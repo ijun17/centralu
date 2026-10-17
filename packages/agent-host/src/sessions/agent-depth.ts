@@ -70,12 +70,12 @@ export function recordAgentDepth(
   childId: string,
   starterId: string,
 ): void {
-  host.store.setAppSetting(agentDepthKey(childId), String(depthOf(host, starterId) + 1))
+  host.store.settings.setAppSetting(agentDepthKey(childId), String(depthOf(host, starterId) + 1))
 }
 
 /** A session's depth now: what a hub sends with an ask_project task to another machine, one deeper (#838) */
 export function depthOf(host: Parameters<typeof agentDepthRefusal>[0], sessionId: string): number {
-  return sessionDepth(sessionId, host.meta, host.children.delegations.values(), (id) => recordedAgentDepth(host.store, id))
+  return sessionDepth(sessionId, host.meta, host.children.delegations.values(), (id) => recordedAgentDepth(host.store.settings, id))
 }
 
 /** Where the person changes the setting, as every refusal names it */
@@ -102,7 +102,7 @@ export function agentDepthRefusal(
     meta: ReadonlyMap<string, Pick<SessionInfo, 'askedBy' | 'forkedFrom'>>
     children: { delegations: ReadonlyMap<string, Pick<Delegation, 'callerId' | 'sessionId' | 'settled'>> }
     uiPreferences: () => Pick<UiPreferences, 'agentDepth'>
-    store: DepthStore
+    store: { settings: DepthStore }
   },
   callerId: string,
   what: string,

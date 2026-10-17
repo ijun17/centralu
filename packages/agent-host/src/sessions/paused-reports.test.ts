@@ -256,7 +256,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(r.ok && r.notice).toContain('Not stoppable from here, still running: a watcher')
     expect(stoppedTasks).toEqual(['bg-dev'])
     expect(w.store.listReportMarks()).toEqual([])
-    expect(w.store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(w.store.settings.appSetting(`report_paused:${child}`)).toBeNull()
     // The turn the stopped task may start is the child's own
     h.event({ type: 'state_change', sessionId: child, state: 'working' })
     h.answer('the dev server stopped')

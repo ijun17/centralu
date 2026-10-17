@@ -1103,34 +1103,34 @@ describe('v16 migration — the host settings survive a restart', () => {
 
     const first = new Store(file)
     // Something never written is null — distinct from 'false'
-    expect(first.appSetting('updates.auto')).toBeNull()
-    first.setAppSetting('updates.auto', 'false')
+    expect(first.settings.appSetting('updates.auto')).toBeNull()
+    first.settings.setAppSetting('updates.auto', 'false')
     first.close()
 
     const second = new Store(file)
-    expect(second.appSetting('updates.auto')).toBe('false')
+    expect(second.settings.appSetting('updates.auto')).toBe('false')
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the table and wipe the answer
-    second.setAppSetting('updates.auto', 'true')
-    expect(second.appSetting('updates.auto')).toBe('true')
+    second.settings.setAppSetting('updates.auto', 'true')
+    expect(second.settings.appSetting('updates.auto')).toBe('true')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
   it('updateAppSetting computes the next value from the stored one, and keeps the old value when that fails', () => {
     const s = new Store()
-    s.updateAppSetting('k', (cur) => {
+    s.settings.updateAppSetting('k', (cur) => {
       expect(cur).toBeNull()
       return 'a'
     })
-    s.updateAppSetting('k', (cur) => `${cur}b`)
-    expect(s.appSetting('k')).toBe('ab')
+    s.settings.updateAppSetting('k', (cur) => `${cur}b`)
+    expect(s.settings.appSetting('k')).toBe('ab')
     expect(() =>
-      s.updateAppSetting('k', () => {
+      s.settings.updateAppSetting('k', () => {
         throw new Error('nope')
       }),
     ).toThrow('nope')
-    expect(s.appSetting('k')).toBe('ab')
+    expect(s.settings.appSetting('k')).toBe('ab')
     s.close()
   })
 })

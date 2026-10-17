@@ -217,7 +217,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     await until(() => stored(parent).length === 1)
     expect(stored(parent)[0]).toContain('verify passed, PR opened')
     expect(store.listReportMarks()).toEqual([])
-    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
   })
 
   it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {
@@ -231,7 +231,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
 
     const c = host()
     expect(store.listReportMarks()).toEqual([])
-    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
     expect(c.mgr.waitsOn(parent)).toEqual([])
   })
 

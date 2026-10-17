@@ -190,7 +190,7 @@ export class SessionAppWiring {
     if (!rt.list().some((a) => a.projectId === ref.projectId && a.appId === ref.appId)) {
       throw rpcError(`No such app: ${ref.appId}`)
     }
-    writeShared(this.host.store, ref, shared)
+    writeShared(this.host.store.settings, ref, shared)
     rt.sharingChanged()
   }
 

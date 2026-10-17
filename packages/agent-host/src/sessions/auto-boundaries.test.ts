@@ -217,7 +217,7 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       expect(await w.mgr.askProject(s, { project: w.target.id, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       handle(s).answer('done')
-      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      await w.until(() => w.store.settings.appSetting(`hub_ask_depth:${s}`) === null)
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
@@ -229,7 +229,7 @@ describe('auto Centralu boundaries (#603)', () => {
       handle(s).answer('an earlier turn', false)
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       handle(s).answer('done')
-      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      await w.until(() => w.store.settings.appSetting(`hub_ask_depth:${s}`) === null)
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
@@ -253,8 +253,8 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
       // The record goes with the session when the trash is emptied of it, and only its own
       expect(await w.store.purgeSession(middle.sessionId)).toBe(true)
-      expect(w.store.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
-      expect(w.store.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
+      expect(w.store.settings.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
+      expect(w.store.settings.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
     })
 
     it('is read at each call: lowering it refuses the next start, raising it allows it again', async () => {

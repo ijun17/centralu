@@ -101,7 +101,7 @@ beforeEach(async () => {
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readShared(store, ref) })
+  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readShared(store.settings, ref) })
   mgr.useExternalApps(rt, { toolListWaitMs: 10_000 })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   alpha = ((await rpc('projects.add', { path: a })) as { id: string }).id

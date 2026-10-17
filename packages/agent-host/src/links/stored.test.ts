@@ -155,7 +155,7 @@ describe('the project order across machines in the store (#734)', () => {
     expect(order.read()).toEqual([])
     order.write(['m1.b', 'h2', 'm1.a'])
     expect(storeProjectOrder(store).read()).toEqual(['m1.b', 'h2', 'm1.a'])
-    store.setAppSetting('hub.projectOrder', '{oops')
+    store.settings.setAppSetting('hub.projectOrder', '{oops')
     expect(order.read()).toEqual([])
   })
 })

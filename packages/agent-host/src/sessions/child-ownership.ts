@@ -120,8 +120,6 @@ type OwnershipStore = Pick<
   Store,
   | 'setReportMark'
   | 'clearReportMark'
-  | 'setAppSetting'
-  | 'deleteAppSetting'
   | 'setDelegatedTurn'
   | 'clearDelegatedTurn'
   | 'setDelegatedTurnTold'
@@ -130,7 +128,7 @@ type OwnershipStore = Pick<
   | 'markQueuedDelivering'
   | 'markQueuedOpenedByAuto'
   | 'listReportMarks'
-  | 'appSetting'
+  | 'settings'
   | 'listDelegatedTurns'
   | 'listQueuedRequests'
 >
@@ -232,7 +230,7 @@ export class ChildOwnership {
   /** A new mark is new work: a pause of the work before it is not this work's, nor one an older build left stored */
   markReport(sessionId: string, callerId: string): void {
     this.unpauseReport(sessionId)
-    this.store.deleteAppSetting(pausedReportKey(sessionId))
+    this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
     this.reports.set(sessionId, callerId)
     this.store.setReportMark(sessionId, callerId)
   }
@@ -255,7 +253,7 @@ export class ChildOwnership {
     for (const mark of this.store.listReportMarks()) {
       const child = sessions.get(mark.sessionId)
       const kept = keptSessions?.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
-      const paused = readPausedTasks(this.store.appSetting(pausedReportKey(mark.sessionId)))
+      const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
       if (kept && (inTurn(child.state) || paused)) {
         this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
         continue
@@ -264,7 +262,7 @@ export class ChildOwnership {
         console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
       }
       this.store.clearReportMark(mark.sessionId)
-      this.store.deleteAppSetting(pausedReportKey(mark.sessionId))
+      this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
     }
   }
 
@@ -320,12 +318,12 @@ export class ChildOwnership {
     if (!this.paused.has(sessionId) || added.length) {
       const next = [...held, ...added]
       this.paused.set(sessionId, next)
-      this.store.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
+      this.store.settings.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
     }
   }
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
-    if (this.paused.delete(sessionId)) this.store.deleteAppSetting(pausedReportKey(sessionId))
+    if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {

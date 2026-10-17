@@ -50,7 +50,7 @@ describe('the refusal (#867)', () => {
     meta: metaOf(links),
     children: { delegations: new Map<string, ReturnType<typeof delegation>>() },
     uiPreferences: () => ({ agentDepth }),
-    store: { appSetting: () => null, setAppSetting: () => {} },
+    store: { settings: { appSetting: () => null, setAppSetting: () => {} } },
   })
   const chain = { p: {}, c: { askedBy: 'p' }, g: { askedBy: 'c' }, gg: { askedBy: 'g' } }
 

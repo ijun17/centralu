@@ -320,7 +320,7 @@ const externalApps = new ExternalApps({
   // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
   builderBusy: (ref) => mgr.builderBusy(ref),
   // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
-  shared: (ref) => readShared(store, ref),
+  shared: (ref) => readShared(store.settings, ref),
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
@@ -354,9 +354,9 @@ if (held) {
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
 const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
 // On by default when nothing has been saved yet: see below
-const autoUpdateCheck = flagSetting(store, AUTO_UPDATE_CHECK_KEY, true)
+const autoUpdateCheck = flagSetting(store.settings, AUTO_UPDATE_CHECK_KEY, true)
 // Off unless the person turned it on (#352): installing without a click is asked for, never assumed
-const autoApplyUpdates = flagSetting(store, AUTO_APPLY_UPDATES_KEY, false)
+const autoApplyUpdates = flagSetting(store.settings, AUTO_APPLY_UPDATES_KEY, false)
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
@@ -385,7 +385,7 @@ mgr.useUpdateApply(updateApply)
  */
 const AUTO_APPLY_AGENT_VERSIONS_KEY = 'agents.autoApplyVersions'
 const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
-const autoApplyAgentVersions = flagSetting(store, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
+const autoApplyAgentVersions = flagSetting(store.settings, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
@@ -393,8 +393,8 @@ const agentVersions = new AgentVersionService({
   publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: autoApplyAgentVersions.read,
   writeAutoApply: autoApplyAgentVersions.write,
-  readSeen: () => asObj(parseJson(store.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
-  writeSeen: (seen) => store.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
+  readSeen: () => asObj(parseJson(store.settings.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
+  writeSeen: (seen) => store.settings.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
@@ -407,8 +407,8 @@ const SLEEP_AFTER_KEY = 'agents.sleepAfterMinutes'
 const sleeper = new SessionSleeper({
   sessions: mgr,
   canSleep: (tool) => !!adapters.get(tool)?.capabilities.sleep,
-  readAfterMinutes: () => parseSleepSetting(store.appSetting(SLEEP_AFTER_KEY)),
-  writeAfterMinutes: (minutes) => store.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),
+  readAfterMinutes: () => parseSleepSetting(store.settings.appSetting(SLEEP_AFTER_KEY)),
+  writeAfterMinutes: (minutes) => store.settings.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),
   overrideMs: sleepOverrideFrom(process.env.CC_SLEEP_AFTER_MS),
 })
 sleeperRef.current = sleeper
@@ -433,9 +433,9 @@ const views: ViewHost = new ViewHost({
   allowedOrigins,
   source: runtimeViewSource(externalApps),
   ports: new OriginPorts({
-    load: () => parseStoredPortBook(store.appSetting(VIEW_PORTS_KEY)),
-    save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
-    update: (fn) => store.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
+    load: () => parseStoredPortBook(store.settings.appSetting(VIEW_PORTS_KEY)),
+    save: (book) => store.settings.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
+    update: (fn) => store.settings.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
   }),
   // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
   hostPort: () => viewPort(launch.frontDoor, port),
@@ -454,7 +454,7 @@ const inlineViews = attachInlineViews(mgr, externalApps, views)
  */
 if (launch.underKeeper) {
   try {
-    const { restored, skipped } = restoreViewHandover(store, views, inlineViews)
+    const { restored, skipped } = restoreViewHandover(store.settings, views, inlineViews)
     if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
   } catch (err) {
     console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
@@ -565,7 +565,7 @@ const shutdown = new Shutdown({
     stopPlan(mode, handOver, {
       handOverViews: () => {
         try {
-          const n = recordViewHandover(store, views, inlineViews)
+          const n = recordViewHandover(store.settings, views, inlineViews)
           if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
         } catch (err) {
           console.error(`[agent-host] could not hand the open app views over: ${(err as Error).stack ?? err}`)

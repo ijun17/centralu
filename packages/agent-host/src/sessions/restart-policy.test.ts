@@ -123,7 +123,7 @@ describe('background work (#648)', () => {
   })
 
   it('forgetting a session drops its unknown mark, its hold and its stored list', async () => {
-    store.setAppSetting('background_tasks:s', '[]')
+    store.settings.setAppSetting('background_tasks:s', '[]')
     meta.get('s')!.model = 'm2'
     meta.get('s')!.backgroundTasks = [shell]
     policy.restartAfterTurn.add('s')
@@ -132,7 +132,7 @@ describe('background work (#648)', () => {
     policy.forgetBackground('s')
     expect(holds().has('s')).toBe(false)
     expect(policy.backgroundUnknown.has('s')).toBe(false)
-    expect(store.appSetting('background_tasks:s')).toBeNull()
+    expect(store.settings.appSetting('background_tasks:s')).toBeNull()
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
     expect(restarts).toEqual([])
   })

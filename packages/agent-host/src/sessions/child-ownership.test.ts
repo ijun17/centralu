@@ -52,13 +52,13 @@ describe('report marks', () => {
     own.pauseReport('child', [{ id: 't1', description: 'dev server' }])
     own.pauseReport('child', [{ id: 't1', description: 'dev server' }, { id: 't2', description: 'watcher' }])
     expect(own.pausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
-    expect(JSON.parse(store.appSetting(pausedReportKey('child'))!)).toEqual([
+    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([
       { id: 't1', description: 'dev server' },
       { id: 't2', description: 'watcher' },
     ])
     own.markReport('child', 'caller')
     expect(own.pausedReports.has('child')).toBe(false)
-    expect(store.appSetting(pausedReportKey('child'))).toBeNull()
+    expect(store.settings.appSetting(pausedReportKey('child'))).toBeNull()
     expect(own.awaitingReport.get('child')).toBe('caller')
   })
 
@@ -228,13 +228,13 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
   it("keeps the report marks a kept session still owes, a paused one's too, and drops the rest from the store", () => {
     for (const id of ['kept-working', 'kept-paused', 'kept-idle', 'gone-process']) store.setReportMark(id, 'caller')
     store.setReportMark('kept-working-no-caller', 'nobody')
-    store.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-    store.setAppSetting(pausedReportKey('gone-process'), '[]')
+    store.settings.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+    store.settings.setAppSetting(pausedReportKey('gone-process'), '[]')
     own.restoreReports(sessions, kept)
     expect([...own.awaitingReport].sort()).toEqual([['kept-paused', 'caller'], ['kept-working', 'caller']])
     expect(own.pausedReports.get('kept-paused')).toEqual([{ id: 't1', description: 'dev server' }])
     expect(store.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
-    expect(store.appSetting(pausedReportKey('gone-process'))).toBeNull()
+    expect(store.settings.appSetting(pausedReportKey('gone-process'))).toBeNull()
   })
 
   it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {

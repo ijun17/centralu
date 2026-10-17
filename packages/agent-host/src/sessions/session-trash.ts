@@ -430,7 +430,7 @@ export class SessionTrash {
       try {
         await this.host.store.purgeSession(sessionId)
         this.host.restartPolicy.forgetBackground(sessionId)
-        this.host.store.deleteAppSetting(codeIntelligenceKey(sessionId))
+        this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
         await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))

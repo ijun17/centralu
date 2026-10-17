@@ -431,7 +431,7 @@ export class AppSessions {
   }
 
   private builderMap(): Record<string, string> {
-    return asObj(parseJson(this.host.store.appSetting(APP_BUILDERS_KEY))) as Record<string, string>
+    return asObj(parseJson(this.host.store.settings.appSetting(APP_BUILDERS_KEY))) as Record<string, string>
   }
 
   /** Records the builder session an app points at. If `sessionId` is null, this clears it — with `only`
@@ -445,7 +445,7 @@ export class AppSessions {
     } else {
       map[key] = sessionId
     }
-    this.host.store.setAppSetting(APP_BUILDERS_KEY, JSON.stringify(map))
+    this.host.store.settings.setAppSetting(APP_BUILDERS_KEY, JSON.stringify(map))
   }
 }
 

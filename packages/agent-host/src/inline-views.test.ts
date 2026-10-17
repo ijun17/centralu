@@ -560,13 +560,13 @@ describe('a planned hand-over to the next host', () => {
     const inlineId = appViews()[0]!.instanceId!
     const pinnedId = views.open({ projectId, appId: 'viewer' }, 'ui://viewer/main').instanceId
 
-    expect(recordViewHandover(store, views, inline)).toBe(2)
+    expect(recordViewHandover(store.settings, views, inline)).toBe(2)
     inline.dispose()
     await views.dispose()
     nextHost()
-    expect(restoreViewHandover(store, views, inline)).toEqual({ restored: 2, skipped: 0 })
+    expect(restoreViewHandover(store.settings, views, inline)).toEqual({ restored: 2, skipped: 0 })
     // Read once: a later start never reopens them again
-    expect(store.appSetting(VIEW_HANDOVER_KEY)).toBeNull()
+    expect(store.settings.appSetting(VIEW_HANDOVER_KEY)).toBeNull()
 
     const app = { appId: 'viewer', projectId }
     await expect(rpc('apps.viewFrame', { ...app, instanceId: inlineId, hostOrigin: HOST_ORIGIN })).resolves.toMatchObject({

@@ -71,7 +71,7 @@ export class Store extends MigrationRunner {
   private readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
   private readonly trash: TrashRecords
-  private readonly settings: SettingsRecords
+  readonly settings: SettingsRecords
   private readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
   private readonly children: ChildOwnershipRecords
@@ -381,36 +381,8 @@ export class Store extends MigrationRunner {
 
   // ── SettingsRecords (store/settings.ts) ──
 
-  saveCommands(tool: string, cwd: string, commands: unknown): void {
-    return this.settings.saveCommands(tool, cwd, commands)
-  }
-
-  loadCommands<T>(tool: string, cwd: string): T | null {
-    return this.settings.loadCommands(tool, cwd)
-  }
-
-  saveWorkspace(layout: unknown): void {
-    return this.settings.saveWorkspace(layout)
-  }
-
-  loadWorkspace<T = unknown>(): T | null {
-    return this.settings.loadWorkspace()
-  }
-
   appSetting(key: string): string | null {
     return this.settings.appSetting(key)
-  }
-
-  setAppSetting(key: string, value: string): void {
-    return this.settings.setAppSetting(key, value)
-  }
-
-  updateAppSetting(key: string, next: (current: string | null) => string): void {
-    return this.settings.updateAppSetting(key, next)
-  }
-
-  deleteAppSetting(key: string): void {
-    return this.settings.deleteAppSetting(key)
   }
 
   // ── PermissionRecords (store/permissions.ts) ──

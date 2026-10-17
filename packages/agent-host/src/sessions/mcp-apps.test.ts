@@ -142,7 +142,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     expect(m).not.toHaveProperty('home')
     expect(rt.list().find((a) => a.appId === 'echoer')).toMatchObject({ projectId: null, status: 'stopped', trusted: true, error: null })
     // It is not written to the legacy registry
-    expect(store.appSetting(LEGACY_KEY)).toBeNull()
+    expect(store.settings.appSetting(LEGACY_KEY)).toBeNull()
 
     // The orchestrator has restarted, and that server is attached as an app proxy server — no server is loaded raw
     expect(adapter.seen.length).toBe(before + 1)
@@ -203,18 +203,18 @@ describe('migrates an approved server from the legacy registry (A-7)', () => {
       // A name approved before #93 — it cannot be a valid app id
       { name: 'centralu', command: 'npx', args: ['-y', 'whatever'] },
     ]
-    store.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
+    store.settings.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
     connect()
     expect(userApps()).toEqual(['echoer'])
     expect(readManifest('echoer')).toMatchObject({ id: 'echoer', server: SERVER })
-    expect(JSON.parse(store.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
+    expect(JSON.parse(store.settings.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
 
     /*
      * Suppose the host died after writing the app but before clearing the key — the legacy key is
      * left just as it was at the start. The next startup tries to migrate the same entry again,
      * and it must not end up with two apps or overwrite the app already migrated.
      */
-    store.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
+    store.settings.setAppSetting(LEGACY_KEY, JSON.stringify(legacy))
     const written = statSync(manifestPath('echoer')).mtimeMs
     const text = readFileSync(manifestPath('echoer'), 'utf8')
     await new Promise((r) => setTimeout(r, 30))
@@ -223,7 +223,7 @@ describe('migrates an approved server from the legacy registry (A-7)', () => {
     expect(statSync(manifestPath('echoer')).mtimeMs).toBe(written)
     expect(readFileSync(manifestPath('echoer'), 'utf8')).toBe(text)
     expect(readdirSync(join(dataRoot, 'apps'))).toEqual(['echoer'])
-    expect(JSON.parse(store.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
+    expect(JSON.parse(store.settings.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
 
     // The orchestrator receives the migrated app, and the legacy entry is loaded raw nowhere
     await mgr.orchestrator()
@@ -232,20 +232,20 @@ describe('migrates an approved server from the legacy registry (A-7)', () => {
   })
 
   it('once everything is migrated, the legacy key disappears', async () => {
-    store.setAppSetting(LEGACY_KEY, JSON.stringify([{ name: 'echoer', ...SERVER }]))
+    store.settings.setAppSetting(LEGACY_KEY, JSON.stringify([{ name: 'echoer', ...SERVER }]))
     connect()
     expect(userApps()).toEqual(['echoer'])
-    expect(store.appSetting(LEGACY_KEY)).toBeNull()
+    expect(store.settings.appSetting(LEGACY_KEY)).toBeNull()
   })
 
   it('if a different app with the same id already exists, does not overwrite it, and keeps the entry', async () => {
     plantApp(join(dataRoot, 'apps'), 'echoer', { server: SERVER })
     const mine = readFileSync(manifestPath('echoer'), 'utf8')
     const theirs = { name: 'echoer', command: 'npx', args: ['-y', 'other-server'] }
-    store.setAppSetting(LEGACY_KEY, JSON.stringify([theirs]))
+    store.settings.setAppSetting(LEGACY_KEY, JSON.stringify([theirs]))
     connect()
     expect(readFileSync(manifestPath('echoer'), 'utf8')).toBe(mine)
-    expect(JSON.parse(store.appSetting(LEGACY_KEY)!)).toEqual([theirs])
+    expect(JSON.parse(store.settings.appSetting(LEGACY_KEY)!)).toEqual([theirs])
   })
 })
 

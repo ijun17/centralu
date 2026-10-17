@@ -1,7 +1,7 @@
 import { RESERVED_APP_IDS } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
-import type { Store } from '../dev-services/store.js'
+import type { SettingsRecords } from '../dev-services/store/settings.js'
 import { proposedMcpServerNameError } from './orchestrator-tools.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 
@@ -55,7 +55,7 @@ export type ProposalOutcome = ProposalResult & { restart: boolean }
  */
 export class OrchestratorProposals {
   constructor(
-    private readonly store: Pick<Store, 'appSetting' | 'setAppSetting' | 'deleteAppSetting'>,
+    private readonly store: Pick<SettingsRecords, 'appSetting' | 'setAppSetting' | 'deleteAppSetting'>,
     /** The external app runtime, or undefined on a host without one */
     private readonly apps: () => ExternalApps | undefined,
     /**

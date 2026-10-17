@@ -349,7 +349,7 @@ export class SessionManager {
     this.handoffChildren = new HandoffChildren(this.parts())
     this.cards = new RoutedCards(this.parts())
     this.queue = new QueuedRequests(this.parts())
-    this.cardRests = new CardRests(appSettingRests(store))
+    this.cardRests = new CardRests(appSettingRests(store.settings))
     this.delegationFlow = new DelegationFlow(this.parts())
     this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.parts())
@@ -363,7 +363,7 @@ export class SessionManager {
     this.hostCards = new HostCards(this.parts())
     this.linkedReports = new LinkedReports(this.parts())
     this.proposals = new OrchestratorProposals(
-      this.store,
+      this.store.settings,
       () => this.apps.appsHub?.rt,
       // `this.emit` is wrapped just below; the callback looks it up when a list changes, not now
       () => this.emit({ type: 'orchestrator_proposals_changed' }),
@@ -903,10 +903,10 @@ export class SessionManager {
      */
     if (!ask) return this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
     const key = hubAskDepthKey(sessionId)
-    this.store.setAppSetting(key, String(ask.depth))
+    this.store.settings.setAppSetting(key, String(ask.depth))
     const done = () => {
       this.hubAskTurns.delete(sessionId)
-      this.store.deleteAppSetting(key)
+      this.store.settings.deleteAppSetting(key)
     }
     try {
       await this.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t) => {
@@ -1188,7 +1188,7 @@ export class SessionManager {
 
     this.meta.set(id, info)
     this.store.upsertSession(info)
-    if (noCodeIntelligence) this.store.setAppSetting(codeIntelligenceKey(id), 'off')
+    if (noCodeIntelligence) this.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
     this.launches.rememberToolPrefix(id)
     this.launches.rememberLaunchSettings(info, cwd)
     this.store.setSessionCwd(id, cwd)
@@ -1609,7 +1609,7 @@ export class SessionManager {
        * (If messages were exchanged after the boundary, that is the new tool's conversation, and it
        * does have an externalId.)
        */
-      const boundary = Number(this.store.appSetting(freshStartKey(m.id)) ?? '-1')
+      const boundary = Number(this.store.settings.appSetting(freshStartKey(m.id)) ?? '-1')
       const newest = this.store.loadMessages(m.id, 1)[0]
       if (newest && newest.seq > boundary) {
         return {
@@ -2241,7 +2241,7 @@ export class SessionManager {
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
     // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
-    if (endedTurn && e.sessionId && !this.hubAskTurns.has(e.sessionId) && this.store.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.deleteAppSetting(hubAskDepthKey(e.sessionId))
+    if (endedTurn && e.sessionId && !this.hubAskTurns.has(e.sessionId) && this.store.settings.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.settings.deleteAppSetting(hubAskDepthKey(e.sessionId))
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.hostCards.raiseHostAsks(e.sessionId)
@@ -2630,7 +2630,7 @@ export class SessionManager {
     // behind (there is a path where a row that came in as an event never passes through meta) — even
     // one row of drift would make the guard read it as "lost", and the session just switched would
     // fail to wake
-    this.store.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
+    this.store.settings.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
     /*
      * The broadcast state is also written into meta (#163). It used to only broadcast idle while
      * saving meta as working, so a screen that reconnected and the orchestrator's list_sessions both
@@ -3533,7 +3533,7 @@ export class SessionManager {
       const project = this.projectRow(projectId)
       return this.firstTool(project?.defaultTool)
     }
-    return this.firstTool(this.store.appSetting('orchestrator_tool'))
+    return this.firstTool(this.store.settings.appSetting('orchestrator_tool'))
   }
 
   /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
@@ -3857,7 +3857,7 @@ export class SessionManager {
   }
 
   configureOrchestrator(tool: ToolName): void {
-    this.store.setAppSetting('orchestrator_tool', tool)
+    this.store.settings.setAppSetting('orchestrator_tool', tool)
   }
 
   /** The orchestrator being created (#839): a second ask while it is made waits on this one, never makes another */
@@ -3886,7 +3886,7 @@ export class SessionManager {
      * onboarding ("Codex is ready") and still be unable to open the orchestrator (#63). The wiring on
      * the Codex side (the stdio bridge) was already laid down and measured by the project orchestrator (#13).
      */
-    const configured = this.store.appSetting('orchestrator_tool')
+    const configured = this.store.settings.appSetting('orchestrator_tool')
     const info = await this.createSession({
       projectId: null,
       // The marker is born together with the session — stamping it separately would leave a window with no

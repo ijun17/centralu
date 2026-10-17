@@ -234,12 +234,12 @@ export class ExternalConversations {
        save. If it is not in the list, the time is unknown, so it reads as before. */
     const changedAt = (await this.externalIndexOf(info.tool, cwd))?.ids.get(externalId) ?? null
     const key = externalSyncedKey(info.id)
-    if (changedAt !== null && changedAt <= Number(this.host.store.appSetting(key) ?? '-1')) return 0
+    if (changedAt !== null && changedAt <= Number(this.host.store.settings.appSetting(key) ?? '-1')) return 0
     /* Records the point that was read, even when there was nothing to attach — "read it" and "there
        was something new" are different facts, and failing to record the former means re-reading
        every single time instead of only when something changes. */
     const mark = () => {
-      if (changedAt !== null) this.host.store.setAppSetting(key, String(changedAt))
+      if (changedAt !== null) this.host.store.settings.setAppSetting(key, String(changedAt))
     }
 
     let history: HistoryMessage[]
@@ -410,7 +410,7 @@ export class ExternalConversations {
     const m = this.host.meta.get(sessionId)
     if (!m || !(m.externalId ?? m.importedFrom)) return
     if (!this.host.adapters.get(m.tool)?.capabilities.exclusiveWriter) return
-    this.host.store.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
+    this.host.store.settings.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
   }
 
   /**

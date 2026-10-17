@@ -24,7 +24,7 @@ test('a window on an older host draws its sessions and a conversation without cr
   test.setTimeout(60_000)
   const ws = workspace()
   withStore(ws.db, (store) => {
-    store.setAppSetting('updates.auto', 'false')
+    store.settings.setAppSetting('updates.auto', 'false')
     store.addProject({ id: PROJECT, path: ws.project, name: 'older' })
     seedSession(store, PROJECT, SESSION, 'alpha')
   })

@@ -12,9 +12,9 @@ const KEY = 'ui_preferences'
 
 function setup(stored?: string) {
   const store = new Store()
-  if (stored !== undefined) store.setAppSetting(KEY, stored)
+  if (stored !== undefined) store.settings.setAppSetting(KEY, stored)
   const mgr = new SessionManager(store, new Map(), () => {})
-  const row = () => JSON.parse(store.appSetting(KEY) ?? 'null') as Record<string, unknown>
+  const row = () => JSON.parse(store.settings.appSetting(KEY) ?? 'null') as Record<string, unknown>
   return { mgr, row }
 }
 
@@ -38,13 +38,13 @@ describe('screen preferences across builds', () => {
 
   it('the agent depth survives a restart; a record from before it, or with a value out of range, reads as 1 (#867)', () => {
     const store = new Store()
-    store.setAppSetting(KEY, JSON.stringify({ sendWithModifierEnter: true }))
+    store.settings.setAppSetting(KEY, JSON.stringify({ sendWithModifierEnter: true }))
     expect(agentDepthOf(new SessionManager(store, new Map(), () => {}).uiPreferences())).toBe(1)
     new SessionManager(store, new Map(), () => {}).setUiPreferences({ agentDepth: 3 })
     // A new manager over the same database: what a restarted host reads
     expect(new SessionManager(store, new Map(), () => {}).uiPreferences()).toMatchObject({ agentDepth: 3, sendWithModifierEnter: true })
     for (const bad of [0, 4, 2.5, '2', null]) {
-      store.setAppSetting(KEY, JSON.stringify({ agentDepth: bad }))
+      store.settings.setAppSetting(KEY, JSON.stringify({ agentDepth: bad }))
       expect(agentDepthOf(new SessionManager(store, new Map(), () => {}).uiPreferences())).toBe(1)
     }
   })

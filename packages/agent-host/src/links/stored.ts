@@ -49,7 +49,7 @@ const PROJECT_ORDER_KEY = 'hub.projectOrder'
 
 export function storeProjectOrder(store: Store): ProjectOrder {
   return {
-    read: () => readJsonList(store.appSetting(PROJECT_ORDER_KEY), z.string()),
-    write: (orderedIds) => store.setAppSetting(PROJECT_ORDER_KEY, JSON.stringify(orderedIds)),
+    read: () => readJsonList(store.settings.appSetting(PROJECT_ORDER_KEY), z.string()),
+    write: (orderedIds) => store.settings.setAppSetting(PROJECT_ORDER_KEY, JSON.stringify(orderedIds)),
   }
 }

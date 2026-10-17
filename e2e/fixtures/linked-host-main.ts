@@ -136,10 +136,10 @@ const views: ViewHost = new ViewHost({
   source: runtimeViewSource(externalApps),
   ports: new OriginPorts({
     load: () => {
-      const raw = store.appSetting('apps.viewPorts')
+      const raw = store.settings.appSetting('apps.viewPorts')
       return raw ? (JSON.parse(raw) as PortBook) : null
     },
-    save: (book) => store.setAppSetting('apps.viewPorts', JSON.stringify(book)),
+    save: (book) => store.settings.setAppSetting('apps.viewPorts', JSON.stringify(book)),
   }),
   hostPort: () => port || null,
   remote: linkedViews((method, params) => router.handle(method, params)),

@@ -204,7 +204,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
-    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
     await mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
@@ -226,7 +226,7 @@ describe('tool definitions after a host switch (#581)', () => {
     await rpc('agents.send', { sessionId: session.id, text: 'work' })
     const restart = vi.spyOn(mgr, 'restartSession')
     old.emitApproval('held-card')
-    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
     await mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(false)
     await rpc('agents.respondApproval', { sessionId: session.id, requestId: 'held-card', decision: 'allow' })
@@ -250,7 +250,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
 
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v2')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('v2')
   })
 
   it.each(['idle', 'working'] as const)('restarts a kept %s process with unrecorded launch settings once and reports its own cause', async (state) => {
@@ -259,8 +259,8 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const old = adapter.handleOf(session.id)!
     // A request before the handoff consumes the newly-created session's cold-start note.
     old.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 30_000, cacheCreationTokens: 0 }, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 0 } })
-    store.deleteAppSetting(`launch_settings:${session.id}`)
-    store.deleteAppSetting(`tool_prefix:${session.id}`)
+    store.settings.deleteAppSetting(`launch_settings:${session.id}`)
+    store.settings.deleteAppSetting(`tool_prefix:${session.id}`)
     if (state === 'working') await rpc('agents.send', { sessionId: session.id, text: 'work' })
     const restart = vi.spyOn(mgr, 'restartSession')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -274,7 +274,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     expect(old.disposed).toBe(true)
     expect(restart).toHaveBeenCalledWith(session.id, 'launch_settings')
     expect(log).toHaveBeenCalledWith(expect.stringContaining('launch settings changed or previously unrecorded'))
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v1')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('v1')
     const current = adapter.handleOf(session.id)!
     current.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 30_000 }, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 } })
     const usage = await rpc('agents.usage', { tool: 'claude' }) as { cache: { windows: { rebuildCauses: Record<string, number> }[] } }
@@ -5719,8 +5719,8 @@ describe('after the control app was removed (#372)', () => {
     ['agents.createCoordinator', { name: 'x', memberSessionIds: ['s1'], roleAppend: 'r', tool: 'claude' }],
   ] as const)('an older window calling the retired %s gets an unknown-method error and changes nothing', async (method, params) => {
     const doc = JSON.stringify({ notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }], tasks: [] })
-    store.setAppSetting('app:control:doc', doc)
-    store.setAppSetting('app:control:enabled', '1')
+    store.settings.setAppSetting('app:control:doc', doc)
+    store.settings.setAppSetting('app:control:enabled', '1')
     const before = store.listSessions().length
 
     const err = (await rpc(method, params).then(
@@ -5730,16 +5730,16 @@ describe('after the control app was removed (#372)', () => {
     expect(err?.message).toBe(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     expect(err?.code).toBe('internal')
 
-    expect(store.appSetting('app:control:doc')).toBe(doc)
-    expect(store.appSetting('app:control:enabled')).toBe('1')
+    expect(store.settings.appSetting('app:control:doc')).toBe(doc)
+    expect(store.settings.appSetting('app:control:enabled')).toBe('1')
     expect(store.listSessions().length).toBe(before)
   })
 
   it('its stored rows are left in place across a restart, for an older build that may still read them', async () => {
     const doc = JSON.stringify({ notifies: [{ id: 'n1', text: 'done' }] })
-    store.setAppSetting('app:control:doc', doc)
+    store.settings.setAppSetting('app:control:doc', doc)
     new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
-    expect(store.appSetting('app:control:doc')).toBe(doc)
+    expect(store.settings.appSetting('app:control:doc')).toBe(doc)
   })
 })
 
@@ -6320,7 +6320,7 @@ describe('project trust changes restart live sessions (#663)', () => {
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
     expect(adapter.lastOpts?.projectTrusted).toBe(true)
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('trusted')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('trusted')
     expect(trustNotices()).toHaveLength(1)
     expect(trustNotices()[0]).toMatchObject({ sessionId: session.id, text: expect.stringContaining('now reads the project') })
   })

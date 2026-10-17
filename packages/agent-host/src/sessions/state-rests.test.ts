@@ -232,16 +232,16 @@ describe('a session at rest stays at rest (#428)', () => {
     b.mgr.respondApproval(a.s.id, 'r1', 'allow')
     expect(b.mgr.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
     expect(b.mgr.sessionIdle(a.s.id)).toEqual({ idle: true })
-    expect(store.appSetting(CARD_RESTS_KEY)).toBeNull()
+    expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
   })
 
   it('a rest left for a process nobody adopted is dropped, and so is a deleted session\'s', async () => {
     const a = await session()
     a.h.turn()
     a.h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    expect(JSON.parse(store.appSetting(CARD_RESTS_KEY)!)).toEqual({ [a.s.id]: 'waiting_input' })
+    expect(JSON.parse(store.settings.appSetting(CARD_RESTS_KEY)!)).toEqual({ [a.s.id]: 'waiting_input' })
     await a.mgr.trashSession(a.s.id)
-    expect(store.appSetting(CARD_RESTS_KEY)).toBeNull()
+    expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
 
     const c = await session()
     c.h.turn()
@@ -249,7 +249,7 @@ describe('a session at rest stays at rest (#428)', () => {
     await c.mgr.detachAll()
     // Not kept: the process is gone with its card, and the next start forgets the rest
     host()
-    expect(store.appSetting(CARD_RESTS_KEY)).toBeNull()
+    expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
   })
 
   it('a limit report does not take a session off the card it waits on', async () => {
