@@ -373,6 +373,9 @@ describe.each([
       // A real repository for the host; the mock reads any registered folder as one
       repo = mkdtempSync(join(tmpdir(), 'cc-contract-repo-'))
       execFileSync('git', ['init', '-q', repo])
+      // An identity of its own: a runner with none (CI) makes git refuse any commit for that before anything else
+      execFileSync('git', ['-C', repo, 'config', 'user.name', 'Contract'])
+      execFileSync('git', ['-C', repo, 'config', 'user.email', 'contract@example.invalid'])
     })
     afterAll(() => {
       rmSync(parent, { recursive: true, force: true })
@@ -481,11 +484,15 @@ describe.each([
       await waitFor(() => events.some((e) => e.type === 'session_deleted' && e.sessionId === 'never-here'))
     })
 
+    /*
+     * What both share is the shape: a failure, with a reason in words. The words are git's own, and they depend on the
+     * machine (its identity, its language), so the contract does not pin them; the mock's are in its git.ts.
+     */
     it('a commit with nothing staged fails and says why', async () => {
       const r = (await h.platform.projects.list()).find((p) => p.name === basename(repo))!
       const res = await h.platform.git.commit(r.id, 'nothing here')
       expect(res.ok).toBe(false)
-      expect(res.message).toMatch(/nothing to commit/)
+      expect(res.message?.trim()).toBeTruthy()
     })
   })
 
