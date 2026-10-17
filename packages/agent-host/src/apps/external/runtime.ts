@@ -19,10 +19,11 @@ import { PROJECT_APPS_REL, USER_APPS_REL, scanApps } from './discovery.js'
 import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { SecretStore, secretValueProblem } from './secrets.js'
 import { AppStartEnv } from './app-start-env.js'
+import { AppResources } from './app-resources.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
 import type { Snapshot } from './versions.js'
-import { resourceUriOf, type Audience } from './visibility.js'
+import type { Audience } from './visibility.js'
 
 /**
  * The external app runtime (M4 A) — **the one file that is the door the core knows external apps
@@ -85,6 +86,8 @@ export class ExternalApps {
   private secrets: SecretStore
   /** What an app process is started with: its folders, environment and secrets (`app-start-env.ts`) */
   private startEnv: AppStartEnv
+  /** An app's resources and its fixed screen (`app-resources.ts`) */
+  private resources: AppResources
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
@@ -167,6 +170,7 @@ export class ExternalApps {
     )
     this.secrets = new SecretStore(deps.dataRoot)
     this.startEnv = new AppStartEnv(this.deps, this.timing, this.secrets, this.calls, this.desk)
+    this.resources = new AppResources(this.timing, this.lifecycle, (ref) => this.require(ref))
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
     /*
      * Once at startup: closes a run that never saw its own ending, and prunes anything past
@@ -396,36 +400,14 @@ export class ExternalApps {
     return this.calls.call(this.require(ref), name, args, caller, opts)
   }
 
-  /**
-   * Reads an app's resource — the path a screen uses to read its own `ui://` document and resources
-   * (B-3, B-4's `onreadresource`). Not a tool call, so no run record is kept, but the rules for
-   * starting the app (trust, only when first needed) are the same.
-   */
-  async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
-    const e = this.require(ref)
-    return this.lifecycle.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
+  /** Reads an app's resource, starting the app the first time it is needed (`AppResources.readResource`, `app-resources.ts`) */
+  readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
+    return this.resources.readResource(ref, uri)
   }
 
-  /**
-   * The list of resources an app offers (MCP `resources/list`, following pagination) — the basis an
-   * in-conversation screen (B-1) uses to check that a `ui://` a tool declared **actually belongs to
-   * this app** (from the plan, "blocking impersonation"). Starts the app under the same rule as
-   * reading. Follows only up to a page cap — so an app that keeps handing out the next page cannot
-   * hold the host hostage.
-   */
-  async listResources(ref: AppRef, maxPages = 20): Promise<ListResourcesResult['resources']> {
-    const e = this.require(ref)
-    return this.lifecycle.use(e, async (proc) => {
-      const out: ListResourcesResult['resources'] = []
-      let cursor: string | undefined
-      for (let page = 0; page < maxPages; page++) {
-        const r = await proc.client.listResources(cursor ? { cursor } : {}, { timeout: this.timing.connectTimeoutMs })
-        out.push(...r.resources)
-        cursor = r.nextCursor
-        if (!cursor) break
-      }
-      return out
-    })
+  /** The resources an app offers, following pagination up to a cap (`AppResources.listResources`, `app-resources.ts`) */
+  listResources(ref: AppRef, maxPages?: number): Promise<ListResourcesResult['resources']> {
+    return this.resources.listResources(ref, maxPages)
   }
 
   /**
@@ -436,29 +418,9 @@ export class ExternalApps {
     return this.lifecycle.retainView(this.require(ref), ref)
   }
 
-  /**
-   * The tool that opens the fixed screen, and that screen itself (B-2) — the manifest's `home`, and
-   * that tool's declared `_meta.ui.resourceUri`. Since this needs the tool list, if the app is down,
-   * **this is where it starts**.
-   *
-   * A tool declaring no screen is never accepted. A fixed screen is one born from a tool call (from
-   * the plan, "the two places a screen can appear"), and calling a tool with no screen would leave
-   * only a result with nothing to open. Calling it anyway would leave the person watching the app's
-   * state change with nothing appearing on screen. So this is refused **before** ever calling it. The
-   * reason is worded for a person, since it shows up on screen verbatim.
-   */
-  async homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
-    const e = this.require(ref)
-    if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
-    const home = e.manifest.home
-    if (!home) throw new AppUnavailableError('This app has no screen: its manifest names no home tool')
-    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [])
-    const found = all.find((t) => t.tool.name === home)
-    if (!found) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" is not in its tool list`)
-    const ui = resourceUriOf(found.tool)
-    if (ui.error) throw new AppUnavailableError(`This app's screen is declared wrong: ${ui.error}`)
-    if (!ui.uri) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" declares no _meta.ui.resourceUri`)
-    return { tool: home, resourceUri: ui.uri }
+  /** The tool that opens the fixed screen, and that screen; starts the app when first needed (`AppResources.homeView`, `app-resources.ts`) */
+  homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
+    return this.resources.homeView(ref)
   }
 
   /**
