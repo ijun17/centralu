@@ -307,9 +307,15 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): other
   sessions and their conversations (`read_session`, which lists them when called without an id), a search of past
   conversations (`recall`) and the app guide (`app_guide`). Until #984 (owner decision 2026-10-17) this covered only
-  its own project; it now covers every project on this computer and on the linked machines, so a session can find
-  the one to talk to later, with each row naming its project and machine and its text framed as someone else's. The
-  orchestrator's and coordinators' conversations stay out, as they do from a hub (remote-hub.md §3.4). Sending,
+  its own project; from a **trusted** project it now covers every project on this computer and on the linked
+  machines, so a session can find the one to talk to later. From an untrusted project it stays inside its own
+  project, as `ask_project` and `attach_app` refuse there (#382): text planted in an untrusted clone must not search
+  every conversation. Outside its own project it reads ordinary sessions only: never the orchestrator's or a
+  coordinator's, and never an app's (its builder, or an agent an app asked for). Each row names its project and
+  machine, a project nobody trusted is marked "(not trusted)", and the text stays framed as someone else's. The list
+  shows 40 rows and counts the rest; `project` narrows it, and the own project's sessions and hits come first. A
+  linked machine that does not answer within 4 s is listed from what the hub last knew, or named under "Not
+  searched", so one slow link does not hold up every session's call. Sending,
   creating and proposing stay with the orchestrator, acting on another project goes through `ask_project` and its
   consent, and no role goes with it; since
   #564 (2026-10-12) one short instruction does, the rule of §1.2 worded as which tool answers which need. It
@@ -512,7 +518,7 @@ delete one for good; and the trash is emptied by nothing but the person.
 - **Content is what was said**: the person's words, the agents' answers and their reasoning. Tool calls and their output are not searched ([#221](https://github.com/ijun17/centralu/issues/221)). Commands were indexed until then, and they were 55,131 of 81,816 index rows and most of a 124.5MiB index in a 236.2MiB store (a copy of the real one, 2026-09-30); a command's output never was. Taking them out cost nothing a search for what was said finds (all 397 sampled queries returned the same messages) and left a 36.6MiB index in a 145.4MiB store. What a session ran is read with `read_session`, not searched.
 - **A native subagent's steps are not searched either, its text included** ([#222](https://github.com/ijun17/centralu/issues/222)). The parent's own report on what its subagent found is in the conversation, and that is what search finds.
 - Sessions in the trash (FR-22) are **not** searched, by the person or by an agent's `recall`: their index rows are dropped when they go to the trash and rebuilt when they come back.
-- **An agent's `recall` and `read_session` reach its own session only above its last compaction** ([#974](https://github.com/ijun17/centralu/issues/974)): a compaction that folded something, or a fresh conversation (`/clear`). Above that point the model's context lost the words and the store kept them; below it, or with no such point, they are still in context and finding them is an echo, so they stay out. `recall` labels such a hit "(this session, before compaction)"; `read_session` reads itself only with `around` at such a hit, and stops at that point. Both adapters store a compaction as the same marker row (Claude's `compact_boundary`, Codex's `contextCompaction`, and either read back from the tool), so the point is known for both; a session with no marker is treated as never compacted.
+- **An agent's `recall` and `read_session` reach its own session only for messages earlier than its last compaction point** ([#974](https://github.com/ijun17/centralu/issues/974)): a compaction that folded something, or a fresh conversation (`/clear`). Messages earlier than that point are gone from the model's context and kept in the store; messages later than it, or all of them when there is no such point, are still in context and finding them is an echo, so they stay out. `recall` labels such a hit "(this session, before compaction)", and its snippet stops at the point; `read_session` reads itself only with `around` at such a hit, and stops at that point. Both adapters store a compaction as the same marker row (Claude's `compact_boundary`, Codex's `contextCompaction`, and either read back from the tool), so the point is known for both; a session with no marker is treated as never compacted.
 
 #### FR-22. Session trash (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
 

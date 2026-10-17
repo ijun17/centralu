@@ -100,10 +100,16 @@ export function labelOf(reader: MessageReader, s: SessionInfo): string {
  * alternates (before, after), filling from the messages nearest the target point, and stops at a
  * per-message cap and an overall budget.
  */
-export function contextAt(reader: MessageReader, sessionId: string, seq: number): string {
+export function contextAt(
+  reader: MessageReader,
+  sessionId: string,
+  seq: number,
+  /** Nothing from this seq on: a session's own hit stops at its compaction (#974), the rest is still in its context */
+  untilSeq?: number,
+): string {
   // seq+1: toward the front, including the target row itself, and then toward the back
   const before = reader.loadMessages(sessionId, CONTEXT_SPAN_MSGS, seq + 1)
-  const after = reader.loadMessagesFrom(sessionId, seq, CONTEXT_SPAN_MSGS)
+  const after = reader.loadMessagesFrom(sessionId, seq, CONTEXT_SPAN_MSGS).filter((r) => untilSeq === undefined || r.seq < untilSeq)
   const nearFirst: StoredMessage[] = []
   const b = [...before].reverse()
   for (let i = 0; i < Math.max(b.length, after.length); i++) {

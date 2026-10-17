@@ -188,7 +188,8 @@ ${toolLines(seats.orchestrator)}
 ${toolLines(seats.scoped)}
 
 ## Tools every other session calls
-It reads other sessions of any project, here and on linked machines (not the orchestrator's). It acts
+It reads other sessions: from a trusted project any project's, here and on linked machines (not the
+orchestrator's or an app's); from an untrusted one its own project's. It acts
 only in its own project: with the person's consent it starts other agents there (in its folder or a
 new worktree) and works with the ones it started; ask_project reaches another project. Settings →
 Orchestrator can turn them off.

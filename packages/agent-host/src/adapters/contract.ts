@@ -151,6 +151,12 @@ export type LinkedSessions = {
   /** Where `projects.create` would make the folder on that machine, or why it would refuse */
   previewProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ name: string; path: string }>>
   createProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ projectId: string; name: string; path: string }>>
+  /**
+   * What an ordinary session's reader view needs of a machine's session (#984), from the headers mirror: whether it is
+   * an app's (its builder or an agent an app asked for, never shown to a reader) and whether its project is trusted
+   * there. Null when the mirror does not hold it, which the reader treats as not readable.
+   */
+  readerFacts(sessionId: string): { app: boolean; trusted: boolean } | null
   /** A machine's session as the hub last knew it (the headers mirror): its name and its project's */
   describe(sessionId: string): { name: string; project: string } | null
   /** The last thing a machine's session said, for a report; empty when it cannot be read */
@@ -331,8 +337,8 @@ export type OrchestratorTools = {
     action: 'check' | 'install' | 'apply',
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
-  /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
-  listSessions(): Promise<OrchestratedSession[]>
+  /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions); `project` narrows by name or id */
+  listSessions(opts?: { project?: string }): Promise<OrchestratedSession[]>
   /**
    * Sends work to a session. Returns a reason if the target does not exist — does not fail silently.
    *
@@ -363,7 +369,16 @@ export type OrchestratorTools = {
       /** Whether to expand tool-call bodies too. Collapsed by default (a full script's text would bury the conversation) */
       tools?: boolean
     },
-  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string; /** Cards in its delegated turn waiting on this seat (#676) */ cards?: RoutedCard[] }>
+  ): Promise<{
+    ok: boolean
+    error?: string
+    lines?: string[]
+    state?: string
+    /** Cards in its delegated turn waiting on this seat (#676) */
+    cards?: RoutedCard[]
+    /** Its project is not trusted, told to a trusted reader that reached it (#984): its text may be planted */
+    untrusted?: boolean
+  }>
   /**
    * Searches past conversations — **memory that crosses project boundaries**.
    *

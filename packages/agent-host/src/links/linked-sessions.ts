@@ -66,6 +66,11 @@ const LOOKUP_MS = 4000
 /** What a linked machine's lookup answers past its bound (`raceTimeout`) */
 const TIMED_OUT = Symbol('timed out')
 
+/** A machine past its lookup bound, in the words the model reads */
+function notWithin(ms: number): string {
+  return `did not answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`
+}
+
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
 function cause(m: RoutedMachine, err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
@@ -218,7 +223,7 @@ export function linkedSessions(
           if (!m.reachable) return mirrored(NOT_REACHABLE)
           try {
             const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
-            if (list === TIMED_OUT) throw new Error(`did not answer within ${lookupMs % 1000 === 0 ? `${lookupMs / 1000} s` : `${lookupMs} ms`}`)
+            if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
             return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
           } catch (err) {
             return mirrored(cause(m, err))
@@ -313,6 +318,20 @@ export function linkedSessions(
       })
     },
 
+    readerFacts(sessionId) {
+      const m = owner(sessionId)
+      const split = splitQualified(sessionId)
+      if (!m || !split) return null
+      const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === split.id)
+      if (!isObj(s) || m.hides(s)) return null
+      const p = typeof s.projectId === 'string' ? (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId) : undefined
+      return {
+        // An app's session, its builder or an agent it asked for, as projectSessions leaves them out
+        app: s.kind !== 'worker' || (typeof s.appId === 'string' && s.appId !== '') || typeof s.projectId !== 'string',
+        trusted: isObj(p) && p.trusted === true,
+      }
+    },
+
     describe(sessionId) {
       const m = owner(sessionId)
       const split = splitQualified(sessionId)
@@ -342,7 +361,10 @@ export function linkedSessions(
         [...machines()].map(async (m) => {
           if (!m.reachable) return lastKnown(m, 'not reachable right now')
           try {
-            return rows(m, await m.call('host.sessions', {}))
+            // Bounded like a lookup (#984): every session's list waits on the slowest machine otherwise
+            const answer = await raceTimeout(m.call('host.sessions', {}), lookupMs, TIMED_OUT)
+            if (answer === TIMED_OUT) return lastKnown(m, notWithin(lookupMs))
+            return rows(m, answer)
           } catch (err) {
             return lastKnown(m, cause(m, err))
           }
@@ -383,7 +405,11 @@ export function linkedSessions(
             return []
           }
           try {
-            const answer = await m.call('host.recall', { query, limit })
+            const answer = await raceTimeout(m.call('host.recall', { query, limit }), lookupMs, TIMED_OUT)
+            if (answer === TIMED_OUT) {
+              notSearched.push(`${m.name} (${notWithin(lookupMs)})`)
+              return []
+            }
             if (!Array.isArray(answer)) return []
             const out: RecallHit[] = []
             for (const raw of answer) {

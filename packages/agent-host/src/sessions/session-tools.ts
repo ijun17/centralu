@@ -85,9 +85,10 @@ export class SessionTools {
   }
 
   /**
-   * The light set an ordinary session gets (#320): its own project's sessions, read-only.
+   * The light set an ordinary session gets (#320): other sessions, read-only — every project's and the linked
+   * machines' from a trusted project, its own project's from an untrusted one (#984).
    *
-   * Only the three readers are taken from the project-scoped view; everything that acts is a refusal
+   * Only the three readers are taken from the reader view; everything that acts is a refusal
    * here, not just a name the profile leaves out. profileAllows already stops both exposure and the
    * bridge's calls, but a read-only seat should not be holding a working sendToSession behind one
    * check — the object itself cannot act.
@@ -105,7 +106,7 @@ export class SessionTools {
     const offError = 'Turned off in Settings'
     return {
       updateCentralu: async (action, signal) => (off() ? { ok: false, error: offError } : this.host.updateCentraluAsked(sessionId, action, signal)),
-      listSessions: async () => (off() ? [] : view.listSessions()),
+      listSessions: async (opts) => (off() ? [] : view.listSessions(opts)),
       readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
       recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
       // The one reach outside its project (#371 part B) — behind the person's consent for the pair, inside askProject

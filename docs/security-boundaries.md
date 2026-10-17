@@ -14,7 +14,9 @@ holding the read-only `reader` set (#320) is still a worker here: the gate asks 
 source directs sessions, not whether it has tools. Worker-originated records are excluded from
 privileged conversation memory. Read-session, preview and recall text is framed as structured
 untrusted data, not human authorization — that now includes what one ordinary session reads of
-another in the same project; the reader set reads no other project and cannot send.
+another. The reader set cannot send. From a trusted project it reads other projects' and linked machines' ordinary
+sessions (#984), each row of a project nobody trusted marked "(not trusted)"; from an untrusted project it reads its
+own project only, so text planted there cannot search every conversation (the #382 rule).
 
 Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
 sent `fromApp` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
@@ -279,7 +281,7 @@ front door" below).
 | `orchestrator` | The central orchestrator | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at other sessions" is on | Reads every project's sessions on this computer and the linked machines but the orchestrator's and coordinators' (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
+| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at other sessions" is on | From a trusted project, reads every project's ordinary sessions on this computer and the linked machines (not an orchestrator's, a coordinator's or an app's); from an untrusted one, its own project only (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
 | none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged

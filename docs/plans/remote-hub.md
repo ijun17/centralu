@@ -908,10 +908,13 @@ and its tools stay there).
   capped at 200 lines and a search at 50 hits per call, five times the tools' defaults, so one call cannot ask a
   machine for its whole store.
 - **On the hub** (`links/linked-sessions.ts`, wired in `main.ts` as `useLinkedReader`). One call per machine, in
-  parallel, each bounded by the link's call timeout. A machine that is away contributes its mirrored sessions with
+  parallel, each bounded by the link's call timeout; a list or a search waits at most 4 s for each machine (`LOOKUP_MS`,
+  #984) and treats one past it as away. A machine that is away contributes its mirrored sessions with
   "not reachable right now" (list) or its name under "Not searched" (recall), and is not asked; one that predates step
-  1 answers "Unknown method" and is named as needing Centralu updated there. Only the central orchestrator reads
-  through it: a manager, a lead and an ordinary session keep their own machine's view.
+  1 answers "Unknown method" and is named as needing Centralu updated there. The central orchestrator reads through
+  it, and since #984 so does an ordinary session of a trusted project, which sees only a machine's ordinary sessions
+  that the headers mirror holds (not an app's; a project there nobody trusted is marked) (`readerFacts`); a lead keeps
+  its members.
 - **Hits from several machines** are taken in turns, one from each machine's own ranked list (`takeInTurns`): ranks
   from two stores do not compare, and appending would let the first list fill the limit before the others are heard.
 - **Text.** A row is `- <name> [m1.<id>] · project <project> on <machine> · <tool> · <state>`, with `· <why>` when the

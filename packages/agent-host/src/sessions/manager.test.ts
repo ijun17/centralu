@@ -2643,7 +2643,11 @@ describe("an ordinary session's reader set (#320)", () => {
   })
 
   it("lists, reads and recalls every project's sessions, its own project's first, but never the orchestrator (#984)", async () => {
-    const { a1, a2, b, orc } = await setup()
+    const { shop, a1, a2, b, orc } = await setup()
+    // From an untrusted project it reads its own project only, as before (#984, the #382 rule)
+    expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toEqual([a2.id])
+    expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
+    store.setProjectTrusted(shop.id, true)
     const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
     expect(listed).toEqual([a2.id, b.id])
     expect(listed).not.toContain(orc.id)

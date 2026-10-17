@@ -217,7 +217,7 @@ export class MessageRecords {
    * something (a failed one did not), or a fresh conversation (`conversation_reset`, Claude Code's `/clear`). Null when
    * there is none. Both adapters store a compaction as the same marker row, live or read back from the tool
    * (`recordedRowKind`, `historyRow`), so one query covers Claude's `compact_boundary` and Codex's `contextCompaction`.
-   * Everything above this seq is in our record but no longer in the model's context.
+   * Every message earlier than this seq is in our record but no longer in the model's context.
    */
   lastContextCut(sessionId: string): number | null {
     const row = this.db
