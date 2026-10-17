@@ -14,6 +14,7 @@ import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
+import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 
 /** The first line of a report held over the session's own background work (#721) */
 function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean): string {
@@ -56,7 +57,7 @@ function settledReportLine(tasks: readonly BackgroundTask[]): string {
  * What a child's reports reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'handingOver' | 'meta' | 'store'> &
+export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'handingOver' | 'meta' | 'store' | 'trashing'> &
   Pick<RestartHost, 'inputsHeld'> &
   Pick<QueuedRequestsHost, 'projectRow'>
 
@@ -272,9 +273,10 @@ export class ChildReports {
    * send_to_session, an ask_project) is of a session it does not delete.
    */
   private cleanUpWords(parentId: string, childId: string): string {
-    if (this.host.meta.get(childId)?.askedBy !== parentId) return ''
-    const others = [...this.host.meta.values()].filter((s) =>
-      s.id !== childId && s.id !== parentId && s.askedBy === parentId && !inTurn(s.state) && !s.pendingApproval && s.pendingQuestions.length === 0).length
+    const child = this.host.meta.get(childId)
+    if (!child || !cleanUpDue(child, parentId)) return ''
+    // Counted as agent_session list counts them (own-agents.ts), so the number matches what list shows
+    const others = ownAgents(this.host, parentId).filter((s) => s.id !== childId && agentState(this.host, s) === 'finished').length
     return (
       `\n${cleanUpLine(childId)}` +
       (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: agent_session(action="list") shows them.` : '')

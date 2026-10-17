@@ -139,7 +139,9 @@ export function cleanUpLine(sessionId: string): string {
 }
 
 /** agent_session list (#690): the caller's own children, each with what deleting it would cost */
-export function agentListText(rows: readonly AgentListRow[]): ToolOutput {
+export function agentListText(r: { ok: true; agents: readonly AgentListRow[] } | { ok: false; error: string }): ToolOutput {
+  if (!r.ok) return { text: r.error, isError: true }
+  const rows = r.agents
   if (rows.length === 0) return { text: 'No session start_agent started from here is left.' }
   const finished = rows.filter((r) => r.state === 'finished').length
   const lines = rows.map(
@@ -231,8 +233,8 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
         text:
           `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
           (r.notice ? `${r.notice}\n` : '') +
-          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}\n` +
-          cleanUpLine(r.sessionId),
+          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}` +
+          (r.cleanUp ? `\n${cleanUpLine(r.sessionId)}` : ''),
       }
     case 'done': {
       const lines = [`${who} answered, as JSON:`, trustedJsonText(r.answer || '(no final text)')]
@@ -240,7 +242,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
       if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
       lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it. ${NEW_ROLE_NEW_AGENT}`)
-      lines.push(cleanUpLine(r.sessionId))
+      if (r.cleanUp) lines.push(cleanUpLine(r.sessionId))
       return { text: lines.join('\n') }
     }
   }

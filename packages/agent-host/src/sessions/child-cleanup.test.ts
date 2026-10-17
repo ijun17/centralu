@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import type { SessionInfo } from '@cc/protocol'
 import { agentListText, agentRunText } from './tool-answers.js'
+import { runOrchestratorTool } from './orchestrator-tools.js'
+import { agentState, cleanUpDue, ownAgents, type OwnAgentsHost } from './own-agents.js'
 
 /**
  * Finished children left behind (#690): on 2026-10-14 a parent used fourteen children's answers and deleted none until
@@ -99,25 +102,98 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(told).toContain('[Centralu] The assigned work finished.')
     expect(told).not.toContain('action="delete"')
   })
+
+  it("status under auto names the delete only on the caller's own child, never on the person's session or its own", async () => {
+    const s = await session()
+    const mine = await startRunning(s, 'my job')
+    handleOf(mine)!.answer('done')
+    await w.until(() => reportOf(s, mine).length === 1)
+    const persons = await session()
+    await w.mgr.updateSettings(s, { permissionPreset: 'auto' })
+    const del = (id: string) => `agent_session(sessionId="${id}", action="delete")`
+    expect(agentRunText(await w.mgr.agentSession(s, { sessionId: mine, action: 'status' })).text).toContain(del(mine))
+    const other = agentRunText(await w.mgr.agentSession(s, { sessionId: persons, action: 'status' }))
+    expect(other.text).toContain('is not working on anything')
+    expect(other.text).not.toContain('action="delete"')
+    expect(agentRunText(await w.mgr.agentSession(s, { sessionId: s, action: 'status' })).text).not.toContain('action="delete"')
+  })
+
+  it('list says the set is turned off, rather than that nothing is left', async () => {
+    const s = await session()
+    await startRunning(s, 'a job')
+    const tools = handleOf(s)!.opts.orchestratorTools!
+    w.mgr.setUiPreferences({ sessionTools: false })
+    const r = await runOrchestratorTool(tools, 'agent_session', { action: 'list' }, { sessionId: s, profile: 'reader' })
+    expect(r).toMatchObject({ text: 'Turned off in Settings', isError: true })
+  })
 })
 
 describe('the answers that hand a child back (#690)', () => {
   const base = { ok: true as const, sessionId: 'c1', sessionName: 'job', tool: 'claude' }
-  it('done and at_rest end with the delete; working, stopped and deleted do not', () => {
+  it('done and at_rest end with the delete only when it is due; working, stopped and deleted never', () => {
     const del = 'agent_session(sessionId="c1", action="delete")'
-    expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [] }).text).toContain(del)
-    expect(agentRunText({ ...base, state: 'at_rest', answer: 'x', sessionState: 'idle' }).text).toContain(del)
+    expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [], cleanUp: true }).text).toContain(del)
+    expect(agentRunText({ ...base, state: 'at_rest', answer: 'x', sessionState: 'idle', cleanUp: true }).text).toContain(del)
+    expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [] }).text).not.toContain(del)
+    expect(agentRunText({ ...base, state: 'at_rest', answer: 'x', sessionState: 'idle' }).text).not.toContain(del)
     expect(agentRunText({ ...base, state: 'working', reported: true }).text).not.toContain(del)
     expect(agentRunText({ ...base, state: 'stopped' }).text).not.toContain(del)
     expect(agentRunText({ ...base, state: 'deleted' }).text).not.toContain(del)
   })
 
+  it('is due only for its own child whose work is over: not cut short, limited, failed, or owing a report', () => {
+    const child = (over: Partial<SessionInfo> = {}) => ({ id: 'c', askedBy: 'p', state: 'idle', interruption: null, ...over }) as unknown as SessionInfo
+    expect(cleanUpDue(child(), 'p')).toBe(true)
+    expect(cleanUpDue(child(), 'someone else')).toBe(false)
+    expect(cleanUpDue(child({ askedBy: null }), 'p')).toBe(false)
+    expect(cleanUpDue(child({ interruption: { reason: 'network' } as SessionInfo['interruption'] }), 'p')).toBe(false)
+    expect(cleanUpDue(child({ state: 'error' }), 'p')).toBe(false)
+    expect(cleanUpDue(child({ state: 'limited' }), 'p')).toBe(false)
+    expect(cleanUpDue(child(), 'p', 'Its own background work is still running')).toBe(false)
+  })
+
   it("list names an unmerged worktree branch as work a delete keeps in the trash, and a sleeping child as asleep", () => {
-    const text = agentListText([
+    const text = agentListText({ ok: true, agents: [
       { sessionId: 'a', name: 'wt job', tool: 'codex', state: 'finished', asleep: true, worktree: { branch: 'agent/wt', unmerged: true } },
       { sessionId: 'b', name: 'merged job', tool: 'claude', state: 'finished', asleep: false, worktree: { branch: 'agent/m', unmerged: false } },
-    ]).text
+    ] }).text
     expect(text).toContain('[a] · codex · finished (asleep) · worktree branch agent/wt, not merged: a delete keeps its work in the trash')
     expect(text).toContain('[b] · claude · finished · worktree branch agent/m, merged')
+  })
+})
+
+describe("whose agents list shows, and where each stands (#690 review)", () => {
+  const info = (id: string, over: Partial<SessionInfo> = {}) =>
+    ({ id, projectId: 'p1', askedBy: 'parent', parentSessionId: null, state: 'idle', interruption: null, pendingApproval: null, pendingQuestions: [], createdAt: 1, ...over }) as unknown as SessionInfo
+  const hostWith = (sessions: SessionInfo[], opts: { trashing?: string[]; running?: string[] } = {}): OwnAgentsHost =>
+    ({
+      meta: new Map(sessions.map((s) => [s.id, s])),
+      trashing: new Map((opts.trashing ?? []).map((id) => [id, Promise.resolve()])),
+      children: { delegations: new Map((opts.running ?? []).map((id) => [`parent>${id}`, { sessionId: id, settled: false }])) },
+    }) as unknown as OwnAgentsHost
+
+  it("takes the caller's own children in its project, oldest first; not another project's, one being trashed, or a parentSessionId-only link", () => {
+    const host = hostWith(
+      [
+        info('parent', { askedBy: null }),
+        info('late', { createdAt: 3 }),
+        info('early', { createdAt: 2 }),
+        info('elsewhere', { projectId: 'p2' }),
+        info('leaving'),
+        info('legacy', { askedBy: null, parentSessionId: 'parent' }),
+        info('theirs', { askedBy: 'sibling' }),
+      ],
+      { trashing: ['leaving'] },
+    )
+    expect(ownAgents(host, 'parent').map((s) => s.id)).toEqual(['early', 'late'])
+  })
+
+  it('a delegation still running reads as working, a stopped turn as stopped, a card as waiting', () => {
+    const host = hostWith([info('parent', { askedBy: null })], { running: ['busy'] })
+    expect(agentState(host, info('busy'))).toBe('working')
+    expect(agentState(host, info('idle'))).toBe('finished')
+    expect(agentState(host, info('cut', { interruption: { reason: 'network' } as SessionInfo['interruption'] }))).toBe('stopped')
+    expect(agentState(host, info('limited', { state: 'limited' }))).toBe('stopped')
+    expect(agentState(host, info('asks', { pendingQuestions: [{}] as unknown as SessionInfo['pendingQuestions'] }))).toBe('waiting')
   })
 })
