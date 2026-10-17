@@ -17,6 +17,7 @@ import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from '
 import { NodeTooOld } from './node-floor.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Two real hosts in one process (#82): each with its own store, session manager, RPC handler and
@@ -126,14 +127,6 @@ async function ui(port: number) {
   return { call, frames, events }
 }
 
-const until = async (pred: () => boolean | Promise<boolean>, ms = 5000) => {
-  const t0 = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - t0 > ms) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
-
 const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLine => ({
   v: 1,
   port,
@@ -203,7 +196,7 @@ describe('a hub linked to another host (#82)', () => {
     const remote = await remoteHost()
     await remote.mgr.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     const projects = await u.call('projects.list')
     const s = await u.call('agents.createSession', { projectId: projects[0].id, cwd: projects[0].path, tool: 'claude' })
@@ -212,7 +205,7 @@ describe('a hub linked to another host (#82)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     remote.server.broadcast({ type: 'approval_request', sessionId: remoteId, requestId: 'r-newer', detail: newer } as unknown as NormalizedEvent)
     remote.server.broadcast({ type: 'approval_request', sessionId: remoteId, requestId: 'r-known', detail: { kind: 'command', command: 'ls', cwd: '/' } } as unknown as NormalizedEvent)
-    await until(() => u.events().filter((e) => e.type === 'approval_request').length === 2)
+    await eventually(() => u.events().filter((e) => e.type === 'approval_request').length === 2)
     warn.mockRestore()
     expect(u.events().find((e) => e.requestId === 'r-newer')!.detail).toMatchObject({ kind: 'other', about: 'unknown_card' })
     const answered: [string, string][] = []
@@ -225,7 +218,7 @@ describe('a hub linked to another host (#82)', () => {
     // A card the hub read is answered "always" as before
     await u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-known', decision: 'always' }).catch(() => {})
     await u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-newer', decision: 'allow' }).catch(() => {})
-    await until(() => answered.length === 2)
+    await eventually(() => answered.length === 2)
     expect(answered).toEqual([['r-known', 'always'], ['r-newer', 'allow']])
   })
 
@@ -234,7 +227,7 @@ describe('a hub linked to another host (#82)', () => {
     const remoteProject = await remote.mgr.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
     await hub.mgr.addProject(folder())
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
 
     const projects = await u.call('projects.list')
@@ -251,13 +244,13 @@ describe('a hub linked to another host (#82)', () => {
     expect(hub.mgr.listSessions()).toEqual([])
 
     await u.call('agents.send', { sessionId: s.id, text: 'hello' })
-    await until(() => u.events().some((e) => e.type === 'message_delta' && e.text === 'echo: hello'))
+    await eventually(() => u.events().some((e) => e.type === 'message_delta' && e.text === 'echo: hello'))
     await u.call('agents.send', { sessionId: s.id, text: 'approve this' })
-    await until(() => u.events().some((e) => e.type === 'approval_request'))
+    await eventually(() => u.events().some((e) => e.type === 'approval_request'))
     const ask = u.events().find((e) => e.type === 'approval_request')!
     expect(ask.sessionId).toBe(s.id)
     await u.call('agents.respondApproval', { sessionId: s.id, requestId: ask.requestId, decision: 'allow' })
-    await until(() => u.events().some((e) => e.type === 'message_delta' && e.text === 'approved'))
+    await eventually(() => u.events().some((e) => e.type === 'message_delta' && e.text === 'approved'))
 
     // Every event reached the UI under the hub's own sequence, in order, with the remote's session qualified
     const seqs = u.frames.filter((f) => f.kind === 'event').map((f) => f.seq)
@@ -281,12 +274,12 @@ describe('a hub linked to another host (#82)', () => {
     ])
     const remote = await remoteHost(0, store)
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     expect((await u.call('sessions.list')).map((x: any) => x.id)).toEqual(['m1.worker1'])
     remote.server.broadcast({ type: 'session_title', sessionId: 'orch', title: 'secret plan', auto: true })
     remote.server.broadcast({ type: 'session_title', sessionId: 'worker1', title: 'visible', auto: true })
-    await until(() => u.events().some((e) => e.type === 'session_title'))
+    await eventually(() => u.events().some((e) => e.type === 'session_title'))
     await new Promise((r) => setTimeout(r, 100))
     expect(u.events().filter((e) => e.type === 'session_title').map((e) => e.sessionId)).toEqual(['m1.worker1'])
     // Hub-only events of the remote stay there
@@ -297,8 +290,8 @@ describe('a hub linked to another host (#82)', () => {
     remote.server.broadcast({ type: 'external_apps_changed' })
     // A project the remote made (#515) reaches the hub's windows, which re-read the merged list
     remote.server.broadcast({ type: 'projects_changed' })
-    await until(() => u.events().some((e) => e.type === 'external_apps_changed'))
-    await until(() => u.events().some((e) => e.type === 'projects_changed'))
+    await eventually(() => u.events().some((e) => e.type === 'external_apps_changed'))
+    await eventually(() => u.events().some((e) => e.type === 'projects_changed'))
     expect(u.events().some((e) => e.type === 'themes_changed')).toBe(false)
     expect(u.events().some((e) => e.type === 'update_apply_request' || e.type === 'update_apply_go')).toBe(false)
   })
@@ -307,29 +300,29 @@ describe('a hub linked to another host (#82)', () => {
     const { store, projectId } = seeded([])
     const remote = await remoteHost(0, store)
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     // Another window of that machine, reaching it directly, not through the hub
     const other = await ui(remote.port)
     const trustedOnHub = async () => (await u.call('projects.list')).find((p: any) => p.id === `m1.${projectId}`)?.trusted
     expect(await trustedOnHub()).toBe(false)
     await other.call('projects.setTrusted', { projectId, trusted: true })
-    await until(() => u.events().some((e) => e.type === 'projects_changed'))
+    await eventually(() => u.events().some((e) => e.type === 'projects_changed'))
     expect(await trustedOnHub()).toBe(true)
     const heard = u.events().filter((e) => e.type === 'projects_changed').length
     await other.call('projects.setCommands', { projectId, commands: [{ command: 'pnpm dev' }] })
-    await until(() => u.events().filter((e) => e.type === 'projects_changed').length > heard)
+    await eventually(() => u.events().filter((e) => e.type === 'projects_changed').length > heard)
     expect((await u.call('projects.list')).find((p: any) => p.id === `m1.${projectId}`)?.commands).toEqual([{ command: 'pnpm dev' }])
   })
 
   it('relays terminal output under the machine’s prefix', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     remote.server.pushTerminal({ terminalId: 'term-9', data: 'hi' })
     remote.server.pushTerminal({ terminalId: 'run-2', exitCode: 1 })
-    await until(() => u.frames.filter((f) => f.kind === 'term' || f.kind === 'term_exit').length === 2)
+    await eventually(() => u.frames.filter((f) => f.kind === 'term' || f.kind === 'term_exit').length === 2)
     expect(u.frames.filter((f) => f.kind === 'term' || f.kind === 'term_exit')).toEqual([
       { kind: 'term', terminalId: 'm1.term-9', data: 'hi' },
       { kind: 'term_exit', terminalId: 'm1.run-2', exitCode: 1 },
@@ -341,7 +334,7 @@ describe('a hub linked to another host (#82)', () => {
     const remote = await remoteHost(0, remoteStore)
     const p = await remote.mgr.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     const s = await u.call('agents.createSession', { projectId: `m1.${p.id}`, cwd: p.path, tool: 'claude' })
     expect(s.live).toBe(true)
@@ -349,7 +342,7 @@ describe('a hub linked to another host (#82)', () => {
     expect(await u.call('grid.set', { panels: [{ kind: 'session', sessionId: s.id }] })).toEqual([{ kind: 'session', sessionId: s.id }])
 
     await remote.close()
-    await until(() => status(hub) !== 'connected')
+    await eventually(() => status(hub) !== 'connected')
     const listed = await u.call('sessions.list')
     expect(listed).toEqual([expect.objectContaining({ id: s.id, live: true, unreachable: true, machine: 'm1' })])
     expect(await u.call('projects.list')).toEqual([expect.objectContaining({ id: `m1.${p.id}`, unreachable: true })])
@@ -361,8 +354,8 @@ describe('a hub linked to another host (#82)', () => {
     // The remote comes back on the same port, a new lifetime: the UI is told to read that machine again
     const resyncsBefore = u.events().filter((e: any) => e.type === 'machine_resync').length
     await remoteHost(remote.port, remoteStore)
-    await until(() => status(hub) === 'connected')
-    await until(() => u.events().filter((e: any) => e.type === 'machine_resync').length > resyncsBefore)
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => u.events().filter((e: any) => e.type === 'machine_resync').length > resyncsBefore)
     const back = (await u.call('sessions.list')).find((x: any) => x.id === s.id)
     // The remote restarted without a keeper: its agent is gone, which the fresh list says and the UI wakes
     expect(back).toMatchObject({ live: false })
@@ -373,7 +366,7 @@ describe('a hub linked to another host (#82)', () => {
     const remote = await remoteHost(0, seeded([['w1', 'worker', true]]).store)
     const hubStore = new Store()
     const first = await hubHost(() => lineFor(remote.port), hubStore)
-    await until(() => status(first) === 'connected')
+    await eventually(() => status(first) === 'connected')
     await remote.close()
     await first.links.stop()
     // A new hub on the same store, the machine still away
@@ -387,7 +380,7 @@ describe('a hub linked to another host (#82)', () => {
     const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.1' })
     let line = lineFor(remote.port, { version: '0.1.0-beta.1' })
     const hub = await hubHost(() => line)
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const info = hub.links.list()[0]!
     expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.1' } })
     const u = await ui(hub.port)
@@ -395,7 +388,7 @@ describe('a hub linked to another host (#82)', () => {
 
     line = lineFor(remote.port, { protocolVersion: PROTOCOL_VERSION + 1 })
     await u.call('machines.reconnect', { machineId: 'm1' })
-    await until(() => hub.links.list()[0]!.versions?.compatible === false)
+    await eventually(() => hub.links.list()[0]!.versions?.compatible === false)
     expect(status(hub)).toBe('versions_differ')
     expect(hub.links.list()[0]!.error).toMatch(/protocol/)
     await expect(u.call('machines.acceptVersions', { machineId: 'm1' })).rejects.toThrow(/different protocols/)
@@ -406,7 +399,7 @@ describe('a hub linked to another host (#82)', () => {
     const store = new Store()
     storeRegistry(store).add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'powershell' }, addedAt: 1, acceptedVersions: null })
     const hub = await hubHost(() => lineFor(remote.port, { token: 'rotated-but-serve-keeps-the-old-one' }), store, false)
-    await until(() => status(hub) === 'refused')
+    await eventually(() => status(hub) === 'refused')
     expect(hub.links.list()[0]!.error).toMatch(/restart `centralu\.cmd serve` there/)
     const dev = await hubHost(() => lineFor(1), store, false, {
       installer: { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '', registry: {} },
@@ -423,7 +416,7 @@ describe('a hub linked to another host (#82)', () => {
       asked++
       return lineFor(remote.port, { token: 'rotated-but-serve-keeps-the-old-one' })
     })
-    await until(() => status(hub) === 'refused')
+    await eventually(() => status(hub) === 'refused')
     expect(hub.links.list()[0]!.error).toMatch(/restart `centralu serve` there/)
     const atRefusal = asked
     await new Promise((r) => setTimeout(r, 300))
@@ -440,7 +433,7 @@ describe('a hub linked to another host (#82)', () => {
     await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl' })).rejects.toThrow(/distro/)
     const added: MachineInfo = await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
     expect(added).toMatchObject({ id: 'remote-box', shell: 'posix' })
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     expect((await u.call('sessions.list')).map((s: any) => s.id)).toEqual(['remote-box.w1'])
     await u.call('grid.set', { panels: [{ kind: 'session', sessionId: 'remote-box.w1' }] })
     await u.call('machines.remove', { machineId: 'remote-box' })
@@ -455,7 +448,7 @@ describe('a hub linked to another host (#82)', () => {
     const hub = await hubHost(() => lineFor(remote.port), new Store(), false)
     const u = await ui(hub.port)
     await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     // The mirror learns the machine's projects from the list the window reads
     await u.call('projects.list')
     const panels = [
@@ -501,11 +494,11 @@ describe('a hub linked to another host (#82)', () => {
     })
     cleanups.push(() => links.stop())
     links.start()
-    await until(() => seen.includes('open'))
+    await eventually(() => seen.includes('open'))
     await links.remove('m1')
     release()
     // The forward an ssh tunnel brought up after the removal would otherwise run until the host exits
-    await until(() => seen.at(-1) === 'close' && seen.includes('opened'))
+    await eventually(() => seen.at(-1) === 'close' && seen.includes('opened'))
     expect(seen).toEqual(['open', 'close', 'opened', 'close'])
   })
 
@@ -548,7 +541,7 @@ describe('a hub linked to another host (#82)', () => {
 
     it('starts it without asking, says so in the row and the log, and connects', async () => {
       const l = await linkTo(async () => ({ how: 'detached', note: null }))
-      await until(() => l.links.list()[0]!.status === 'connected')
+      await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.starts()).toBe(1)
       expect(l.statuses).toContain('starting')
       expect(l.statuses).not.toContain('not_running')
@@ -558,7 +551,7 @@ describe('a hub linked to another host (#82)', () => {
 
     it('says when the host runs only while the link is up, and why', async () => {
       const l = await linkTo(async () => ({ how: 'link_bound', note: 'Windows did not start Centralu through WMI (returned 2).' }))
-      await until(() => l.links.list()[0]!.status === 'connected')
+      await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.links.list()[0]!.hostStarted).toMatchObject({ how: 'link_bound', note: /through WMI/ })
       expect(l.logs.join('\n')).toMatch(/its host runs only while this link is up: Windows did not start Centralu through WMI/)
     })
@@ -569,10 +562,10 @@ describe('a hub linked to another host (#82)', () => {
         if (fail) throw new Error('centralu serve exited (1) before its host answered')
         return { how: 'detached', note: null }
       })
-      await until(() => l.links.list()[0]!.status === 'not_running')
+      await eventually(() => l.links.list()[0]!.status === 'not_running')
       expect(l.links.list()[0]!.error).toBe('Centralu could not be started on Remote box: centralu serve exited (1) before its host answered')
       fail = false
-      await until(() => l.links.list()[0]!.status === 'connected')
+      await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.starts()).toBeGreaterThanOrEqual(2)
     })
   })
@@ -684,7 +677,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
 
   it('installs the pinned Node before it tries to start a host under the old one, and says so in one sentence', async () => {
     const l = await linkTo({ startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => l.row().status === 'connected')
+    await eventually(() => l.row().status === 'connected')
     // The system Node is never asked to start the host: preflight, Node, Centralu, then the managed launcher starts it
     expect(l.calls).toEqual(['managed'])
     expect(l.runs).toHaveLength(3)
@@ -701,7 +694,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
         return { how: 'detached', note: null }
       },
     })
-    await until(() => l.row().status === 'connected')
+    await eventually(() => l.row().status === 'connected')
     expect(l.calls).toEqual(['system', 'managed'])
     expect(l.row().hostStarted?.note).toBe('Centralu installed its own Node 24.21.0 on Remote box, because the Node on Remote box (22.13.1) is older than 22.14.0, the oldest Centralu runs on.')
   })
@@ -715,7 +708,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
         return { how: 'detached', note: null }
       },
     })
-    await until(() => l.row().status === 'connected')
+    await eventually(() => l.row().status === 'connected')
     expect(l.calls).toEqual(['system', 'managed'])
     expect(l.row().hostStarted?.note).toBe('Centralu installed its own Node 24.21.0 on Remote box, because Centralu crashed on start under the Node on Remote box, and 22.14.0 is the oldest Centralu runs on.')
   })
@@ -726,7 +719,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
         throw new NodeTooOld('centralu serve exited (3221225477) before its host answered', 'crashed', null)
       },
     })
-    await until(() => l.calls.length >= 2 && l.row().status === 'not_running')
+    await eventually(() => l.calls.length >= 2 && l.row().status === 'not_running')
     await new Promise((r) => setTimeout(r, 400))
     expect(l.runs).toHaveLength(3)
     expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
@@ -734,7 +727,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
 
   it('tries a failing install once, not at every retry (each one is a download)', async () => {
     const l = await linkTo({ failInstall: true, startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => l.row().status === 'not_running')
+    await eventually(() => l.row().status === 'not_running')
     await new Promise((r) => setTimeout(r, 700))
     // Preflight failed once; the retries (every 50 to 200 ms here) report instead of trying again
     expect(l.runs).toHaveLength(1)
@@ -749,7 +742,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
         throw new NodeTooOld('centralu serve exited (3221225477) before its host answered', 'crashed', null)
       },
     })
-    await until(() => l.row().status === 'not_running')
+    await eventually(() => l.row().status === 'not_running')
     expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
     expect(l.runs).toHaveLength(0)
   })
@@ -758,7 +751,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     flags.floorBroken = true
     cleanups.push(() => void (flags.floorBroken = false))
     const l = await linkTo({ startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => l.row().status === 'connected')
+    await eventually(() => l.row().status === 'connected')
     expect(l.runs).toHaveLength(0)
     expect(l.starts()).toBe(1)
     expect(l.logs.filter((x) => x.includes('the Node floor could not be read'))).toHaveLength(1)
@@ -766,10 +759,10 @@ describe('a machine whose Node is below the floor (#699)', () => {
 
   it('does not put back what the person removed: after `machines.uninstall` a below-floor machine is named, not installed again', async () => {
     const l = await linkTo({ later: ['CENTRALU-NOT-FOUND\n', 'CENTRALU-NOT-FOUND\n', 'CENTRALU-INSTALL uninstalled\n'], startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => l.row().status === 'connected')
+    await eventually(() => l.row().status === 'connected')
     expect(l.runs).toHaveLength(3)
     await l.links.uninstall('m1')
-    await until(() => l.row().status === 'not_running')
+    await eventually(() => l.row().status === 'not_running')
     expect(l.row().error).toMatch(/older than 22\.14\.0[\s\S]*removed from there on request/)
     await new Promise((r) => setTimeout(r, 400))
     expect(l.runs).toHaveLength(6)
@@ -777,14 +770,14 @@ describe('a machine whose Node is below the floor (#699)', () => {
 
   it('names the floor and asks for a Node update where it may not install: a development hub, or a command of the person’s own', async () => {
     const dev = await linkTo({ dev: true, startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => dev.row().status === 'not_running')
+    await eventually(() => dev.row().status === 'not_running')
     expect(dev.row().error).toBe(
       'The Node on Remote box (22.12.0) is older than 22.14.0, the oldest Centralu runs on, and this computer did not install its own Node there (this development build is not published): update Node there, and Centralu starts again.',
     )
     expect(dev.runs).toHaveLength(0)
     expect(dev.calls).toEqual([])
     const own = await linkTo({ remote: { shell: 'posix', command: 'my-centralu' }, startHost: async () => ({ how: 'detached', note: null }) })
-    await until(() => own.row().status === 'not_running')
+    await eventually(() => own.row().status === 'not_running')
     expect(own.row().error).toMatch(/older than 22\.14\.0[\s\S]*it runs a command of its own in place of centralu/)
     expect(own.runs).toHaveLength(0)
   })
@@ -814,7 +807,7 @@ describe('machines.install from a hub running a local build (#689)', () => {
     expect(params.version).toBe(APP_VERSION)
     expect(logs.some((l) => l.includes(`installing the release it was cut from, ${APP_VERSION}`))).toBe(true)
     // The remote now runs the base release, not the hub's exact version, and the link takes it
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
   })
 })
@@ -826,7 +819,7 @@ describe('machines.update never installs an older release than the remote runs (
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { version: '9.0.0' })), { exec: async (cmd: string) => (ran.push(cmd), { code: 0, stderr: '', stdout: '' }) })
     const installer = { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '// the installer', registry: {} }
     const hub = await hubHost(() => lineFor(remote.port, { version: '9.0.0' }), new Store(), true, { tunnelFor: () => tunnel, installer })
-    await until(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === '9.0.0')
+    await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === '9.0.0')
     const u = await ui(hub.port)
     await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(new RegExp(`Remote box runs Centralu 9\\.0\\.0, newer than ${APP_VERSION.replaceAll('.', '\\.')}.*would downgrade`))
     expect(ran).toEqual([])
@@ -911,7 +904,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500 })
     const u = await ui(hub.port)
     // An older remote on one protocol connects (#689); the update is offered, not required
-    await until(() => status(hub!) === 'connected')
+    await eventually(() => status(hub!) === 'connected')
     return { hub, u, runs, activity, setStarts: (v: string) => (starts = v) }
   }
 
@@ -920,11 +913,11 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     // comes: on a real Windows PC every rollback timed out and put the newer version back
     const { hub, u, setStarts } = await setup({ startsVersion: APP_VERSION })
     await u.call('machines.update', { machineId: 'm1' })
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     setStarts('0.0.1')
     const r = await u.call('machines.rollback', { machineId: 'm1' })
     expect(r).toMatchObject({ current: { version: '0.0.1' } })
-    await until(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
+    await eventually(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
   })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
@@ -947,7 +940,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       .map((e) => e.machine.operation.step as string)
     expect([...new Set(steps)]).toEqual(['preflight', 'registry', 'node', 'centralu', 'stop', 'switch', 'start', 'check', 'prune'])
     expect(u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'updating')).toBe(true)
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     expect(hub.links.list()[0]!.operation).toBeNull()
   })
 
@@ -958,7 +951,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     )
     expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
     // Back on the old version, the prompt is there again
-    await until(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
+    await eventually(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
   })
 })
 
@@ -979,7 +972,7 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     }
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { autostart: { on, how, linger: on ? false : null } })), { exec })
     const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     return { hub, u: await ui(hub.port), runs, isOn: () => on }
   }
 
@@ -995,7 +988,7 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     const r = await u.call('machines.autostart', { machineId: 'm1', on: true })
     expect(r).toMatchObject({ autostart: { on: true, how: 'systemd', linger: false }, machine: { id: 'm1', autostart: { on: true, linger: false } } })
     expect(isOn()).toBe(true)
-    await until(() => u.events().some((e) => e.type === 'machine_status' && e.machine.autostart?.on === true))
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.autostart?.on === true))
     // Reading asks the machine, changing nothing
     expect((await u.call('machines.autostart', { machineId: 'm1' })).autostart).toEqual({ on: true, how: 'systemd', linger: false })
     expect((await u.call('machines.autostart', { machineId: 'm1', on: false })).autostart).toEqual({ on: false, how: 'systemd', linger: null })
@@ -1009,10 +1002,10 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     let release!: () => void
     const { hub, u } = await setup({ gate: new Promise<void>((r) => (release = r)) })
     const turning = u.call('machines.autostart', { machineId: 'm1', on: true })
-    await until(() => hub.links.list()[0]!.operation !== null, 2000)
+    await eventually(() => hub.links.list()[0]!.operation !== null, 2000)
     // The row says so, as for an install or an update: the window greys out the buttons that would be refused
     expect(hub.links.list()[0]!.operation).toMatchObject({ kind: 'autostart', step: 'on', target: null })
-    await until(() => u.events().some((e) => e.type === 'machine_status' && e.machine.operation?.kind === 'autostart'))
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.operation?.kind === 'autostart'))
     await expect(u.call('machines.autostart', { machineId: 'm1', on: false })).rejects.toThrow('Remote box is busy with autostart; wait until it is done')
     release()
     expect((await turning).autostart.on).toBe(true)
@@ -1032,7 +1025,7 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
   it('is refused where the hub has no shell on the machine', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     await expect((await ui(hub.port)).call('machines.autostart', { machineId: 'm1', on: true })).rejects.toThrow(/no shell on Remote box/)
   })
 })
@@ -1106,7 +1099,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     seedSession(hubStore, hubProject, 'h1', 'worker')
     talk(hubStore, 'h1', [['where is the backup', 'zebracrossing lives on the server']])
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const tool = async (name: string, args: Record<string, unknown> = {}) =>
       (await hub.mgr.runOrchestratorTool('hub-orch', name, args)) as { text: string; isError?: boolean }
     return { remote, hub, tool }
@@ -1157,10 +1150,10 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
       text: 'Sent: m1.w1 (I will let you know once it is done)',
     })
     // Recorded there as an instruction from this orchestrator, named with this computer
-    await until(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
+    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
     const there = remote.store.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
     expect(there.payload).toMatchObject({ from: { name: 'hub-orch on Hub mac' } })
-    await until(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
     const report = told(hub).find((t) => t.startsWith('[Centralu]'))!
     expect(report).toContain('id: m1.w1')
     expect(report).toMatch(/Project: .+ on Remote box/)
@@ -1168,7 +1161,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
 
     // No report was asked for this time: none comes, and the first one is not repeated
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'and again' })
-    await until(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: and again'))
+    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: and again'))
     await new Promise((r) => setTimeout(r, 200))
     expect(told(hub).filter((t) => t.startsWith('[Centralu]'))).toHaveLength(1)
   })
@@ -1177,7 +1170,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const { tool, remote } = await rig({ worktreeChild: true })
     expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'merge the branch' })
-    await until(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
+    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
   })
 
   it('changes a machine’s session’s settings there, and says so to the hub’s windows (step 2)', async () => {
@@ -1185,7 +1178,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const u = await ui(hub.port)
     expect(await tool('update_session_settings', { sessionId: 'm1.w1', model: 'scripted-1' })).toMatchObject({ text: expect.stringContaining('Changed: m1.w1') })
     expect(remote.mgr.listSessions().find((s) => s.id === 'w1')!.model).toBe('scripted-1')
-    await until(() => u.events().some((e: any) => e.type === 'settings_changed' && e.sessionId === 'm1.w1' && e.model === 'scripted-1'))
+    await eventually(() => u.events().some((e: any) => e.type === 'settings_changed' && e.sessionId === 'm1.w1' && e.model === 'scripted-1'))
   })
 
   it('creates a session in a machine’s project with its first instruction, and asks for the id when two machines share the name (step 2)', async () => {
@@ -1194,7 +1187,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(made.text).toMatch(/^Created: Backups \[m1\.[0-9a-f-]+\] — sent the first instruction$/)
     const s = remote.mgr.listSessions().find((x) => x.name === 'Backups')!
     expect(s).toMatchObject({ projectId: 'p-remote', permissionPreset: 'normal' })
-    await until(() => remote.store.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
+    await eventually(() => remote.store.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
 
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
@@ -1210,7 +1203,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const { tool, remote, hub } = await rig()
     const parent = folder()
     const pending = tool('create_project', { name: 'fresh', parent, machine: 'Remote box' })
-    await until(() => !!hub.mgr.listSessions().find((s) => s.id === 'hub-orch')?.pendingApproval)
+    await eventually(() => !!hub.mgr.listSessions().find((s) => s.id === 'hub-orch')?.pendingApproval)
     const card = hub.mgr.listSessions().find((s) => s.id === 'hub-orch')!.pendingApproval!
     expect(card.detail).toEqual({ kind: 'project_create', name: 'fresh', path: join(parent, 'fresh'), machine: 'Remote box' })
     // Nothing is made before the answer
@@ -1246,7 +1239,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const { tool, remote, hub } = await rig()
     await tool('list_sessions')
     await remote.close()
-    await until(() => status(hub) !== 'connected')
+    await eventually(() => status(hub) !== 'connected')
     const list = (await tool('list_sessions')).text
     // From the headers mirror, which names a project as the window does (its folder's name; the seed's folder is a temporary one)
     expect(list).toMatch(/^- w1 \[m1\.w1\] · project cc-links-\w+ on Remote box · claude · idle · not reachable right now$/m)
@@ -1270,16 +1263,16 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     hub.mgr.setProjectTrusted('p-hub', true)
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
     const ask = (opts: { project: string; session?: string; task?: string }) => hub.mgr.askProject('h1', opts)
     const card = () => hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval
     const answer = async (decision: 'allow' | 'always' | 'deny') => {
-      await until(() => !!card())
+      await eventually(() => !!card())
       const c = card()!
       await hub.mgr.respondApproval('h1', c.requestId, decision)
       // The next card is a new one: this one is gone before the caller asks again
-      await until(() => card()?.requestId !== c.requestId)
+      await eventually(() => card()?.requestId !== c.requestId)
       return c
     }
     return { remote, hub, name, ask, card, answer }
@@ -1308,7 +1301,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await answer('allow')
     expect(await call).toMatchObject({ ok: true, state: 'done' })
     expect(sent).toHaveBeenCalledWith('w1', expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
-    await until(() => remote.store.appSetting('hub_ask_depth:w1') === null)
+    await eventually(() => remote.store.appSetting('hub_ask_depth:w1') === null)
   })
 
   it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {
@@ -1349,7 +1342,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect((missing as { error: string }).error).toBe(`No project named "no-such-project". The other projects are: ${name} (on Remote box).`)
 
     await remote.close()
-    await until(() => status(hub) !== 'connected')
+    await eventually(() => status(hub) !== 'connected')
     // The project is known from the headers mirror, so the refusal says why it cannot be asked
     for (const project of [name, `m1/${name}`]) {
       expect(await ask({ project, task: 'x' })).toMatchObject({
@@ -1371,17 +1364,17 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: 'm1.w1', notice: expect.stringContaining('approval there') })
     // The same caller asking again with a task is told to wait, not to start a second one
     expect(await ask({ project: name, task: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('still working on your last task') })
-    await until(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
     await remote.mgr.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
     expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
   })
   it('sends nothing when the person started a turn in the session while the question stood', async () => {
     const { remote, name, ask, answer, card } = await rig()
     const call = ask({ project: name, task: 'say hello' })
-    await until(() => !!card())
+    await eventually(() => !!card())
     // The person works in that session there while the card is up: a turn that waits on them
     await remote.mgr.send('w1', 'please approve my command')
-    await until(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
     // The task did not join their turn: it is nowhere in the conversation there
@@ -1392,7 +1385,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
   it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {
     const { remote, hub, name, ask, card } = await rig()
     const call = ask({ project: name, task: 'say hello' })
-    await until(() => !!card())
+    await eventually(() => !!card())
     void hub.mgr.setProjectTrusted('p-hub', false)
     expect(card()).toBeFalsy()
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
@@ -1402,7 +1395,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
   it('refuses an approval that comes after the trust it rested on is gone, and sends nothing to the machine', async () => {
     const { remote, hub, name, ask, answer, card } = await rig()
     const call = ask({ project: name, task: 'say hello' })
-    await until(() => !!card())
+    await eventually(() => !!card())
     // Taken away at the store, so only the read after the answer can see it
     hub.store.setProjectTrusted('p-hub', false)
     await answer('allow')
@@ -1418,7 +1411,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await remote.close()
     // The next call is told what happened to the task, not that it still works
     let last: Awaited<ReturnType<typeof ask>> | undefined
-    await until(async () => {
+    await eventually(async () => {
       last = await ask({ project: name })
       return !last.ok || last.state !== 'working'
     })
@@ -1437,7 +1430,7 @@ describe('a link to a host that can prove it holds the token', () => {
   it('comes up with the real host', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port, { proof: true }))
-    await until(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected')
   })
 
   // A host from before the proof, still running after an update, closes on `prove` (#838 review): said as that
@@ -1447,7 +1440,7 @@ describe('a link to a host that can prove it holds the token', () => {
     cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
     wss.on('connection', (ws) => ws.on('message', () => ws.close(4001, 'not a hello')))
     const hub = await hubHost(() => lineFor((wss.address() as { port: number }).port, { proof: true }))
-    await until(() => status(hub) === 'refused')
+    await eventually(() => status(hub) === 'refused')
     expect(hub.links.list()[0]!.error).toMatch(/runs an older Centralu host than the one installed there.*Restart it there: `centralu serve --stop`/)
   })
 
@@ -1463,7 +1456,7 @@ describe('a link to a host that can prove it holds the token', () => {
       ws.send(JSON.stringify(f.kind === 'prove' ? { kind: 'proof', nonce: f.nonce, mac: 'A'.repeat(43) } : { kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0 }))
     }))
     const hub = await hubHost(() => lineFor((wss.address() as { port: number }).port, { proof: true }))
-    await until(() => got.length >= 2)
+    await eventually(() => got.length >= 2)
     expect(got.join('\n')).not.toContain(`"${TOKEN}"`)
     expect(got.every((g) => JSON.parse(g).kind === 'prove')).toBe(true)
     expect(status(hub)).not.toBe('connected')

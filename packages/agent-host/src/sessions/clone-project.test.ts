@@ -11,7 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Cloning a repository as a new project (#515), end to end with the machine's real git: a local bare repository is
@@ -114,14 +114,6 @@ afterEach(async () => {
   store.close()
 })
 
-const until = async (ok: () => boolean, ms = 5000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 describe('projects.create with a git source', () => {
   it('clones over https into a folder named after the repository, and registers it', async () => {
     const info = (await rpc('projects.create', { name: '', source: { git: `${base}/game.git` } })) as { name: string; path: string }
@@ -187,7 +179,7 @@ describe('create_project with git (the orchestrator)', () => {
   it('the card names the repository and where it goes; the clone runs only after Create, said in the conversation', async () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { git: `${base}/game.git`, branch: 'dev' })
-    await until(() => mgr.listSessions().find((s) => s.id === orc.id)?.pendingApproval?.detail.kind === 'project_create')
+    await eventually(() => mgr.listSessions().find((s) => s.id === orc.id)?.pendingApproval?.detail.kind === 'project_create')
     const pending = mgr.listSessions().find((s) => s.id === orc.id)!.pendingApproval!
     expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(centralu, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })
     expect(readdirSync(centralu)).toEqual([])

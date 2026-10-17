@@ -8,6 +8,7 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * "You will be told when it ends" across a host swap (#646): a parent that started an agent without waiting is told
@@ -105,14 +106,6 @@ function host(kept: ReadonlySet<string> = new Set()) {
   return { mgr, claude }
 }
 
-const until = async (ok: () => boolean, ms = 2000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
 async function parentAndChild(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
@@ -135,7 +128,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     a.claude.handles.get(child)!.answer('done here')
-    await until(() => reports(a.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     expect(store.listReportMarks()).toEqual([])
   })
 
@@ -152,7 +145,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     // Only the next host's handles exist now: the parent hears nothing through the old host's
     b.claude.handles.get(child)!.answer('finished under the new host')
-    await until(() => reports(b.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
     expect(stored(parent)).toHaveLength(1)
     expect(stored(parent)[0]).toContain('finished under the new host')
     expect(reports(a.claude.handles.get(parent), child)).toEqual([])
@@ -201,7 +194,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
-    await until(() => reports(a.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     await a.mgr.detachAll()
 
@@ -214,7 +207,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
     h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
     h.answer('verify passed, PR opened')
-    await until(() => stored(parent).length === 1)
+    await eventually(() => stored(parent).length === 1)
     expect(stored(parent)[0]).toContain('verify passed, PR opened')
     expect(store.listReportMarks()).toEqual([])
     expect(store.appSetting(`report_paused:${child}`)).toBeNull()
@@ -226,7 +219,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
-    await until(() => reports(a.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     await a.mgr.detachAll()
 
     const c = host()

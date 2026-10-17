@@ -13,6 +13,7 @@ import { Store } from '../dev-services/store.js'
 import { crossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A handoff moves the original session's live children to the session that took over (#693): their reports, the
@@ -108,14 +109,6 @@ function host(kept: ReadonlySet<string> = new Set()) {
   return { mgr, claude }
 }
 
-const until = async (ok: () => boolean, ms = 2000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 /** A parent in a trusted project that may start agents without a card */
 async function parentOf(h: ReturnType<typeof host>, preset: 'normal' | 'safe' = 'normal') {
   const project = await h.mgr.addProject(root)
@@ -170,11 +163,11 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
 
     h.claude.handles.get(child)!.answer('done here')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(reports(h.claude.handles.get(parent), child)).toEqual([])
     expect(store.listReportMarks()).toEqual([])
     // The delegated turn's link (#676) ends with the turn, under its new owner too
-    await until(() => store.listDelegatedTurns().length === 0)
+    await eventually(() => store.listDelegatedTurns().length === 0)
   })
 
   it('lets the new session status and delete the child, and the original neither', async () => {
@@ -197,7 +190,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
     h.claude.handles.get(settled)!.answer('checked')
-    await until(() => reports(h.claude.handles.get(parent), settled).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const live = await startChild(h, parent, 'long work')
     h.mgr.rename(live, 'Port the parser')
     const heir = await handOff(h, project, parent, false)
@@ -235,7 +228,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const ch = h.claude.handles.get(child)!
     ch.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     ch.answer('waiting for verify')
-    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
     const heir = await handOff(h, project, parent)
 
     expect(owner(child)).toBe(heir)
@@ -244,7 +237,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     ch.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
     ch.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
     ch.answer('verify passed')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(store.listReportMarks()).toEqual([])
   })
 
@@ -253,7 +246,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
     h.claude.handles.get(settled)!.answer('checked')
-    await until(() => reports(h.claude.handles.get(parent), settled).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const heir = await handOff(h, project, parent, false)
     expect(owner(settled)).toBe(parent)
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
@@ -266,7 +259,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'first job')
     h.claude.handles.get(child)!.answer('first done')
-    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
     // The person works in the child; the parent's next job waits in its queue (#677)
     await h.mgr.send(child, 'person work')
     const queued = await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })
@@ -277,9 +270,9 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`busy; your request is queued — handle: ${child}`)
     const ch = h.claude.handles.get(child)!
     ch.answer('person answer')
-    await until(() => ch.sent.some((t) => t.includes('second job')))
+    await eventually(() => ch.sent.some((t) => t.includes('second job')))
     ch.answer('second done')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'second done' })
   })
 
@@ -299,9 +292,9 @@ describe('a handoff moves the live children to the new session (#693)', () => {
       handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
     })
     expect(store.listQueuedRequests()).toEqual([])
-    await until(() => store.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
+    await eventually(() => store.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
     h.claude.handles.get(other)!.answer('person answer')
-    await until(() => h.mgr.listSessions().find((s) => s.id === other)?.state !== 'working')
+    await eventually(() => h.mgr.listSessions().find((s) => s.id === other)?.state !== 'working')
     expect(h.claude.handles.get(other)!.sent).toEqual(['person work'])
   })
 
@@ -310,7 +303,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const { project, parent } = await parentOf(h, 'safe')
     const call = h.mgr.startAgent(parent, { task: 'needs a yes', wait: false })
     const cardIn = (id: string) => h.mgr.listSessions().find((s) => s.id === id)?.pendingApproval
-    await until(() => cardIn(parent)?.detail.kind === 'agent_start')
+    await eventually(() => cardIn(parent)?.detail.kind === 'agent_start')
     const requestId = cardIn(parent)!.requestId
     const heir = await handOff(h, project, parent)
 
@@ -319,11 +312,11 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(events.filter((e) => e.type === 'approval_request' && e.sessionId === parent)).toHaveLength(1)
     // The new session's first turn (reading the note) hides the card; it stands again when that turn ends (#673)
     h.claude.handles.get(heir)!.answer('I have read the note')
-    await until(() => cardIn(heir)?.requestId === requestId)
+    await eventually(() => cardIn(heir)?.requestId === requestId)
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`handle: ${requestId}`)
     h.mgr.respondApproval(heir, requestId, 'allow')
     await call
-    await until(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
+    await eventually(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
     const child = h.mgr.listSessions().find((s) => s.askedBy === heir)!.id
     expect(store.listAgentStartRequests()).toEqual([])
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
@@ -346,13 +339,13 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const child = await startChild(h, parent, 'long work')
     // The original waits on the child in a call (its wait takes the report mark down)
     const waiting = h.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
-    await until(() => store.listReportMarks().length === 0)
+    await eventually(() => store.listReportMarks().length === 0)
     const heir = await handOff(h, project, parent, false)
     expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
     // The report that wait had taken down is owed to the new session, stored too
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
     h.claude.handles.get(child)!.answer('the answer')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(reports(h.claude.handles.get(parent), child)).toEqual([])
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'the answer' })
   })
@@ -361,7 +354,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const h = host()
     const { project, parent } = await parentOf(h, 'safe')
     void h.mgr.startAgent(parent, { task: 'needs a yes', wait: false })
-    await until(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
+    await eventually(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
     const requestId = h.mgr.listSessions().find((s) => s.id === parent)!.pendingApproval!.requestId
     const waiting = h.mgr.agentSession(parent, { sessionId: requestId, action: 'wait' })
     const heir = await handOff(h, project, parent, false)
@@ -379,7 +372,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const other = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     h.mgr.rename(other, 'Docs')
     const sent = h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy the docs' })
-    await until(() => h.mgr.listSessions().find((s) => s.id === other)?.state === 'working')
+    await eventually(() => h.mgr.listSessions().find((s) => s.id === other)?.state === 'working')
     const heir = await handOff(h, project.id, parent, false)
     // The call that gave the work was still waiting: it hears where the work went
     expect(await sent).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
@@ -407,10 +400,10 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(heir, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending' })
 
     free = 8 * GB
-    await until(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
+    await eventually(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
     const child = h.mgr.listSessions().find((s) => s.askedBy === heir)!.id
     expect(h.mgr.listSessions().some((s) => s.askedBy === parent)).toBe(false)
-    await until(() => store.listReportMarks().some((m) => m.sessionId === child))
+    await eventually(() => store.listReportMarks().some((m) => m.sessionId === child))
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
   })
 
@@ -441,7 +434,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     await next.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(parent)
     next.claude.handles.get(child)!.answer('finished under the next host')
-    await until(() => reports(next.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(next.claude.handles.get(parent), child).length === 1)
     expect(reports(next.claude.handles.get(heir), child)).toEqual([])
   })
 
@@ -457,7 +450,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
     expect(await next.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
     next.claude.handles.get(child)!.answer('finished under the next host')
-    await until(() => reports(next.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(next.claude.handles.get(heir), child).length === 1)
   })
 })
 
@@ -513,7 +506,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = await startChild(h, parent, 'write the notes')
     h.mgr.rename(child, name)
     h.claude.handles.get(child)!.answer('notes written, PR opened')
-    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
     return child
   }
 
@@ -549,7 +542,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     // Its next report, after the new session gives it more work, reaches the new session
     await sendPastBound(h, heir, child, 'now the changelog')
     h.claude.handles.get(child)!.answer('changelog written')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'changelog written' })
 
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
@@ -595,7 +588,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = started.sessionId
     expect(store.listSessions().find((s) => s.id === child)!.parentSessionId).toBe(parent)
     h.claude.handles.get(child)!.answer('done')
-    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
     const heir = await handOff(h, project, parent)
 
     expect(store.listSessions().find((s) => s.id === child)).toMatchObject({ askedBy: heir, parentSessionId: heir })
@@ -647,7 +640,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
 
     await sendPastBound(h, heir, child, 'one more')
     h.claude.handles.get(child)!.answer('one more done')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
   })
 
   it('gives the settled children to the new session when a window that does not say so deletes the original', async () => {
@@ -687,7 +680,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(owner(child)).toBe(heir)
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
     h.claude.handles.get(child)!.answer('done here')
-    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'done here' })
   })
 
@@ -696,7 +689,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const { project, parent } = await parentOf(h, 'safe')
     const heir = await handOff(h, project, parent, false)
     const call = h.mgr.startAgent(parent, { task: 'needs a yes', wait: false })
-    await until(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
+    await eventually(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
     await h.mgr.trashSession(parent)
 
     expect(await call).toMatchObject({ ok: false })
@@ -718,7 +711,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(store.listQueuedRequests()).toEqual([])
     const ch = h.claude.handles.get(child)!
     ch.answer('person answer')
-    await until(() => h.mgr.listSessions().find((s) => s.id === child)?.state !== 'working')
+    await eventually(() => h.mgr.listSessions().find((s) => s.id === child)?.state !== 'working')
     await new Promise((r) => setTimeout(r, 50))
     expect(ch.sent.some((t) => t.includes('second job'))).toBe(false)
   })
@@ -729,7 +722,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const heir = await handOff(h, project, parent, false)
     const child = await startChild(h, parent, 'long work')
     const waiting = h.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
-    await until(() => store.listReportMarks().length === 0)
+    await eventually(() => store.listReportMarks().length === 0)
     await h.mgr.trashSession(parent)
 
     expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining(`[${child}]`) })

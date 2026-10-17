@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { THEME_SCHEMA_FILE, themeFileJsonSchema } from '@cc/protocol'
 import { ThemeFiles } from './themes.js'
-import { SLOW } from '../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../tooling/test-timing.js'
 
 let root: string
 let dir: string
@@ -24,16 +24,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-// 10 s, not 3: a file-system event can arrive seconds late on a loaded machine. The full
-// suite timed out at 3 s on 2026-10-05 while the same test passed alone every time.
-const waitFor = async (check: () => boolean, ms = 10_000) => {
-  const until = Date.now() + ms
-  while (!check()) {
-    if (Date.now() > until) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 25))
-  }
-}
-
 /** Resolves once `changes` has not moved for 300 ms (three settle windows) */
 const quiet = async () => {
   for (let seen = -1; seen !== changes; ) {
@@ -51,11 +41,11 @@ const quiet = async () => {
  */
 const writeUntilHeard = async (file: string, text: string) => {
   const before = changes
-  const until = Date.now() + 10_000
+  const until = Date.now() + 10_000 * SLOW
   while (changes === before) {
     if (Date.now() > until) throw new Error('the watcher never reported a write')
     writeFileSync(file, text)
-    await waitFor(() => changes !== before, 500).catch(() => {})
+    await eventually(() => changes !== before, 500).catch(() => {})
   }
 }
 
@@ -115,7 +105,9 @@ describe('the themes folder (#312)', () => {
     // The watcher is live now: a burst of writes is announced once
     const before = changes
     for (const base of ['light', 'dark', 'light']) writeFileSync(file, JSON.stringify({ name: 'Mine', base, tokens: {} }))
-    await waitFor(() => changes > before)
+    // 10 s, not 3: a file-system event can arrive seconds late on a loaded machine. The full
+    // suite timed out at 3 s on 2026-10-05 while the same test passed alone every time.
+    await eventually(() => changes > before, 10_000)
     await quiet()
     expect(changes).toBe(before + 1)
   }, 30_000 * SLOW)

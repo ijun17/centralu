@@ -9,6 +9,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { projectsHome } from '../dev-services/project-folder.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Making a new project (#515): `projects.create` from a dialog, and the orchestrator's create_project behind an approval
@@ -45,14 +46,6 @@ afterEach(async () => {
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
-
-const until = async (ok: () => boolean, ms = 2000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 /** The card raised in a session, when it is a new-project card */
 function card(sessionId: string) {
@@ -146,7 +139,7 @@ describe('create_project (the orchestrator)', () => {
     for (const name of ['first', 'second']) {
       const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name })
       if (preset !== 'auto') {
-        await until(() => !!card(orc.id))
+        await eventually(() => !!card(orc.id))
         expect(existsSync(join(centralu, name))).toBe(false)
         mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
       }
@@ -160,7 +153,7 @@ describe('create_project (the orchestrator)', () => {
   it('raises a card with the full path, makes nothing until the person approves, then makes and registers it', async () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail).toEqual({ kind: 'project_create', name: 'shop', path: join(centralu, 'shop') })
     expect(mgr.listSessions().find((s) => s.id === orc.id)?.state).toBe('waiting_approval')
     // Nothing exists while the card stands
@@ -181,7 +174,7 @@ describe('create_project (the orchestrator)', () => {
   it('makes nothing when the person denies it', async () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     const r = await call
     expect(r.isError).toBe(true)
@@ -199,7 +192,7 @@ describe('create_project (the orchestrator)', () => {
     expect(card(orc.id)).toBeUndefined()
 
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'late' })
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     mkdirSync(join(centralu, 'late'))
     writeFileSync(join(centralu, 'late', 'keep.txt'), 'mine')
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
@@ -214,7 +207,7 @@ describe('create_project (the orchestrator)', () => {
     const stop = new AbortController()
     const tools = (mgr as unknown as { orchestratorToolsFor(id: string): { createProject: (s: { name: string }, signal?: AbortSignal) => Promise<{ ok: boolean }> } }).orchestratorToolsFor(orc.id)
     const call = tools.createProject({ name: 'shop' }, stop.signal)
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     stop.abort()
     expect((await call).ok).toBe(false)
     expect(card(orc.id)).toBeUndefined()
@@ -224,12 +217,12 @@ describe('create_project (the orchestrator)', () => {
   it('"always" on the card makes this one folder and remembers nothing', async () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'one' })
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'always')
     expect((await call).isError).toBeFalsy()
     const second = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'two' })
     // Asked again: nothing was remembered
-    await until(() => !!card(orc.id))
+    await eventually(() => !!card(orc.id))
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     expect((await second).isError).toBe(true)
     expect(existsSync(join(centralu, 'two'))).toBe(false)

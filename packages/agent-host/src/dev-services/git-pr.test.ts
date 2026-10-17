@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 const alive = (pid: number) => {
   try {
@@ -12,14 +12,6 @@ const alive = (pid: number) => {
     return true
   } catch {
     return false
-  }
-}
-
-const until = async (ok: () => boolean, ms: number) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 20))
   }
 }
 
@@ -92,7 +84,7 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await until(() => existsSync(join(project, 'pids')), 10_000)
+    await eventually(() => existsSync(join(project, 'pids')), 10_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(alive(child)).toBe(true)
@@ -101,7 +93,7 @@ describe('gh stopped by an abort (#368)', () => {
     expect(alive(ghPid)).toBe(false)
     // No retries: Windows refuses (EBUSY) while gh still works in it
     rmSync(project, { recursive: true })
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
   // macOS and Linux: the tree kill does not reach a child that left gh's group, and one holding gh's output kept
@@ -128,15 +120,15 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     stop.abort()
     const started = Date.now()
     expect(await answer).toBeNull()
-    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(Date.now() - started).toBeLessThan(5_000 * SLOW)
     expect(alive(ghPid)).toBe(false)
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 })
 

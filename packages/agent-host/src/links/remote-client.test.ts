@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer } from '../transport/server.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /** The hub's connection to a linked machine's host (#82), against the real server */
 
@@ -35,14 +36,6 @@ function client(port: number, extra: Partial<ConstructorParameters<typeof Remote
   return { c, seen }
 }
 
-const until = async (pred: () => boolean, ms = 3000) => {
-  const t0 = Date.now()
-  while (!pred()) {
-    if (Date.now() - t0 > ms) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
 const ev = (text: string) => ({ type: 'message_delta' as const, sessionId: 's1', role: 'assistant' as const, text })
 
 describe('the link client (#82)', () => {
@@ -51,10 +44,10 @@ describe('the link client (#82)', () => {
     server.broadcast(ev('old'))
     const { c, seen } = client(port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     expect(seen.hellos).toEqual([{ resync: true, newLifetime: true, protocolVersion: PROTOCOL_VERSION, build: expect.objectContaining({ version: '0.1.0-beta.11' }) }])
     server.broadcast(ev('new'))
-    await until(() => seen.events.length > 0)
+    await eventually(() => seen.events.length > 0)
     expect(seen.events).toEqual([ev('new')])
   })
 
@@ -62,14 +55,14 @@ describe('the link client (#82)', () => {
     const { server, port } = await host()
     const { c, seen } = client(port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     server.broadcast(ev('a'))
-    await until(() => seen.events.length === 1)
+    await eventually(() => seen.events.length === 1)
     // Cut every socket the host holds; the host keeps running and keeps numbering
     for (const ws of (server as unknown as { clients: Set<{ terminate(): void }> }).clients) ws.terminate()
-    await until(() => seen.downs.length === 1)
+    await eventually(() => seen.downs.length === 1)
     server.broadcast(ev('b'))
-    await until(() => seen.events.length === 2)
+    await eventually(() => seen.events.length === 2)
     expect(seen.events).toEqual([ev('a'), ev('b')])
     expect(seen.hellos.at(-1)).toMatchObject({ resync: false, newLifetime: false })
   })
@@ -78,13 +71,13 @@ describe('the link client (#82)', () => {
     const first = await host()
     const { c, seen } = client(first.port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     first.server.broadcast(ev('a'))
-    await until(() => seen.events.length === 1)
+    await eventually(() => seen.events.length === 1)
     await first.server.close()
-    await until(() => seen.downs.length === 1)
+    await eventually(() => seen.downs.length === 1)
     await host(first.port)
-    await until(() => seen.hellos.length === 2)
+    await eventually(() => seen.hellos.length === 2)
     expect(seen.hellos[1]).toMatchObject({ resync: true, newLifetime: true })
   })
 
@@ -115,7 +108,7 @@ describe('the link client (#82)', () => {
     cleanups.push(() => server.close())
     const { c } = client(port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     expect(await c.call('sessions.list', {})).toEqual({ ok: 'sessions.list' })
     await expect(c.call('fail', {})).rejects.toMatchObject({ code: 'session_not_found', message: 'nope', retryable: false, data: { x: 1 } })
   })
@@ -124,12 +117,12 @@ describe('the link client (#82)', () => {
     const { port } = await host()
     const wrong = client(port, { token: 'stale' })
     wrong.c.connect()
-    await until(() => wrong.seen.refusals.length === 1)
+    await eventually(() => wrong.seen.refusals.length === 1)
     expect(wrong.seen.refusals[0]).toMatchObject({ code: 4001 })
 
     const other = client(port, { protocolVersion: PROTOCOL_VERSION + 1 })
     other.c.connect()
-    await until(() => other.seen.refusals.length === 1)
+    await eventually(() => other.seen.refusals.length === 1)
     expect(other.seen.refusals[0]).toMatchObject({
       code: 4002,
       error: { code: 'version_mismatch', data: { protocolVersion: PROTOCOL_VERSION, version: '0.1.0-beta.11' } },
@@ -160,7 +153,7 @@ describe('the link client (#82)', () => {
     const { port } = wss.address() as { port: number }
     const { c, seen } = client(port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     await new Promise((r) => setTimeout(r, 200))
     // Only the hub's own hello went out: nothing answered the request, nothing was dispatched
     expect(fromHub).toEqual([expect.objectContaining({ kind: 'hello' })])
@@ -171,10 +164,10 @@ describe('the link client (#82)', () => {
     const { server, port } = await host()
     const { c, seen } = client(port)
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     server.pushTerminal({ terminalId: 'term-1', data: 'hi' })
     server.pushTerminal({ terminalId: 'term-1', exitCode: 0 })
-    await until(() => seen.terms.length === 2)
+    await eventually(() => seen.terms.length === 2)
     expect(seen.terms).toEqual([{ terminalId: 'term-1', data: 'hi' }, { terminalId: 'term-1', exitCode: 0 }])
   })
 })
@@ -204,7 +197,7 @@ describe('a host asked to prove it holds the token (#838)', () => {
     const { port } = await host()
     const { c, seen } = client(port, { proveHost: true })
     c.connect()
-    await until(() => c.connected)
+    await eventually(() => c.connected)
     expect(seen.hellos).toHaveLength(1)
   })
 
@@ -220,7 +213,7 @@ describe('a host asked to prove it holds the token (#838)', () => {
     })
     const { c, seen } = client((wss.address() as { port: number }).port, { proveHost: true })
     c.connect()
-    await until(() => seen.refusals.length === 1)
+    await eventually(() => seen.refusals.length === 1)
     await new Promise((r) => setTimeout(r, 300))
     expect(seen.refusals).toEqual([expect.objectContaining({ code: 4001 })])
     expect(opened).toBe(1)
@@ -236,7 +229,7 @@ describe('a host asked to prove it holds the token (#838)', () => {
       const s = await squatter(answer)
       const { c } = client(s.port, { proveHost: true, handshakeTimeoutMs: 300 })
       c.connect()
-      await until(() => s.got.length > 0)
+      await eventually(() => s.got.length > 0)
       await new Promise((r) => setTimeout(r, 400))
       expect(c.connected).toBe(false)
       expect(s.got.join('\n')).not.toContain(TOKEN)

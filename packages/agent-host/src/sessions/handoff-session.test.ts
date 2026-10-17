@@ -9,6 +9,7 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionH
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * The orchestrator's handoff_session (#694) over the real manager: who may hand off what, the person's card unless
@@ -104,14 +105,6 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const until = async (ok: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 const info = (id: string): SessionInfo => mgr.listSessions().find((s) => s.id === id)!
 const named = (name: string) => mgr.listSessions().filter((s) => s.name === name)
 
@@ -180,7 +173,7 @@ describe('handoff_session (#694)', () => {
   it('under normal: a card in the orchestrator asks the person; a refusal starts nothing, an allowance hands off', async () => {
     const { target, orch } = await world('normal')
     const call = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     const card = info(orch).pendingApproval!
     expect(card.detail).toMatchObject({ kind: 'other', about: SESSION_HANDOFF })
     expect((card.detail as { raw: string }).raw).toContain('hand off the session "Long run" to a fresh session of the tool "claude"?')
@@ -192,7 +185,7 @@ describe('handoff_session (#694)', () => {
     expect(named('Long run')).toHaveLength(1)
 
     const again = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
     expect((await again).isError).toBeFalsy()
     const heir = named('Long run').find((s) => s.id !== target)!
@@ -203,7 +196,7 @@ describe('handoff_session (#694)', () => {
   it('"always" lasts for that orchestrator: the next handoff raises no card', async () => {
     const { target, orch } = await world('normal')
     const first = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
     expect((await first).isError).toBeFalsy()
     const r = await handoff(orch, { sessionId: target })
@@ -222,7 +215,7 @@ describe('handoff_session (#694)', () => {
 
     // A turn that starts while the card stands is not cut short by the allowance
     const call = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     await mgr.send(target, 'One more thing')
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
     const late = await call
@@ -253,7 +246,7 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('auto')
     const call = handoff(orch, { sessionId: target, mode: 'agent' })
     const h = claude.handles.get(target)!
-    await until(() => h.sent.length === 2)
+    await eventually(() => h.sent.length === 2)
     expect(h.sent[1]).toBe(handoffPrompt())
     const asked = store.loadMessages(target, 20).find((m) => (m.payload as { text?: string }).text === handoffPrompt())
     expect((asked!.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(orch)
@@ -268,15 +261,15 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('auto')
     const h = claude.handles.get(target)!
     const stopped = handoff(orch, { sessionId: target, mode: 'agent' })
-    await until(() => h.sent.length === 2)
+    await eventually(() => h.sent.length === 2)
     h.cut('interrupted')
     expect((await stopped).text).toContain('did not write its note: the turn was stopped before it finished; nothing was handed off')
     const silent = handoff(orch, { sessionId: target, mode: 'agent' })
-    await until(() => h.sent.length === 3)
+    await eventually(() => h.sent.length === 3)
     h.answer('')
     expect((await silent).text).toContain('ended its turn without a note')
     const failed = handoff(orch, { sessionId: target, mode: 'agent' })
-    await until(() => h.sent.length === 4)
+    await eventually(() => h.sent.length === 4)
     h.fail('the CLI crashed')
     expect((await failed).text).toContain("did not write its note: the agent's turn failed: the CLI crashed")
     expect(named('Long run')).toHaveLength(1)
@@ -310,7 +303,7 @@ describe('handoff_session (#694)', () => {
     const first = await handoff(orch, { sessionId: target, mode: 'agent' })
     expect(first.text).toContain('is still running')
     claude.handles.get(target)!.answer('The note.')
-    await until(() => named('Long run').length === 2)
+    await eventually(() => named('Long run').length === 2)
     const later = await handoff(orch, { sessionId: target })
     expect(later.text).toContain('built from the record')
     expect(named('Long run')).toHaveLength(3)
@@ -334,7 +327,7 @@ describe('handoff_session (#694)', () => {
       return real(...a)
     })
     const first = handoff(orch, { sessionId: target })
-    await until(() => spy.mock.calls.length === 1)
+    await eventually(() => spy.mock.calls.length === 1)
     const second = await handoff(orch, { sessionId: target })
     const third = await handoff(orch, { sessionId: target })
     expect(second.text).toContain('is already being handed off')
@@ -355,7 +348,7 @@ describe('handoff_session (#694)', () => {
 
     const long = 'x'.repeat(450)
     const call = handoff(orch, { sessionId: target, tool: 'codex', instructions: long })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     const raw = (info(orch).pendingApproval!.detail as { raw: string }).raw
     expect(raw).toContain('of the tool "codex"?')
     expect(raw).toContain(`"${'x'.repeat(400)}" (cut here; 450 characters in all`)
@@ -366,13 +359,13 @@ describe('handoff_session (#694)', () => {
   it('"always" on a card whose call is then refused grants nothing (#694 review)', async () => {
     const { target, orch } = await world('normal')
     const call = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     await mgr.send(target, 'A turn starts while the card stands')
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
     expect((await call).text).toContain('is mid-turn')
     claude.handles.get(target)!.answer('done')
     const next = handoff(orch, { sessionId: target })
-    await until(() => !!info(orch).pendingApproval)
+    await eventually(() => !!info(orch).pendingApproval)
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
     expect((await next).text).toContain('did not allow')
   })
