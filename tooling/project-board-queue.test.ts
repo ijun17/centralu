@@ -1073,6 +1073,24 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     ])
   })
 
+  // The flake of job 117380827558: the list was ordered by when each item was last read, so which of #77 and #78 came
+  // first depended on which poll came last. Waits for the state that made it fail: #78 read after #77.
+  it('lists the queue in the order it was made, whichever item was read last', async () => {
+    runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    const readAt = (q: any, pr: number) => q.queue.find((i: any) => i.pr === pr).updatedAt as string
+    for (const [first, last] of [
+      [77, 78],
+      [78, 77],
+    ] as const) {
+      // The view that shows the state is the one asserted on
+      const q = await until((x) => readAt(x, last) > readAt(x, first), `#${last} to be read after #${first}`, BATCH_WAIT_MS)
+      expect(q.queue.map((i: any) => i.pr)).toEqual([77, 78])
+    }
+  })
+
   it('makes no batch again with one that conflicts, when too few are left to batch', async () => {
     runtime(batchState({ conflicts: [B] }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
