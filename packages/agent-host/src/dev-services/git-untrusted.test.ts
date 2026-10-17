@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -19,6 +19,7 @@ import { gitArgv } from './git-exec.js'
 import { listDir } from './fs.js'
 import { invalidateFileIndex, searchFiles } from './file-search.js'
 import { plantedRepo, type PlantedRepo } from './planted-repo.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * Before a project is trusted, no git read runs a program the repository chose (#407).
@@ -30,8 +31,8 @@ import { plantedRepo, type PlantedRepo } from './planted-repo.test-helpers.js'
  */
 
 const roots: string[] = []
-afterEach(() => {
-  for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true, maxRetries: 5 })
+afterEach(async () => {
+  for (const r of roots.splice(0)) await removeTree(r)
   invalidateFileIndex()
 })
 

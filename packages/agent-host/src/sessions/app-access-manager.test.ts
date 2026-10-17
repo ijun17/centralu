@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
@@ -12,6 +10,7 @@ import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * Another project's app tools through the manager (#371 part A) — the sharing RPC, the three tools
@@ -72,10 +71,10 @@ let beta = ''
 
 function repo(name: string): string {
   const dir = join(root, name)
-  execFileSync('git', ['init', '-q', '-b', 'main', dir], { cwd: root })
+  fixtureGit(root, ['init', '-q', '-b', 'main', dir])
   writeFileSync(join(dir, 'a.txt'), 'hello\n')
-  execFileSync('git', ['add', '.'], { cwd: dir })
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: dir })
+  fixtureGit(dir, ['add', '.'])
+  fixtureGit(dir, ['commit', '-qm', 'init'])
   return dir
 }
 
@@ -83,7 +82,7 @@ const servers = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server)
 const tool = (sessionId: string, name: string, args: Record<string, unknown> = {}) => mgr.runOrchestratorTool(sessionId, name, args)
 
 beforeEach(async () => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-access-')))
+  root = tempRoot('cc-app-access-')
   const dataRoot = join(root, 'data')
   vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(dataRoot)
@@ -122,7 +121,7 @@ const card = (sessionId: string) => {
 afterEach(async () => {
   await mgr.disposeAll()
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 const create = async (projectId: string, t: ToolName) =>

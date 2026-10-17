@@ -1,8 +1,7 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fixtureGit, removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params?: Record<string, unknown> }[],
@@ -28,21 +27,21 @@ const { CodexAdapter } = await import('./index.js')
 let root: string
 let main: string
 let worktree: string
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' })
+const git = (cwd: string, ...args: string[]) => fixtureGit(cwd, args)
 beforeEach(() => {
   state.requests.length = 0
   state.sandbox = undefined
   state.config = {}
-  // .native: on Windows it expands 8.3 short names (RUNNER~1), as git's own paths are
-  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-codex-sandbox-')))
+  // By its long path (tempRoot): on Windows git's own paths expand 8.3 short names (RUNNER~1)
+  root = tempRoot('cc-codex-sandbox-')
   main = join(root, 'main')
   worktree = join(root, 'child')
   mkdirSync(main)
   git(main, 'init', '-q')
-  git(main, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'initial')
+  git(main, 'commit', '--allow-empty', '-qm', 'initial')
   git(main, 'worktree', 'add', '-qb', 'child', worktree)
 })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTree(root))
 
 describe('Codex worktree sandbox (#582)', () => {
   it('the launch fingerprint distinguishes auto from normal and changes from the previous sandbox policy', () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, cpSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fixtureGit, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * A repository that came from somewhere (#407): a folder copied the way a zip extract lands, with
@@ -33,7 +33,7 @@ export type PlantedRepo = {
 const HOOKS = ['post-index-change', 'post-checkout', 'reference-transaction'] as const
 
 export function plantedRepo(opts: { processFilter?: boolean } = {}): PlantedRepo {
-  const root = mkdtempSync(join(tmpdir(), 'cc-planted-'))
+  const root = tempRoot('cc-planted-')
   const src = join(root, 'src')
   const dir = join(root, 'copy')
   const markers = join(root, 'markers')
@@ -42,7 +42,7 @@ export function plantedRepo(opts: { processFilter?: boolean } = {}): PlantedRepo
   mkdirSync(markers)
   mkdirSync(tools)
   const posix = (p: string) => p.replaceAll('\\', '/')
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: src, encoding: 'utf8' })
+  const git = (...args: string[]) => fixtureGit(src, args)
 
   git('init', '-q', '-b', 'main')
   git('config', 'user.email', 't@t')
