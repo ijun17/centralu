@@ -128,6 +128,50 @@ struct Shared {
     cmds: Mutex<Vec<Cmd>>,
     wake: OwnedFd,
     sock: PathBuf,
+    /// Who the socket answers (#538): the hosts this keeper holds.
+    hosts: Mutex<Hosts>,
+}
+
+/**
+ * The processes the child socket answers (#538, issue's option B): the current host, which the
+ * keeper's supervisor names (`current`), and a swap's standby while it is one. Through this socket a
+ * process can start any program and read every agent's stream; the uid check alone let every process
+ * of this user in. Nothing is answered until the keeper says who its host is.
+ */
+#[derive(Default)]
+struct Hosts {
+    current: Option<Arc<dyn Fn() -> Option<u32> + Send + Sync>>,
+    standby: Option<u32>,
+}
+
+impl Shared {
+    /// Whether the process at the other end of `stream` is a host this keeper holds: its pid is one,
+    /// or its process group is one's (a host run from source is tsx's child, in tsx's group, and
+    /// `spawn_host` makes the host the leader of its own group). Said in the log when it is not.
+    fn answers(&self, stream: &std::os::unix::net::UnixStream) -> bool {
+        let pid = match os::peer_pid(stream) {
+            Ok(pid) => pid,
+            Err(e) => {
+                log(&format!("refused a connection: cannot tell which process it is ({e})"));
+                return false;
+            }
+        };
+        let held: Vec<u32> = match self.hosts.lock() {
+            Ok(h) => h.current.as_ref().and_then(|f| f()).into_iter().chain(h.standby).collect(),
+            Err(_) => Vec::new(),
+        };
+        if is_a_host(pid, os::process_group(pid), &held) {
+            return true;
+        }
+        log(&format!("refused a connection from pid {pid}: not a host this keeper holds"));
+        false
+    }
+}
+
+/// `Shared::answers`'s rule, apart from the kernel: the peer `pid` (in the group `group`, when it
+/// could be read) is a host of `held`, or in one's group.
+pub(super) fn is_a_host(pid: u32, group: Option<u32>, held: &[u32]) -> bool {
+    held.contains(&pid) || group.is_some_and(|g| held.contains(&g))
 }
 
 enum Cmd {
@@ -140,6 +184,8 @@ enum Cmd {
     /// Reap every child that has exited since the freeze and report it (the outgoing keeper is
     /// still their parent; the next one cannot reap them).
     Reap(mpsc::Sender<Vec<(i32, ExitStatus)>>),
+    /// What the keeper holds, as the child socket's `list` says it (`keeper.sock` `children`).
+    List(mpsc::Sender<Vec<Value>>),
     /// Tests only: before its next `poll`, the reactor waits until a command is queued and every
     /// child's stdout has bytes waiting, so both are ready in the same pass (#368).
     #[cfg(test)]
@@ -157,7 +203,7 @@ impl Children {
         let _ = fs::set_permissions(&sock, fs::Permissions::from_mode(0o600));
         listener.set_nonblocking(true)?;
         let (wake_r, wake_w) = pipe()?;
-        let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: sock.clone() });
+        let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: sock.clone(), hosts: Mutex::default() });
         Reactor::new(listener, wake_r, shared.clone())?.start()?;
         log(&format!("listening on {}", sock.display()));
         Ok(Children { shared: Some(shared) })
@@ -166,6 +212,21 @@ impl Children {
     /// A keeper whose child socket could not be bound: hosts fall back to spawning their own.
     pub fn disabled() -> Children {
         Children { shared: None }
+    }
+
+    /// Who the current host is, asked on every connection: the socket answers it, and a standby
+    /// (`set_standby`), and no other process (#538).
+    pub fn answer_hosts(&self, current: Arc<dyn Fn() -> Option<u32> + Send + Sync>) {
+        if let Some(Ok(mut h)) = self.shared.as_ref().map(|s| s.hosts.lock()) {
+            h.current = Some(current);
+        }
+    }
+
+    /// A swap's standby host while it is one, None once the swap is over.
+    pub fn set_standby(&self, pid: Option<u32>) {
+        if let Some(Ok(mut h)) = self.shared.as_ref().map(|s| s.hosts.lock()) {
+            h.standby = pid;
+        }
     }
 
     fn send(&self, cmd: Cmd) -> bool {
@@ -223,6 +284,17 @@ impl Children {
     }
 
     /// Reaps, while frozen, every child that exited since the freeze (#280 step 4, at the commit).
+    /// What the keeper holds, as the child socket's `list` answers it; None without a child service or
+    /// when it does not answer within `wait`. For `keeper.sock`'s `children` (#538): the child socket
+    /// itself answers only the hosts.
+    pub fn list(&self, wait: Duration) -> Option<Vec<Value>> {
+        let (tx, rx) = mpsc::channel();
+        if !self.send(Cmd::List(tx)) {
+            return None;
+        }
+        rx.recv_timeout(wait).ok()
+    }
+
     pub fn reap_now(&self, wait: Duration) -> Vec<(i32, ExitStatus)> {
         let (tx, rx) = mpsc::channel();
         if !self.send(Cmd::Reap(tx)) {
@@ -239,7 +311,7 @@ impl Children {
     pub fn prepare(data: &Path, state: &Value, unpack: &mut Shifted) -> Result<Pending, String> {
         let st: ReactorState = serde_json::from_value(state.clone()).map_err(|e| format!("child table: {e}"))?;
         let (wake_r, wake_w) = pipe().map_err(|e| e.to_string())?;
-        let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: socket_path(data) });
+        let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: socket_path(data), hosts: Mutex::default() });
         let reactor = Reactor::restore(st, unpack, wake_r, shared.clone())?;
         Ok(Pending { reactor, shared })
     }

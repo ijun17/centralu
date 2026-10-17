@@ -165,6 +165,8 @@ pub fn run(args: &[String]) -> i32 {
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
     });
+    // The child socket answers this keeper's hosts and no other process (#538)
+    answer_hosts(&keeper);
     log(&format!(
         "keeper {} started (pid {}, data {}, front door {}, background {}, idle limit {}s)",
         keeper.info.version,

@@ -107,7 +107,7 @@ fn the_dev_host_is_started_directly_never_through_a_package_manager() {
 #[test]
 fn a_host_leads_a_process_group_of_its_own() {
     use std::io::BufRead;
-    let launch = HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), "echo $$ $(ps -o pgid= -p $$)".into()], env: vec![] };
+    let launch = HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), "echo $$ $(ps -o pgid= -p $$)".into()], env: vec![], token: None };
     let mut child = spawn_host(&launch).unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
@@ -328,6 +328,7 @@ fn a_host_launched_while_quitting_is_stopped_at_once() {
                 program: "/bin/sh".into(),
                 args: vec!["-c".into(), "echo $$ > \"$F\"; while :; do sleep 0.05; done".into()],
                 env: vec![("F".into(), file.clone())],
+                token: None,
             })
         })
     };
@@ -698,6 +699,7 @@ fn a_host_is_stopped_pid_first_then_its_group_with_stdin_held() {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into()],
         env: vec![("F".into(), file.to_string_lossy().to_string())],
+        token: None,
     };
     let mut child = spawn_host(&launch).unwrap();
     let read = || std::fs::read_to_string(&file).unwrap_or_default();
@@ -739,9 +741,37 @@ fn a_host_is_stopped_pid_first_then_its_group_with_stdin_held() {
 #[test]
 fn a_windows_host_is_asked_to_stop_by_closing_its_stdin() {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
-    let launch = HostLaunch { program: format!("{root}\\System32\\findstr.exe"), args: vec!["x".into()], env: vec![] };
+    let launch = HostLaunch { program: format!("{root}\\System32\\findstr.exe"), args: vec!["x".into()], env: vec![], token: None };
     let mut child = spawn_host(&launch).unwrap();
     let started = Instant::now();
     stop_child(&mut child);
     assert!(started.elapsed() < STOP_GRACE, "stopped only after the grace: {:?}", started.elapsed());
+}
+
+/// #538: the token goes as the first line on the host's stdin, never in its environment, which every
+/// process of this user can read while the host runs (#502); and a launch can be logged without it.
+#[cfg(unix)]
+#[test]
+fn the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed() {
+    let file = std::env::temp_dir().join(format!("cc-test-token-line-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let launch = HostLaunch {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), "read line; echo \"$line\" > \"$F\"; env > \"$F.env\"".into()],
+        env: vec![("F".into(), file.to_string_lossy().to_string())],
+        token: Some(HandedToken("tok-0123456789abcdef".into())),
+    };
+    assert!(!format!("{launch:?}").contains("tok-0123"), "{launch:?}");
+    let mut child = spawn_host(&launch).unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    while !file.with_extension("env").exists() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), r#"{"token":"tok-0123456789abcdef"}"#);
+    assert!(!std::fs::read_to_string(file.with_extension("env")).unwrap().contains("tok-0123"), "not in the environment");
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(file.with_extension("env"));
 }

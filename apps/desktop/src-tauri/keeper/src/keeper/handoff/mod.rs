@@ -718,6 +718,8 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
     });
+    // The child socket answers this keeper's hosts and no other process (#538)
+    super::server::answer_hosts(&keeper);
     server::record_lock_holder(&keeper.lock);
     for w in p.windows {
         server::adopt_window(&keeper, w);

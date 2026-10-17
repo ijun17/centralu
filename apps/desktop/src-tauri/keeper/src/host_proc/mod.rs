@@ -89,6 +89,35 @@ pub struct HostLaunch {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// The token, handed over as the first line on the host's stdin (#538) rather than in `env`. The host
+    /// is told by `CC_HOST_TOKEN_ON_STDIN=1` (`HandedToken::ENV`), which the one who sets this adds too.
+    pub token: Option<HandedToken>,
+}
+
+/**
+ * A token on its way to a host's stdin (#538). Not in the environment: what a process is started with
+ * stays readable to every process of its user for as long as it runs (`ps eww`, measured in #502). Its
+ * `Debug` says nothing of the value, so a launch can be logged.
+ */
+#[derive(Clone, PartialEq)]
+pub struct HandedToken(pub String);
+
+impl HandedToken {
+    /// What tells the host to read the token from its stdin.
+    pub const ENV: (&'static str, &'static str) = ("CC_HOST_TOKEN_ON_STDIN", "1");
+
+    /// The line the host reads (`readHandedToken` in agent-host's lifecycle/handed-token.ts).
+    pub fn line(&self) -> Vec<u8> {
+        let mut line = serde_json::to_vec(&serde_json::json!({ "token": self.0 })).unwrap_or_default();
+        line.push(b'\n');
+        line
+    }
+}
+
+impl std::fmt::Debug for HandedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HandedToken(..)")
+    }
 }
 
 /// Why a launch could not even be attempted.
@@ -625,7 +654,17 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
     os::original_descriptor_limit(&mut cmd);
     hide_console(&mut cmd);
 
-    cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))
+    let mut child = cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))?;
+    // Before anything else on the pipe: the host reads the line first, and the control lines after it
+    if let Some(token) = &launch.token {
+        let written = child.stdin.as_mut().map(|s| s.write_all(&token.line()).and_then(|()| s.flush()));
+        if !matches!(written, Some(Ok(()))) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("could not hand the token to {} on its stdin", launch.program));
+        }
+    }
+    Ok(child)
 }
 
 /// Stops a host the supervisor does not hold (a swap's standby that failed its check, #280 step 3)
@@ -769,7 +808,7 @@ pub fn bundled_launch(main_mjs: &Path, extra: &[String]) -> Result<HostLaunch, L
         "--watch-parent".into(),
     ];
     args.extend(extra.iter().cloned());
-    Ok(HostLaunch { program: node, args, env: Vec::new() })
+    Ok(HostLaunch { program: node, args, env: Vec::new(), token: None })
 }
 
 /// dev: runs the source directly through the workspace's tsx.
@@ -795,7 +834,7 @@ pub fn source_launch(extra: &[String]) -> HostLaunch {
         args.insert(0, format!("{root}/node_modules/tsx/dist/cli.mjs"));
         resolve_node().unwrap_or_else(|_| "node".into())
     };
-    HostLaunch { program, args, env: vec![("CC_DEV".into(), "1".into())] }
+    HostLaunch { program, args, env: vec![("CC_DEV".into(), "1".into())], token: None }
 }
 
 pub fn workspace_root() -> String {

@@ -14,7 +14,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-pub use super::this_unix::peer_uid;
+pub use super::this_unix::{peer_pid, peer_uid};
 
 /// Every descriptor above stderr this process has open, except those in `keep`: what it inherited,
 /// when it is asked before it opens anything of its own. `/dev/fd` lists them on macOS and Linux
@@ -158,6 +158,15 @@ pub fn my_uid() -> u32 {
 /// everyone else (lessons LK8). The error describes who it was, for the log.
 pub fn peer_is_this_user(stream: &UnixStream) -> Result<(), String> {
     same_user(peer_uid(stream), my_uid())
+}
+
+/// The process group of `pid`, or None when it cannot be read: the process is gone, or is in
+/// another session where the OS does not say (macOS refuses `getpgid` across sessions).
+pub fn process_group(pid: u32) -> Option<u32> {
+    let target = i32::try_from(pid).ok().filter(|&p| p > 0)?;
+    // SAFETY: a plain syscall.
+    let pgid = unsafe { libc::getpgid(target) };
+    u32::try_from(pgid).ok().filter(|&g| g > 0)
 }
 
 fn same_user(peer: io::Result<u32>, me: u32) -> Result<(), String> {

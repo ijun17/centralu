@@ -9,7 +9,7 @@ pub(super) fn direct_launcher(start: &Start) -> Launcher {
     let (host, dev, bundled) = (start.plan.host, start.plan.dev, start.bundled.clone());
     Arc::new(move || {
         let mut launch: HostLaunch = match (host, host_proc::host_cmd_override(), &bundled) {
-            (Some(Host::Command), Some((program, args)), _) => HostLaunch { program, args, env: Vec::new() },
+            (Some(Host::Command), Some((program, args)), _) => HostLaunch { program, args, env: Vec::new(), token: None },
             (Some(Host::Bundle), _, Some(dir)) => host_proc::bundled_launch(&dir.join("main.mjs"), &[])?,
             _ => return Ok(host_proc::source_launch(&[])),
         };

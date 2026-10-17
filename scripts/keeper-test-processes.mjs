@@ -95,7 +95,8 @@ export function request(sock, body, timeoutMs = 8000) {
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 
 /** What the keeper holds, from its child socket */
-export const heldChildren = (data) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => r.children ?? [])
+/* The child socket answers only the keeper's hosts (#538): keeper.sock lists what it holds */
+export const heldChildren = (data) => request(join(data, 'keeper.sock'), { op: 'children' }).then((r) => r.children ?? [])
 
 /** pid, parent and process group of every process, from one `ps` (the same flags on macOS and Linux) */
 function processTable() {
