@@ -1,4 +1,5 @@
-import { closeSync, existsSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, fchmodSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
+import { modesGuardFiles } from './os.js'
 
 /**
  * **Records the host's output to a file.**
@@ -46,6 +47,88 @@ function sizeOf(path: string): number {
 }
 
 /**
+ * One log file that is appended to **synchronously**, created `0600`, and rolled off to `.1` when it overflows. The host's
+ * log (`teeStderrToFile`) and an app's log (`AppLog` in apps/external) are both this, so they roll and protect their
+ * files the same way: they were two copies, and the copy for apps opened its file `0644`.
+ *
+ * Every failure is **swallowed.** Failing to write a log is not a reason to stop what is being logged.
+ */
+export class RollingFile {
+  private fd: number | null = null
+  private written: number
+  private closed = false
+
+  constructor(
+    private readonly path: string,
+    private readonly maxBytes: number = MAX_LOG_BYTES,
+  ) {
+    rotateIfLarge(path, maxBytes)
+    this.written = sizeOf(path)
+    try {
+      this.fd = openSync(path, 'a', 0o600)
+      // The mode above is only for a file this call creates; a log an older build made is 0644 and is narrowed here
+      if (modesGuardFiles()) fchmodSync(this.fd, 0o600)
+    } catch {
+      /* a file that could not be narrowed is still written to; one that could not be opened has no fd */
+    }
+  }
+
+  /** Whether the file could be opened (a file that could not goes quiet; it does not throw) */
+  get isOpen(): boolean {
+    return this.fd !== null
+  }
+
+  write(text: string): void {
+    if (this.closed) return
+    try {
+      if (this.fd !== null) writeSync(this.fd, text)
+      this.written += Buffer.byteLength(text)
+      if (this.written >= this.maxBytes) this.roll()
+    } catch {
+      /* even if the write fails, whatever is being logged goes on */
+    }
+  }
+
+  close(): void {
+    this.closed = true
+    this.closeFd()
+  }
+
+  private closeFd(): void {
+    try {
+      if (this.fd !== null) closeSync(this.fd)
+    } catch {
+      /* If it was already closed, that is fine */
+    }
+    this.fd = null
+  }
+
+  private roll(): void {
+    /*
+     * **A closed fd number must never be held onto.**
+     *
+     * If rename fails after close (permissions, disk), the dead number used to be left sitting in
+     * fd. The OS soon reissues that number to a different file — SQLite WAL, a pty, whatever — so
+     * the next writeSync silently corrupts **someone else's file** with log lines. So even on the
+     * failure path, it must always be cleared and reopened.
+     */
+    this.closeFd()
+    try {
+      renameSync(this.path, `${this.path}.1`)
+    } catch {
+      /* If the rollover fails, keep writing to the same file — a large file beats no log */
+    }
+    try {
+      this.fd = openSync(this.path, 'a', 0o600)
+    } catch {
+      /* If it cannot be opened, only the file side goes quiet — whatever else the text goes to is still alive */
+    }
+    // Reset to 0 even on failure — otherwise a rollover is attempted again on every line
+    this.written = 0
+  }
+}
+
+/**
  * Also flows stderr into a file (**mirrors it, without intercepting it**).
  *
  * It still goes out on the original stderr too — if it disappeared from view when launched from a
@@ -61,52 +144,14 @@ function sizeOf(path: string): number {
  * either — the host's stderr is quiet to begin with.
  */
 export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES): () => void {
-  rotateIfLarge(path, maxBytes)
-  let written = sizeOf(path)
-  let fd: number | null = null
-  try {
-    fd = openSync(path, 'a', 0o600)
-  } catch {
-    return () => {}
-  }
+  const file = new RollingFile(path, maxBytes)
+  if (!file.isOpen) return () => {}
 
   const original = process.stderr.write.bind(process.stderr)
 
-  const roll = () => {
-    /*
-     * **A closed fd number must never be held onto.**
-     *
-     * If rename fails after close (permissions, disk), the dead number used to be left sitting in
-     * fd. The OS soon reissues that number to a different file — SQLite WAL, a pty, whatever — so
-     * the next writeSync silently corrupts **someone else's file** with log lines. So even on the
-     * failure path, it must always be cleared and reopened.
-     */
-    try {
-      if (fd !== null) closeSync(fd)
-    } catch {
-      /* If it was already closed, that is fine */
-    }
-    fd = null
-    try {
-      renameSync(path, `${path}.1`)
-    } catch {
-      /* If the rollover fails, keep writing to the same file — a large file beats no log */
-    }
-    try {
-      fd = openSync(path, 'a', 0o600)
-    } catch {
-      /* If it cannot be opened, only the file side goes quiet — the original stderr path is still alive */
-    }
-    // Reset to 0 even on failure — otherwise a rollover is attempted again on every line
-    written = 0
-  }
-
   process.stderr.write = ((chunk: unknown, enc?: unknown, cb?: unknown) => {
     try {
-      const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8')
-      if (fd !== null) writeSync(fd, text)
-      written += Buffer.byteLength(text)
-      if (written >= maxBytes) roll()
+      file.write(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'))
     } catch {
       /* If it fails to write to the file, the original path below is still alive */
     }
@@ -115,12 +160,7 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
 
   return () => {
     process.stderr.write = original
-    try {
-      if (fd !== null) closeSync(fd)
-    } catch {
-      /* If it was already closed, that is fine */
-    }
-    fd = null
+    file.close()
   }
 }
 

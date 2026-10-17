@@ -4,7 +4,7 @@
  * that ends the host and every session. The start fails; nothing escapes.
  */
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -199,4 +199,27 @@ describe("a Python app's stderr", () => {
     expect(err).toBeInstanceOf(AppStartError)
     expect(err.stderr).toEqual(['실패: 한글 설정 오류'])
   }, 30_000 * SLOW)
+})
+
+// An app's log is its owner's only, like the host's (#978): it was created 0644
+describe.skipIf(process.platform === 'win32')('an app’s log file', () => {
+  it('is 0600 and holds what the app wrote to stderr', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-app-logmode-'))
+    const logPath = join(dir, 'app.log')
+    const started = AppProcess.start({
+      command: process.execPath,
+      args: ['-e', "process.stderr.write('boom\\n'); setTimeout(() => process.exit(3), 100)"],
+      cwd: dir,
+      env: process.env,
+      logPath,
+      logMaxBytes: 1024 * 1024,
+      redact: (t) => t,
+      probeTimeoutMs: 5000 * SLOW,
+      connectTimeoutMs: 5000 * SLOW,
+      exitWaitMs: 5000 * SLOW,
+    })
+    await started.catch(() => undefined)
+    expect(readFileSync(logPath, 'utf8')).toContain('boom')
+    expect(statSync(logPath).mode & 0o777).toBe(0o600)
+  })
 })
