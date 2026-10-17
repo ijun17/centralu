@@ -9,7 +9,7 @@ import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR } from './config.mjs'
 import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
-import { ACTIVE, dequeue, enqueue, itemLine } from './queue.mjs'
+import { ACTIVE, dequeue, enqueue, findItem, itemLine } from './queue.mjs'
 import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
@@ -109,13 +109,17 @@ async function queueMerge({ pr, lowers = [], owner, deleteBranch = true }) {
     problems.push(`${top.ref} is based on ${p.baseRefName}, not ${defaultBranch}: give the PRs under it as lowers, so the stack lands through ${top.ref}.`)
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: 'refused' }))
 
-  const who = owner?.trim() || `queue-${randomBytes(3).toString('hex')}`
+  // No owner given: a new id, unless it is queued already (queued again, it stays the session's that
+  // queued it first, whose watch command still listens for that owner)
+  const given = owner?.trim() || null
   const at = new Date().toISOString()
   const r = updateQueue(dataDir(), (q) => {
-    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner: who, deleteBranch, title: p.title, at }, queueRef)
+    const owner = given ?? findItem(q, top.repo, top.number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
+    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, deleteBranch, title: p.title, at }, queueRef)
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length }
   })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))
+  const who = r.item.owner
   const watch = watchCommand({ owner: who, after: r.seq })
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
   const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${who}. ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`

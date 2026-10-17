@@ -161,7 +161,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
   request, and for a top based on a branch none of its lowers has. A pull request is in one item only.
-  `owner` names the queuing session (default a new id); the answer gives the watch command.
+  `owner` names the queuing session (default a new id); the answer gives the watch command. Queued
+  again (what an attention message may ask for), an item is looked at afresh: its clocks and failure
+  count start over, a merge GitHub refused is tried again, reruns spent on its head stay spent, and
+  without a new `owner` it stays the first session's, whose watch command listens for that owner.
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY,

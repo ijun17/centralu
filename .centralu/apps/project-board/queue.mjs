@@ -79,9 +79,23 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
     if (both.length) return { error: `${both.map((n) => ref(repo, n)).join(', ')} ${both.length === 1 ? 'is' : 'are'} already queued with ${ref(other.repo, other.pr)}.` }
   }
   if (mine) {
-    // Queued again (what an attention message may ask for): it is looked at afresh, and a merge
-    // GitHub refused is tried again; reruns already spent on this head stay spent
-    Object.assign(mine, { lowers, owner: owner ?? mine.owner, deleteBranch, state: 'waiting', reason: null, noticeKey: null, updatedAt: at, nextAt: at })
+    // Queued again (what an attention message may ask for): it is looked at afresh, so its clocks
+    // and failure count start again and a merge GitHub refused is tried again; reruns already spent
+    // on this head stay spent. Queued again without an owner, it stays the first session's
+    Object.assign(mine, {
+      lowers,
+      owner: owner ?? mine.owner,
+      deleteBranch,
+      state: 'waiting',
+      reason: null,
+      noticeKey: null,
+      noCiSince: null,
+      missingSince: null,
+      uncleanSince: null,
+      errors: 0,
+      updatedAt: at,
+      nextAt: at,
+    })
     pushEvent(q, mine, { kind: 'queued', text: `${ref(repo, pr)} queued again${lowers.length ? ` with ${lowers.map((n) => ref(repo, n)).join(', ')}` : ''}.`, at })
     return { item: mine, replaced: true }
   }

@@ -158,6 +158,16 @@ describe('what the merge queue decides for one poll', () => {
     expect(noticeKey({ kind: 'failed', job: { id: '12' } }, SHA2)).not.toBe(k)
   })
 
+  it('starts the clocks and the failure count again when an item is queued again, and keeps its reruns and owner', () => {
+    const q = emptyQueue()
+    const { item } = enqueue(q, { repo: R, pr: 80, owner: 'first', at: 'x' }, ref)
+    const spent = { cancelled: { run: 900, attempt: 1, at: 'x' } }
+    Object.assign(item, { state: 'attention', reason: { kind: 'not-clean', text: 'x' }, noCiSince: 'a', missingSince: 'b', uncleanSince: 'c', errors: 2, reruns: spent })
+    enqueue(q, { repo: R, pr: 80, at: 'y' }, ref)
+    // Without this, queued again after "not CLEAN for 30 minutes" it said so again at once
+    expect(q.items[0]).toMatchObject({ state: 'waiting', owner: 'first', noCiSince: null, missingSince: null, uncleanSince: null, errors: 0, reruns: spent })
+  })
+
   it("reruns the PR's own pull_request run when a push run shares its commit, and reads an old file without lowers", () => {
     const pr = { headRefName: 'feat/queue' }
     const push = { id: 1, run_attempt: 1, event: 'push', head_branch: 'feat/queue', status: 'completed', conclusion: 'failure', created_at: '2026-10-17T09:00:00Z', workflow_id: 7 }
@@ -495,6 +505,19 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     const listed = await call('merge_queue')
     expect(listed.text).toContain('Merge queue: 1 need attention.')
     expect(listed.text).toContain('#77 feat(apps): change 77 — needs attention: dirty')
+  })
+
+  it('keeps the first owner when the PR is queued again without one, so its watch command still hears about it', async () => {
+    runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } }))
+    const first = await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(first.data.owner).toBe('tester')
+    const again = await call('queue_merge', { pr: 77 })
+    expect(again.text).toMatch(/^Queued again #77 .*, for tester\./)
+    expect(again.data.owner).toBe('tester')
+    expect(again.data.watch).toContain('--owner tester')
+    expect(queueOnDisk().items.map((i: any) => i.owner)).toEqual(['tester'])
+    // A new owner given replaces it
+    expect((await call('queue_merge', { pr: 77, owner: 'orchestrator' })).data.owner).toBe('orchestrator')
   })
 
   it('refuses to queue for an account without maintain or admin, a draft, or a PR stacked on a branch not given as a lower', async () => {
