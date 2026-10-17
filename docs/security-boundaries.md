@@ -1144,7 +1144,7 @@ then who may call it:
   into the user folder from elsewhere is not: see "Imported apps and app links" below.
 - The host withholds its own environment: every `CC_*` and `CENTRALU_*` variable is removed (the
   WebSocket token is one; with it an app could call every RPC). The app receives its declared
-  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`runtime.ts` `spawnSpec`; test "receives its
+  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`app-start-env.ts` `spawnSpec`; test "receives its
   data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
