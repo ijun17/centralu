@@ -1,9 +1,11 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
+import { shareRoot, walkLinks, walkLinksSync, type LinkWalk } from './link-walk.js'
 
 /** This OS's path rules */
 const nativePath: PlatformPath = sep === '\\' ? win32 : posix
+const windows = sep === '\\'
 
 export class UnsafePathError extends Error {
   override readonly name = 'UnsafePathError'
@@ -73,6 +75,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
     try {
       const linkStats = await lstat(candidate, { bigint: true })
       if (linkStats.isSymbolicLink()) {
+        if (windows) offMachine(await walkLinks(candidate, shareRoot(rootReal)))
         const target = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
           if (isMissingFsPath(error)) throw new MissingPathError(rel)
           throw error
@@ -82,7 +85,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
         current = target
       } else {
         stats = linkStats
-        current = candidate
+        current = windows ? realInside(rootReal, await realpath(candidate)) : candidate
       }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
@@ -116,13 +119,14 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
     try {
       const linkStats = lstatSync(candidate)
       if (linkStats.isSymbolicLink()) {
+        if (windows) offMachine(walkLinksSync(candidate, shareRoot(rootReal)))
         const target = realpathSync.native(candidate)
         assertInside(rootReal, target)
         stats = statSync(target)
         current = target
       } else {
         stats = linkStats
-        current = candidate
+        current = windows ? realInside(rootReal, realpathSync.native(candidate)) : candidate
       }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
@@ -210,6 +214,33 @@ function checkedParent(rootReal: string, current: string): string {
 
 function assertInside(rootReal: string, candidate: string): void {
   if (!isInside(rootReal, candidate)) throw new UnsafePathError('Path is outside the project')
+}
+
+/**
+ * Windows: where an entry `lstat` did not call a link really is, which has to be inside the project as well. libuv
+ * calls a reparse point a link only when it can read the target, and `lstat` follows any other: a junction to a volume
+ * path (`\\?\Volume{…}\outside`), which anyone can make without a privilege, came back as a plain folder, and the walk
+ * went on inside it as if it were in the project while every call after the guard went where it leads. Measured on
+ * Windows 11 (#849 follow-up): the file tree listed the outside folder and a dropped file was written there. A junction
+ * never leads off the machine (Windows does not follow a mount point to a share), so this realpath connects nowhere.
+ */
+function realInside(rootReal: string, real: string): string {
+  assertInside(rootReal, real)
+  return real
+}
+
+/**
+ * Windows: refuses a link before anything follows it, when it or a link after it leads to another machine
+ * (`docs -> \\host\share`, or a chain of local links ending in one), or when where it leads cannot be checked
+ * (`link-walk.ts`). `realpath` followed it to see whether it stayed inside, and following it is already the
+ * connection: Windows opens the share over SMB and offers that machine the person's sign-in, so a repository could
+ * plant one for the file tree to open. Measured on Windows 11 (#849 follow-up): realpath answered the share's path,
+ * about a second later, before the guard refused it as outside the project. A project that is itself on a share keeps
+ * its links on that share (pnpm's junctions, an app folder's links): the walk takes that one share as home.
+ */
+function offMachine(walk: LinkWalk): void {
+  if (walk.ok) return
+  throw new UnsafePathError(walk.reason === 'elsewhere' ? `Path leads off this machine (${walk.why})` : `Path cannot be checked: ${walk.why}`)
 }
 
 function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {

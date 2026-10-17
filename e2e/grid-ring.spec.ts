@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { channels, tokenColor } from './fixtures/tokens.js'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * The border of a panel that is answering shows **on all four sides**, no matter the window width
@@ -40,36 +41,11 @@ async function litThreshold(page: Page): Promise<number> {
 const EDGES = ['top', 'right', 'bottom', 'left'] as const
 type Dim = { width: number; panel: number; edge: (typeof EDGES)[number]; peak: number }
 
-async function setup(page: Page, path = '/tmp/alpha') {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate((p: string) => {
-    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = p
-  }, path)
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
-}
-
-async function newSession(page: Page, prompt: string): Promise<string> {
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('prompt-input').press('Enter')
-  return page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
-}
-
 /** Sets up three panels answering in the grid — it becomes three columns from 1400px */
 async function workingGrid(page: Page): Promise<string[]> {
   await page.setViewportSize({ width: 1280, height: 800 })
-  await setup(page)
-  const ids = [await newSession(page, 'one'), await newSession(page, 'two'), await newSession(page, 'three')]
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const ids = [await newSession(page, 'alpha', 'one', { tool: 'claude' }), await newSession(page, 'alpha', 'two', { tool: 'claude' }), await newSession(page, 'alpha', 'three', { tool: 'claude' })]
   await page.evaluate((l: string[]) => {
     const store = (window as never as { __store: any }).__store
     store.getState().setGridPanels(l.map((sessionId: string) => ({ kind: 'session', sessionId })))

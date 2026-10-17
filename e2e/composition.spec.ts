@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * IME composition in the composer (issue #12).
@@ -13,33 +14,6 @@ import { expect, test, type Page } from '@playwright/test'
  * do-nothing control hit too — so these tests deliberately claim only the work that stops
  * happening, which is a fact, and never a duration, which is not.
  */
-
-async function setup(page: Page) {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  // Registering a project the first time leads straight into creating a session — this test
-  // only needs the project, so close it
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
-}
-
-async function newSession(page: Page, prompt: string) {
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('prompt-input').press('Enter')
-}
 
 /**
  * One step of a composition: the box's value becomes `value` and the page is told a composition
@@ -103,8 +77,8 @@ async function recordFileSearches(page: Page) {
 }
 
 test('a syllable still being formed is not a file query', async ({ page }) => {
-  await setup(page)
-  await newSession(page, 'task')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task', { tool: 'claude' })
   await recordFileSearches(page)
 
   await page.getByTestId('prompt-input').click()
@@ -131,8 +105,8 @@ test('a syllable still being formed is not a file query', async ({ page }) => {
 })
 
 test('the Enter that finishes a syllable does not send the message', async ({ page }) => {
-  await setup(page)
-  await newSession(page, 'task')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task', { tool: 'claude' })
   await page.getByTestId('prompt-input').click()
 
   await composeStep(page, '안', { start: true })

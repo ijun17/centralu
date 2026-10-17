@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * The prompt cache in the usage gauge (docs/agent-host.md §6.1): one line in the donut's tooltip, and the breakdown in
@@ -9,31 +10,6 @@ import { expect, test, type Page } from '@playwright/test'
 type MockWindow = { __mock: any; __store: any }
 
 const HOUR = 3600_000
-
-async function setup(page: Page): Promise<void> {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    ;(window as unknown as MockWindow).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
-}
-
-async function newSession(page: Page, prompt: string): Promise<string> {
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('prompt-input').press('Enter')
-  return page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId)
-}
 
 /** The answer a host gives: Claude mostly hits (94.1%) with six rebuilds, Codex reports reads only (90.5%) */
 function figures(here: string) {
@@ -118,9 +94,9 @@ async function answer(page: Page, cacheStats: unknown): Promise<void> {
 }
 
 test('the gauge says the cache hit rate on hover, and its dropdown breaks it down and opens the session that wrote most', async ({ page }) => {
-  await setup(page)
-  const cached = await newSession(page, 'the cached one')
-  const other = await newSession(page, 'another one')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const cached = await newSession(page, 'alpha', 'the cached one', { tool: 'claude' })
+  const other = await newSession(page, 'alpha', 'another one', { tool: 'claude' })
   expect(other).not.toBe(cached)
   await answer(page, figures(cached))
 
@@ -167,7 +143,7 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
 })
 
 test('Codex is said to report cache reads only', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await answer(page, figures('none'))
   await page.getByTestId('usage-donut-codex').hover()
   await expect(page.getByTestId('usage-donut-cache-codex')).toHaveText('Cache hit 90.5% · last 5 h')
@@ -183,7 +159,7 @@ test('Codex is said to report cache reads only', async ({ page }) => {
 })
 
 test("a linked machine's donut shows that machine's own cache figures", async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => (window as unknown as MockWindow).__mock.machines.add({ shell: 'posix', name: 'Box', sshTarget: 'me@box' }))
   await answer(page, figures('none'))
   await expect(page.getByTestId('usage-donut-box.claude')).toBeVisible()
@@ -196,7 +172,7 @@ test("a linked machine's donut shows that machine's own cache figures", async ({
 })
 
 test('a host that predates the figures leaves the tooltip and the dropdown as they were', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await answer(page, {})
   await page.getByTestId('usage-donut-claude').hover()
   await expect(page.getByTestId('usage-donut-tip-claude')).toContainText('Weekly')
@@ -208,7 +184,7 @@ test('a host that predates the figures leaves the tooltip and the dropdown as th
 
 
 test('a near-perfect cache rate stays distinct in the tooltip and dropdown (#587)', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   const cache = figures('none')
   Object.assign(cache.codex.windows[0]!, { inputTokens: 70_689, cacheReadTokens: 35_617_437 })
   await answer(page, cache)

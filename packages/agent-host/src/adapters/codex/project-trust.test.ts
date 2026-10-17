@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { PermissionPreset } from '@cc/protocol'
 import type { OrchestratorTools } from '../contract.js'
+import { removeTree } from '../../temp-dir.test-helpers.js'
 
 /**
  * Files in an untrusted project do not reach a Codex thread (M4 decision 3, #92).
@@ -40,6 +41,8 @@ beforeEach(() => {
   // macOS's temp folder sits under a /var -> /private/var symlink — a real case where the two spellings diverge
   cwd = mkdtempSync(join(tmpdir(), 'cc-codex-trust-'))
 })
+// Made with mkdtempSync, not tempRoot: the spelling before the symlink is resolved is the point
+afterEach(() => removeTree(cwd))
 
 const start = (permissionPreset: PermissionPreset, projectTrusted: boolean | undefined, extra: Record<string, unknown> = {}) =>
   new CodexAdapter().createSession({ sessionId: 's1', cwd, permissionPreset, projectTrusted, ...extra }, () => {})

@@ -270,6 +270,8 @@ writeFileSync(
       protocolVersion: protocolVersion(),
       // The host answers a `prove` before hello (#838): `centralu serve` reads this to say `proof` in the connection line
       hostProof: 1,
+      // The host takes its token as the first line on stdin (#538): a keeper hands it over there instead of in the environment
+      tokenOnStdin: 1,
       builtAt: new Date().toISOString(),
       runtime: 'system-node',
       platform: process.platform,

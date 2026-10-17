@@ -221,4 +221,23 @@ describe('a gh that is a batch file', () => {
     expect({ answer, plantedRan: existsSync(join(project, 'planted-ran')) }).toEqual({ answer: 'unavailable', plantedRan: false })
   })
 
+  /*
+   * #838: with no gh on PATH at all, the bare name was spawned, and Windows ran the gh.exe committed to the project (the
+   * common case: git installed, gh not). Here that gh.exe is Node, which runs the script `pr` it finds and leaves a mark.
+   */
+  it('is no gh on PATH at all: gh is unavailable, and the gh.exe in the project never runs', async () => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-none-')))
+    const bin = join(root, 'bin')
+    const project = join(root, 'project')
+    mkdirSync(bin)
+    mkdirSync(project)
+    fakeGh(project)
+    writeFileSync(join(project, 'package.json'), '{"type":"commonjs"}')
+    writeFileSync(join(project, 'pr'), "require('node:fs').writeFileSync('planted-ran', 'yes')\n")
+    vi.stubEnv('PATH', bin)
+    vi.stubEnv('NoDefaultCurrentDirectoryInExePath', undefined)
+    __forgetPrograms()
+    const answer = await gitBranchPr(project, 'feat/x')
+    expect({ answer, plantedRan: existsSync(join(project, 'planted-ran')) }).toEqual({ answer: 'unavailable', plantedRan: false })
+  })
 })

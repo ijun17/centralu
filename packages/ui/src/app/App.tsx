@@ -417,7 +417,7 @@ function Body() {
 /** The bar's edge margin. Same value as `pr-4` on the right, and also the floor for the left padding */
 const EDGE_PADDING = 16
 /** The widest the top bar's search field gets */
-const SEARCH_MAX = 560
+const SEARCH_MAX = 400
 
 function TopBar() {
   const counts = useCounts()

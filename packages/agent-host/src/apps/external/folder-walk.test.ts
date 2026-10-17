@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { folderFingerprint, walkCode } from './fingerprint.js'
 import { IMPORT_LIMITS, listAppFiles, stageLocal } from './imports.js'
 import { AppVersions } from './versions.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Every reader of an app folder walks it the same way (`folder-walk.ts`): what an import copies is
@@ -15,12 +15,12 @@ let root = ''
 let app = ''
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-walk-')))
+  root = tempRoot('cc-app-walk-')
   app = join(root, 'app')
   mkdirSync(app)
 })
 
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTree(root))
 
 const write = (rel: string, text: string) => {
   mkdirSync(dirname(join(app, rel)), { recursive: true })

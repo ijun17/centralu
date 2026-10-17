@@ -16,6 +16,8 @@ const read = (page: Page, id: string) =>
 
 test('an answer that finishes while the app is behind another window does not become read until 3 seconds after the app regains focus', async ({ page }) => {
   test.setTimeout(30000)
+  // The page's timers run on a clock the test can move, so "3 seconds went by" is something the test makes happen
+  await page.clock.install()
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
   await page.getByTestId('add-project').click()
@@ -34,7 +36,13 @@ test('an answer that finishes while the app is behind another window does not be
   await expect(page.getByTestId('session-view')).toContainText('finished while you were away')
   const before = await read(page, id)
   expect(before.lastSeq).toBeGreaterThan(before.lastReadSeq)
-  await page.waitForTimeout(3600)
+  /*
+   * Run every timer due in the next 3.6 seconds, the read timer's 3 included. A fixed wait could
+   * end before a loaded page had run that timer, and a timer that marked it read would go unseen.
+   * markRead goes through the mock and then the store; waiting for a frame lets that land.
+   */
+  await page.clock.runFor(3600)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(r)))
   expect(await read(page, id)).toEqual(before)
 
   // Return — the person is watching now, so it becomes read after 3 seconds

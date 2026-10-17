@@ -20,6 +20,10 @@ pub fn all_pids() -> Vec<i32> {
     Vec::new()
 }
 
+pub fn peer_pid(_stream: &UnixStream) -> io::Result<u32> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "peer credentials are not implemented here"))
+}
+
 pub fn peer_uid(_stream: &UnixStream) -> io::Result<u32> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "peer credentials are not implemented here"))
 }

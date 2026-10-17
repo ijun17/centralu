@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup as setupProjects } from './control.js'
 
 /**
  * The sidebar's one list across machines (#734): a linked machine's projects stand among this computer's, in one order
@@ -11,19 +12,8 @@ type MockWindow = { __mock: any; __store: any }
 
 /** This computer with two projects, alpha and beta, added through Add project before any machine is linked */
 async function setup(page: Page): Promise<void> {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => ((window as unknown as MockWindow).__mock.nextPickedDirectory = '/tmp/alpha'))
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
+  await setupProjects(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   // No machine linked: Add project is the folder picker at once, with nothing to choose
-  await page.evaluate(() => ((window as unknown as MockWindow).__mock.nextPickedDirectory = '/tmp/beta'))
-  await page.getByTestId('add-project').click()
-  await expect(page.getByTestId('project-beta')).toBeVisible()
   await expect(page.getByTestId('add-project-machines')).toHaveCount(0)
 }
 

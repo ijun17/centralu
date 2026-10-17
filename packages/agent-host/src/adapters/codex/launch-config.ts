@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { PermissionPreset } from '@cc/protocol'
-import { whichTool } from '../../env-path.js'
+import { toolCommand } from '../../tool-launch.js'
 import { codexLaunch } from './native.js'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
 
@@ -174,6 +174,6 @@ export const APP_STARTUP_TIMEOUT_SEC = 30
  * rather than npm's `node` wrapper (#568, native.ts).
  */
 export function spawnInKeeper(source: ProcessSource, cwd: string): AgentProcess {
-  const launch = codexLaunch(whichTool('codex') ?? 'codex')
+  const launch = codexLaunch(toolCommand('codex'))
   return source.spawn({ command: launch.command, args: [...launch.args, 'app-server'], cwd, env: launch.env(process.env) })
 }

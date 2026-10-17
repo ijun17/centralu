@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, resultText, type AppRef, type RuntimeTiming } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * App check (M4 C-3) — deliberately breaks the `server.mjs` of an app scaffolded from the template,
@@ -19,7 +19,7 @@ let projRoot = ''
 let rt: ExternalApps
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-check-')))
+  root = tempRoot('cc-app-check-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
   mkdirSync(dataRoot)
@@ -28,7 +28,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })

@@ -1650,9 +1650,24 @@ host pid starting with 1 signalled every process of the user (#350). Both stop f
 
 The design is in [architecture.md](architecture.md) §4.2. What the host does:
 
-**Token and address from the keeper.** Under the keeper the host gets `CC_HOST_TOKEN` (the front door's token,
-the same for every host the keeper runs) and `CC_FRONT_DOOR` (`ws://127.0.0.1:<door>`), and deletes both from its
-environment once read, so terminals, agents and commands do not inherit them. The Codex bridge is started with the
+**Token and address from the keeper.** Under the keeper the host gets the front door's token (the same for every
+host the keeper runs) as the first line on its stdin, `{"token":…}`, told by `CC_HOST_TOKEN_ON_STDIN=1` (#538,
+`lifecycle/handed-token.ts`), and `CC_FRONT_DOOR` (`ws://127.0.0.1:<door>`) in its environment, which it deletes
+once read, so terminals, agents and commands do not inherit it. The token is read before the control channel takes
+stdin; a host told to expect it that gets no such line within 10 s ends its start with a line saying why.
+
+**Mixed versions during an update** (#538). Which side reads what:
+
+| Keeper | Host | The token |
+|---|---|---|
+| this build or later | this build or later (its `bundle-info.json` says `tokenOnStdin`, or it runs from source) | on stdin only |
+| this build or later | older (a rollback, a switch to an older window's build) | in `CC_HOST_TOKEN`, as before; `keeper.log` says so |
+| older (one that could not hand itself over) | this build or later | in `CC_HOST_TOKEN`, as before; the host still reads it |
+| older | older | as before |
+
+The child socket checks its peer by pid whatever the host's build, so an older host under this keeper is let in
+as any host is, and this host under an older keeper meets the old same-user rule. A keeper handoff passes the token
+on its own channel and the host's stdin unchanged, so nothing is read again. The Codex bridge is started with the
 front door's address (`swap-control.ts`, `bridgeAddress`): a running codex keeps its bridge, and only an address
 that outlives this host survives a swap. Without a keeper the bridge gets the host's own port, as before.
 
@@ -2286,7 +2301,7 @@ skip the restore.
 | A launcher starts the bundled host on the system Node; no keeper | The same `resources/host` the app runs, so a remote host is not a second build to keep working. The keeper exists to swap builds under a window and to hold agents across restarts; a headless host needs neither yet |
 | Bound to 127.0.0.1 only, reached through an SSH local forward | SSH already authenticates the person and encrypts the link. A public port would need TLS and a login of our own, and every scanner on the internet would find it |
 | The token lives in `<data folder>/serve.json`, mode 0600 from the first byte, narrowed back if it drifts | It is the key to every RPC on that machine. `--connection` prints it and nothing else does: the host's ready line, which carries it, is read by the launcher and never passed on |
-| The token reaches the host in `CC_HOST_TOKEN`, not `--token` | Any user on the machine can read another's command line (`ps`); only the owner can read a process's environment. The host deletes the variable after reading it |
+| The token reaches the host as the first line on its stdin (#538), not `--token` and not `CC_HOST_TOKEN` | Any user on the machine can read another's command line (`ps`), and every process of the same user can read a process's start environment for as long as it runs, deleted or not (#502). The host's stdin is a pipe to the launcher anyway (`--watch-parent`) |
 | Token and port are generated once and kept | The client stores them and reconnects without an SSH round trip; it runs `--connection` again only when a hello is refused |
 | Default port 17175 | Below every OS's ephemeral range and below the host's per-app view origins (20000–32767, `views/origin-ports.ts`) |
 | A recorded or default port another program holds moves to the next free one above it (up to 19 more, below 20000) and is recorded; `--port` is used as given | One Windows laptop linked twice, its Windows side and a WSL distro, had both hosts on 17175: WSL2 relays the distro's loopback ports to Windows (`wslrelay.exe`), so the second could not start (#482). Inside WSL, the ports Windows listens on count as taken too (`netstat.exe` through interop): a host there on such a port would be unreachable, because the hub's forward ends on Windows' loopback. `--connection` reports the port the host got |

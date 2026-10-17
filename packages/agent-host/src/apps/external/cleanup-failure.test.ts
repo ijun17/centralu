@@ -1,5 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, utimesSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, utimesSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppHandover, STAGING_REL } from './handover.js'
@@ -8,6 +7,7 @@ import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { placeAppFolder } from './placement.js'
 import { makeZip } from './zip.test-helpers.js'
 import { AppVersions, VERSIONS_KEPT } from './versions.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * A cleanup that fails (a file still open on Windows: EBUSY, EPERM, ENOTEMPTY) must never take down what it runs
@@ -24,17 +24,17 @@ let dataRoot = ''
 let logged: string[] = []
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'cc-cleanup-'))
+  dir = tempRoot('cc-cleanup-')
   dataRoot = join(dir, 'data')
   mkdirSync(dataRoot)
   logged = []
   vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void logged.push(a.join(' ')))
 })
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.useRealTimers()
-  rmSync(dir, { recursive: true, force: true })
+  await removeTree(dir)
 })
 
 const host = () => ({ dataRoot, reservedIds: [], rescanUser: () => {}, userApp: () => null, changed: () => {} })

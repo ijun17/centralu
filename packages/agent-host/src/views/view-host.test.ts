@@ -16,6 +16,7 @@ import { LEASE_GRACE_MS, MAX_INSTANCES, ViewHost, type AppRef, type OriginMode, 
 import { VIEW_MIME_TYPE } from './view-document.js'
 import { createHash } from 'node:crypto'
 import { connect, createServer, type Server as NetServer } from 'node:net'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const SECRET = 'view-host-test-secret-0123456789abcdef'
 const HOST_ORIGIN = 'http://127.0.0.1:5174'
@@ -537,7 +538,7 @@ describe('ViewHost — a view leased to a window (#392)', () => {
     const { v, held } = leasing(50)
     const id = v.open(NOTES, 'ui://notes/board', 1).instanceId
     v.holderGone(1)
-    await expect.poll(() => v.describe(id), { timeout: 10_000 }).toBeNull()
+    await expect.poll(() => v.describe(id), { timeout: 10_000 * SLOW }).toBeNull()
     expect(held.get('notes')).toBe(0)
   })
 })

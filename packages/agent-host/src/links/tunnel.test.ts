@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -20,9 +20,10 @@ import {
   type RemoteSpec,
   type SshTunnelOptions,
 } from './tunnel.js'
-import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { fakeExe } from '../fake-exe.test-helpers.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -145,6 +146,13 @@ const logged = (): unknown[] =>
     .filter(Boolean)
     .map((l) => JSON.parse(l))
 
+/**
+ * Waits for every fake ssh that said it hangs to be gone. A deadline ends the ssh without waiting for it, so a test that
+ * stops at the rejection would leave its cleanup removing a folder the ssh is still being ended in.
+ */
+const hungGone = () =>
+  eventually(() => logged().every((l) => !(typeof l === 'object' && l !== null && 'hanging' in l) || !isAlive((l as { hanging: number }).hanging)), 10_000)
+
 const freePort = () =>
   new Promise<number>((resolve) => {
     const s = createServer()
@@ -184,7 +192,9 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   afterEach(async () => {
     await Promise.all(tunnels.splice(0).map((t) => t.close()))
     await new Promise<void>((r) => remote.close(() => r()))
-    rmFakeDir(dir)
+    // Without blocking: a sync rmSync's retries hold the event loop while a just-stopped fake ssh lets go of the
+    // folder, and on a loaded Windows machine that once held the worker for 128 s (#845)
+    await removeTree(dir)
   })
 
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
@@ -293,9 +303,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     })
     const forwards = () => (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L')).length
     await reopen()
+    const first = (t as unknown as { child: ChildProcess }).child
     await reopen()
-    // Long enough for several rounds of the churn (each about 50 ms plus one ssh round trip)
-    await new Promise((r) => setTimeout(r, 1500))
+    /*
+     * The first forward's exit is where a down would be reported, by its own exit listener, so once it has exited
+     * there is nothing more to wait for (#845); a fixed sleep could end first on a loaded machine
+     */
+    await eventually(() => first.exitCode !== null || first.signalCode !== null)
     expect(downs).toEqual([])
     expect(forwards()).toBe(2)
   })
@@ -342,17 +356,19 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       expect(pid).toBeGreaterThan(0)
       await expect(starting).rejects.toThrow(/did not finish within 5 seconds/)
       // The ssh itself is gone, not only the wait for it
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 * SLOW })
     }, 30_000 * SLOW)
 
     it('puts the deadline on asking for the connection line too', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1', FAKE_SSH_LINE: line({ port: await freePort() }) }, undefined, { commandTimeoutMs: 300 })
       await expect(t.open()).rejects.toThrow(/did not finish within/)
+      await hungGone()
     })
 
     it('stops an exec step that does not finish, at the step deadline', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { execTimeoutMs: 300 })
       await expect(t.exec('true')).rejects.toThrow(/did not finish within/)
+      await hungGone()
     })
 
     it('gives an installer step far longer than a short question: a slow download is not cut short', async () => {
@@ -484,7 +500,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       // The host is the ssh session's process: it is gone with the link. Windows ends ssh outright,
       // with no SIGTERM for the fake to clean up its marker file on, so the process is what shows it there.
       const pid = hosting[0]!.pid!
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 * SLOW })
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000 * SLOW)
 

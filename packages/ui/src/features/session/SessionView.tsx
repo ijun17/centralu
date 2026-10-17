@@ -10,6 +10,7 @@ import { isFileDrag } from '../files/dragPath.js'
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
 import { isOutsideLink } from './dragLink.js'
 import { ChatStream } from './chat-stream/ChatStream.jsx'
+import { SessionStart } from './SessionStart.jsx'
 import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
 import { AwayNote, DormantNote, InterruptedNote } from './SessionNotes.jsx'
@@ -361,6 +362,10 @@ export function SessionPane({
         headerDrag={headerDrag}
       />
 
+      {/* A brand-new session (nothing said, nothing stored) offers the other tool, and the past conversations to resume */}
+      {session && session.kind === 'worker' && session.projectId && !session.appId && session.lastSeq === 0 && chat.length === 0 && (
+        <SessionStart sessionId={sessionId} projectId={session.projectId} tool={session.tool} />
+      )}
       <ChatStream
         bottomPeek={fold}
         /*

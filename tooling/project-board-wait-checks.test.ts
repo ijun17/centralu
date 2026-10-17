@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { fakeExe, linkNode, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { fakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
@@ -19,16 +20,10 @@ afterEach(() => {
 
 function run(args: string[], conclusion = 'success', direct = false, pending = false, scenario = '') {
   dir = mkdtempSync(join(tmpdir(), 'cc-wait-checks-'))
-  const bin = join(dir, 'bin')
-  const node = join(dir, 'node')
-  mkdirSync(bin)
-  linkNode(node)
-  fakeExe(bin, 'gh', String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const a = process.argv.slice(2)
-const log = process.env.FAKE_GH_LOG
-const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : []
-fs.appendFileSync(log, JSON.stringify(a) + '\n')
+  // Answers from the scenario in its environment and the calls before this one
+  const gh = fakeGh(dir, String.raw`
+const a = args
+const calls = fs.readFileSync(process.env.FAKE_GH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l).args).slice(0, -1)
 const scenario = process.env.FAKE_SCENARIO
 if (scenario === 'hung') setInterval(() => {}, 1_000)
 const workflowPolls = calls.filter(c => c[1].includes('/actions/runs?')).length
@@ -57,11 +52,13 @@ else if (a[1].includes('/commits/')) {
   process.stdout.write(JSON.stringify({ sha: scenario === 'moving' && resolved ? 'def5678' : process.env.FAKE_SHA }))
 } else process.exit(2)
 `)
+  // This process's own HOME, as before the shared fake
+  const { HOME: _home, ...fakeEnv } = gh.env({ PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_CONCLUSION: conclusion, FAKE_SHA: SHA, FAKE_SCENARIO: scenario, FAKE_PENDING: pending ? '1' : '' })
   const result = spawnSync(direct ? SCRIPT : process.execPath, direct ? args : [SCRIPT, ...args], {
     encoding: 'utf8', timeout: 25_000,
-    env: { ...process.env, PATH: `${bin}${delimiter}${node}`, PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_GH_LOG: join(dir, 'calls'), FAKE_CONCLUSION: conclusion, FAKE_SHA: SHA, FAKE_SCENARIO: scenario, FAKE_PENDING: pending ? '1' : '' },
+    env: { ...process.env, ...fakeEnv },
   })
-  return { ...result, calls: () => readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]) }
+  return { ...result, calls: () => gh.calls().map((c) => c.args) }
 }
 
 describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
@@ -78,7 +75,8 @@ describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
     const r = run(['ijun17/centralu77'])
     expect(r.status).toBe(2)
     expect(r.stderr).toContain('Usage:')
-    expect(r.calls).toThrow()
+    // Refused before asking GitHub anything
+    expect(r.calls()).toEqual([])
   })
 
   // Windows starts no program through a `#!` line, so there is no direct run to check there

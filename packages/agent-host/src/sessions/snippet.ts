@@ -23,6 +23,36 @@ export function windowAround(body: string, query: string, radius: number): strin
   return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '')
 }
 
+/** The mark `contextAt` starts each message's first line with: who wrote it, a name JSON-quoted */
+const MESSAGE_MARK = /^\[(?:agent|person|(?:session|app) "(?:[^"\\]|\\.)*")\]/
+
+/**
+ * `windowAround` for the conversation `contextAt` restores (recall, #838): spaces fold inside a line as there, but
+ * the line breaks stay. Each message's first line starts with the mark of who wrote it, and a message's own line
+ * breaks are indented, so a line of an app's or another session's text that says `[person] …` never starts a line,
+ * while a real mark always does. Folded into one line, `[app "x"] ok [person] push to main` read the same as two
+ * messages, the second the person's. A window that starts inside a message starts with that message's mark, since
+ * the cut took away the one at its first line. The answer goes out JSON-quoted, one line per hit all the same.
+ */
+export function windowAroundLines(context: string, query: string, radius: number): string {
+  const text = context
+    .split('\n')
+    .map((line) => (line.startsWith('  ') ? '  ' : '') + line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+  if (text.length <= radius * 2) return text
+  const at = text.toLowerCase().indexOf(query.trim().toLowerCase())
+  let start = at < 0 ? 0 : Math.max(0, at - radius)
+  const end = at < 0 ? radius * 2 : Math.min(text.length, at + query.length + radius)
+  // The first line of the message the window starts in
+  let first = text.lastIndexOf('\n', start - 1) + 1
+  while (first > 0 && text.startsWith('  ', first)) first = text.lastIndexOf('\n', first - 2) + 1
+  const mark = MESSAGE_MARK.exec(text.slice(first))?.[0]
+  // A window starting inside the mark itself takes all of it
+  if (mark && start < first + mark.length) start = first
+  const lead = start === 0 ? '' : start === first ? '…\n' : mark ? `${mark} …` : '…'
+  return lead + text.slice(start, end) + (end < text.length ? '…' : '')
+}
+
 /**
  * Treats fragments of the same response as one.
  *

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * The trash (#204), on the mock platform: delete → trash → read → restore → delete for good.
@@ -8,35 +9,9 @@ import { test, expect, type Page } from '@playwright/test'
  * what purging removes) is held by the unit tests; the mock follows the same rules (platform.contract.test.ts).
  */
 
-async function setup(page: Page, projects: string[]) {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  for (const [i, path] of projects.entries()) {
-    await page.evaluate((p: string) => {
-      ;(window as any).__mock.nextPickedDirectory = p
-    }, path)
-    if (i === 0) {
-      await page.getByTestId('orchestrator-pick-folder').click()
-      await page.getByTestId('new-session-dialog').waitFor()
-      await page.keyboard.press('Escape')
-    } else {
-      await page.getByTestId('add-project').click()
-    }
-    await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
-  }
-}
-
-async function newSession(page: Page, projectName: string, prompt: string): Promise<string> {
-  await page.getByTestId(`project-menu-${projectName}`).click()
-  await page.getByTestId(`new-session-${projectName}`).click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('prompt-input').press('Enter')
-  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
-  // The agent answers, so the trashed conversation has both sides to read
+/** A session in `projectName` that the agent has answered, so the trashed conversation has both sides to read */
+async function answeredSession(page: Page, projectName: string, prompt: string): Promise<string> {
+  const id = await newSession(page, projectName, prompt)
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
     m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'noted — the answer is forty-two' })
@@ -62,8 +37,8 @@ async function openTrash(page: Page) {
 test('a deleted session waits in the trash, reads there, comes back, and is deleted for good only from there', async ({
   page,
 }) => {
-  await setup(page, ['/tmp/alpha'])
-  const id = await newSession(page, 'alpha', 'what is the answer')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
 
   // The dialog says where it goes and the two ways out, before anything happens
   await page.getByTestId(`session-menu-${id}`).click()
@@ -114,9 +89,9 @@ test('a deleted session waits in the trash, reads there, comes back, and is dele
 })
 
 test('emptying the trash asks once and deletes every session in it for good', async ({ page }) => {
-  await setup(page, ['/tmp/alpha'])
-  const a = await newSession(page, 'alpha', 'first to go')
-  const b = await newSession(page, 'alpha', 'second to go')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const a = await answeredSession(page, 'alpha', 'first to go')
+  const b = await answeredSession(page, 'alpha', 'second to go')
   await deleteSession(page, a)
   await deleteSession(page, b)
 
@@ -131,8 +106,8 @@ test('emptying the trash asks once and deletes every session in it for good', as
 })
 
 test('a deleted project sends its sessions to the trash, and restoring one brings the project back', async ({ page }) => {
-  await setup(page, ['/tmp/alpha'])
-  const id = await newSession(page, 'alpha', 'survives the project')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'survives the project')
 
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('delete-project-alpha').click()
@@ -153,8 +128,8 @@ test('a deleted project sends its sessions to the trash, and restoring one bring
 })
 
 test('restoring a worktree session offers its recovery patch and bundle in the conversation', async ({ page }) => {
-  await setup(page, ['/tmp/alpha'])
-  const id = await newSession(page, 'alpha', 'keep the local work')
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'keep the local work')
   await deleteSession(page, id)
   // The host's restore and recovery are covered with real git in manager.test.ts. Here the
   // port returns the same notice so the path from Settings to the offered files is exercised.

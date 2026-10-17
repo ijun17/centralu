@@ -1323,6 +1323,14 @@ describe('listening (HO13)', () => {
 })
 
 describe('deterministic shutdown (#82)', () => {
+  /*
+   * What close() came to: 'closed', or 'hung' if it is still open after 3 s × SLOW (#845). Each hang these tests catch
+   * would last far longer (30 s for `ws`, or for ever), while a loaded machine could take more than the 1 to 1.5 s the
+   * tests used to give. A race rather than a plain await lets a hang fail by name and clean up within the test's limit.
+   */
+  const closeOutcome = (srv: HostServer) =>
+    Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 3_000 * SLOW).unref())])
+
   it('does not wait for a half-sent HTTP request', async () => {
     const { createConnection } = await import('node:net')
     const { server: srv, port } = await start()
@@ -1331,7 +1339,7 @@ describe('deterministic shutdown (#82)', () => {
     socket.write('GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n')
     await new Promise((r) => setTimeout(r, 20))
     try {
-      const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1000))])
+      const outcome = await closeOutcome(srv)
       expect(outcome).toBe('closed')
     } finally {
       socket.destroy()
@@ -1346,12 +1354,10 @@ describe('deterministic shutdown (#82)', () => {
     c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
     await c.wait(() => c.frames.length > 0)
     ;(c.ws as unknown as { _socket: { pause(): void } })._socket.pause()
-    const t0 = Date.now()
-    const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1500))])
-    expect(outcome).toBe('closed')
-    expect(Date.now() - t0).toBeLessThan(1000)
+    const outcome = await closeOutcome(srv)
     server = null
     c.ws.terminate()
+    expect(outcome).toBe('closed')
   })
 
   it('a socket that connected but never said hello does not hold close() open (HO9)', async () => {
@@ -1359,7 +1365,7 @@ describe('deterministic shutdown (#82)', () => {
     const { server: srv, port } = await start(undefined, { handshakeTimeoutMs: 60_000, closeGraceMs: 100 })
     const c = connect(port)
     await c.open()
-    const outcome = await Promise.race([srv.close().then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 1500))])
+    const outcome = await closeOutcome(srv)
     server = null
     c.ws.terminate()
     expect(outcome).toBe('closed')

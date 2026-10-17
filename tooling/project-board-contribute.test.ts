@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   commitProblems,
@@ -20,6 +20,7 @@ import {
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { topLevel } from '../.centralu/apps/project-board/git.mjs'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -154,13 +155,8 @@ describe('the rules for public text', () => {
 
 // --- The app, against a fake gh ---------------------------------------------------------------------
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const json = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0) }
 if (st.mode === 'offline') fail('error connecting to api.github.com\n')
@@ -171,8 +167,16 @@ if (args[0] === 'pr' && args[1] === 'view') {
   json(pr)
 }
 if (args[0] === 'pr' && args[1] === 'list') {
+  if (args.includes('--base')) json(Object.values(st.prs).filter((p) => p.baseRefName === args[args.indexOf('--base') + 1] && p.state === 'OPEN'))
   const head = args[args.indexOf('--head') + 1]
   json(Object.values(st.prs).filter((p) => p.headRefName === head))
+}
+if (args[0] === 'pr' && args[1] === 'ready') {
+  const p = st.prs[args[2]]
+  if (!p) fail('GraphQL: Could not resolve to a PullRequest with the number of ' + args[2] + '.\n')
+  p.isDraft = args.includes('--undo')
+  save()
+  process.exit(0)
 }
 if (args[0] === 'api' && args[1] === '-X') {
   const [method, path] = [args[2], args[3]]
@@ -208,8 +212,7 @@ let root = ''
 /** Where git is, when the PATH has to be told (gitWrapper) */
 let gitDirs: string[] = []
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string }
 type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean }
@@ -238,19 +241,15 @@ const pr = (number: number, extra: Partial<Pr>): Pr => ({
 beforeEach(() => {
   // The long form of the folder, which is what git answers: a runner's temp folder is named with 8.3 (RUNNER~1)
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-contribute-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  gitDirs = gitWrapper(join(root, 'bin'))
-  statePath = join(root, 'state.json')
-  logPath = join(root, 'gh.log')
+  mkdirSync(join(root, 'data'))
+  gh = fakeGh(root, FAKE_GH)
+  gitDirs = gitWrapper(gh.bin)
   const state: State = {
     mode: 'ok',
     files: { '.github/PULL_REQUEST_TEMPLATE.md': TEMPLATE, 'docs/commit-conventions.md': CONVENTIONS_DOC },
     prs: {},
   }
-  writeFileSync(statePath, JSON.stringify(state))
-  writeFileSync(logPath, '')
+  gh.setState(state)
 })
 
 afterEach(async () => {
@@ -264,7 +263,7 @@ function runtime() {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1' },
+    env: gh.env({ GIT_CONFIG_NOSYSTEM: '1' }, gitDirs),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -276,18 +275,9 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const ghCalls = () =>
-  readFileSync(logPath, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string | null })
+const ghCalls = () => gh.calls()
 const writes = () => ghCalls().filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
-const patchState = (fn: (s: State) => void) => {
-  const s = JSON.parse(readFileSync(statePath, 'utf8')) as State
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+const patchState = (fn: (s: State) => void) => gh.patchState<State>(fn)
 function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }
@@ -408,6 +398,31 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
+  })
+
+  // #1066: a stack's lower pull requests are drafts, and build.yml runs no CI for a draft
+  it('turns the pull request a new one is stacked on into a draft, and leaves one on main alone', async () => {
+    patchState((s) => {
+      s.prs['5'] = pr(5, { headRefName: 'feat/low' })
+      s.prs['6'] = pr(6, { headRefName: 'feat/lower-draft', isDraft: true })
+    })
+    runtime()
+    const dry = await call('open_pr', { ...PR, base: 'feat/low', dryRun: true })
+    expect(dry.text).toContain("Would turn #5, which this one is stacked on, into a draft: a stack's lower pull requests run no CI")
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toEqual([])
+    const r = await call('open_pr', { ...PR, base: 'feat/low' })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain("Turned #5, which this one is stacked on, into a draft: a stack's lower pull requests run no CI")
+    expect(r.data.drafted).toBe(5)
+    expect(ghCalls().filter((c) => c.args[1] === 'ready').map((c) => c.args)).toEqual([['pr', 'ready', '5', '--undo', '-R', 'ijun17/centralu']])
+    // The new one is the top: not a draft
+    expect(JSON.parse(writes()[0]!.stdin!).draft).toBe(false)
+    // Already a draft, or opened on main: nothing to turn
+    for (const base of ['feat/lower-draft', 'main']) {
+      const again = await call('open_pr', { ...PR, base })
+      expect(again.text).not.toContain('into a draft')
+    }
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toHaveLength(1)
   })
 
   it('refuses a pull request with an empty Not exercised, a bad title or a heading the template lacks, sending nothing', async () => {
@@ -594,6 +609,27 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(writes()).toEqual([{ args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/pulls/2', '--input', '-'], stdin: '{"base":"main"}' }])
     expect(checkout(s.work)).toEqual(before)
     expect(leftovers(s.work)).toEqual({ worktrees: 1, refs: '' })
+  })
+
+  // #1066: a stack's lowers are drafts; restacked onto main with nothing based on it, a draft is its stack's top now
+  it('says when the pull request it restacked is a draft nothing is based on any more, so CI runs once it is marked ready', async () => {
+    const s = stack()
+    patchState((st) => (st.prs['2']!.isDraft = true))
+    runtime()
+    const r = await call('rebase_stack', { pr: 2, path: s.work, push: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.steps.at(-1)).toBe("#2 is a draft, and no open pull request is based on up: if it is its stack's top now, mark it ready for review (mark_ready, or gh pr ready 2) so CI runs on it.")
+  })
+
+  it('says nothing of a draft it restacked that is still a lower of another', async () => {
+    const t = stack()
+    runtime()
+    patchState((st) => {
+      st.prs['2']!.isDraft = true
+      st.prs['3'] = pr(3, { headRefName: 'top', baseRefName: 'up' })
+    })
+    const again = await call('rebase_stack', { pr: 2, path: t.work, push: true })
+    expect(again.data.steps.join(' ')).not.toContain('is a draft')
   })
 
   it('says when the tree differs from the tested one, and that the difference is only what main had', async () => {

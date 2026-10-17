@@ -49,15 +49,26 @@ export async function setup(page: Page, opts: { projects?: string[]; trusted?: b
   }
 }
 
-export async function newSession(page: Page, projectName: string, prompt: string) {
+/**
+ * Creates a session in `projectName` and sends `prompt` as its first instruction; resolves to the new session's id.
+ * `tool` picks that tool in the dialog first; without it the dialog's own choice stands.
+ */
+export async function newSession(
+  page: Page,
+  projectName: string,
+  prompt: string,
+  opts: { tool?: 'claude' | 'codex' } = {},
+): Promise<string> {
   // A new session goes through a dialog (FR-7: pick the tool, model and permission)
   await page.getByTestId(`project-menu-${projectName}`).click()
   await page.getByTestId(`new-session-${projectName}`).click()
+  if (opts.tool) await page.getByTestId(`tool-option-${opts.tool}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
+  return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }
 
 /**
@@ -181,4 +192,46 @@ export async function seedLongChat(page: Page, sessionId: string) {
 /** How far the stream is from its own bottom, in px. `< BOTTOM_SLACK` means "at the bottom" */
 export function distanceFromBottom(stream: Locator): Promise<number> {
   return stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
+}
+
+/**
+ * Resolves once the page has drawn `n` more frames. A render the app scheduled in reaction to something (a store
+ * update, a resize observer, an effect that sets state) lands within a frame or two, so this is how long "the
+ * screen caught up" takes, counted in the page's own frames rather than in milliseconds a loaded machine may not
+ * draw any frame in.
+ */
+export function nextFrames(page: Page, n = 2): Promise<void> {
+  return page.evaluate(async (count) => {
+    for (let i = 0; i < count; i++) await new Promise((r) => requestAnimationFrame(r))
+  }, n)
+}
+
+/**
+ * Starts recording whether an element with `testId` is in the page at any moment from now on, and returns the
+ * question to ask afterwards.
+ *
+ * A negative ("it never showed") cannot be polled: `toHaveCount(0)` passes once a flash is over, and a poll that
+ * comes late misses it. An observer installed before the cause records every insertion, however brief. Call the
+ * returned check only after waiting for something the same cause did draw (its positive half); the check then lets
+ * two more frames pass, so a render that cause scheduled has landed, before it answers.
+ */
+export async function watchAppearance(page: Page, testId: string): Promise<() => Promise<boolean>> {
+  const key = `__appeared_${testId}`
+  await page.evaluate(
+    ({ id, k }) => {
+      const w = window as any
+      const there = () => document.querySelector(`[data-testid="${id}"]`) !== null
+      w[`${k}_watch`]?.disconnect()
+      w[k] = there()
+      w[`${k}_watch`] = new MutationObserver(() => {
+        if (there()) w[k] = true
+      })
+      w[`${k}_watch`].observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-testid'] })
+    },
+    { id: testId, k: key },
+  )
+  return async () => {
+    await nextFrames(page)
+    return page.evaluate((k) => (window as any)[k] as boolean, key)
+  }
 }

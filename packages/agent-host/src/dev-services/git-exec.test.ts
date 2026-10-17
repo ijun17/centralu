@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gitArgv, gitFilterListings, runGit } from './git-exec.js'
+import { __forgetPrograms } from '../tool-launch.js'
 
 /**
  * Every git the host starts goes through `runGit` (#407), so a new call is locked before trust by
@@ -140,5 +141,38 @@ describe('one listing of the filter drivers for one operation (#368)', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
+  })
+})
+
+/*
+ * #838: with git not on PATH at all, the bare name was spawned, and Windows looks a bare name up in the child's working
+ * folder first: every git call runs in the project, so a git.exe committed to it ran on the first status read, before
+ * any trust. The planted one here is Node, which refuses git's arguments: had it run, the call would have failed with
+ * Node's own complaint instead of git being missing.
+ */
+describe.skipIf(process.platform !== 'win32')('git that is not installed', () => {
+  let root = ''
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    __forgetPrograms()
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  })
+
+  it('is reported missing, and the git.exe in the project never runs', async () => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-none-')))
+    const bin = join(root, 'bin')
+    const project = join(root, 'project')
+    mkdirSync(bin)
+    mkdirSync(project)
+    try {
+      linkSync(process.execPath, join(project, 'git.exe'))
+    } catch {
+      copyFileSync(process.execPath, join(project, 'git.exe'))
+    }
+    vi.stubEnv('PATH', bin)
+    // Windows' default, which some shells (agent CLIs among them) turn off: the working directory is looked in first
+    vi.stubEnv('NoDefaultCurrentDirectoryInExePath', undefined)
+    __forgetPrograms()
+    await expect(runGit(project, ['status'])).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

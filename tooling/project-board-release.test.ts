@@ -11,10 +11,10 @@ import {
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import {
@@ -28,6 +28,7 @@ import {
   versionLines,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/versions.mjs'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -177,13 +178,8 @@ describe('the version rules', () => {
 
 // --- The app, against a fake gh and real git ---------------------------------------------------------
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const json = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0) }
 const R = 'repos/ijun17/centralu'
@@ -244,7 +240,7 @@ if (args[0] === 'api') {
   if (path === R) json({ default_branch: 'main', permissions: st.permissions })
   if (path === R + '/branches/main/protection/required_status_checks') {
     if (st.noProtection) fail('gh: Branch not protected (HTTP 404)\n', 1, '{"message":"Branch not protected"}')
-    json({ contexts: ['build'], checks: [] })
+    json({ contexts: st.requiredContexts || ['build'], checks: [] })
   }
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
@@ -254,7 +250,9 @@ if (args[0] === 'api') {
     const releaseChecks = collision ? [{ id: 99, name: 'build', status: 'completed', conclusion: 'success', started_at: '2026-10-13T12:00:00Z', check_suite: { id: 99 }, app: { slug: 'github-actions' } }] : []
     if (verdict === 'none') json({ check_runs: releaseChecks })
     const c = { green: ['completed', 'success'], failing: ['completed', 'failure'], pending: ['in_progress', null], cancelled: ['completed', 'cancelled'] }[verdict]
-    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...releaseChecks] })
+    // build.yml's full tier job, when a test names its conclusion on this commit (two tiers of CI)
+    const tier = st.fullTierBySha?.[sha] ? [{ id: 2, name: 'full tier', status: 'completed', conclusion: st.fullTierBySha[sha], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/2', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: 'github-actions' } }] : []
+    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...tier, ...releaseChecks] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
   if (path === R + '/actions/runs') json({ workflow_runs: (st.activeRuns || []).filter((r) => r.status === q.get('status')) })
@@ -290,6 +288,10 @@ type State = {
   seq?: Record<string, unknown[]>
   /** No branch protection: the required set comes from the workflow files */
   noProtection?: boolean
+  /** The required set branch protection names (default ['build']) */
+  requiredContexts?: string[]
+  /** The `full tier` check's conclusion per commit (none reported when absent) */
+  fullTierBySha?: Record<string, string>
   /** A file's text at one ref (the contents API's ?ref=), before `files` */
   filesAt?: Record<string, Record<string, string>>
   /** Every workflow's runs not completed, for how busy the runners are */
@@ -311,13 +313,13 @@ function registryServer() {
       registryAsked?.()
       await registryHold
     }
-    const st = JSON.parse(readFileSync(statePath, 'utf8')) as State
+    const st = gh.state<State>()
     const m = /^\/(.+)\/([^/]+)$/.exec(req.url ?? '')
     const name = m ? decodeURIComponent(m[1]!) : ''
     const hidden = st.registryHidden?.[name] ?? 0
     if (hidden > 0) {
       st.registryHidden![name] = hidden - 1
-      writeFileSync(statePath, JSON.stringify(st))
+      gh.setState(st)
     }
     if (!m || hidden > 0 || !st.registry || !(name in st.registry)) return void res.writeHead(404).end('{}')
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ name, version: m[2], ...(st.registry[name] ? { gitHead: st.registry[name] } : {}) }))
@@ -334,8 +336,7 @@ let root = ''
 /** Where git is, when the PATH has to be told (gitWrapper) */
 let gitDirs: string[] = []
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 let registry: { url: string; close: () => Promise<void> } | null = null
 /** While set, the registry answers only once it settles; `registryAsked` is called on each request */
 let registryHold: Promise<void> | null = null
@@ -343,12 +344,9 @@ let registryAsked: (() => void) | null = null
 
 beforeEach(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  gitDirs = gitWrapper(join(root, 'bin'))
-  statePath = join(root, 'state.json')
-  logPath = join(root, 'gh.log')
+  mkdirSync(join(root, 'data'))
+  gh = fakeGh(root, FAKE_GH)
+  gitDirs = gitWrapper(gh.bin)
   const state: State = {
     permissions: { admin: true, maintain: true, push: true },
     ci: 'green',
@@ -358,8 +356,7 @@ beforeEach(async () => {
     jobs: {},
     pending: {},
   }
-  writeFileSync(statePath, JSON.stringify(state))
-  writeFileSync(logPath, '')
+  gh.setState(state)
   registry = await registryServer()
 })
 
@@ -387,7 +384,7 @@ function runtime(ignore?: string[]) {
     projects: () => [{ id: 'p1', path: projectPath, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10', PROJECT_BOARD_CI_POLL_MS: '10', PROJECT_BOARD_NPM_REGISTRY: registry!.url },
+    env: gh.env({ GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10', PROJECT_BOARD_CI_POLL_MS: '10', PROJECT_BOARD_NPM_REGISTRY: registry!.url }, gitDirs),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -400,18 +397,8 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const ghWrites = () =>
-  readFileSync(logPath, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string | null })
-    .filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
-const patchState = (fn: (s: State) => void) => {
-  const s = JSON.parse(readFileSync(statePath, 'utf8')) as State
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+const ghWrites = () => gh.calls().filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
+const patchState = (fn: (s: State) => void) => gh.patchState<State>(fn)
 
 const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root } }).trim()
 function commitAll(cwd: string, message: string) {
@@ -608,6 +595,29 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
+  // Two tiers of CI (2026-10-18): a quick run skips every job but a few, and a skipped job reads as passed
+  it("takes the bump PR's run as evidence only when it ran the full tier", async () => {
+    const s = repo({ bumped: true })
+    write(s.work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n  full-tier:\n    name: full tier\n    runs-on: ubuntu-latest\n')
+    s.tip = commitAll(s.work, 'ci: two tiers')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => { st.dispatchSha = s.tip })
+    const prHead = bumpEvidence(s)
+    patchState((st) => {
+      st.requiredContexts = ['build', 'full tier']
+      st.fullTierBySha = { [prHead]: 'skipped' }
+    })
+    runtime()
+    const quick = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(quick.isError, quick.text).toBe(true)
+    expect(quick.data.problems.join(' ')).toContain("PR #900's run did not run the full tier of CI")
+    expect(ghWrites()).toEqual([])
+    patchState((st) => { st.fullTierBySha = { [prHead]: 'success' } })
+    const full = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(full.isError, full.text).toBe(false)
+    expect(full.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
+  })
+
   it('refuses checks from another app even when their suite id and name match CI', async () => {
     const s = repo({ bumped: true })
     bumpEvidence(s)
@@ -637,7 +647,8 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
-  it.each(['pending', 'failing', 'none'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
+  // A failed own run is never overridden; pending or absent, the bump PR's run on the same tree stands for it (#1042, below)
+  it.each(['failing'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
     const s = repo({ bumped: true })
     bumpEvidence(s)
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
@@ -672,6 +683,59 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const again = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(again.isError, again.text).toBe(true)
     expect(ghWrites()).toHaveLength(1)
+  })
+
+  /*
+   * #1042 (owner decision, 2026-10-18): approval may use the bump PR's run instead of waiting about 14 minutes for main's
+   * push build, only when the tagged commit's tree is the very tree that run tested.
+   */
+  it.each(['pending', 'none'] as const)("approves from the bump PR's run while the tagged commit's own CI is %s, on the tree that run tested", async (ci) => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.ci = ci
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
+    })
+    runtime()
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.summary).not.toContain('Wait for green CI')
+    expect(status.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+    expect(r.data.lines.join(' ')).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: ${ci}.`)
+    expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
+    expect(ghWrites()).toHaveLength(1)
+    // The PR's run failing now: no evidence, and the own run is still not green
+    patchState((st) => { st.prCi = 'failing' })
+    const again = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(again.isError, again.text).toBe(true)
+    expect(again.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head checks are not all green")
+    expect(ghWrites()).toHaveLength(1)
+  })
+
+  it("waits for the tagged commit's own CI when its tree is not the one the bump PR's run tested", async () => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s, { differentTree: true })
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.ci = 'pending'
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
+    })
+    runtime()
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
+    expect(r.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head has a different tree from the tagged commit")
+    expect(ghWrites()).toEqual([])
+    patchState((st) => { st.ci = 'green' })
+    const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(approved.data.approved, approved.text).toBe(true)
   })
 
   it('does not let a newer green main authorize a tag whose own main CI failed', async () => {
@@ -1311,7 +1375,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(plan.data.summary).toContain('Ready to cancel duplicate run 62')
     const cancelled = await call('release', { step: 'cancel_duplicate', run: 62, path: s.work, confirm: true })
     expect(cancelled.data.summary).toContain('Cancelled duplicate run 62')
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
+    expect(gh.state<State>().cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
   })
 
   /** A tagged NEXT whose release run 61 waits on npm-publish with `jobs` */
@@ -1347,7 +1411,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.data.lines).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: green.`)
     expect(approvals()).toHaveLength(1)
     // Every pending answer was read before the one approval
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).seq![`ci:${s.tip}`]).toEqual(['green'])
+    expect(gh.state<State>().seq![`ci:${s.tip}`]).toEqual(['green'])
   })
 
   it('without wait, the same pending CI still refuses at once', async () => {
@@ -1393,7 +1457,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.data.lines).toContain('This is the shim: the last moment anything is reversible (docs/releasing.md).')
     expect(r.data.lines.join(' ')).toContain(`the ${REGISTRY_NAMES.length} packages it needs are on the registry at ${NEXT} from ${s.tip.slice(0, 7)}`)
     expect(approvals()).toHaveLength(1)
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).registryHidden).toEqual({ [REGISTRY_NAMES[0]!]: 0 })
+    expect(gh.state<State>().registryHidden).toEqual({ [REGISTRY_NAMES[0]!]: 0 })
   })
 
   it('refuses the shim while a package is not on the registry, from another commit, or a platform job failed', async () => {

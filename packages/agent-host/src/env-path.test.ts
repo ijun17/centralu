@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
 import { alive as isAlive } from './process.test-helpers.js'
+import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 
 /**
  * Regression test for the packaged app not being able to find the CLI.
@@ -106,7 +106,10 @@ describe('CLI search path augmentation', () => {
  */
 // The shells here are sh scripts, which Windows cannot run; that Windows asks none is the last test, by parameter
 describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-probe-'))
+  // Made in a hook, not in the describe's body: a skipped describe's body still runs on Windows, and its folder was left there
+  let dir = ''
+  beforeAll(() => void (dir = tempRoot('cc-probe-')))
+  afterAll(() => removeTree(dir))
   function shell(name: string, body: string): string {
     const path = join(dir, name)
     writeFileSync(path, `#!/bin/sh\n${body}\n`)
@@ -197,6 +200,32 @@ describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
  * arguments, so it runs the same on every OS.
  */
 describe('finding a tool on Windows', () => {
+  /*
+   * Review of #1073: a tool not found here is no longer spawned by its bare name, so whichTool may not be narrower than
+   * Windows' own search. Windows reads a quoted PATH entry as the folder inside the quotes.
+   */
+  it('reads a quoted PATH entry as the folder inside the quotes', () => {
+    const git = 'C:\\Program Files\\Git\\mingw64\\bin\\git.exe'
+    expect(whichTool('git', { PATH: 'C:\\Windows;"C:\\Program Files\\Git\\mingw64\\bin"', PATHEXT: '.EXE' }, 'win32', (p) => p === git)).toBe(git)
+  })
+
+  /*
+   * An App Execution Alias (WindowsApps) is a reparse point only process creation can follow: existsSync answered false
+   * for it, and a tool installed that way looked missing. One already on this machine is used (none can be made).
+   */
+  const aliases = process.platform === 'win32' && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps') : null
+  const alias = (() => {
+    try {
+      return aliases ? readdirSync(aliases, { withFileTypes: true }).find((e) => e.isSymbolicLink() && /\.exe$/i.test(e.name) && !existsSync(join(aliases, e.name)))?.name : undefined
+    } catch {
+      return undefined
+    }
+  })()
+  it.skipIf(!alias)('finds a tool that is an App Execution Alias', () => {
+    const name = alias!.replace(/\.exe$/i, '')
+    expect(whichTool(name, { PATH: aliases!, PATHEXT: '.EXE' }, 'win32')?.toLowerCase()).toBe(join(aliases!, alias!).toLowerCase())
+  })
+
   const npm = 'C:\\Users\\me\\AppData\\Roaming\\npm'
   // What `npm i -g @anthropic-ai/claude-code` leaves in that folder.
   const files = new Set([`${npm}\\claude`, `${npm}\\claude.cmd`, `${npm}\\claude.ps1`])

@@ -25,12 +25,20 @@ export type LaunchEnv = {
    * shutdown.
    */
   startedByServe: boolean
-  /** The token handed over in the environment; under a keeper the keeper's, the same for every host it runs */
+  /**
+   * The token handed over in the environment, by a keeper or `centralu serve` older than #538 (and by scripts that
+   * start a host themselves). Under a keeper the keeper's, the same for every host it runs
+   */
   token: string | undefined
+  /**
+   * The launcher writes the token as the first line on stdin instead (#538, `readHandedToken`): never in the
+   * environment, which every process of this user can read for as long as the host runs
+   */
+  tokenOnStdin: boolean
 }
 
 /** The variables `takeLaunchEnv` reads and removes. Nothing the host spawns may see any of them */
-export const LAUNCH_VARIABLES = ['CC_KEEPER', 'CC_HOST_SOURCE', 'CC_FRONT_DOOR', 'CC_SERVE', 'CC_HOST_TOKEN'] as const
+export const LAUNCH_VARIABLES = ['CC_KEEPER', 'CC_HOST_SOURCE', 'CC_FRONT_DOOR', 'CC_SERVE', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN'] as const
 
 export function takeLaunchEnv(env: Record<string, string | undefined> = process.env): LaunchEnv {
   const launch: LaunchEnv = {
@@ -39,6 +47,7 @@ export function takeLaunchEnv(env: Record<string, string | undefined> = process.
     frontDoor: env.CC_FRONT_DOOR,
     startedByServe: env.CC_SERVE === '1',
     token: env.CC_HOST_TOKEN,
+    tokenOnStdin: env.CC_HOST_TOKEN_ON_STDIN === '1',
   }
   for (const name of LAUNCH_VARIABLES) delete env[name]
   return launch

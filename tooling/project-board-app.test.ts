@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -22,12 +23,8 @@ const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
 const screen: AppCaller = { kind: 'view' }
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 if (st.mode === 'offline') fail('error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n')
 if (st.mode === 'logged-out') fail('To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n', 4)
@@ -120,20 +117,13 @@ function project() {
 
 let root = ''
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 
 beforeEach(() => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-')))
-  mkdirSync(join(root, 'bin'))
   mkdirSync(join(root, 'data'))
-  mkdirSync(join(root, 'node'))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  statePath = join(root, 'project.json')
-  logPath = join(root, 'gh.log')
-  writeFileSync(statePath, JSON.stringify(project()))
-  writeFileSync(logPath, '')
+  gh = fakeGh(root, FAKE_GH)
+  gh.setState(project())
 })
 
 afterEach(async () => {
@@ -144,14 +134,13 @@ afterEach(async () => {
 
 /** The runtime the host uses, on this repository, with `gh` resolving to the fake (or to nothing) */
 function runtime(withGh = true) {
-  // node through a link of its own, so the folder node lives in (often Homebrew's, which holds the
-  // real gh too) is never on this PATH
-  const path = withGh ? `${join(root, 'bin')}${delimiter}${join(root, 'node')}` : join(root, 'node')
+  // Without gh, the PATH is the fake's node folder alone: node through a link of its own, so the folder node lives in
+  // (often Homebrew's, which holds the real gh too) is never on it
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: path, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
+    env: withGh ? gh.env() : gh.env({ PATH: gh.node }),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -163,14 +152,14 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as Record<string, unknown> | undefined }
 }
-const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
+const ghCalls = () => gh.calls().map((c) => c.args)
 const queries = () => ghCalls().map((a) => a.find((x) => x.startsWith('query='))!)
 const mutations = () => queries().filter((q) => q.startsWith('query=mutation'))
-const patchState = (patch: Record<string, unknown>) => writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), ...patch }))
+const patchState = (patch: Record<string, unknown>) => gh.patchState((s) => Object.assign(s, patch))
 const setMode = (mode: string) => patchState({ mode })
 /** The project item each field write went to, in the order "GitHub" received them */
 const writtenItems = () => ghCalls().filter((a) => a.some((x) => x.includes('updateProjectV2ItemFieldValue'))).map((a) => a.find((x) => x.startsWith('item='))!.slice(5))
-const stored = (id: string) => (JSON.parse(readFileSync(statePath, 'utf8')) as ReturnType<typeof project>).items.find((i) => i.id === id)
+const stored = (id: string) => gh.state<ReturnType<typeof project>>().items.find((i) => i.id === id)
 
 describe('the project board app', { timeout: 30_000 * SLOW }, () => {
   it('passes check: every tool annotated, the screen served with its bridge, show as an app-only home', async () => {

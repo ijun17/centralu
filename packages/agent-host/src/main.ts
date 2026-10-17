@@ -1,4 +1,5 @@
 import { takeLaunchEnv } from './lifecycle/launch-env.js'
+import { readHandedToken } from './lifecycle/handed-token.js'
 import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
@@ -93,6 +94,17 @@ if (workJobWanted(launch)) {
   }
 }
 const workJob = joinWorkJob(launch)
+/*
+ * The token, when the launcher hands it over on stdin (#538) rather than in the environment. Read before the control
+ * channel and the parent watch take stdin, which then see only what follows it. Without it no client could reach
+ * this host, so a missing line ends the start (the supervisor's retry gets a fresh pipe).
+ */
+const handedToken = launch.tokenOnStdin
+  ? await readHandedToken(process.stdin).catch((e: Error) => {
+      console.error(`[agent-host] the launcher did not hand over the token: ${e.message}`)
+      process.exit(1)
+    })
+  : launch.token
 
 /**
  * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
@@ -120,9 +132,9 @@ const { values } = parseArgs({
  */
 const control = launch.underKeeper ? new ControlChannel(process.stdin) : null
 
-const token = values.token || launch.token || randomBytes(16).toString('hex')
+const token = values.token || handedToken || randomBytes(16).toString('hex')
 /* The token is the keeper's only when the keeper started this host and handed it over (#280 step 4, below) */
-const keeperToken = launch.underKeeper && !values.token && launch.token ? token : null
+const keeperToken = launch.underKeeper && !values.token && handedToken ? token : null
 /*
  * The secret for the HTTP door (M4 P-2). A **different value** from the WebSocket token. Since
  * this value ends up as a path segment in an iframe's address and travels around in a URL, even if

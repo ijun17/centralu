@@ -50,6 +50,12 @@ const MAIN_PKG = join(ROOT, 'packaging/npm/centralu')
 const publish = process.argv.includes('--publish')
 const skipBuild = process.argv.includes('--skip-build')
 /**
+ * Skip the verify run (#1042). Passed by release.yml on a tag push only when `guard` found a
+ * successful rehearsal on the tagged commit's tree (scripts/release-rehearsal.mjs): that rehearsal ran
+ * the same verify on the same files, in every job, on the same runners.
+ */
+const skipVerify = process.argv.includes('--skip-verify')
+/**
  * Publish the platform package but not the `centralu` shim.
  *
  * Needed because the shim pins its platform packages to an exact version, so it can
@@ -571,7 +577,8 @@ if (publish) {
   }
 }
 
-for (const script of target?.verify ?? ['verify']) sh('pnpm', [script])
+if (skipVerify) console.log('\n  --skip-verify: a rehearsal on this tree verified it (release.yml guard)')
+else for (const script of target?.verify ?? ['verify']) sh('pnpm', [script])
 
 console.log(
   `  ${target?.id ?? 'centralu (shim only)'} · version ${APP_VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,

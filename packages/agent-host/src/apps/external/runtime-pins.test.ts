@@ -1,9 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { delimiter, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The version check in the runtime build script (M4 C-1, `scripts/build-app-runtime.mjs --check`) —
@@ -24,9 +24,9 @@ const ESBUILD = realpathSync(fileURLToPath(new URL('../../../node_modules/esbuil
 
 let root = ''
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-runtime-pins-')))
+  root = tempRoot('cc-runtime-pins-')
 })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTree(root))
 
 describe('the version check reads from the install side, not the hoisted side', () => {
   it('is not thrown off by a different version hoisted into NODE_PATH — a real install, a real build', () => {

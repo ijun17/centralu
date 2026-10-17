@@ -2,7 +2,7 @@
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { pathInput } from './board.mjs'
 import { ciLines, progress } from './ci-tools.mjs'
-import { evaluateChecks, workflowCheckNames } from './ci.mjs'
+import { evaluateChecks, ranTier, workflowCheckNames } from './ci.mjs'
 import { APP_DIR, CI, config } from './config.mjs'
 import { openPr } from './contribute-tools.mjs'
 import { activeJobs, approveDeployments, cancelWorkflowRun, dispatchWorkflow, pendingDeployments, prsWithHead, readRepo, readRequired, readWorkflowChecks, runJobs, workflowRuns } from './github.mjs'
@@ -21,7 +21,8 @@ const RELEASE = releaseConfig(config.release)
  * Release CI: only configured workflow suites, on the exact commit and source event. `own`: the
  * required set from that commit's own workflows rather than main's (an approval judges the tagged
  * commit, whose run reports the jobs its workflow had). `settled`: every build run on it completed,
- * so a check still missing will never report.
+ * so a check still missing will never report. `tier`: whether the full tier of CI ran, when the
+ * required set names its check (a skipped job counts as passed, so a quick run is green on it).
  */
 async function ciForRelease(repo, sha, { pr, own = false } = {}) {
   const { defaultBranch } = await readRepo(repo)
@@ -32,7 +33,8 @@ async function ciForRelease(repo, sha, { pr, own = false } = {}) {
   const settled = runs.length > 0 && runs.every((r) => r.status === 'completed')
   const missing = checks.rows.filter((r) => r.state === 'missing').map((r) => r.name)
   const running = checks.rows.some((r) => r.state === 'pending')
-  return { cancelledRuns, verdict: cancelledRuns.length ? 'failing' : checks.verdict, settled, missing, running, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
+  const tier = CI.fullTier && req.names.includes(CI.fullTier) ? ranTier(checks, CI.fullTier) : 'full'
+  return { cancelledRuns, tier, verdict: cancelledRuns.length ? 'failing' : checks.verdict, settled, missing, running, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
 }
 
 // PROJECT_BOARD_NPM_REGISTRY: for the tests only, which answer from a local server

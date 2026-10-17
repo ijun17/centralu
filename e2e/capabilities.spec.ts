@@ -94,10 +94,9 @@ test('chain started from a session: the question shows as that session\'s approv
   await expect(card.getByTestId('approve-deny')).toBeVisible()
   // The answer is remembered regardless — there is no "always allow", and a does nothing
   await expect(card.getByTestId('approve-always')).toHaveCount(0)
+  // Keys are handled in the order they are pressed, so the y after it is the proof: had the a
+  // answered, its answer would come first in the list (or the card would be gone for the y)
   await page.keyboard.press('a')
-  await page.waitForTimeout(200)
-  expect(await page.evaluate(() => (window as any).__mock.approvalAnswers)).toEqual([])
-
   await page.keyboard.press('y')
   await expect.poll(() => page.evaluate(() => (window as any).__mock.approvalAnswers)).toEqual([{ sessionId, requestId: 'cap-1', decision: 'allow' }])
   await expect(card).toHaveCount(0)

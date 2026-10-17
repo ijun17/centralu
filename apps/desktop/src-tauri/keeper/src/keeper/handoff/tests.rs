@@ -5,6 +5,11 @@
 use super::*;
 use std::io::{Read, Write};
 
+/// The test process as the host the child socket answers (#538): the tests connect from it.
+fn this_process() -> std::sync::Arc<dyn Fn() -> Option<u32> + Send + Sync> {
+    std::sync::Arc::new(|| Some(std::process::id()))
+}
+
 struct Dir(PathBuf);
 impl Drop for Dir {
     fn drop(&mut self) {
@@ -96,6 +101,7 @@ fn exactly_once(got: &[u8], n: u32) {
 fn a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled() {
     let d = temp_dir("table");
     let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
     let (mut ctl, mut out) = counting_child(&d.0, 300);
     let mut got = Vec::new();
     read_until(&mut out, &mut got, "line40\n");
@@ -104,7 +110,8 @@ fn a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled() {
     // While frozen the child keeps writing into its pipe and nobody reads it
     std::thread::sleep(Duration::from_millis(150));
     let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
+    b.answer_hosts(this_process());
 
     read_until(&mut out, &mut got, "line299\n");
     exactly_once(&got, 300);
@@ -125,6 +132,7 @@ fn a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled() {
 fn output_held_for_no_reader_reaches_the_next_keepers_reader() {
     let d = temp_dir("unread");
     let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
     let (_ctl, mut out) = counting_child(&d.0, 300);
     let mut got = Vec::new();
     read_until(&mut out, &mut got, "line40\n");
@@ -137,7 +145,8 @@ fn output_held_for_no_reader_reaches_the_next_keepers_reader() {
     let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
     std::thread::sleep(Duration::from_millis(150));
     let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
+    b.answer_hosts(this_process());
     // The outgoing keeper is frozen, not gone, as between the commit and its exit
     std::thread::sleep(Duration::from_millis(300));
 
@@ -158,6 +167,7 @@ fn output_held_for_no_reader_reaches_the_next_keepers_reader() {
 fn a_freeze_that_arrives_with_output_waiting_reads_none_of_it() {
     let d = temp_dir("race");
     let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
     let (_ctl, mut out) = counting_child(&d.0, 100);
     let mut got = Vec::new();
     read_until(&mut out, &mut got, "line10\n");
@@ -167,7 +177,8 @@ fn a_freeze_that_arrives_with_output_waiting_reads_none_of_it() {
     a.hold_next_poll();
     let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
     let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
+    b.answer_hosts(this_process());
 
     let id = state["children"][0]["n"].as_u64().map(|n| format!("c{n}")).unwrap();
     let mut again = connect(&d.0);
@@ -183,6 +194,7 @@ fn a_freeze_that_arrives_with_output_waiting_reads_none_of_it() {
 fn a_thawed_child_table_carries_on_as_if_nothing_happened() {
     let d = temp_dir("thaw");
     let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
     let (_ctl, mut out) = counting_child(&d.0, 200);
     let mut got = Vec::new();
     read_until(&mut out, &mut got, "line20\n");
@@ -201,6 +213,7 @@ fn a_thawed_child_table_carries_on_as_if_nothing_happened() {
 fn a_sweep_still_waiting_at_the_handoff_is_finished_by_the_next_keeper() {
     let d = temp_dir("sweep");
     let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
     let mut ctl = connect(&d.0);
     send(&mut ctl, &json!({ "op": "hello", "protocol": 1 }));
     assert_eq!(read_line(&mut ctl)["ok"], true);
@@ -239,7 +252,8 @@ fn a_sweep_still_waiting_at_the_handoff_is_finished_by_the_next_keeper() {
     let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
     assert_eq!(state["sweeps"].as_array().map(|s| s.len()), Some(1), "{}", state["sweeps"]);
     let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[]).unwrap();
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
+    b.answer_hosts(this_process());
     let end = std::time::Instant::now() + Duration::from_secs(6);
     while alive() && std::time::Instant::now() < end {
         std::thread::sleep(Duration::from_millis(20));
@@ -317,3 +331,30 @@ fn an_outgoing_keeper_that_is_a_zombie_or_still_exiting_counts_as_gone() {
     let _ = running.wait();
     assert!(still, "a running outgoing keeper counted as gone");
 }
+
+/// Review of #1100: the next keeper's child service accepts before the keeper is built and names its
+/// host. A host's attach in that gap was closed, and the host quietly kept its own children from then
+/// on. The host handed over is answered from the first accept, and by the supervisor once adopted.
+#[test]
+fn the_host_handed_over_is_answered_from_the_first_accept() {
+    let d = temp_dir("first");
+    let a = Children::start(&d.0).unwrap();
+    a.answer_hosts(this_process());
+    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
+    let mut u = Unpack::new(pack.fds, pack.blobs);
+    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], Some(std::process::id())).unwrap();
+    // No answer_hosts yet: the keeper is not built
+    let mut c = connect(&d.0);
+    send(&mut c, &json!({ "op": "hello", "protocol": 1 }));
+    assert_eq!(read_line(&mut c)["ok"], true, "the handed-over host, before the keeper names it");
+    // Adopted, and the supervisor names another (or none): the handed-over pid alone no longer gets in
+    b.answer_hosts(std::sync::Arc::new(|| None));
+    b.adopted();
+    let mut c2 = UnixStream::connect(children::socket_path(&d.0)).unwrap();
+    c2.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let _ = c2.write_all(b"{\"op\":\"hello\",\"protocol\":1}\n");
+    let mut buf = [0u8; 64];
+    assert_eq!(c2.read(&mut buf).unwrap_or(0), 0, "refused once the supervisor names the host");
+    b.stop_all(Duration::from_millis(200));
+}
+

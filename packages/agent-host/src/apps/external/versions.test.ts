@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +8,7 @@ import { ExternalApps, type AppRef } from './runtime.js'
 import { AppVersions, VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
 import { until } from './test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Versioning for apps outside git (M4 E-1) — exercised with a real app process (env-app.mjs). This
@@ -63,7 +63,7 @@ function make() {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-versions-')))
+  root = tempRoot('cc-apps-versions-')
   dataRoot = join(root, 'data')
   mkdirSync(join(dataRoot, 'apps', 'ver'), { recursive: true })
   writeFileSync(join(appDir(), MANIFEST_FILE), JSON.stringify(manifest(), null, 2))
@@ -72,7 +72,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('a version is captured when the code changes and starts', () => {
@@ -214,8 +214,8 @@ describe('an imported app\'s versions', () => {
 })
 
 describe('version records another build left (#384)', () => {
-  it('a record without an id and time is skipped, a newer one with extra fields is listed, the list never throws', () => {
-    const root = mkdtempSync(join(tmpdir(), 'cc-vermeta-'))
+  it('a record without an id and time is skipped, a newer one with extra fields is listed, the list never throws', async () => {
+    const root = tempRoot('cc-vermeta-')
     try {
       const put = (name: string, text: string) => {
         mkdirSync(join(root, 'app', name), { recursive: true })
@@ -230,7 +230,7 @@ describe('version records another build left (#384)', () => {
       expect(new AppVersions(root).list('app').map((v) => v.id)).toEqual(['v2', 'v1'])
       expect(new AppVersions(root).list('app')[0]).toEqual(newer)
     } finally {
-      rmSync(root, { recursive: true, force: true })
+      await removeTree(root)
     }
   })
 })

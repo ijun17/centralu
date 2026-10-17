@@ -1,11 +1,9 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../contract.js'
 import { DEFAULT_RARE_TIER, setRareTier } from '../../sessions/orchestrator-tools.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Can a proposed MCP server take the orchestrator's own name (#93)?
@@ -50,15 +48,24 @@ let store: InstanceType<typeof Store>
 let mgr: InstanceType<typeof SessionManager>
 /** Every event the sessions sent, where an approval card for the person shows up */
 let seen: NormalizedEvent[] = []
+let dataDir = ''
 
 beforeEach(() => {
   // So the orchestrator home does not get created in the real home directory (sessions come up here).
-  vi.stubEnv('CC_DATA_DIR', mkdtempSync(join(tmpdir(), 'cc-93-')))
+  dataDir = tempRoot('cc-93-')
+  vi.stubEnv('CC_DATA_DIR', dataDir)
   captured.options = null
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new ClaudeAdapter()]])
   seen = []
   mgr = new SessionManager(store, adapters, (e: NormalizedEvent) => seen.push(e))
+})
+
+// The sessions end before their data folder goes, so none writes into it as it is removed
+afterEach(async () => {
+  await mgr.disposeAll()
+  store.close()
+  await removeTree(dataDir)
 })
 
 /** The MCP server map carried by the last session that came up. */

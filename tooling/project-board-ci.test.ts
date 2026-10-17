@@ -1,10 +1,10 @@
 import { runInNewContext } from 'node:vm'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   decideMerge,
@@ -12,6 +12,7 @@ import {
   firstFailure,
   failureLineIndex,
   matchKnownFailure,
+  ranTier,
   squashMessage,
   stripAttribution,
   summarizeDescription,
@@ -19,6 +20,7 @@ import {
   workflowEventJobs,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/ci.mjs'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -72,6 +74,7 @@ describe('which checks a workflow requires', () => {
       'e2e (webkit 4/5)',
       'e2e (webkit 5/5)',
       'e2e report',
+      'full tier',
       'host tests, remote Node (ubuntu-24.04)',
       'host tests, remote Node (windows-2022)',
       'keeper e2e',
@@ -190,6 +193,46 @@ describe('whether to merge', () => {
     expect(decideMerge({ permissions: maintainer, pr: openPr, checks: failing })).toMatchObject({ action: 'refuse', kind: 'failing' })
     expect(decideMerge({ permissions: maintainer, pr: { ...openPr, mergeable: 'CONFLICTING' }, checks: green() })).toMatchObject({ action: 'refuse', kind: 'conflict' })
     expect(decideMerge({ permissions: maintainer, pr: { ...openPr, mergeable: 'UNKNOWN' }, checks: green() })).toMatchObject({ action: 'wait', kind: 'mergeable' })
+  })
+})
+
+/*
+ * Two tiers of CI (2026-10-18): a pull request runs the quick tier, and a skipped job counts as passed, so a quick run
+ * is green on every check it reports. Nothing lands from it: only a run where the full tier's check passed counts.
+ */
+describe('which tier of CI ran on a commit', () => {
+  const TIER = 'full tier'
+  const of = (...reported: Check[]) => evaluateChecks({ required: [...REQUIRED, TIER], reported })
+
+  it("is full only when the full tier's check ran and passed, quick when it was skipped, and unknown until it reports", () => {
+    expect(ranTier(of(run(TIER, 'success'), ...allPassed()), TIER)).toBe('full')
+    expect(ranTier(of(run(TIER, 'skipped'), run('verify', 'success')), TIER)).toBe('quick')
+    expect(ranTier(of(run('verify', 'success')), TIER)).toBeNull()
+    expect(ranTier(of(run(TIER, null)), TIER)).toBeNull()
+    // A commit status of that name is not the job
+    expect(ranTier(of({ kind: 'status', name: TIER, state: 'success' }), TIER)).toBeNull()
+    // The newest report counts: a full run on the branch after its quick run
+    expect(ranTier(of(run(TIER, 'skipped', { at: '2026-10-18T01:00:00Z', id: 1 }), run(TIER, 'success', { at: '2026-10-18T02:00:00Z', id: 2 })), TIER)).toBe('full')
+    // Outside the required set (branch protection that does not name it) it still counts
+    expect(ranTier(evaluateChecks({ required: REQUIRED, reported: [run(TIER, 'skipped'), ...allPassed()] }), TIER)).toBe('quick')
+    // A repository without tiers runs everything every time
+    expect(ranTier(of(run('verify', 'success')), null)).toBe('full')
+  })
+
+  it('merges nothing that ran only the quick tier, though every check it reports passed', () => {
+    const quickRun = of(run(TIER, 'skipped'), ...allPassed())
+    expect(quickRun.verdict).toBe('green')
+    const d = decideMerge({ permissions: maintainer, pr: { ...openPr, headRefName: 'feat/x' }, checks: quickRun, fullTier: TIER })
+    expect(d).toMatchObject({ action: 'refuse', kind: 'quick-tier' })
+    expect(d.reason).toContain('gh workflow run build.yml --ref feat/x')
+    // Its full tier's jobs not reported yet: still refused, since a quick run never reports them
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: of(run(TIER, 'skipped'), run('verify', 'success')), fullTier: TIER })).toMatchObject({ action: 'refuse', kind: 'quick-tier' })
+    // Green on a required set that does not name it, the check not reported: waits for it
+    const unnamed = evaluateChecks({ required: REQUIRED, reported: allPassed() })
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: unnamed, fullTier: TIER })).toMatchObject({ action: 'wait' })
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: of(run(TIER, 'success'), ...allPassed()), fullTier: TIER }).action).toBe('merge')
+    // Without tiers, as before
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: unnamed }).action).toBe('merge')
   })
 })
 
@@ -333,12 +376,8 @@ describe("a failed job's log", () => {
 const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const out = (v) => process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v))
 const fail = (msg) => { process.stderr.write('gh: ' + msg + '\n'); process.exit(1) }
 const R = 'repos/ijun17/centralu'
@@ -360,7 +399,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.pr.isDraft = false
   save()
 } else if (path === R + '/issues/77/comments' && args.includes('POST')) {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8')).body
+  const body = JSON.parse(stdin).body
   st.comments = [...(st.comments ?? []), body]
   save()
   out({ id: 5, node_id: 'IC_5', html_url: 'https://github.com/ijun17/centralu/pull/77#issuecomment-5', user: { login: 'contributor' }, created_at: '2026-10-17T10:00:00Z', body })
@@ -399,7 +438,10 @@ const ghRun = (name: string, conclusion: string | null, id: number) => ({
   started_at: '2026-10-05T08:00:00Z',
   app: { slug: 'github-actions' },
 })
-const green = () => [ghRun('verify', 'success', 11), ghRun('windows tests', 'success', 12), ghRun('linux-x64', 'success', 13), ghRun('notify', 'success', 14)]
+// A full run: the full tier's check passed (project.json ci.fullTier, build.yml's `full tier` job)
+const green = () => [ghRun('full tier', 'success', 10), ghRun('verify', 'success', 11), ghRun('windows tests', 'success', 12), ghRun('linux-x64', 'success', 13), ghRun('notify', 'success', 14)]
+// A pull request's quick run: what it ran passed, the full tier's check skipped, the full tier's jobs not reported
+const quick = () => [ghRun('full tier', 'skipped', 10), ghRun('verify', 'success', 11)]
 const PR_BODY = '## Why\n\nBecause.\n\n## What changed\n\nThings.\n\n## Not exercised\n\nNothing.\n\n## Closes\n\nRefs #386\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>'
 
 function ghState(patch: Record<string, unknown> = {}) {
@@ -429,17 +471,12 @@ function ghState(patch: Record<string, unknown> = {}) {
 
 let root = ''
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 
 beforeEach(() => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-ci-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  statePath = join(root, 'gh-state.json')
-  logPath = join(root, 'gh.log')
-  writeFileSync(logPath, '')
+  mkdirSync(join(root, 'data'))
+  gh = fakeGh(root, FAKE_GH)
 })
 
 afterEach(async () => {
@@ -449,12 +486,12 @@ afterEach(async () => {
 })
 
 function runtime(state: Record<string, unknown>) {
-  writeFileSync(statePath, JSON.stringify(state))
+  gh.setState(state)
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}${delimiter}${join(root, 'node')}`, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, PROJECT_BOARD_CI_POLL_MS: '250' },
+    env: gh.env({ PROJECT_BOARD_CI_POLL_MS: '250' }),
     // The product's probe and call limits: a shorter one only adds a way to fail under load (#368)
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
@@ -467,8 +504,8 @@ async function call(name: string, args: Record<string, unknown>, progress?: stri
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as Record<string, unknown> }
 }
-const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
-const merges = () => (JSON.parse(readFileSync(statePath, 'utf8')) as { merges?: string[][] }).merges ?? []
+const ghCalls = () => gh.calls().map((c) => c.args)
+const merges = () => gh.state<{ merges?: string[][] }>().merges ?? []
 
 describe('the project board app: ci_status and merge_when_green', { timeout: 30_000 * SLOW }, () => {
   it('passes check with ci_status as a read and merge_when_green as a change, both for agents only', async () => {
@@ -507,7 +544,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const full = await call('ci_status', { pr: 77, detail: 'full' })
     expect(full.text).toContain('Passed: verify, windows tests, linux-x64.')
     expect(full.text).toContain('Required: build.yml on main.')
-    expect(full.text).toContain('Not required: notify passed.')
+    expect(full.text).toContain('Not required: full tier passed, notify passed.')
   })
 
   it('finds the Windows Vitest failure and its diff beyond setup-node noise (#587)', async () => {
@@ -621,6 +658,17 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(merges()).toEqual([])
   })
 
+  it('merges nothing whose own run was the quick tier, and says how it lands', async () => {
+    runtime(ghState({ checkRuns: [quick()] }))
+    const r = await call('merge_when_green', { pr: 77, wait: true })
+    expect(r.isError).toBe(true)
+    expect(r.data).toMatchObject({ outcome: 'refused', kind: 'quick-tier' })
+    const first = r.text.split('\n')[0]
+    expect(first).toContain('ran only the quick tier of CI')
+    expect(first).toContain('queue_merge')
+    expect(merges()).toEqual([])
+  })
+
   it('cannot make a check optional by removing its job in the pull request', async () => {
     const headWorkflow = ['jobs:', '  verify:', '    name: verify', ''].join('\n')
     runtime(ghState({ headWorkflow, checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('linux-x64', 'success', 13)]] }))
@@ -672,7 +720,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(ghCalls().flat()).not.toContain('-d')
 
     await rt!.dispose()
-    writeFileSync(logPath, '')
+    gh.clearCalls()
     const fork = ghState()
     fork.pr = { ...fork.pr, isCrossRepository: true }
     runtime(fork)
@@ -775,7 +823,7 @@ describe('the project board app: mark_ready', { timeout: 30_000 * SLOW }, () => 
     ;(s.pr as Record<string, unknown>).isDraft = true
     return s
   }
-  const gh = () => JSON.parse(readFileSync(statePath, 'utf8')) as { readied?: string[]; comments?: string[] }
+  const written = () => gh.state<{ readied?: string[]; comments?: string[] }>()
 
   it('marks a draft ready for review for a contributor once nothing required failed, and says the maintainer merges', async () => {
     runtime(state())
@@ -783,12 +831,12 @@ describe('the project board app: mark_ready', { timeout: 30_000 * SLOW }, () => 
     expect(r.isError).toBe(false)
     expect(r.text.split('\n')[0]).toBe('Marked PR #77 ready for review. The maintainer merges it (merge_when_green or queue_merge).')
     expect(r.data).toMatchObject({ ready: true, marked: true, verdict: 'green' })
-    expect(gh().readied).toEqual(['77'])
-    expect(gh().comments).toBeUndefined()
+    expect(written().readied).toEqual(['77'])
+    expect(written().comments).toBeUndefined()
     // Ready already: nothing to change, and it says so
     const again = await call('mark_ready', { pr: 77 })
     expect(again.text.split('\n')[0]).toBe('PR #77 was ready for review already. The maintainer merges it (merge_when_green or queue_merge).')
-    expect(gh().readied).toEqual(['77'])
+    expect(written().readied).toEqual(['77'])
   })
 
   it('refuses while a required check failed, naming it, and changes nothing', async () => {
@@ -797,7 +845,7 @@ describe('the project board app: mark_ready', { timeout: 30_000 * SLOW }, () => 
     expect(r.isError).toBe(true)
     expect(r.text).toContain('Not marked ready: a required check failed.')
     expect(r.text).toContain('windows tests: failed')
-    expect(gh().readied).toBeUndefined()
+    expect(written().readied).toBeUndefined()
   })
 
   it('leaves the note for the maintainer with the CI line, while checks still run; a note that breaks the public text rules stops it first', async () => {
@@ -805,10 +853,10 @@ describe('the project board app: mark_ready', { timeout: 30_000 * SLOW }, () => 
     const bad = await call('mark_ready', { pr: 77, note: '리뷰 부탁드립니다' })
     expect(bad.isError).toBe(true)
     expect(bad.text).toMatch(/^Not marked ready: The note /)
-    expect(gh().readied).toBeUndefined()
+    expect(written().readied).toBeUndefined()
     const r = await call('mark_ready', { pr: 77, note: 'Ready: the Windows path is not exercised.' })
     expect(r.isError).toBe(false)
     expect(r.text.split('\n')[0]).toBe('Marked PR #77 ready for review, and left the note. CI is pending, not green yet; it goes on meanwhile. The maintainer merges it (merge_when_green or queue_merge).')
-    expect(gh().comments).toEqual(['Ready: the Windows path is not exercised.\n\nPR #77 at c0ffee0: pending — 2/3 passed, 1 pending.'])
+    expect(written().comments).toEqual(['Ready: the Windows path is not exercised.\n\nPR #77 at c0ffee0: pending — 2/3 passed, 1 pending.'])
   })
 })

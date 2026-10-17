@@ -28,7 +28,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryEvent, HistoryM
 import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
-import { removeTree } from '../temp-dir.test-helpers.js'
+import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -199,6 +199,17 @@ beforeEach(() => {
 })
 
 const addProject = () => rpc('projects.add', { path: tmpdir() }) as Promise<{ id: string; path: string }>
+
+/** A new empty folder for a project of a test's own, removed after the test (#845) */
+const projectDirs: string[] = []
+const projectDir = (prefix: string) => {
+  const d = tempRoot(prefix)
+  projectDirs.push(d)
+  return d
+}
+afterEach(async () => {
+  for (const d of projectDirs.splice(0)) await removeTree(d)
+})
 
 describe('tool definitions after a host switch (#581)', () => {
   it('restarts a live idle session when its served prefix hash changed', async () => {
@@ -2913,10 +2924,8 @@ describe('the initial prompt is recorded too', () => {
  */
 describe('reordering within a project does not disturb the global order', () => {
   it('a session that was not moved stays exactly where it was', async () => {
-    const { mkdtempSync } = await import('node:fs')
-    const { join } = await import('node:path')
-    const p1 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p1-')) })) as { id: string; path: string }
-    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-p2-')) })) as { id: string; path: string }
+    const p1 = (await rpc('projects.add', { path: projectDir('cc-p1-') })) as { id: string; path: string }
+    const p2 = (await rpc('projects.add', { path: projectDir('cc-p2-') })) as { id: string; path: string }
     // Global order: a1, b1, a2, b2 (creation order)
     const mk = async (proj: { id: string; path: string }) =>
       ((await rpc('agents.createSession', { projectId: proj.id, cwd: proj.path, tool: 'claude' })) as { id: string }).id
@@ -4783,7 +4792,7 @@ describe('the orchestrator', () => {
    */
   it('listing and directing cross project boundaries', async () => {
     const p1 = await addProject()
-    const p2 = (await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'cc-proj-')) })) as { id: string }
+    const p2 = (await rpc('projects.add', { path: projectDir('cc-proj-') })) as { id: string }
     const here = (await rpc('agents.createSession', {
       projectId: p1.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
@@ -6361,7 +6370,7 @@ describe('project trust changes restart live sessions (#663)', () => {
 
   it('leaves the sessions of other projects alone', async () => {
     const project = await addProject()
-    const other = await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'trust-other-')) }) as { id: string; path: string }
+    const other = await rpc('projects.add', { path: projectDir('trust-other-') }) as { id: string; path: string }
     const bystander = await mgr.createSession({ projectId: other.id, cwd: other.path, tool: 'claude', permissionPreset: 'normal' })
     const handle = adapter.handleOf(bystander.id)!
 
