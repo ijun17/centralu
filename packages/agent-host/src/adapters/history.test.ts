@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import {
   __setSessionApiForTest,
+  AGENT_REPORT_NOT_RECORDED,
   forkClaudeSession,
   listClaudeSessions,
   readClaudeHistory,
@@ -14,6 +15,9 @@ import {
   turnsToHistory,
   UNSUPPORTED as CODEX_UNSUPPORTED,
 } from './codex/history.js'
+import { normalizeMessage } from './claude/normalize.js'
+import { normalizeNotification } from './codex/normalize.js'
+import { HISTORY_OUTPUT_CHARS, HISTORY_TOOL_ROWS } from './history-events.js'
 import { cleanTitle, stripInjectedBlocks } from './history-text.js'
 
 /**
@@ -69,22 +73,35 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     expect(out[2]!.createdAt).toBe(500)
   })
 
-  it('keeps only the conversation — drops tool results and keeps only the name of a tool call', async () => {
+  /*
+   * #843: an imported conversation used to keep only a tool's name, as a line of the model's words (`Bash`), where a
+   * watched one showed the call and its output. The rows are read by the live normalizer now, so each call and result
+   * is the event the same message gives live. Shapes as getSessionMessages gives them (SDK 0.3.263: `type`, `message`).
+   */
+  it('reads tool calls and their results back as the live normalizer reads the same messages (#843)', async () => {
+    const call = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Building' }, { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'pnpm build' } }] } }
+    const result = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'exit 0' }], is_error: false }] } }
     __setSessionApiForTest({
       listSessions: async () => [],
       getSessionMessages: async () => [
         { type: 'user', message: { content: [{ type: 'text', text: 'Fix the build' }] } },
-        { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'x' }] } },
-        { type: 'user', message: { content: [{ type: 'tool_result', content: 'exit 0' }] } },
+        call,
+        result,
         { type: 'assistant', message: { content: [{ type: 'text', text: 'Fixed it' }] } },
         { type: 'system', message: { content: 'compact boundary' } },
       ],
     })
+    const live = [...normalizeMessage(call, ''), ...normalizeMessage(result, '')].filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
+    expect(live.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
     expect(await readClaudeHistory('s', '/p', 100)).toEqual([
       { role: 'user', text: 'Fix the build' },
-      { role: 'assistant', text: '`Bash`' },
+      { role: 'assistant', text: 'Building' },
+      { role: 'system', event: live[0] },
+      { role: 'system', event: live[1] },
       { role: 'assistant', text: 'Fixed it' },
     ])
+    expect(live[0]).toMatchObject({ callId: 'tu1', summary: { tool: 'Bash', title: 'pnpm build' }, input: { command: 'pnpm build' } })
+    expect(live[1]).toMatchObject({ callId: 'tu1', ok: true, summary: 'exit 0' })
   })
 
   it('strips blocks the tool injected and keeps only the person\'s own words', async () => {
@@ -124,8 +141,84 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     expect(await readClaudeHistory('s', '/p', 100)).toEqual([
       { role: 'user', text: 'Start the work' },
       { role: 'assistant', text: 'Working on it' },
-      { role: 'system', marker: 'compaction' },
+      { role: 'system', event: { type: 'compaction', sessionId: '', failed: false } },
       { role: 'assistant', text: 'Continuing' },
+    ])
+  })
+
+  /*
+   * #843 review: getSessionMessages keeps no `tool_use_result`, so an agent's result read back is the text meant for
+   * the model (the launch notice of a background agent, the hand-back preamble of a foreground one; shapes from
+   * claude/subagent.test.ts). The card says the report is not in the record instead, keeping nothing as output.
+   */
+  it("does not put the text meant for the model on an agent's card", async () => {
+    const launch = 'Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a19ec1fdf94e35cfc'
+    const handBack = "[Subagent hand-back] The text below is the final report of a subagent this session started.\n\nI'm done."
+    const result = (id: string, text: string) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }] } })
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'bg', name: 'Agent', input: { description: 'Review', run_in_background: true } }] } },
+        result('bg', launch),
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'fg', name: 'Task', input: { description: 'Fix' } }] } },
+        result('fg', handBack),
+        // A call before the rows read: known by its text alone
+        result('early', launch),
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'sh', name: 'Bash', input: { command: 'ls' } }] } },
+        result('sh', 'a.txt'),
+      ],
+    })
+    const results = (await readClaudeHistory('s', '/p', 100)).flatMap((h) => (h.role === 'system' && h.event.type === 'tool_result' ? [h.event] : []))
+    expect(results.map((e) => [e.callId, e.summary, e.output])).toEqual([
+      ['bg', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['fg', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['early', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['sh', 'a.txt', 'a.txt'],
+    ])
+  })
+
+  it('a row in a shape the reader does not expect costs that row, not the import (#843 review)', async () => {
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'assistant', message: { content: 'a body as text' } },
+        { type: 'assistant', message: { content: { type: 'text', text: 'an object' } } },
+        { type: 'assistant', message: null },
+        { type: 'assistant', message: 'a message as text' },
+        { type: 'assistant', message: { content: [null, 5, 'x', { type: 'text', text: 'kept' }] } },
+        { type: 'user', message: { content: { type: 'tool_result' } } },
+        { type: 'user', message: { content: [null, { type: 'text', text: 'asked' }] } },
+      ],
+    })
+    expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+      { role: 'assistant', text: 'a body as text' },
+      { role: 'assistant', text: 'a message as text' },
+      { role: 'assistant', text: 'kept' },
+      { role: 'user', text: 'asked' },
+    ])
+  })
+
+  /*
+   * #1006: the SDK's `limit` slices from the start (SDK 0.3.263: the whole transcript read, then `offset..offset +
+   * limit`), which this fake does too. The reader gave the oldest rows, so a catch-up past 600 rows never matched.
+   */
+  it('keeps the newest lines of a long conversation, counting words and compactions, not tool rows', async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => [
+      { type: 'user', message: { content: [{ type: 'text', text: `q${i}` }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: `t${i}`, name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'a' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: `a${i}` }] } },
+    ]).flat()
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async (_id, o) => {
+        const from = Number(o?.offset ?? 0)
+        return typeof o?.limit === 'number' && o.limit > 0 ? rows.slice(from, from + o.limit) : rows.slice(from)
+      },
+    })
+    const out = await readClaudeHistory('s', '/p', 3)
+    expect(out.map((h) => (h.role === 'system' ? `${h.event.type}:${(h.event as { callId?: string }).callId}` : h.text))).toEqual([
+      'a8', 'q9', 'tool_call:t9', 'tool_result:t9', 'a9',
     ])
   })
 
@@ -162,26 +255,42 @@ describe('codex — thread/list · thread/read', () => {
     ])
   })
 
-  it('pulls only the person and model words out of turns — an unknown item is silently passed over', () => {
+  /*
+   * #843: every item but the words is read by the live normalizer, as if it had started and completed while the app
+   * watched, so a command leaves its card as it does live, and an item kind Codex adds later leaves the card it would
+   * leave live. Reasoning is not part of a conversation read back. Item shapes from generated/v2/ThreadItem.ts.
+   */
+  it('reads the words, and every other item as the live normalizer reads it (#843)', () => {
+    const command = { type: 'commandExecution', id: 'c1', command: 'pnpm test', cwd: '/p', status: 'completed', aggregatedOutput: 'ok', exitCode: 0 }
+    const future = { type: 'future_item_type', id: 'f1', title: 'does not crash even though it is unknown' }
     const out = turnsToHistory(
       [
         {
           startedAt: 1_700_000_000,
           items: [
             { type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] },
-            { type: 'reasoning', summary: [], content: [] },
-            { type: 'commandExecution', command: 'pnpm test' },
+            { type: 'reasoning', summary: ['thinking'], content: [] },
+            command,
             { type: 'agentMessage', text: 'All tests passed' },
-            { type: 'future_item_type', text: 'does not crash even though it is unknown' },
+            future,
           ],
         },
       ],
       100,
     )
+    const live = (item: object) =>
+      ['item/started', 'item/completed']
+        .flatMap((method) => normalizeNotification('', { method, params: { item } }))
+        .filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
+        .map((event) => ({ role: 'system', event, ts: 1_700_000_000_000 }))
     expect(out).toEqual([
       { role: 'user', text: 'Run the tests', ts: 1_700_000_000_000 },
+      ...live(command),
       { role: 'assistant', text: 'All tests passed', ts: 1_700_000_000_000 },
+      ...live(future),
     ])
+    expect(out[1]).toMatchObject({ event: { type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'pnpm test' }, input: { command: 'pnpm test', cwd: '/p' } } })
+    expect(out[2]).toMatchObject({ event: { type: 'tool_result', callId: 'c1', ok: true, summary: 'ok' } })
   })
 
   /*
@@ -208,8 +317,8 @@ describe('codex — thread/list · thread/read', () => {
     expect(out).toEqual([
       { role: 'user', text: 'ready?', ts: 1000 },
       { role: 'assistant', text: 'ready', ts: 1000 },
-      { role: 'system', marker: 'compaction', ts: 2000 },
-      { role: 'system', marker: 'compaction', ts: 3000 },
+      { role: 'system', event: { type: 'compaction', sessionId: '', failed: false }, ts: 2000 },
+      { role: 'system', event: { type: 'compaction', sessionId: '', failed: false }, ts: 3000 },
       { role: 'user', text: 'and now?', ts: 3000 },
       { role: 'assistant', text: 'after', ts: 3000 },
     ])
@@ -221,7 +330,38 @@ describe('codex — thread/list · thread/read', () => {
         items: Array.from({ length: 10 }, (_, i) => ({ type: 'agentMessage', text: `m${i}` })),
       },
     ]
-    expect(turnsToHistory(turns, 3).map((m) => (m.role === 'system' ? m.marker : m.text))).toEqual(['m7', 'm8', 'm9'])
+    expect(turnsToHistory(turns, 3).map((m) => (m.role === 'system' ? m.event.type : m.text))).toEqual(['m7', 'm8', 'm9'])
+  })
+
+  it("counts the words and compactions toward the limit; a turn's tool rows ride along, an older turn's are cut (#843)", () => {
+    const turn = (i: number) => ({
+      items: [
+        { type: 'userMessage', content: [{ type: 'text', text: `q${i}` }] },
+        { type: 'commandExecution', id: `c${i}`, command: 'ls', status: 'completed', aggregatedOutput: 'a' },
+        { type: 'agentMessage', text: `a${i}` },
+      ],
+    })
+    const lines = (n: number) =>
+      turnsToHistory([turn(0), turn(1), turn(2)], n).map((m) => (m.role === 'system' ? `${m.event.type}:${(m.event as { callId?: string }).callId}` : m.text))
+    expect(lines(3)).toEqual(['a1', 'q2', 'tool_call:c2', 'tool_result:c2', 'a2'])
+    expect(lines(4)).toEqual(['q1', 'tool_call:c1', 'tool_result:c1', 'a1', 'q2', 'tool_call:c2', 'tool_result:c2', 'a2'])
+    expect(lines(0)).toEqual([])
+    expect(lines(100)).toHaveLength(12)
+  })
+
+  it('keeps the newest calls up to the row cap, and cuts a long output, in one import (#843 review)', () => {
+    const calls = Array.from({ length: HISTORY_TOOL_ROWS }, (_, i) => ({ type: 'commandExecution', id: `c${i}`, command: 'ls', status: 'completed', aggregatedOutput: i === HISTORY_TOOL_ROWS - 1 ? 'x'.repeat(HISTORY_OUTPUT_CHARS * 3) : 'a' }))
+    const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'text', text: 'go' }] }, ...calls, { type: 'agentMessage', text: 'done' }] }], 100)
+    const tools = out.flatMap((h) => (h.role === 'system' && h.event.type !== 'compaction' ? [h.event] : []))
+    expect(tools).toHaveLength(HISTORY_TOOL_ROWS)
+    // The newest half of the calls, each with its result
+    expect(tools[0]).toMatchObject({ type: 'tool_call', callId: `c${HISTORY_TOOL_ROWS / 2}` })
+    expect(out[0]).toEqual({ role: 'user', text: 'go' })
+    expect(out.at(-1)).toEqual({ role: 'assistant', text: 'done' })
+    const long = tools.at(-1) as { output: string; summary: string }
+    expect(long.output.length).toBeLessThan(HISTORY_OUTPUT_CHARS + 100)
+    expect(long.output).toMatch(/the rest was not read back: 60000 characters in all\)$/)
+    expect(long.summary).toHaveLength(2000)
   })
 
   it('gives an empty conversation when turns is missing or malformed', () => {
@@ -331,7 +471,9 @@ describe('codex history read in pages (#342)', () => {
     const { request, calls } = pager(turns)
     const out = await readThreadHistory(request, 'x', 600)
     expect(out).toEqual(turnsToHistory(turns, 600))
-    expect(out.filter((m) => m.role === 'system')).toEqual([{ role: 'system', marker: 'compaction', ts: 5000 }])
+    expect(out.filter((m) => m.role === 'system' && m.event.type === 'compaction')).toEqual([
+      { role: 'system', event: { type: 'compaction', sessionId: '', failed: false }, ts: 5000 },
+    ])
     expect(calls).toHaveLength(Math.ceil(23 / HISTORY_PAGE_TURNS))
   })
 

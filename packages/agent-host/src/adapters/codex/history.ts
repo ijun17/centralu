@@ -1,6 +1,8 @@
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { finite, trimmed } from '../../json-value.js'
+import { countsAsLine, HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
+import { normalizeNotification } from './normalize.js'
 import { withCodexClient } from './short-lived.js'
 
 /**
@@ -88,7 +90,8 @@ export async function readThreadHistory(
   threadId: string,
   limit: number,
 ): Promise<HistoryMessage[]> {
-  const newestFirst: unknown[] = []
+  /** Each page's lines, read once (oldest first within the page), newest page first */
+  const pages: HistoryMessage[][] = []
   let lines = 0
   let cursor: string | null = null
   try {
@@ -101,8 +104,9 @@ export async function readThreadHistory(
         ...(cursor ? { cursor } : {}),
       })) as { data?: unknown; nextCursor?: unknown } | undefined
       const turns = Array.isArray(page?.data) ? page.data : []
-      newestFirst.push(...turns)
-      lines += turnsToHistory(turns, Number.POSITIVE_INFINITY).length
+      const pageLines = turnLines([...turns].reverse())
+      pages.push(pageLines)
+      lines += pageLines.filter(countsAsLine).length
       cursor = typeof page?.nextCursor === 'string' && page.nextCursor && turns.length > 0 ? page.nextCursor : null
     } while (cursor && lines < limit)
   } catch (err) {
@@ -110,7 +114,7 @@ export async function readThreadHistory(
     if (!isUnknownMethod(err)) throw err
     return readWholeThread(request, threadId, limit)
   }
-  return turnsToHistory(newestFirst.reverse(), limit)
+  return lastLines(pages.reverse().flat(), limit)
 }
 
 /** The path for a Codex that predates `thread/turns/list`: the whole thread in one response */
@@ -163,45 +167,54 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
   return out
 }
 
-/** Turns, oldest first, into a list of conversation lines. Trims from the older side when it exceeds the limit */
+/**
+ * Turns, oldest first, into a list of conversation lines. Trims from the older side when the lines that count exceed
+ * the limit (`lastLines`: the words and compactions; a turn's tool rows ride along)
+ */
 export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] {
+  return lastLines(turnLines(turns), limit)
+}
+
+/** Turns, oldest first, into every line they leave */
+function turnLines(turns: unknown): HistoryMessage[] {
   const list = Array.isArray(turns) ? turns : []
   const out: HistoryMessage[] = []
   for (const t of list) {
     const turn = (t ?? {}) as Record<string, unknown>
     const at = ms(turn.startedAt)
     const items = Array.isArray(turn.items) ? turn.items : []
-    for (const i of items) {
-      const msg = itemToMessage(i, at)
-      if (msg) out.push(msg)
-    }
+    for (const i of items) out.push(...itemToMessages(i, at))
   }
-  return out.length > limit ? out.slice(out.length - limit) : out
+  return out
 }
 
 /**
- * A ThreadItem into one line of conversation.
+ * A ThreadItem into the lines of conversation it leaves.
  *
- * Only picks up the kinds we know about (userMessage, agentMessage, contextCompaction). Everything else
- * (reasoning, commandExecution, fileChange, ...) is **passed over as unknown** — even if codex
- * adds a new item kind, this does not break, it just does not show up.
+ * The person's and the model's words are read here: a `userMessage` with injected blocks stripped, an `agentMessage`
+ * whole (live, its text arrives as deltas). Every other item is read by the live normalizer, as if it had started and
+ * completed while the app watched (#843), so it leaves what it would have left live: a tool card (a command, a file
+ * change, an MCP call, a search, an agent launch, a kind Codex adds later) with its input and result, and a compaction
+ * marker for a `contextCompaction` (#303). Reasoning and the review and image-view items leave nothing that is kept
+ * (`historyEvents`). Before #843 only the words and compactions came back, so an imported thread showed none of its
+ * tool calls where a watched one did.
  *
- * A compaction is kept as a marker (#303). Measured (codex-cli 0.147.0, 0.153.4 and 0.160.0, 2026-10-04):
- * `thread/read` returns it as `{ type: 'contextCompaction', id }` in the turn where it ran — a turn of its own for a
- * manual compaction, and ahead of the userMessage for an automatic one — so its position among the lines is right.
+ * A compaction's place is right: measured (codex-cli 0.147.0, 0.153.4 and 0.160.0, 2026-10-04), `thread/read` returns
+ * it as `{ type: 'contextCompaction', id }` in the turn where it ran — a turn of its own for a manual compaction, and
+ * ahead of the userMessage for an automatic one.
  */
-function itemToMessage(item: unknown, ts?: number): HistoryMessage | null {
+function itemToMessages(item: unknown, ts?: number): HistoryMessage[] {
   const it = (item ?? {}) as Record<string, unknown>
-  if (it.type === 'contextCompaction') return { role: 'system', marker: 'compaction', ts }
   if (it.type === 'agentMessage') {
     const text = trimmed(it.text)
-    return text ? { role: 'assistant', text, ts } : null
+    return text ? [{ role: 'assistant', text, ts }] : []
   }
   if (it.type === 'userMessage') {
     const text = stripInjectedBlocks(userInputText(it.content))
-    return text ? { role: 'user', text, ts } : null
+    return text ? [{ role: 'user', text, ts }] : []
   }
-  return null
+  const live = (method: string) => normalizeNotification(HISTORY_SESSION, { method, params: { item: it } })
+  return historyEvents([...live('item/started'), ...live('item/completed')], ts)
 }
 
 /** Only the text the person typed, out of UserInput[]. Image and file attachments are excluded from display */

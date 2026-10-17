@@ -43,6 +43,14 @@ export function targetFor(platform, arch) {
 }
 
 /**
+ * Whether replacing a file by rename fails while another program has the target open (a reader, a virus scanner):
+ * Windows, which then answers EPERM, EBUSY or EACCES for a moment. Elsewhere a rename over an open file just works.
+ */
+export function renameWaitsForReaders(platform = process.platform) {
+  return platform === 'win32'
+}
+
+/**
  * The file that proves the artifact is there and is what gets started.
  *
  * On macOS and Linux that is the artifact itself (a bundle handed to `open`, an AppImage

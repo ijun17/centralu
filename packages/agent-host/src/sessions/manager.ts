@@ -3216,6 +3216,7 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
+      listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
         return self.agentRuns
       },

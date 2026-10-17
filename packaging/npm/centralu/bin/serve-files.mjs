@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
-import { isAlive, replaceFile } from './serve-util.mjs'
+import { isAlive, replaceFile, sleepSync } from './serve-util.mjs'
 
 /**
  * The file in the data folder that holds the token and the port, mode 0600.
@@ -30,14 +30,29 @@ export function serveDataDir(env, home) {
   return env.CC_DATA_DIR || join(home, '.centralu')
 }
 
-/** The state, or null when there is none yet or it cannot be read as one */
-export function readServeState(dataDir) {
-  let raw
-  try {
-    raw = readFileSync(join(dataDir, SERVE_STATE_FILE), 'utf8')
-  } catch {
-    return null
+/**
+ * The state, or null when there is none yet or it cannot be read as one. A file that is refused (Windows, while a
+ * writer or a scanner has it) or does not parse is read again a few times before it counts as unreadable: a
+ * `--detach` waiting for the port reads it while the launcher replaces it (#1041).
+ */
+export function readServeState(dataDir, { tries = 5, sleep = sleepSync } = {}) {
+  const file = join(dataDir, SERVE_STATE_FILE)
+  for (let i = 1; ; i++) {
+    let raw
+    try {
+      raw = readFileSync(file, 'utf8')
+    } catch (e) {
+      if (e?.code === 'ENOENT' || i >= tries) return null
+      sleep(10 * i)
+      continue
+    }
+    const state = parseServeState(raw)
+    if (state || i >= tries) return state
+    sleep(10 * i)
   }
+}
+
+function parseServeState(raw) {
   try {
     const v = JSON.parse(raw)
     if (typeof v?.token !== 'string' || v.token.length < 32) return null
