@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { defaultCapabilities } from '../capabilities.js'
 import { changedFileCount, type NormalizedEvent } from '@cc/protocol'
 import type { AgentPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
@@ -127,20 +127,12 @@ export class MockPlatform implements Platform {
     if (opts.now) this.clock.now = opts.now
   }
 
-  readonly capabilities = {
-    // A browser has no window controls to leave room for, and E2E runs against this
-    // mock — so the header it measures starts at the window edge.
-    windowControlsInset: 0,
-    // This mock has no OS to ask. Settles on the Mac notation as the answer — both development
-    // and e2e run on a Mac, and guessing the keyboard here would make the result depend on
-    // whatever machine the test happens to run on.
-    shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
-    // Same reason: settles on the Mac name as the answer — guessing the machine e2e runs on
-    // would make what gets written on screen vary from test to test.
-    fileManagerName: 'Finder',
-    // E2E drives this mock in Chromium and in WebKit, and the engine running it is the real one
-    frameDragEndInPage: frameDragEndInPage(),
-  }
+  /*
+   * The defaults, with the window edge where E2E measures the header from. The file manager settles on the Mac name:
+   * guessing the machine e2e runs on would make what gets written on screen vary from test to test. E2E drives this
+   * mock in Chromium and in WebKit, and the engine running it is the real one.
+   */
+  readonly capabilities = defaultCapabilities({ fileManagerName: 'Finder' })
 
   /** The channel through which tests inject events */
   emit(event: NormalizedEvent): void {

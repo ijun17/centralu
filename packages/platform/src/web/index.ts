@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { defaultCapabilities } from '../capabilities.js'
 import type {
   Attachment,
   ApprovalDecision,
@@ -19,6 +19,7 @@ import type {
   ConnectionState,
   MachineRef,
   Platform,
+  PlatformCapabilities,
   ProjectPort,
   SystemPort,
   Unsubscribe,
@@ -50,8 +51,11 @@ export type WebPlatformOptions = {
     trash(absPath: string): Promise<void>
     reveal(absPath: string): Promise<void>
   }
-  /** Answered by the shell, for the same reason as the keyboard labels — a browser has no file manager to ask */
-  fileManagerName?: string
+  /**
+   * What the desktop shell answered about the machine (the keyboard, the window controls, the file manager), over the
+   * defaults a browser keeps — so the Tauri build hands over one capability object instead of building a second one
+   */
+  capabilities?: Partial<PlatformCapabilities>
 }
 
 /**
@@ -658,23 +662,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       answerApply: (a) => rpc.call('updates.answerApply', a),
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
-    capabilities: {
-      // The browser draws no window controls over our page.
-      windowControlsInset: 0,
-      /*
-        A page could sniff the keyboard from the user agent, and deliberately does not.
-        This build is the dev server and the contract-test harness, both of which run on a
-        Mac, and a capability that answers differently depending on the machine running the
-        suite is one the contract test cannot pin. The shipped desktop app asks Rust
-        (`packages/platform/src/tauri/index.ts`), which is the answer that has to be right.
-      */
-      shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
-      // Same reason as the keyboard above: the page does not guess. The desktop build
-      // passes the shell's answer in; the browser gets the phrase that is true anywhere.
-      fileManagerName: opts.fileManagerName ?? 'file manager',
-      // Unlike the keyboard, the engine is the page's own: the dev browser is whichever one runs it
-      frameDragEndInPage: frameDragEndInPage(),
-    },
+    // The page does not guess the machine: the desktop build passes the shell's answers in (`defaultCapabilities`)
+    capabilities: defaultCapabilities(opts.capabilities),
     async dispose() {
       unsubscribeEndpoint?.()
       rpc.close()

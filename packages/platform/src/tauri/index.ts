@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { ANY_FILE_MANAGER, MAC_SHORTCUT_KEYS, badgeCount } from '../capabilities.js'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
@@ -325,7 +325,7 @@ export class TauriSystemPort implements SystemPort {
   }
 
   async setBadge(count: number): Promise<void> {
-    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) }).catch(rethrowAsError)
+    await invoke('set_badge', { count: badgeCount(count) }).catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
@@ -505,13 +505,11 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   // The fallback is the Mac spelling because a failure here can only mean the command is
   // missing from the handler list, which is a build-time mistake affecting every platform
   // equally — and every other implementation in this package answers the same way.
-  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch(
-    (): ShortcutKeys => ({ mod: '⌘', alt: '⌥', join: '' }),
-  )
+  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch((): ShortcutKeys => MAC_SHORTCUT_KEYS)
 
   // And the same again for what this desktop calls its file manager (#19), so the context
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
-  const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
+  const fileManagerName = await invoke<string>('file_manager_name').catch(() => ANY_FILE_MANAGER)
 
   // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
   // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
@@ -525,7 +523,8 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
-    fileManagerName,
+    // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
+    capabilities: { windowControlsInset, shortcutKeys, fileManagerName },
     /*
       The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
       A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
@@ -553,13 +552,6 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
         }
       : {}),
     system: new TauriSystemPort(),
-    capabilities: {
-      windowControlsInset,
-      shortcutKeys,
-      fileManagerName,
-      // WKWebView or WebKitGTK answers false, WebView2 true: the webview answers for itself
-      frameDragEndInPage: frameDragEndInPage(),
-    },
   }
 }
 

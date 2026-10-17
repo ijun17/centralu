@@ -1,4 +1,5 @@
 import type { AlertKind, SystemPort } from '../ports/index.js'
+import { badgeCount } from '../capabilities.js'
 import { deliver } from '../deliver.js'
 
 /** The OS side the mock stands in for: notifications, the dock badge, pickers, the window and app links */
@@ -37,7 +38,7 @@ export class SystemMock {
       this.alerts.push({ kind, sound })
     },
     setBadge: async (count: number) => {
-      this.badge = count
+      this.badge = badgeCount(count)
     },
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
