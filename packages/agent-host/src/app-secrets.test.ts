@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -120,6 +120,17 @@ describe('set or unset is visible, but the value is not', () => {
     // Clearing it returns it to not set
     await setSecret('API_KEY', null)
     expect(info().secrets?.[0]).toEqual({ name: 'API_KEY', set: false })
+  })
+
+  // #944: the Secrets section showed every value missing, with no word of why
+  it('the list says the saved secrets could not be read, on an app that declares any, until that app has a value', async () => {
+    writeFileSync(join(dataRoot, 'app-secrets.json'), '{"p1/keys": {"API_KEY": "sk-')
+    plant([], ['API_KEY'])
+    make()
+    expect(info().secrets).toEqual([{ name: 'API_KEY', set: false }])
+    expect(info().secretsUnreadable).toEqual({ movedTo: expect.stringMatching(/^app-secrets\.json\.unreadable-\d+$/), at: expect.any(Number) })
+    await setSecret('API_KEY', VALUE)
+    expect(info().secretsUnreadable).toBeUndefined()
   })
 
   it('an app that declares no secrets has no field for it', () => {

@@ -113,10 +113,12 @@ export class AppStartEnv {
   }
 
   /** Whether a value is set for each declared secret (E, the secrets section) — just the name and whether it is set. No field at all if there is no declaration */
-  secretSlots(e: AppEntry): Pick<ExternalAppInfo, 'secrets'> {
+  secretSlots(e: AppEntry): Pick<ExternalAppInfo, 'secrets' | 'secretsUnreadable'> {
     const declared = e.manifest?.secrets ?? []
     if (declared.length === 0) return {}
     const stored = this.secrets.names(this.appKey(e.ref))
-    return { secrets: declared.map((name) => ({ name, set: stored.has(name) })) }
+    // This app's: one app's value entered again says nothing of another's (#944, #993 review)
+    const trouble = this.secrets.trouble(this.appKey(e.ref))
+    return { secrets: declared.map((name) => ({ name, set: stored.has(name) })), ...(trouble ? { secretsUnreadable: trouble } : {}) }
   }
 }

@@ -18,12 +18,16 @@ import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog
  */
 export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   const slots = app.info.secrets ?? []
+  const trouble = app.info.secretsUnreadable
   if (slots.length === 0) return null
+  // Still in place and unreadable: nothing can be saved over it, and the Save button says why instead of failing
+  const stuck = trouble?.movedTo === null ? 'The saved secrets file cannot be read, so nothing is saved until it is fixed or removed' : null
   return (
     <div data-testid="app-secrets">
+      {trouble && <SecretsUnreadable movedTo={trouble.movedTo} />}
       <ul className="space-y-2">
         {slots.map((s) => (
-          <SecretRow key={s.name} app={app} name={s.name} set={s.set} />
+          <SecretRow key={s.name} app={app} name={s.name} set={s.set} stuck={stuck} />
         ))}
       </ul>
       <p className="mt-2 text-xs leading-body text-ink-faint">
@@ -33,7 +37,30 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
-function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; set: boolean }) {
+/**
+ * The saved secrets could not be read (#944): said once above the fields. On screen nothing said it before, and a
+ * section showing every value missing read as values never entered. Moved aside, the values are in that copy; the line
+ * goes once a value is saved again. Still in place, the file has to be fixed or removed first.
+ */
+function SecretsUnreadable({ movedTo }: { movedTo: string | null }) {
+  return (
+    <p className="mb-2 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" role="alert" data-testid="secrets-unreadable">
+      {movedTo ? (
+        <>
+          The saved secrets could not be read and were moved to <span className="font-mono">{movedTo}</span> in
+          Centralu’s data folder. Enter them again, or restore the file.
+        </>
+      ) : (
+        <>
+          The saved secrets file (<span className="font-mono">app-secrets.json</span> in Centralu’s data folder) cannot
+          be read. Nothing can be saved until it is fixed or removed.
+        </>
+      )}
+    </p>
+  )
+}
+
+function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: string; set: boolean; stuck: string | null }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const refresh = useStore((s) => s.refreshExternalApps)
@@ -97,7 +124,7 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
           className="mt-1.5 flex items-center gap-1.5"
           onSubmit={(e) => {
             e.preventDefault()
-            if (draft && !busy) void write(draft)
+            if (draft && !busy && stuck === null) void write(draft)
           }}
         >
           <input
@@ -126,7 +153,8 @@ function SecretRow({ app, name, set }: { app: ExternalCatalogApp; name: string; 
           )}
           <button
             className="shrink-0 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
-            disabled={!draft || busy}
+            disabled={!draft || busy || stuck !== null}
+            title={stuck ?? undefined}
             data-testid="secret-save"
           >
             {busy ? 'Saving…' : 'Save'}
