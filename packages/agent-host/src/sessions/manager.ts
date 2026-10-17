@@ -19,6 +19,7 @@ import { SessionAppWiring, type SessionAppWiringHost } from './session-app-wirin
 import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
+import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -27,7 +28,7 @@ import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
 import { orchestratorMemory } from './transcript-view.js'
 import { homedir } from 'node:os'
-import { basename, join, relative, resolve, sep } from 'node:path'
+import { basename, join } from 'node:path'
 import type {
   RebuildCause,
   ApprovalDecision,
@@ -41,15 +42,12 @@ import type {
   SavedCommand,
   SessionInfo,
   SessionState,
-  Interruption,
   ToolName,
   SettingsApplied,
   FsResolvePurpose,
 } from '@cc/protocol'
 import {
   applyBackgroundTasks,
-  applySessionState,
-  nextStateFor,
   sessionOnlyAlways,
   DATA_DIR,
   oneLineText,
@@ -85,7 +83,6 @@ import {
   gitSummary,
   gitStatusFiles,
   gitDiff,
-  gitHeadSha,
   gitLog,
   gitCommitDetail,
   gitBranches,
@@ -105,7 +102,7 @@ import {
 } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
-import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
+import { attachCommitSessions } from '../dev-services/git-attrib.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
@@ -114,11 +111,11 @@ import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 import { canonicalPath, isInside, pathParts } from '../dev-services/path-guard.js'
 import { HostCards, type HostCardsHost } from './host-cards.js'
-import { ExternalConversations, type ExternalConversationsHost, truncate } from './external-conversations.js'
+import { ExternalConversations, type ExternalConversationsHost } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
 import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
-import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
+import type { AppMessageSource, AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
@@ -126,15 +123,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost
-
-function untrustedSourceSessionNotification(sourceSessionId: string): string {
-  return (
-    '[Centralu] intersession message available.\n' +
-    `sourceSessionId: ${sourceSessionId}\n` +
-    'Use read_session(sourceSessionId) if you need the untrusted session transcript.'
-  )
-}
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -244,6 +233,8 @@ export class SessionManager {
   private readonly linkedReports: LinkedReports
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
   private readonly starts: SessionStarts
+  /** What a session's tool says, received and settled, and what goes into its conversation (session-events.ts) */
+  private readonly events: SessionEvents
   /**
    * Session currently being resumed -> its promise.
    *
@@ -347,6 +338,7 @@ export class SessionManager {
     this.hostCards = new HostCards(this.parts())
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
+    this.events = new SessionEvents(this.parts())
     this.proposals = new OrchestratorProposals(
       this.store.settings,
       () => this.apps.appsHub?.rt,
@@ -1049,7 +1041,7 @@ export class SessionManager {
           if (inTurn(m.state)) {
             // The same statement the window gets, through the same rules (#428)
             const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
-            this.applyStateHint(change, m)
+            this.events.applyStateHint(change, m)
             this.interruptions.markStoppedByQuit(m, true)
             this.store.sessions.upsertSession(m)
             this.emit(change)
@@ -1289,186 +1281,9 @@ export class SessionManager {
     }
   }
 
-  /** Receive event -> update metadata -> persist message -> broadcast */
-  private onEvent(raw: NormalizedEvent, from: SessionHandle | null = null): void {
-    const e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
-    /*
-     * **A message from a handle that has already been set aside is never accepted** (#157) — anything
-     * not from the handle currently registered for that session is dropped. It never enters the crash
-     * branch (does not close the new handle), and does not record either the text from the turn that
-     * was winding down or its turn_complete.
-     *
-     * The only exception is a message that closes something showing on screen — the approval and
-     * question cards, and the agent card, that a handle releases as it closes. Dropping those too
-     * would leave the card stuck forever (see the comment on dispose). The manager calls the dispose
-     * that produces that message **before** removing the handle, so a different message issued during
-     * close (notice of a message that could not be sent) still arrives as a message from the
-     * registered handle.
-     */
-    if (
-      from &&
-      e.sessionId &&
-      this.handles.get(e.sessionId) !== from &&
-      e.type !== 'approval_resolved' &&
-      e.type !== 'question_resolved' &&
-      e.type !== 'tool_result' &&
-      e.type !== 'background_tasks'
-    ) {
-      return
-    }
-    /*
-     * A set-aside handle's background work (#290) — only its endings are its to say. Its tasks went with its process,
-     * and the live set belongs to the handle now registered, which a late empty set from the old one must not wipe.
-     */
-    if (from && e.type === 'background_tasks' && this.handles.get(e.sessionId) !== from) {
-      const m = this.meta.get(e.sessionId)
-      if (!m || !e.ended?.length) return
-      return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
-    }
-    const unborn = e.sessionId && !this.meta.has(e.sessionId) ? this.record.unborn.get(e.sessionId) : undefined
-    if (unborn) {
-      unborn.push(e)
-      return
-    }
-    if (e.type === 'subagent_event') {
-      this.record.recordSubagentStep(e)
-      return
-    }
-    if (e.type === 'settings_changed' && e.by === 'tool') {
-      this.record.recordToolSettings(e)
-      return
-    }
-    // Text the tool repeats on every start (#304): one stored line per session is enough
-    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.handoffs.hasNotice(e.sessionId, e.text)) return
-    let seq: number | null = null
-    /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
-     * itself */
-    let endedTurn = false
-    /** The session's interruption before this event (#698); `undefined` when the event belongs to no known session */
-    let interruptionBefore: Interruption | null | undefined
-    if (e.sessionId) {
-      const m = this.meta.get(e.sessionId)
-      if (m) {
-        const handle = this.handles.get(e.sessionId)
-        if (handle?.externalId && m.externalId !== handle.externalId) {
-          m.externalId = handle.externalId
-        }
-        const wasBusy = inTurn(m.state)
-        const before = m.state
-        this.applyStateHint(e, m)
-        this.cardRests.note(e, m.id, before)
-        interruptionBefore = m.interruption ?? null
-        this.interruptions.trackInterruption(e, m, wasBusy && !inTurn(m.state))
-        // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
-        if (this.restartPolicy.backgroundUnknown.has(m.id)) this.restartPolicy.backgroundUnknown.set(m.id, Date.now())
-        /*
-         * A builder session's turn ended (M4 C-4) — this is the moment to relaunch that app from its
-         * files. It happens once, right here, rather than every time the app's folder changes: an app
-         * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
-         * changed or whether a call is still in flight.
-         */
-        // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
-        if (!wasBusy && inTurn(m.state)) this.children.queuedTurnStarted(m.id)
-        /*
-         * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
-         * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
-         * goes in. Left delivering, the session counted as busy for every requester and its queue never moved again. Only
-         * once the input was handed to the process: one the tool reports while the session wakes for it (Codex's account-wide
-         * limit, a crash) refuses nothing yet, and the input still goes in or the delivery fails on its own.
-         */
-        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id) && this.queue.queuedHandedIn.has(m.id)) {
-          this.children.queuedTurnStarted(m.id)
-          endedTurn = true
-        }
-        if (wasBusy && !inTurn(m.state)) {
-          endedTurn = true
-          const ref = this.appSessions.builderRefOf(m)
-          if (ref) this.apps.appsHub?.rt.builderTurnEnded(ref)
-        }
-        seq = this.record.persistMessage(e, m)
-        // An image is persisted as a file (#40, part 2) — it is async, so no seq is taken here
-        if (e.type === 'message_image') void this.record.persistImage(e, m)
-        // Commit attribution (#50) — caught in passing whenever a git commit tool call goes by
-        if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
-        this.store.sessions.upsertSession(m)
-      }
-      /*
-       * **A dead process's handle is removed right on the spot.**
-       *
-       * Raising adapter_crashed while leaving the handle in place means send() would only check
-       * handles.has, push onto an already-dead queue, and **the next message would silently
-       * disappear** (until an explicit restart). Removing it means send()'s "resume if missing" path
-       * becomes automatic recovery on its own.
-       */
-      // A lock error after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread — the same as a crash
-      if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
-        const dead = this.handles.get(e.sessionId)
-        if (dead) {
-          // Closed before it is removed — so a message issued during close (notice of an unsent message)
-          // still arrives as a message from the registered handle (#157)
-          void dead.dispose().catch(() => {})
-          this.handles.delete(e.sessionId)
-          this.running.delete(e.sessionId)
-          // No process any more, and none coming by itself (#648): the windows stop showing it live
-          this.emit({ type: 'session_live', sessionId: e.sessionId, live: false, reason: 'crashed' })
-        }
-      }
-    }
-    // An event that gets recorded carries its assigned in-session seq along with it — the basis for the UI's
-    // unread tracking
-    // Capture the answer before an event subscriber can send more input into this conversation.
-    const run = e.sessionId ? this.agentRuns.get(e.sessionId) : undefined
-    // A wait still reading this turn is owed its end (#698); one that settled earlier is left from a turn before
-    const runOpen = !!run && !run.finished
-    /*
-     * A delegation nobody is waiting on now (ask_project or start_agent past its bound) owes its caller nothing until
-     * it asks again; that caller is who hears of a stop. A call still waiting reads the stop itself.
-     */
-    const delegation = runOpen ? [...this.children.delegations.values()].find((d) => d.wait === run) : undefined
-    const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
-    run?.onEvent(e)
-    if (e.sessionId) for (const observer of this.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
-    this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
-    this.closeIntoRest(e)
-    // After the event that caused it, so a window reads the error first and the reason for it second (#698)
-    const nowInterrupted = e.sessionId ? this.meta.get(e.sessionId)?.interruption ?? null : null
-    if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
-      this.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
-    }
-    // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
-    const owed = endedTurn && !!e.sessionId && (this.children.awaitingReport.has(e.sessionId) || waited)
-    /*
-     * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
-     * turn_complete, but two adapters do not emit turn_complete for a failed turn (emitting it there
-     * too would end the state as "awaiting input" and hide the failure). So a failed run was never
-     * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
-     */
-    // A wait settled in an earlier turn holds that turn's answer, not this one's
-    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined)
-    if (endedTurn && e.sessionId && !owed) void this.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
-    // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
-    if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
-    if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
-    // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
-    if (endedTurn && e.sessionId && !this.hubAskTurns.has(e.sessionId) && this.store.settings.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.settings.deleteAppSetting(hubAskDepthKey(e.sessionId))
-    // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
-    // adapter's card just closed, or a card that had been hiding ours just closed
-    if (e.type === 'approval_resolved' && e.sessionId) this.hostCards.raiseHostAsks(e.sessionId)
-    /*
-     * A card still standing when the turn ends is raised again (#673): a start_agent request that answered "pending"
-     * outlives the call, and the turn's own events cleared the slot meanwhile. An error is left showing; the card
-     * comes back at the next turn's end
-     */
-    if (endedTurn && e.sessionId && this.meta.get(e.sessionId)?.state !== 'error') this.hostCards.raiseHostAsks(e.sessionId)
-    // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
-    // so nothing happens
-    // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
-    if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
-    if (endedTurn && e.sessionId) this.restartPolicy.applyDeferredRestart(e.sessionId)
-    // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
-    if (e.type === 'background_tasks' && e.sessionId) this.restartPolicy.applyDeferredRestart(e.sessionId)
-    // A paused report's work may just have ended (#721)
-    if (e.type === 'background_tasks' && e.sessionId && this.children.pausedReports.has(e.sessionId)) this.reports.settlePausedReport(e.sessionId)
+  /** `SessionEvents.onEvent` (session-events.ts), kept on the manager for its callers */
+  private onEvent(...a: Parameters<SessionEvents['onEvent']>): ReturnType<SessionEvents['onEvent']> {
+    return this.events.onEvent(...a)
   }
 
   /** A queued note not yet taken, on the delegation's wait or an observer's own reader (#646): the session is not between turns */
@@ -1478,129 +1293,12 @@ export class SessionManager {
     return false
   }
 
-  /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
-  private applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
-    const from = m.state
-    // An illegal transition is ignored and logged, as the window does (docs/state-management.md §2)
-    if (applySessionState(m, e, Date.now()).illegal) console.warn(`[agent-host] ignored ${e.type} for ${m.id.slice(0, 8)}: ${from} cannot go to ${nextStateFor(e)}`)
-    this.trackLiveFacts(e, m)
-  }
-
   /** The rest an adapter's card raised between turns was raised in (`CardRests`, card-rest.ts), written to the store */
   private cardRests: CardRests
-
-  /**
-   * An adapter's card raised between turns closes back into that rest once answered (#428), as the host's own cards do
-   * (`restAfterCard`, host-cards.ts): without `onEvent`, since no turn ended (no report, no deferred restart).
-   */
-  private closeIntoRest(e: NormalizedEvent): void {
-    const m = e.sessionId ? this.meta.get(e.sessionId) : undefined
-    const rest = m ? this.cardRests.restAfter(e, m) : null
-    if (!m || rest === null) return
-    this.settleState(m, { type: 'state_change', sessionId: m.id, state: rest })
-  }
-
-  /**
-   * A state the host itself states (a resume, a tool change, a card's rest): through the same rules as an event, so the
-   * stored copy is what the window makes of the same `state_change` (#428), then stored and broadcast. Not `onEvent`:
-   * no turn ended.
-   */
-  private settleState(m: SessionInfo, change: Extract<NormalizedEvent, { type: 'state_change' }>): void {
-    // The host has said what the state is: no card rest or asked-for turn of before stands over it
-    this.cardRests.forget(m.id)
-    this.applyStateHint(change, m)
-    this.store.sessions.upsertSession(m)
-    this.emit(change)
-    // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
-    if (!inTurn(m.state) && this.children.queued.has(m.id)) this.queue.scheduleDrain(m.id)
-  }
-
-  /**
-   * Records the **live facts** in metadata that a reconnected UI needs to pick back up.
-   *
-   * While SessionInfo had none of these fields, a UI that disconnected and came back received only
-   * state=waiting_approval, and **had no payload to draw the approval card with** — with no requestId
-   * either, it could not even respond. These are never put in the DB (upsert does not know these
-   * fields) — if the host restarts, they really are gone. The cards, the activity and the limit are set with the
-   * state they belong to (`applySessionState`, protocol session-state.ts); these are the rest.
-   */
-  private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
-    switch (e.type) {
-      case 'usage_update':
-        m.usage = e.tokens
-        if (e.request) this.cacheLedger.record(m.tool, m.id, e.request)
-        break
-      case 'context_update':
-        m.context = { used: e.used, window: e.window, exactness: e.exactness }
-        break
-      case 'conversation_reset':
-        // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
-        m.context = null
-        this.cacheLedger.note(m.id, 'compaction')
-        break
-      case 'compaction':
-        // The conversation the next request sends begins with a summary the cache has never seen (§6.1)
-        this.cacheLedger.note(m.id, 'compaction')
-        break
-      case 'goal':
-        // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
-        // it on resume)
-        m.goal = e.goal
-        break
-      case 'background_tasks':
-        // The same merge the UI's reducer and the mock run (#290), so a reconnect reads back what the screen showed
-        m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
-        /*
-         * Kept for the host that may adopt this process (#648). Only the tool's own full list settles what an adopted
-         * process holds: a level built from an ending or a `/loop` timer says nothing of a shell this host never saw,
-         * and recording it would hand the next host a list it takes as complete.
-         */
-        if (e.snapshot) this.restartPolicy.backgroundUnknown.delete(m.id)
-        if (!this.restartPolicy.backgroundUnknown.has(m.id)) this.launches.rememberBackgroundTasks(m)
-        break
-      case 'agent_version':
-        // What the process says it runs (#297) replaces what was assumed when it started
-        m.agentVersion = e.version
-        break
-    }
-  }
 
   /** `SessionRecord.saveAttachment` (session-record.ts), kept on the manager for its callers */
   saveAttachment(...a: Parameters<SessionRecord['saveAttachment']>): ReturnType<SessionRecord['saveAttachment']> {
     return this.record.saveAttachment(...a)
-  }
-
-  /** A tool_call's callId -> the session that call's `git commit` belonged to (#50) */
-  private pendingCommits = new Map<string, string>()
-
-  private forgetCommits(sessionId: string): void {
-    for (const [callId, sid] of this.pendingCommits) if (sid === sessionId) this.pendingCommits.delete(callId)
-  }
-
-  /**
-   * Commit attribution with no hooks involved (#50). An agent's commit happens through a tool call,
-   * and its output already sits in this stream — the hash is picked up from the `[branch abc1234]`
-   * line, and if the output got truncated, the current HEAD is that commit. Nothing is written to the
-   * repository itself (decided 2026-08-23).
-   */
-  private observeCommit(e: Extract<NormalizedEvent, { type: 'tool_call' | 'tool_result' }>, m: SessionInfo): void {
-    if (e.type === 'tool_call') {
-      if (looksLikeGitCommit(e.summary.title)) this.pendingCommits.set(e.callId, m.id)
-      return
-    }
-    const sid = this.pendingCommits.get(e.callId)
-    if (!sid) return
-    this.pendingCommits.delete(e.callId)
-    const projectId = m.projectId
-    if (!e.ok || !projectId) return
-    const sha = parseCommitSha(e.summary)
-    if (sha) {
-      this.store.sessions.recordCommit(projectId, sha, sid)
-      return
-    }
-    void gitHeadSha(this.cwdOf(projectId))
-      .then((head) => head && this.store.sessions.recordCommit(projectId, head, sid))
-      .catch(() => {})
   }
 
   /**
@@ -1633,118 +1331,9 @@ export class SessionManager {
     return this.deliver(sessionId, text, undefined, undefined, false, app, place)
   }
 
-  /**
-   * The body of send() — takes one more flag for **whether this is an instruction or a relay** (#120).
-   *
-   * While the gate only looked at the sender's profile, a report from a manager or coordinator just
-   * passed straight through. That is because what a profile answers is "can this message be trusted
-   * as an instruction", not "is this someone else's words". A report **is someone else's words no
-   * matter who relays it**, so it is flagged right where the relaying happens. This flag is never
-   * exposed on send(), which anything else can call — a boundary that can be flipped on by accident
-   * is not a boundary.
-   */
-  private async deliver(
-    sessionId: string,
-    text: string,
-    attachments: Attachment[] | undefined,
-    from: { sessionId: string; name: string } | undefined,
-    /** Is this a body carrying over someone else's conversation (the report path)? An instruction is false —
-     * it must be the original text */
-    relayed: boolean,
-    /** If this message came from an inline app view, that app (M4 B-1). Reaches the agent wrapped as the
-     * app's text */
-    fromApp?: AppMessageSource,
-    /**
-     * Which route the app's text came through — an inline view's message (B-1), a pinned view's
-     * message (it came from outside the conversation, B-4), or work the app asked for (D-1) each get
-     * a different header (`appMessageFrame`)
-     */
-    fromAppVia: AppMessageVia = 'inline',
-    sendInput?: (handle: SessionHandle, text: string) => void,
-  ): Promise<void> {
-    const restarting = this.restartPolicy.deferredRestarts.get(sessionId)
-    if (restarting) await restarting
-    const m = this.openSession(sessionId)
-
-    /*
-     * A wake in progress is waited out, through the same call as the send that woke it (#839): its process is registered
-     * before the catch-up, and the message that woke it goes in only after that. Going straight to the process, a second
-     * send overtook it.
-     */
-    if (this.resuming.has(sessionId) && this.handles.has(sessionId)) await this.resumeSession(sessionId)
-    if (!this.handles.has(sessionId)) {
-      const r = await this.resumeSession(sessionId)
-      if (!r.resumed) {
-        throw rpcError(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`, 'session_not_found')
-      }
-    }
-
-    this.notBeingRemoved(sessionId)
-    const h = this.requireHandle(sessionId)
-    // A message from the person is always a message boundary — continuing after an interrupt means everything
-    // before it is one chunk (#66)
-    this.record.closeStream(sessionId)
-    const seq = this.store.messages.nextSeq(sessionId)
-    this.store.messages.appendMessages([
-      {
-        sessionId,
-        seq,
-        role: 'user',
-        kind: 'text',
-        // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
-        // image bytes back in
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(attachments?.length ? { attachments } : {}) },
-        ts: Date.now(),
-      },
-    ])
-    m.lastSeq = seq
-    m.lastReadSeq = seq // Something we sent counts as read
-    // A session's name is never coined from a message an app or another session sent (ask_project's task, a
-    // parent's note, an orchestrator's instruction, #646) — the name always comes from the person's own words
-    if (m.autoNamed && m.name === 'New session' && !fromApp && !from) {
-      m.name = truncate(text)
-      this.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
-    }
-    this.store.sessions.upsertSession(m)
-    /*
-     * **Announces that a message was added.**
-     *
-     * This never used to be announced. The UI was the only place that ever produced a user message,
-     * so the UI drawing its own was enough. That assumption broke once the orchestrator became a
-     * second producer — an injected message was saved, but it never showed up on screen at all.
-     */
-    this.emit({
-      type: 'user_message',
-      sessionId,
-      seq,
-      text,
-      ...(from ? { from } : {}),
-      ...(fromApp ? { fromApp } : {}),
-      // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
-      // — attachments have to ride along too, or the bubble is incomplete
-      ...(attachments?.length ? { attachments } : {}),
-    })
-    /*
-     * The one place that swaps a vendor adapter's input for a sourceSessionId wake — there are two branches.
-     *  - A relayed body: someone else's words no matter who sent them. Swapped unconditionally.
-     *  - A lower-privilege instruction with a known source: swapped only when it is going to a target
-     *    that has tools. An instruction between tool profiles, and an ordinary worker instruction, must
-     *    stay the original text (#90).
-     * Raw provenance stays in the store/UI, and the relayed body is only ever read as observation data via
-     * read_session.
-     */
-    const adapterText =
-      fromApp ? appMessageFrame(fromApp, text, fromAppVia)
-      // A hub's orchestrator directs as this host's own does (`sendFromHub`)
-      : from && (relayed || (this.tools.directs(sessionId) && !this.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
-        ? untrustedSourceSessionNotification(from.sessionId)
-        : attachments?.length
-          ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
-          : text
-    // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
-    this.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, adapterText)
-    else h.send(adapterText)
+  /** `SessionEvents.deliver` (session-events.ts), kept on the manager for its callers */
+  private deliver(...a: Parameters<SessionEvents['deliver']>): ReturnType<SessionEvents['deliver']> {
+    return this.events.deliver(...a)
   }
 
   /**
@@ -1845,7 +1434,7 @@ export class SessionManager {
      * saving meta as working, so a screen that reconnected and the orchestrator's list_sessions both
      * saw an interrupted turn as "still working" (the settings tool refused that session outright).
      */
-    this.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
+    this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
 
     // The new process only comes up once it is addressed (the same rule as resumeSession — launching it here
     // would run a tool that might never even be used)
@@ -2042,40 +1631,6 @@ export class SessionManager {
   /** `HandoffNotes.exportHandoffNote` (handoff-notes.ts), kept on the manager for its callers */
   exportHandoffNote(...a: Parameters<HandoffNotes['exportHandoffNote']>): ReturnType<HandoffNotes['exportHandoffNote']> {
     return this.handoffNotes.exportHandoffNote(...a)
-  }
-
-  /**
-   * Turns a touched file into a path relative to the project (#185).
-   *
-   * The tool gives an absolute path (Claude's `file_path`, Codex's `fileChange`). Entries in the file
-   * tree use paths relative to the project, so left as-is the "edited by agent" indicator never
-   * matched anything at all. Anything that already came as a relative path is read relative to the
-   * folder the session runs in. A path outside the project (a worktree session's own files, a
-   * settings file in the home directory) is discarded — that file does not exist in the project tree,
-   * and marking a different file that happens to share the same relative path would be a lie.
-   */
-  private projectRelative(e: Extract<NormalizedEvent, { type: 'files_touched' }>): NormalizedEvent {
-    const m = this.meta.get(e.sessionId)
-    let root: string
-    try {
-      if (!m?.projectId) return { ...e, paths: [] }
-      root = this.cwdOf(m.projectId)
-    } catch {
-      return { ...e, paths: [] }
-    }
-    const base = this.cwdFor(m)
-    // Both sides canonical (#428): a tool names its files under the real path of a root kept through a link (macOS's
-    // `/tmp` is `/private/tmp`), and compared as written they fell outside and were dropped
-    const rootReal = canonicalPath(root)
-    const paths = new Set<string>()
-    for (const p of e.paths) {
-      const target = canonicalPath(resolve(base, p))
-      const rel = relative(rootReal, target)
-      if (!rel || !isInside(rootReal, target)) continue
-      // git and the screen both speak in POSIX separators (#47) — so does a tree entry's path
-      paths.add(rel.replaceAll(sep, '/'))
-    }
-    return { ...e, paths: [...paths] }
   }
 
   private cwdOf(projectId: string | null): string {
@@ -2456,7 +2011,7 @@ export class SessionManager {
       appHostData: (...a) => self.appSessions.appHostData(...a),
       answerQuestion: (...a) => self.answerQuestion(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
-      applyStateHint: (...a) => self.applyStateHint(...a),
+      applyStateHint: (...a) => self.events.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askProject: (...a) => self.askProject(...a),
       askCapability: (...a) => self.hostCards.askCapability(...a),
@@ -2485,6 +2040,9 @@ export class SessionManager {
       },
       get cardRests() {
         return self.cardRests
+      },
+      get cards() {
+        return self.cards
       },
       get children() {
         return self.children
@@ -2524,7 +2082,7 @@ export class SessionManager {
       },
       firstTool: (...a) => self.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
-      forgetCommits: (...a) => self.forgetCommits(...a),
+      forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),
       handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
@@ -2543,10 +2101,16 @@ export class SessionManager {
         return self.handoffNotes
       },
       hasSession: (id) => self.meta.has(id),
+      get hubAskTurns() {
+        return self.hubAskTurns
+      },
       get hostCards() {
         return self.hostCards
       },
       inputsHeld: (...a) => self.inputsHeld(...a),
+      get interruptions() {
+        return self.interruptions
+      },
       isAppAgentSession: (...a) => self.apps.isAppAgentSession(...a),
       get keeperOpts() {
         return self.keeperOpts
@@ -2573,7 +2137,8 @@ export class SessionManager {
       },
       modelsWithin: (...a) => self.toolQueries.modelsWithin(...a),
       moveChildren: (...a) => self.handoffChildren.moveChildren(...a),
-      observeCommit: (...a) => self.observeCommit(...a),
+      notBeingRemoved: (...a) => self.notBeingRemoved(...a),
+      observeCommit: (...a) => self.events.observeCommit(...a),
       openSession: (...a) => self.openSession(...a),
       orchestratorMemory: (...a) => self.orchestratorMemory(...a),
       orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
@@ -2594,6 +2159,9 @@ export class SessionManager {
       projectRow: (...a) => self.projectRow(...a),
       projectTrusted: (...a) => self.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
+      get queue() {
+        return self.queue
+      },
       get quitNotices() {
         return self.quitNotices
       },
@@ -2609,8 +2177,12 @@ export class SessionManager {
       get recoveryRepair() {
         return self.recoveryRepair
       },
+      get reports() {
+        return self.reports
+      },
       rememberBackgroundTasks: (...a) => self.launches.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
+      requireHandle: (...a) => self.requireHandle(...a),
       requireAppAccess: (...a) => self.apps.requireAppAccess(...a),
       respondApproval: (...a) => self.respondApproval(...a),
       runAppAgent: (...a) => self.runAppAgent(...a),
@@ -2619,6 +2191,7 @@ export class SessionManager {
         return self.restartPolicy
       },
       restartSession: (...a) => self.restartSession(...a),
+      resumeSession: (...a) => self.resumeSession(...a),
       get resuming() {
         return self.resuming
       },
@@ -2632,7 +2205,7 @@ export class SessionManager {
       sessionsInside: (...a) => self.sessionsInside(...a),
       sessionOf: (...a) => self.sessionOf(...a),
       settingFilesFor: (...a) => self.settingFilesFor(...a),
-      settleState: (...a) => self.settleState(...a),
+      settleState: (...a) => self.events.settleState(...a),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

@@ -974,7 +974,7 @@ describe('approvals, read state, and messages', () => {
 
   it('keeps nothing per session for a turn that ended or a session deleted mid-turn (#392)', async () => {
     const internals = mgr as unknown as {
-      pendingCommits: Map<string, string>
+      events: { pendingCommits: Map<string, string> }
       children: ChildOwnership
       restartPolicy: RestartPolicy
     }
@@ -983,9 +983,9 @@ describe('approvals, read state, and messages', () => {
     await rpc('agents.send', { sessionId: ended.id, text: 'commit it' })
     // A commit call interrupted before it answered: its result never comes
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
-    expect([...internals.pendingCommits.values()]).toEqual([ended.id])
+    expect([...internals.events.pendingCommits.values()]).toEqual([ended.id])
     adapter.last!.finishTurn()
-    expect(internals.pendingCommits.size).toBe(0)
+    expect(internals.events.pendingCommits.size).toBe(0)
 
     const gone = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
@@ -994,7 +994,7 @@ describe('approvals, read state, and messages', () => {
     internals.children.adoptReport(gone.id, 'orchestrator', null)
     internals.restartPolicy.appsRestartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
-    expect(internals.pendingCommits.size).toBe(0)
+    expect(internals.events.pendingCommits.size).toBe(0)
     expect(internals.children.awaitingReport.has(gone.id)).toBe(false)
     expect(internals.restartPolicy.appsRestartAfterTurn.has(gone.id)).toBe(false)
   })
