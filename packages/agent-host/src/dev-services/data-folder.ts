@@ -40,3 +40,18 @@ export async function removeData(path: string): Promise<void> {
 export function removeDataSync(path: string): void {
   rmSync(path, { recursive: true, force: true, maxRetries: 3 })
 }
+
+/**
+ * Removes a leftover that nothing depends on, and never throws: a refusal (EBUSY, EPERM or ENOTEMPTY that outlasts the
+ * retries, on Windows) is written to the host's log instead. For cleanup that runs beside a result or an error the
+ * caller must keep (a staging folder after a failed import, a temp folder after a snapshot) and in places no one is
+ * there to catch it (a timer). `prefix` is the caller's log tag (`[apps]`), so this shared file names no one; `remove` is a
+ * parameter for tests, which inject one that throws.
+ */
+export function removeDataQuietly(path: string, prefix: string, remove: (path: string) => void = removeDataSync): void {
+  try {
+    remove(path)
+  } catch (e) {
+    console.error(`${prefix} could not remove ${path}: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}

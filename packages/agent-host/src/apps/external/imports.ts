@@ -1,8 +1,9 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
+import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, isInside } from '../../dev-services/path-guard.js'
 import { proposedMcpServerNameError } from '../contract.js'
 import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
@@ -521,7 +522,11 @@ export function listAppFiles(dir: string, limits: ImportLimits): StagedFiles {
   return out
 }
 
-/** Cleans up one staging entry — silently, even on failure (the next startup cleans the whole staging area) */
-export function discard(dir: string): void {
-  rmSync(dir, { recursive: true, force: true })
+/**
+ * Cleans up one staging entry, retrying a busy file and, if it still will not go, only logging it: a failed cleanup
+ * must not replace the result or the reason beside it, nor throw from a timer (the next startup cleans the whole
+ * staging area)
+ */
+export function discard(dir: string, remove?: (path: string) => void): void {
+  removeDataQuietly(dir, '[apps]', remove)
 }
