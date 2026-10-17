@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { appGuide } from './app-guide.js'
-import { ANSWER_FORM, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
+import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats } from './tool-seats.js'
 
@@ -170,6 +170,7 @@ const HANDLERS: ToolHandlers = {
   async agent_session(args, { tools, signal }) {
     const sessionId = filled(args.sessionId)
     const { action, ifBusy } = args
+    if (action === 'list') return agentListText(await tools.listAgents())
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
     const text = args.text?.trim() ? args.text : undefined
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }

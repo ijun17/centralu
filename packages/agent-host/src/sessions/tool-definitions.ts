@@ -379,10 +379,11 @@ export const AGENT_TOOLS = [
      * "answer" (#676): a card of the turn the caller gave, which status shows; `card` only when more than one stands.
      * Not in the description: the answer that shows a card names the call, and the description rides in every request.
      */
-    description: 'Checks, messages, waits for, stops or deletes a session start_agent started.',
+    description: 'Lists, checks, messages, waits for, stops or deletes sessions start_agent started.',
     schema: z.object({
-      sessionId: z.string(),
-      action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer']),
+      // Not needed for "list" (#690): the caller's own children, so a parent that forgot one finds it in one call
+      sessionId: z.string().optional(),
+      action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer', 'list']),
       text: z.string().optional(),
       card: z.string().optional(),
       // #677: send to a busy session returns its choices, which name this argument

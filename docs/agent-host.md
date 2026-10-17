@@ -332,7 +332,16 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
+| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+
+**Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
+them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
+Every answer that hands a child's result to the session that started it now ends with one line naming the delete:
+`done` and `at_rest` (`cleanUpLine`, `sessions/tool-answers.ts`), and the report of a finished turn
+(`ChildReports.cleanUpWords`), which also says how many of its other children are at rest and that `list` shows them.
+The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
+is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
+stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
