@@ -28,7 +28,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use content_verify::version::{check_not_downgrade, read_highest_seen, Rollback, Version};
-use content_verify::{read_verified_manifest, remove_content, verify_and_copy, verify_in_place, Error, Expect, Manifest, TrustedKey};
+use content_verify::{read_verified_manifest, remove_content, Error, Expect, Fault, Manifest, PlaceError, Placement, Placing, TrustedKey};
 
 use super::exe::KEEPER_EXE;
 
@@ -239,63 +239,23 @@ impl Verifier<'_> {
      */
     pub fn place(&self, data: &Path, src: &Path, manifest: &Manifest, manifest_bytes: &[u8], in_use: bool) -> Result<PathBuf, Refusal> {
         let root = content_root(data);
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&root)
-                .map_err(|e| Refusal::new("copy", format!("cannot create {}: {e}", root.display())))?;
-        }
-        let dest = version_dir(data, &manifest.app_version);
         let expect = self.expect();
-        let differs = |dest: &Path| -> Option<String> {
-            match verify_in_place(dest, self.keys, &expect) {
-                Ok((_, bytes)) if bytes == manifest_bytes => None,
-                Ok(_) => Some("holds a differently signed manifest".to_string()),
-                Err(e) => Some(format!("does not verify ({e})")),
-            }
-        };
-        if fs::symlink_metadata(&dest).is_ok() {
-            match differs(&dest) {
-                None => {
-                    (self.log)(&format!("{} verifies; handing over to it", dest.display()));
-                    return Ok(dest);
-                }
-                Some(why) if in_use => {
-                    return Err(Refusal::new(
-                        "in-use",
-                        format!("{} {why}, and something runs from it; restart Centralu completely to start this build", dest.display()),
-                    ))
-                }
-                Some(why) => {
-                    (self.log)(&format!("{} {why}; copying again", dest.display()));
-                    discard(&dest).map_err(|e| Refusal::new("copy", format!("cannot remove {}: {e}", dest.display())))?;
-                }
-            }
-        }
-        match verify_and_copy(src, &dest, self.keys, &expect) {
-            Ok(copied) if copied == *manifest => {
-                (self.log)(&format!("verified and copied {} files into {}", copied.files.len(), dest.display()));
-                Ok(dest)
-            }
-            Ok(_) => {
-                let _ = remove_content(&dest);
-                Err(Refusal::new("content", format!("the content at {} changed while it was being copied", src.display())))
-            }
-            // Something else copied the same version in the meantime: use its copy if it verifies.
-            Err(Error::DestinationExists(_)) if differs(&dest).is_none() => Ok(dest),
-            Err(e) => Err(refusal(e, src, Stage::Copy)),
-        }
-    }
-}
-
-/// Removes a folder at `dest` the verifier wrote, or whatever else is there (a symlink, a file).
-fn discard(dest: &Path) -> std::io::Result<()> {
-    if fs::symlink_metadata(dest)?.is_dir() {
-        remove_content(dest)
-    } else {
-        fs::remove_file(dest)
+        let placement = Placement { root: &root, src, manifest, manifest_bytes, keys: self.keys, expect: &expect, in_use };
+        content_verify::place(&placement, &mut |step| match step {
+            Placing::Reused(dest) => (self.log)(&format!("{} verifies; handing over to it", dest.display())),
+            Placing::Replacing(dest, why) => (self.log)(&format!("{} {why}; copying again", dest.display())),
+            Placing::Copied(dest, files) => (self.log)(&format!("verified and copied {files} files into {}", dest.display())),
+        })
+        .map_err(|e| match e {
+            PlaceError::CreateRoot(root, e) => Refusal::new("copy", format!("cannot create {}: {e}", root.display())),
+            PlaceError::InUse(dest, why) => Refusal::new(
+                "in-use",
+                format!("{} {why}, and something runs from it; restart Centralu completely to start this build", dest.display()),
+            ),
+            PlaceError::Remove(dest, e) => Refusal::new("copy", format!("cannot remove {}: {e}", dest.display())),
+            PlaceError::SourceChanged => Refusal::new("content", format!("the content at {} changed while it was being copied", src.display())),
+            PlaceError::Copy(e) => refusal(e, src, Stage::Copy),
+        })
     }
 }
 
@@ -310,22 +270,13 @@ enum Stage {
 /// The verifier's error as a refusal, worded for the window. The shell's `run::refusal`, without the
 /// shell version.
 fn refusal(e: Error, src: &Path, stage: Stage) -> Refusal {
-    match e {
-        Error::Io { ref context, .. } if stage == Stage::Copy && !reads_the_source(context) => {
-            Refusal::new("copy", format!("could not copy the new build's content: {e}"))
+    match e.fault(stage == Stage::Copy) {
+        Fault::Copy => Refusal::new("copy", format!("could not copy the new build's content: {e}")),
+        Fault::Unreadable => {
+            Refusal::new("content", format!("the new build's content at {} is incomplete or unreadable: {e}", src.display()))
         }
-        Error::DestinationExists(_) => Refusal::new("copy", format!("could not copy the new build's content: {e}")),
-        other @ (Error::Missing(_) | Error::Io { .. }) => {
-            Refusal::new("content", format!("the new build's content at {} is incomplete or unreadable: {other}", src.display()))
-        }
-        other => Refusal::new("content", format!("the new build's content at {} is not what the project signed: {other}", src.display())),
+        Fault::Unsigned => Refusal::new("content", format!("the new build's content at {} is not what the project signed: {e}", src.display())),
     }
-}
-
-/// Whether an I/O failure was reading the source rather than writing the copy (the verifier's
-/// contexts, as the shell reads them).
-fn reads_the_source(context: &str) -> bool {
-    !context.starts_with("read back") && (context.starts_with("open ") || context.starts_with("read ") || context.starts_with("stat "))
 }
 
 /**

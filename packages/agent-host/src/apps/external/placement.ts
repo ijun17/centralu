@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, renameSync, rmSync } from 'node:fs'
+import { mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
+import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { PROJECT_APPS_PARTS, USER_APPS_PARTS } from './discovery.js'
 
@@ -32,7 +33,7 @@ export function appsFolderOf(root: string, projectId: string | null): string {
  * is never a moment where discovery could read a half-written manifest as "a broken app". If
  * anything fails, the temp folder is removed and the error is passed on as it is.
  */
-export function placeAppFolder(root: string, projectId: string | null, id: string, fill: (staging: string) => void): string {
+export function placeAppFolder(root: string, projectId: string | null, id: string, fill: (staging: string) => void, remove?: (path: string) => void): string {
   const parent = appsFolderOf(root, projectId)
   const dir = join(parent, id)
   const staging = join(parent, `.${id}.${randomUUID()}`)
@@ -40,7 +41,7 @@ export function placeAppFolder(root: string, projectId: string | null, id: strin
     fill(staging)
     renameSync(staging, dir)
   } catch (err) {
-    rmSync(staging, { recursive: true, force: true })
+    removeDataQuietly(staging, '[apps]', remove)
     throw err
   }
   return dir

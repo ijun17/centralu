@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { USER_APP_SCOPE, type AppReview, type ExternalAppInfo } from '@cc/protocol'
@@ -60,6 +60,8 @@ export type HandoverOptions = {
   fetch?: typeof fetch
   /** How long until the staging area cleans itself up */
   stagingMs?: number
+  /** Removes a folder (tests inject one that fails); the default retries a busy file */
+  remove?: (path: string) => void
 }
 
 /** The staging area — inside the data folder, so moving it into the user folder is a rename on the same filesystem. Discovery never scans here */
@@ -84,11 +86,11 @@ export class AppHandover {
     private opts: HandoverOptions = {},
   ) {
     this.book = new ImportBook(host.dataRoot)
-    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, USER_APP_SCOPE))
+    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, USER_APP_SCOPE), opts.remove)
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
     // The staging area a previous host left behind — never brought in, so it is discarded (it can be imported again)
-    rmSync(this.stagingRoot, { recursive: true, force: true })
+    discard(this.stagingRoot, opts.remove)
   }
 
   /**
@@ -141,10 +143,10 @@ export class AppHandover {
       this.staged.set(token, { home, appDir, review, timer })
       return { token, review }
     } catch (e) {
-      discard(home)
+      discard(home, this.opts.remove)
       throw e instanceof ImportRefused ? e : new ImportRefused(`Could not import from ${source.label}: ${(e as Error).message}`)
     } finally {
-      if (tmp) discard(tmp)
+      if (tmp) discard(tmp, this.opts.remove)
     }
   }
 
@@ -190,7 +192,7 @@ export class AppHandover {
     if (!s) return
     clearTimeout(s.timer)
     this.staged.delete(token)
-    discard(s.home)
+    discard(s.home, this.opts.remove)
   }
 
   /**

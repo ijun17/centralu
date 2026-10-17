@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MAX_LOG_BYTES, hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
+import { MAX_LOG_BYTES, RollingFile, hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 const dirs: string[] = []
 const tmp = () => {
@@ -146,6 +146,46 @@ describe.skipIf(process.platform === 'win32')('a new log file’s mode', () => {
     }
     expect(statSync(path).mode & 0o777).toBe(0o600)
     expect(statSync(`${path}.1`).mode & 0o777).toBe(0o600)
+  })
+})
+
+describe('RollingFile', () => {
+  it.skipIf(process.platform === 'win32')('is 0600, and 0600 again after a rollover', () => {
+    const path = join(tmp(), 'app.log')
+    const file = new RollingFile(path, 64)
+    file.write(`${'x'.repeat(100)}\n`)
+    file.write('after the rollover\n')
+    file.close()
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(statSync(`${path}.1`).mode & 0o777).toBe(0o600)
+    expect(readFileSync(path, 'utf8')).toBe('after the rollover\n')
+  })
+
+  it.skipIf(process.platform === 'win32')('narrows a log an older build created 0644', () => {
+    const path = join(tmp(), 'app.log')
+    writeFileSync(path, 'old line\n', { mode: 0o644 })
+    chmodSync(path, 0o644)
+    const file = new RollingFile(path)
+    file.write('new line\n')
+    file.close()
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(readFileSync(path, 'utf8')).toBe('old line\nnew line\n')
+  })
+
+  it('writes nothing once closed, even past the rollover size (it must not open the file again)', () => {
+    const path = join(tmp(), 'app.log')
+    const file = new RollingFile(path, 64)
+    file.write('first\n')
+    file.close()
+    file.write(`${'x'.repeat(100)}\n`)
+    expect(readFileSync(path, 'utf8')).toBe('first\n')
+    expect(existsSync(`${path}.1`)).toBe(false)
+  })
+
+  it('goes quiet instead of throwing when the file cannot be opened', () => {
+    const file = new RollingFile(join(tmp(), 'no-such-folder', 'app.log'))
+    expect(file.isOpen).toBe(false)
+    expect(() => file.write('x\n')).not.toThrow()
   })
 })
 

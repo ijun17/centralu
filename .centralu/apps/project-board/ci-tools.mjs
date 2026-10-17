@@ -9,7 +9,7 @@ import { answer, asError, linesAnswer, reason } from './reply.mjs'
 import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
-import { short, sleep } from './util.mjs'
+import { short, sleep, span } from './util.mjs'
 
 // --- CI: ci_status and merge_when_green -------------------------------------------------------------
 // The decisions are pure functions in ci.mjs; this part reads GitHub, asks them, and says the answer
@@ -138,7 +138,7 @@ async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
  * Tells the caller the call is alive. Centralu ends a call after 10 minutes without progress
  * (docs/apps.md §5), and a wait for CI runs up to 40; the message shows under the session's tool card.
  */
-function progress(ctx, n, message) {
+export function progress(ctx, n, message) {
   console.error(`[project-board] ${message}`)
   const token = ctx?.mcpReq?._meta?.progressToken
   if (token === undefined || typeof ctx?.mcpReq?.notify !== 'function') return
@@ -148,7 +148,6 @@ function progress(ctx, n, message) {
 // GitHub works out whether a PR can be merged when asked, within seconds: a few short retries first.
 const MERGEABLE_RETRIES = 3
 const MERGEABLE_WAIT_MS = 2_000
-const span = (ms) => (ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 
 async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, detail = 'compact' }, ctx) {
   const want = itemOf(pr)

@@ -33,6 +33,8 @@ export type HostParts = {
   /** Putting idle sessions to sleep (#568, sessions/sleep.ts) */
   sleeper: { stop(): void }
   stopActivity: () => void
+  /** The git calls still running (`stopGitChildren`, dev-services/git-exec.ts) */
+  git: { stopAll(): Promise<void> }
   links: { stop(): Promise<void> }
   apps: { dispose(): Promise<void> }
   sessions: { disposeAll(): Promise<void>; detachAll(): Promise<void> }
@@ -48,7 +50,7 @@ export type HostParts = {
 
 /**
  * The shutdown, as data: the reverse of the start (store, children, server, services), with two
- * departures the lessons ask for.
+ * departures the lessons ask for, and the git calls still running ended in both modes (#982).
  *
  * - **Terminals and commands come first, synchronously, in stop mode** (HO8). A pty child runs in
  *   a session of its own, so a supervisor's group SIGKILL after its 3 s budget cannot reach it: if
@@ -80,6 +82,13 @@ export function stopPlan(mode: LeaveMode, handOver: boolean, p: HostParts): Step
     { name: 'putting idle sessions to sleep', run: () => p.sleeper.stop() },
     { name: 'the activity report', run: () => p.stopActivity() },
   )
+  /*
+   * In both modes: the keeper does not hold git, and git runs in a process group of its own (git-exec.ts), so nothing
+   * else ends a commit or push still waiting on a hook or a sign-in, and it would keep the repository's locks for up
+   * to its bound. On a swap the drain has already waited, within its bound, for the RPCs that started them (drain.ts);
+   * what still runs then is ended here. Before the sessions: their cleanup runs git of its own, and awaits it.
+   */
+  steps.push({ name: 'the git calls still running', run: () => p.git.stopAll() })
   if (mode === 'detach') {
     // Released, not killed: the keeper keeps draining them for the next host
     steps.push({ name: 'letting go of terminals and commands', run: () => both(() => p.terminals.detachAll(), () => p.commands.detachAll()) })

@@ -474,8 +474,9 @@ describe('what never gets brought in', () => {
     writeFileSync(join(outside, 'id_rsa'), 'PRIVATE KEY')
     const dir = plantSource('linky', 'linky', { 'lib/real.mjs': '// real' })
     symlinkSync(join(outside, 'id_rsa'), join(dir, 'lib', 'key'))
+    // The refusal names the link's real path, spelled as the file system spells it (a Windows runner's temp folder is `RUNNER~1` here and `runneradmin` there)
     expect(await refusal(rt.prepareImport(dir))).toBe(
-      `lib/key is a link to ${join(outside, 'id_rsa')}, outside the folder. Links are not followed; remove it and import again`,
+      `lib/key is a link to ${realpathSync.native(join(outside, 'id_rsa'))}, outside the folder. Links are not followed; remove it and import again`,
     )
     rmSync(join(dir, 'lib', 'key'))
     symlinkSync(outside, join(dir, 'escape-dir'))
@@ -561,6 +562,9 @@ describe('a zip received over https', () => {
       ['https://127.0.0.1:8443/a.zip', 'A link to this machine or a link-local address cannot be downloaded: https://127.0.0.1:8443/a.zip'],
       ['https://169.254.169.254/latest', 'A link to this machine or a link-local address cannot be downloaded: https://169.254.169.254/latest'],
       ['https://[::1]/a.zip', 'A link to this machine or a link-local address cannot be downloaded: https://[::1]/a.zip'],
+      ['https://[fe80::1]/a.zip', 'A link to this machine or a link-local address cannot be downloaded: https://[fe80::1]/a.zip'],
+      ['https://[::ffff:127.0.0.1]/a.zip', 'A link to this machine or a link-local address cannot be downloaded: https://[::ffff:7f00:1]/a.zip'],
+      ['https://2130706433/a.zip', 'A link to this machine or a link-local address cannot be downloaded: https://127.0.0.1/a.zip'],
       ['https://user:pw@example.com/a.zip', 'Links with a user name or password in them are not accepted'],
       ['http://example.com/a.zip', 'Only folders and .zip files on this machine, or https links, can be imported: http://example.com/a.zip'],
       ['ftp://example.com/a.zip', 'Only folders and .zip files on this machine, or https links, can be imported: ftp://example.com/a.zip'],

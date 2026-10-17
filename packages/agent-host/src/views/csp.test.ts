@@ -76,6 +76,9 @@ describe('buildViewCsp', () => {
     ['http://app.localhost', 'a loopback subdomain'],
     ['http://[::1]:8080', 'IPv6 loopback'],
     ['http://0.0.0.0:80', 'the any address'],
+    ['http://169.254.169.254', 'link-local (cloud metadata)'],
+    ['https://169.254.0.1:8443', 'link-local'],
+    ['http://2852039166', 'link-local, written as an integer'],
     ['ftp://files.example.com', 'a scheme views have no use for'],
     ['api.example.com', 'no scheme'],
   ])('%j (%s) is not admitted even if declared', (entry) => {

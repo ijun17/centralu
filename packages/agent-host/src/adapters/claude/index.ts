@@ -91,7 +91,7 @@ const PROBE_EXIT_WAIT_MS = 10_000
 async function claudeAuthStatus(bin: ToolLaunch): Promise<unknown> {
   let out = ''
   try {
-    out = (await exec(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeout: 5000 })).stdout
+    out = (await exec(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeout: 5000, windowsHide: true })).stdout
   } catch (e) {
     // Even with exit code 1 (= not logged in), the JSON on stdout can still be trusted.
     out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
@@ -259,7 +259,7 @@ export class ClaudeAdapter implements AgentAdapter {
         if (!(err instanceof ClaudePlaceholderError)) throw err
         return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
       }
-      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
+      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000, windowsHide: true })
       // Shows which install is actually being used — reduces confusion in an environment with several versions installed.
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       const loggedIn = await claudeLoggedIn(launch)

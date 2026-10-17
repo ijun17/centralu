@@ -6,7 +6,6 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
-  rmSync,
   rmdirSync,
   statSync,
   unlinkSync,
@@ -14,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { removeDataQuietly, removeDataSync } from '../../dev-services/data-folder.js'
 import { folderFingerprint, walkCode } from './fingerprint.js'
 import { APP_FOLDER_DEPTH } from './folder-walk.js'
 
@@ -62,11 +62,18 @@ export type Snapshot = {
   depth?: number
 }
 
+/** How long a `.tmp-*` capture folder may sit untouched before `prune` sweeps it */
+const STALE_TMP_MS = 60 * 60_000
+
 /** How deep a version captured before the depth was recorded walked (the fingerprint's old cap) */
 export const LEGACY_DEPTH = 8
 
 export class AppVersions {
-  constructor(private root: string) {}
+  /** `remove` is for tests; the default retries a busy file (Windows) */
+  constructor(
+    private root: string,
+    private remove: (path: string) => void = removeDataSync,
+  ) {}
 
   /** An app's versions, most recent first */
   list(appId: string): Snapshot[] {
@@ -125,7 +132,7 @@ export class AppVersions {
       })
       const actual = folderFingerprint(files)
       if (kept.some((s) => s.stamp === actual)) {
-        rmSync(tmp, { recursive: true, force: true })
+        removeDataQuietly(tmp, '[apps]', this.remove)
         return null
       }
       const at = Date.now()
@@ -136,7 +143,8 @@ export class AppVersions {
       this.prune(appId)
       return snap
     } catch (e) {
-      rmSync(tmp, { recursive: true, force: true })
+      // The copy's own error is the one to report; a temp folder that will not go is only logged
+      removeDataQuietly(tmp, '[apps]', this.remove)
       throw e
     }
   }
@@ -178,7 +186,7 @@ export class AppVersions {
       const from = join(files, r)
       const to = join(dir, r)
       mkdirSync(dirname(to), { recursive: true })
-      if (existsSync(to) && statSync(to).isDirectory()) rmSync(to, { recursive: true, force: true })
+      if (existsSync(to) && statSync(to).isDirectory()) this.remove(to)
       copyFileSync(from, to)
       const st = statSync(from)
       utimesSync(to, st.atime, st.mtime)
@@ -186,8 +194,32 @@ export class AppVersions {
     return snap
   }
 
-  /** Keeps only the most recent versions */
+  /**
+   * Keeps only the most recent versions, and sweeps what a failed removal left: a version folder whose `meta.json` is
+   * gone (half deleted, so `list` does not show it) and a `.tmp-*` capture folder nothing has touched for an hour (a
+   * crash or a locked file; a fresh one may be another host's capture under way). Everything here is quiet: a folder
+   * that will not go stays until the next capture prunes again, and must not fail the capture that just succeeded.
+   */
   private prune(appId: string): void {
-    for (const old of this.list(appId).slice(VERSIONS_KEPT)) rmSync(join(this.root, appId, old.id), { recursive: true, force: true })
+    const appRoot = join(this.root, appId)
+    for (const old of this.list(appId).slice(VERSIONS_KEPT)) removeDataQuietly(join(appRoot, old.id), '[apps]', this.remove)
+    let names: string[] = []
+    try {
+      names = readdirSync(appRoot)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      const path = join(appRoot, name)
+      try {
+        if (name.startsWith('.tmp-')) {
+          if (Date.now() - statSync(path).mtimeMs > STALE_TMP_MS) removeDataQuietly(path, '[apps]', this.remove)
+        } else if (!name.startsWith('.') && !existsSync(join(path, 'meta.json'))) {
+          removeDataQuietly(path, '[apps]', this.remove)
+        }
+      } catch {
+        // Gone already, or unreadable: nothing to sweep
+      }
+    }
   }
 }

@@ -484,8 +484,8 @@ fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
     assert_eq!(min_node(), Ok([22, 14, 0]));
     let floor = min_node().unwrap();
     assert_eq!(floor_text(floor).split('.').count(), 3);
-    assert!(!below_floor(&floor, floor));
-    assert!(!below_floor(&[floor[0] + 2], floor));
+    assert!(!below_floor(&floor_text(floor), floor));
+    assert!(!below_floor(&format!("v{}.0.0", floor[0] + 2), floor));
     // Just below, whatever the floor is: one patch down, or the end of the previous minor or major
     let just_below = if floor[2] > 0 {
         [floor[0], floor[1], floor[2] - 1]
@@ -494,7 +494,24 @@ fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
     } else {
         [floor[0] - 1, 99, 99]
     };
-    assert!(below_floor(&just_below, floor));
+    assert!(below_floor(&floor_text(just_below), floor));
+}
+
+/// The keeper, the hub and the launcher each check a Node against the floor, and they disagreed on
+/// `v22.14.0-rc.1` (let through here, below it there) and on `v22` and `v22.x.1` (below it here, let
+/// through there). One fixture now pins the three; the hub's and the launcher's tests read it too
+/// (`packages/agent-host/src/links/node-floor.test.ts`).
+#[test]
+fn the_floor_check_agrees_with_the_hubs_and_the_launchers() {
+    const FIXTURE: &str = include_str!("../../../../../../tooling/fixtures/node-floor.json");
+    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let floor = floor_of(&format!(">={}", fixture["floor"].as_str().unwrap())).unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert!(cases.len() > 10, "the fixture lists its cases");
+    for case in cases {
+        let found = case["found"].as_str().unwrap();
+        assert_eq!(below_floor(found, floor), case["below"].as_bool().unwrap(), "{found:?} against {}", floor_text(floor));
+    }
 }
 
 #[test]
@@ -508,12 +525,15 @@ fn a_package_json_with_no_usable_floor_is_a_sentence_naming_it_not_a_panic() {
 }
 
 #[test]
-fn a_prerelease_counts_by_its_numbers_and_unreadable_output_is_let_through() {
-    // `node --version` on a release candidate prints `v22.14.0-rc.1`: the numbers before the tag decide
+fn a_prerelease_of_the_floor_is_below_it_and_unreadable_output_is_let_through() {
+    // `node --version` on a release candidate prints `v22.14.0-rc.1`, which comes before 22.14.0
     let at_floor = fake_node("v22.14.0-rc.1", "cc-test-node-rc-at");
-    assert_eq!(check_node_version(&at_floor), Ok(at_floor.clone()));
+    assert!(check_node_version(&at_floor).unwrap_err().contains("v22.14.0-rc.1"));
     let below = fake_node("v22.13.1-rc.1", "cc-test-node-rc-below");
     assert!(check_node_version(&below).unwrap_err().contains("v22.13.1-rc.1"));
+    let above = fake_node("v22.15.0-rc.1", "cc-test-node-rc-above");
+    assert_eq!(check_node_version(&above), Ok(above.clone()));
+    // The numbers before the tag still order the folders a version manager keeps
     assert_eq!(version_parts("v22.14.0-rc.1+build5"), vec![22, 14, 0]);
     // Output that is not a version at all gives no basis to refuse
     let garbage = fake_node("Segmentation fault", "cc-test-node-garbage");

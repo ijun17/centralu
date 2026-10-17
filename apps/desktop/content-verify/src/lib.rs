@@ -31,14 +31,18 @@
 //! a listed path may be a symlink, and the file itself must be a regular file.
 
 mod error;
+mod hash;
 mod keys;
 mod manifest;
 pub mod version;
 
 #[cfg(unix)]
 mod copy;
+#[cfg(unix)]
+mod place;
 
-pub use error::Error;
+pub use error::{Error, Fault, IoStep};
+pub use hash::{hex, sha256_file};
 pub use keys::{embedded_keys, key_id, TrustedKey};
 pub use manifest::{
     current_platform, verify_manifest, Expect, FileEntry, Manifest, MANIFEST_FORMAT,
@@ -46,6 +50,8 @@ pub use manifest::{
 
 #[cfg(unix)]
 pub use copy::{read_verified_manifest, remove_content, verify_and_copy, verify_in_place};
+#[cfg(unix)]
+pub use place::{discard, place, PlaceError, Placement, Placing};
 
 /// The manifest's file name, at the top of a content folder.
 pub const MANIFEST_NAME: &str = "content-manifest.json";

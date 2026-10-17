@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isObj } from '../../json-value.js'
 import { PrivateJsonFile } from './private-json-file.js'
@@ -31,13 +32,43 @@ export class SecretStore {
    */
   private file: PrivateJsonFile<SecretsDoc>
 
-  constructor(dataRoot: string) {
+  constructor(private readonly dataRoot: string) {
     this.file = new PrivateJsonFile(join(dataRoot, SECRETS_FILE), {
       label: SECRETS_FILE,
       empty: () => ({}),
       valid: (doc): doc is SecretsDoc => isObj(doc),
       lost: 'Apps start without secrets until they are entered again',
     })
+  }
+
+  /**
+   * Whether the saved secrets could not be read, as it concerns this app (#944): the file is stuck in place (null for
+   * where it went, until it reads again), or a copy moved aside is in the data folder and this app has no value in the
+   * current file. One file holds every app's values (#993 review): re-entering app A's value says nothing of app B's,
+   * so each app's line goes when that app has a value again. Read from the folder, not kept, so a restart finds it.
+   */
+  trouble(appKey: string): { movedTo: string | null; at: number } | null {
+    const doc = this.file.read()
+    const stuck = this.file.trouble
+    if (stuck && stuck.movedTo === null) return stuck
+    if (Object.keys(doc[appKey] ?? {}).length > 0) return null
+    return this.newestCopy()
+  }
+
+  /** The newest `app-secrets.json.unreadable-<ms>` in the data folder, or null */
+  private newestCopy(): { movedTo: string; at: number } | null {
+    let names: string[]
+    try {
+      names = readdirSync(this.dataRoot)
+    } catch {
+      return null
+    }
+    let newest: { movedTo: string; at: number } | null = null
+    for (const name of names) {
+      const at = Number(/^app-secrets\.json\.unreadable-(\d+)$/.exec(name)?.[1])
+      if (Number.isSafeInteger(at) && (!newest || at > newest.at)) newest = { movedTo: name, at }
+    }
+    return newest
   }
 
   /** All values stored for this app (regardless of declaration) */

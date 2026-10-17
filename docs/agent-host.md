@@ -537,8 +537,8 @@ below retained for `safe` and `normal`:
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
 project's repository instead of the caller's folder, through the same path as the new-session window's worktree
 option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step;
-`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
-`centralu/write-the-parser-1a2b`), settled before the card, which names it. It forks from the caller's own branch
+`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job or from the caller's `name` (`agentBranch`:
+`centralu/write-the-parser-1a2b`, at most 40 characters after the prefix, cut at a word, #861), settled before the card, which names it. It forks from the caller's own branch
 when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
@@ -564,6 +564,10 @@ to the project's dependencies would let it change the original checkout. Interna
 links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
 runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
 or cannot be copied, the configured setup command or the child must install them; creation still continues.
+What provisioning could not do (a copy skipped or refused, a link dropped, dependencies or the setup command
+failing) is a warning notice at the top of the new session, and a `start_agent` child also gets it in its task,
+since an agent does not read notices (#841). A step after `git worktree add` that throws before a session owns
+the worktree removes the folder and its branch again (#774); what could not be removed is named in the error.
 
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
@@ -743,10 +747,12 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 1,332 characters (`AGENT_BUDGET_CHARS` 1,350; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,357 characters (`AGENT_BUDGET_CHARS` 1,375; 1,332 before #861's `name`, a bare string; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
-`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
-is named from its task and the person renames it.
+`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. `name` (#861) is a short name
+the caller gives: the child's name in the sidebar, and what its new worktree's branch is made from. Without one, the
+child is named from its task (a worktree child by its branch), skipping the leading words the task shares with a
+sibling's name (`distinguishingText`, at least two of them), and the person renames it.
 
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that
@@ -1056,6 +1062,40 @@ the session to write it (`mode: "agent"`) stays an option in both.
   is writing its note drops the handoff (the request and the note stay in that session's conversation; call again).
   The card waits like `create_project`'s, so on Codex a card left standing past the bridge's bound ends the call there
   while the card stays.
+
+### 1.2.7 The orchestrator starts sessions outside any project (#853)
+
+Handing off light work unrelated to any project (a web search, a lookup), the orchestrator reached for its CLI's own
+subagent, which never appears in Centralu: the person could neither watch it nor step in. It now has `start_agent` and
+`agent_session` too, as commands of the `commands` tier (`RARE_COMMANDS`, reached through `centralu_run`; a direct
+tool in the other tiers), and one line of its instructions says to use them rather than its Agent tool. The flow is
+§1.2.1's (`AgentStartFlow`) with the orchestrator as the caller and no project as the place
+(`ORCHESTRATOR_PLACE`, an empty id):
+
+- **The child** has no project (`projectId: null`), is marked `askedBy` the orchestrator, and works in a folder of its
+  own, `<data>/orchestrator-agents/<uuid>` (`newOrchestratorAgentFolder`), never the orchestrator's: a file a child
+  left in the orchestrator's folder (Codex loads `.agents/skills` from it whatever the trust) would reach the session
+  that directs every other one, and children sharing one folder wrote over each other (#994 review). The folder goes
+  when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
+  preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
+  and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
+  orchestrator's row (`orchestratorChildren`), with a ⋯ menu to stop or delete it; a child whose orchestrator was
+  replaced stays there under "Started by an earlier orchestrator".
+- **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
+  ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
+  answer from an older window, is kept as always for the orchestrator while this host serves it, which the card says
+  ("lasts until Centralu restarts"). `auto` opens it. The depth binds as for any caller; the orchestrator is at 0, so
+  its child starts none.
+- **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the orchestrator's children that
+  are still here, and worded as "agents you started"), the
+  finish notice through the report path, a request kept across a swap (its `projectId` is the empty place id), and
+  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the orchestrator and no other
+  session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the orchestrator.
+
+Characters: the orchestrator's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →
+8,945, under its 9,500); the two tools' definitions ride in no request in the default tier. Not measured live:
+whether the orchestrator then reaches for `start_agent` rather than its Agent tool. Not done: a read-only research
+preset for such a child (the issue's suggestion); it runs under the orchestrator's preset as any child does.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
@@ -2328,7 +2368,8 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 |---|---|---|
 | Registry | `stored.ts`, store v46 `linked_machines` | The machines the person linked: id, name, ssh target, remote shell, the `slot` for folding numbers, the version pair accepted |
 | Transport | `tunnel.ts` (`SshTunnel`) | Asks the remote for its connection line over ssh, then holds an ssh local forward |
-| Link | `links.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates |
+| Link | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates; and what the person asks of it (install, update, rollback, uninstall, autostart, activity) |
+| Links | `links-registry.ts` (`Links`), `link-deps.ts`; `links.ts` re-exports them | Every link of this hub, added and removed with the registry, and the ssh hosts and probe |
 | Client | `remote-client.ts` | The hub's WebSocket to the remote host: hello, cursor and epoch, calls, events, terminal frames |
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
@@ -2583,8 +2624,10 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   Moving to git2 (Rust) **is not done until measurement confirms a bottleneck** (m2-plan decision 3).
   The port interface is the same, so moving it later leaves the UI unchanged.
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
-  migrations; its other methods pass the call on to one module per concept in `dev-services/store/` (projects, sessions,
-  messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
+  migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
+  `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
+  `store/vacuum.ts`. Its other methods pass the call on to one module per concept in `dev-services/store/` (projects,
+  sessions, messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.
@@ -2670,7 +2713,7 @@ The rules for every shape:
 | Screen preferences (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | each missing field is its default | an unreadable value shows its default; unknown fields and unreadable values are kept when this build writes a change | defaults, one stderr line naming the row; the next change replaces it | `theme.test.ts`, `ui-preferences.test.ts` |
 | Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store.test.ts` (ui), `notify.test.ts` |
 | Theme and typography cache | the page's `localStorage` | `applyCachedTheme`, `applyCachedTypography` | each value checked | ignored | same as no cache: only the first frame, the host's answer follows | (cache only) |
-| Keeper settings | `keeper-settings.json` | `source::load_settings` (keeper, serde with defaults) | `background` defaults to off | ignored on read, **dropped on the next save** | reads as off, **with no message** | `background_mode_is_off_unless_saved_on` (no newer-shape test yet) |
+| Keeper settings | `keeper-settings.json` | `source::load_settings` / `save_background` (keeper) | `background` defaults to off | unknown fields kept and written back; a `background` that is not true or false reads as off, alone, with a stderr line | reads as off, one stderr line naming the file; the next save replaces it | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | Grid placements | `grid_layout` | `Store.listGridView` / `setGridView` | a row without a span reads as none chosen (v43) | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. A span out of bounds reads as none | (rows) | `store.test.ts` (v42, v43) |
 | Consents between projects (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (rows) | a kind this build does not know stays in the store and is not listed (#384) | (rows) | `store.test.ts` |
 | A session's app consents | `app_settings.session_apps:<id>` | `parse` in `sessions/app-access.ts` | (list) | an element with an unknown consent is dropped | empty list | |
@@ -2689,9 +2732,8 @@ The rules for every shape:
 | Remote connection line | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version` and `dataDir` default | another `v` is an error that says which side to update; a missing port or token is an error | lines that are not JSON are skipped | `tunnel.test.ts` |
 | Host ↔ UI payloads | RPC results, events, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | defaults applied | undeclared fields dropped; an unreadable value is kept as sent, alone | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
 
-Not covered yet: `keeper-settings.json` drops fields it does not know when it saves, and an unreadable file reads as
-off without a message (the keeper's Rust, left for its own change). An e2e that opens a newer store with the
-previous release's host is still to come; `older-host.spec.ts` covers the payload half.
+Not covered yet: an e2e that opens a newer store with the previous release's host; `older-host.spec.ts` covers the
+payload half.
 
 ## 6. Usage and limits (FR-9)
 

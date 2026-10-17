@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use content_verify::{remove_content, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
+use content_verify::{remove_content, verify_in_place, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use sha2::{Digest, Sha256};

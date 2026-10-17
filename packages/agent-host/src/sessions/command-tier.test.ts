@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import {
+  AGENT_TOOLS,
   COMMANDS_INSTRUCTION,
   DEFAULT_RARE_TIER,
   ORCHESTRATOR_INSTRUCTIONS,
@@ -100,7 +101,7 @@ describe('the commands tier', () => {
   it('refuses a command outside the profile: not listed, not described, not run', async () => {
     const tools = fakeTools()
     const listed = await runOrchestratorTool(tools, 'centralu_commands', {}, orchestrator)
-    for (const outside of ['check', 'ask_project', 'start_agent', 'send_to_session']) {
+    for (const outside of ['check', 'ask_project', 'find_apps', 'send_to_session']) {
       expect(listed.text).not.toContain(`- ${outside}:`)
       const help = await runOrchestratorTool(tools, 'centralu_help', { command: outside }, orchestrator)
       expect(help.isError).toBe(true)
@@ -114,6 +115,28 @@ describe('the commands tier', () => {
     expect(scoped).toMatchObject({ isError: true, text: 'Not a tool of this session: centralu_run' })
     // And the orchestrator no longer reaches the commands by their own names: what it was not shown, it cannot call
     for (const c of RARE) expect(profileAllows('orchestrator', c)).toBe(false)
+  })
+
+  // #853: the orchestrator starts children outside any project, through the commands, never as bare tools
+  it('runs start_agent and agent_session for the orchestrator, whose answers name centralu_run', async () => {
+    const working = { ok: true as const, state: 'working' as const, sessionId: 'c1', sessionName: 'Lookup', tool: 'claude', reported: true }
+    const tools = { ...fakeTools(), startAgent: vi.fn(async () => working), agentSession: vi.fn(async () => working) } as unknown as OrchestratorTools
+    const run = await runOrchestratorTool(tools, 'centralu_run', { command: 'start_agent', args: { task: 'look it up', wait: false } }, orchestrator)
+    expect(run.isError).toBeFalsy()
+    expect(tools.startAgent).toHaveBeenCalledWith({ task: 'look it up', wait: false }, undefined)
+    expect(run.text).toContain('centralu_run(command="agent_session", args={sessionId: "c1", action: "wait"})')
+    expect(run.text).not.toMatch(/(?<!")agent_session\(/)
+    const bare = await runOrchestratorTool(tools, 'start_agent', { task: 'look it up' }, orchestrator)
+    expect(bare).toMatchObject({ isError: true, text: expect.stringContaining('centralu_run(command="start_agent"') })
+    // A reader names agent_session as it calls it
+    const reader = await runOrchestratorTool(tools, 'start_agent', { task: 'look it up' }, { sessionId: 'r', profile: 'reader' })
+    expect(reader.text).toContain('agent_session(sessionId="c1", action="wait")')
+    // A coordinator or a builder has neither
+    for (const profile of ['scoped', 'builder'] as const) {
+      expect(await runOrchestratorTool(tools, 'start_agent', { task: 'x' }, { sessionId: 'm', profile })).toMatchObject({ isError: true })
+      expect(await runOrchestratorTool(tools, 'centralu_run', { command: 'start_agent', args: { task: 'x' } }, { sessionId: 'm', profile })).toMatchObject({ isError: true })
+    }
+    expect(tools.startAgent).toHaveBeenCalledTimes(2)
   })
 
   it('lists each command in one line, and narrows the list by a query', async () => {
@@ -172,7 +195,7 @@ describe('the deferred tier', () => {
   it("defers the orchestrator's rare tools on Claude and nothing else changes", () => {
     setRareTier('deferred')
     const defs = toolDefsFor('orchestrator')
-    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual(ORCHESTRATOR_TOOLS.filter((t) => RARE.includes(t.name)).map((t) => t.name))
+    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
     expect(defs.map((t) => t.name)).toEqual(toolDefsFor('orchestrator', 'resident').map((t) => t.name))
     const cost = residentCost('orchestrator', DEFERRED_SERVER)
     expect(cost.deferredChars).toBeGreaterThan(3_500)

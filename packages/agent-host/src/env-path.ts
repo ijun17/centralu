@@ -81,6 +81,7 @@ export function probeLoginShell(
   if (!shell || !existsSync(shell)) return []
   const r = spawnSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
     encoding: 'utf8',
+    windowsHide: true,
     timeout: timeoutMs,
     // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
     // if this hangs, the host never reaches ready and the whole app fails to start

@@ -162,6 +162,7 @@ async function psRows(): Promise<PsRow[]> {
     const { stdout } = await exec('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], {
       maxBuffer: 8 * 1024 * 1024,
       timeout: 5000,
+      windowsHide: true,
     })
     return parsePsRows(stdout)
   } catch {
@@ -175,6 +176,7 @@ async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
     const { stdout } = await exec('lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'], {
       maxBuffer: 8 * 1024 * 1024,
       timeout: 5000,
+      windowsHide: true,
     })
     return parseLsofCwd(stdout)
   } catch (e) {

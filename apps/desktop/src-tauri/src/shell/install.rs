@@ -21,10 +21,11 @@
 //! step leaves the installed shell as it was.
 
 use std::fs::{self, DirBuilder};
-use std::io::{self, Read};
+use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use crate::keeper::{hex, sha256_file};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -143,17 +144,7 @@ pub fn tree_hash(app: &Path) -> io::Result<String> {
     files.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut all = Sha256::new();
     for (rel, path, exec) in files {
-        let mut h = Sha256::new();
-        let mut f = fs::File::open(&path)?;
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            h.update(&buf[..n]);
-        }
-        all.update(format!("{} {} {rel}\n", if exec { 'x' } else { '-' }, hex(&h.finalize())).as_bytes());
+        all.update(format!("{} {} {rel}\n", if exec { 'x' } else { '-' }, sha256_file(&path)?).as_bytes());
     }
     Ok(hex(&all.finalize()))
 }
@@ -180,10 +171,6 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf, bool)>) -> io:
 
 fn bad(msg: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The steps of `install`, so a test can make any one of them fail.
@@ -295,25 +282,36 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     fs::set_permissions(to, fs::Permissions::from_mode(fs::metadata(from)?.permissions().mode() & 0o777))
 }
 
+/**
+ * Removes a leftover `.Centralu.app.new` or `.Centralu.app.old`, or whatever else is at `p`; nothing there
+ * is not an error. Best effort on the way, unlike the verifier's `remove_content`: every folder is made
+ * writable where it can be, a folder that cannot be (one root owns, after an install run with sudo) or
+ * cannot be listed is passed over, and the removal is tried all the same. It can still succeed when what
+ * could not be changed was writable already, and when it cannot, its error is the one to report.
+ */
 fn remove_any(p: &Path) -> io::Result<()> {
+    remove_any_with(p, &|dir| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
+}
+
+/// `remove_any` with the chmod given, so a test can make it fail as it does on a folder of another user.
+fn remove_any_with(p: &Path, chmod: &dyn Fn(&Path) -> io::Result<()>) -> io::Result<()> {
     match fs::symlink_metadata(p) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
         Ok(m) if m.is_dir() => {
-            // A copy this module made may hold read-only folders; make them writable to remove them.
-            make_writable(p);
+            make_writable(p, chmod);
             fs::remove_dir_all(p)
         }
         Ok(_) => fs::remove_file(p),
     }
 }
 
-fn make_writable(dir: &Path) {
-    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+fn make_writable(dir: &Path, chmod: &dyn Fn(&Path) -> io::Result<()>) {
+    let _ = chmod(dir);
     if let Ok(entries) = fs::read_dir(dir) {
         for e in entries.flatten() {
             if fs::symlink_metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false) {
-                make_writable(&e.path());
+                make_writable(&e.path(), chmod);
             }
         }
     }

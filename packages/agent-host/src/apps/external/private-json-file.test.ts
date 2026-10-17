@@ -113,6 +113,47 @@ describe('the secrets store reads a damaged file as empty without losing it', ()
   })
 })
 
+// #944: what the screen is told, and for how long
+describe('the secrets store says when its file could not be used', () => {
+  it('names the copy a damaged file was moved to, for each app until that app has a value again', () => {
+    writeFileSync(join(dataRoot, SECRETS_FILE), DAMAGED)
+    const store = new SecretStore(dataRoot)
+    const trouble = store.trouble('p1/keys')
+    expect(trouble?.movedTo).toMatch(/^app-secrets\.json\.unreadable-\d+$/)
+    expect(existsSync(join(dataRoot, trouble!.movedTo!))).toBe(true)
+    // Further reads find no file, which is no news: it stays said
+    expect(store.trouble('p1/keys')).toEqual(trouble)
+    // One file holds every app's values (#993 review): app A's value entered again says nothing of app B's
+    store.set('p1/keys', 'API_KEY', 'sk-new-value')
+    expect(store.trouble('p1/keys')).toBeNull()
+    expect(store.trouble('p2/other')).toEqual(trouble)
+    // And a restart finds it again, from the copy in the data folder
+    expect(new SecretStore(dataRoot).trouble('p2/other')).toEqual(trouble)
+    expect(new SecretStore(dataRoot).trouble('p1/keys')).toBeNull()
+  })
+
+  it('says nothing while no copy was ever moved aside', () => {
+    expect(new SecretStore(dataRoot).trouble('p1/keys')).toBeNull()
+    new SecretStore(dataRoot).set('p1/keys', 'API_KEY', 'sk-value')
+    expect(new SecretStore(dataRoot).trouble('p2/other')).toBeNull()
+  })
+
+  it('says a file still in place, with null for where it went, until it reads again', () => {
+    const path = join(dataRoot, SECRETS_FILE)
+    writeFileSync(path, DAMAGED)
+    vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
+    mkdirSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`, 'held'), { recursive: true })
+    const store = new SecretStore(dataRoot)
+    expect(store.trouble('p1/keys')).toEqual({ movedTo: null, at: 1_700_000_000_000 })
+    // Stuck is the file's, so every app says it
+    expect(store.trouble('p2/other')).toEqual({ movedTo: null, at: 1_700_000_000_000 })
+    writeFileSync(path, '{}')
+    // Readable again: the folder held for the move is no copy of the file, so nothing is said
+    rmSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`), { recursive: true })
+    expect(store.trouble('p1/keys')).toBeNull()
+  })
+})
+
 // chmod cannot take read permission away on Windows, nor from root
 const posixUser = process.platform !== 'win32' && process.getuid?.() !== 0 ? it : it.skip
 

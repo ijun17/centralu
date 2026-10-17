@@ -103,7 +103,7 @@ pub fn verify_in_place(dir: &Path, keys: &[TrustedKey], expect: &Expect) -> Resu
     let root = open_dir(dir)?;
     for entry in &manifest.files {
         let mut f = open_beneath(&root, &entry.path)?;
-        let mode = f.metadata().map_err(|e| Error::io(format!("stat {}", entry.path), e))?.mode();
+        let mode = f.metadata().map_err(|e| Error::read_io(format!("stat {}", entry.path), e))?.mode();
         if mode & 0o222 != 0 || ((mode & 0o111) != 0) != entry.executable {
             return Err(Error::CopyMismatch(entry.path.clone()));
         }
@@ -136,7 +136,7 @@ pub fn verify_in_place(dir: &Path, keys: &[TrustedKey], expect: &Expect) -> Resu
             if !allowed.contains(&path) {
                 return Err(Error::CopyMismatch(path));
             }
-            let kind = entry.file_type().map_err(|e| Error::io(format!("stat {path}"), e))?;
+            let kind = entry.file_type().map_err(|e| Error::read_io(format!("stat {path}"), e))?;
             if kind.is_symlink() {
                 return Err(Error::Symlink(path));
             }
@@ -309,7 +309,7 @@ fn copy_one(root: &OwnedFd, entry: &FileEntry, dest: &Path) -> Result<()> {
             Ok(0) => break,
             Ok(n) => n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(Error::io(format!("read {}", entry.path), e)),
+            Err(e) => return Err(Error::read_io(format!("read {}", entry.path), e)),
         };
         total += n as u64;
         // Stop at the first byte past the listed size: a file that grows (or never ends) is not
@@ -388,7 +388,7 @@ fn open_dir(path: &Path) -> Result<OwnedFd> {
         )
     };
     if fd < 0 {
-        return Err(Error::io(
+        return Err(Error::read_io(
             format!("open {}", path.display()),
             io::Error::last_os_error(),
         ));
@@ -428,7 +428,7 @@ fn open_beneath(root: &OwnedFd, rel: &str) -> Result<File> {
     let file = File::from(owned.expect("a checked path has at least one component"));
     let meta = file
         .metadata()
-        .map_err(|e| Error::io(format!("stat {rel}"), e))?;
+        .map_err(|e| Error::read_io(format!("stat {rel}"), e))?;
     if !meta.file_type().is_file() {
         return Err(Error::NotRegularFile(rel.to_string()));
     }
@@ -448,7 +448,7 @@ fn classify(dirfd: libc::c_int, name: &CString, rel: &str, err: io::Error) -> Er
             _ => return Error::NotRegularFile(rel.to_string()),
         }
     }
-    Error::io(format!("open {rel}"), err)
+    Error::read_io(format!("open {rel}"), err)
 }
 
 fn read_small(root: &OwnedFd, name: &'static str, max: u64) -> Result<Vec<u8>> {
@@ -475,7 +475,7 @@ fn read_small(root: &OwnedFd, name: &'static str, max: u64) -> Result<Vec<u8>> {
     (&mut f)
         .take(max + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| Error::io(format!("read {name}"), e))?;
+        .map_err(|e| Error::read_io(format!("read {name}"), e))?;
     if bytes.len() as u64 > max {
         return Err(Error::BadFile {
             name,

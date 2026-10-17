@@ -396,17 +396,36 @@ step shows on the screen.
     in a temporary index (the checkout, its index and branches never move), pushes
     `chore/release-<version>` (never forced) and opens the pull request through `open_pr`'s own code,
     checked with `dryRun` before the push: the merged list under Why, the files under What changed.
+    It warns, never refuses, when other builds' jobs (running plus queued, of every active run) reach
+    three quarters of `release.runners` (default 20): the bump PR's CI would queue behind them (#1035).
   - `rehearse`: CI green, the version untagged and its files consistent; starts the workflow on main
     with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
-    A rehearsal already running or passed on that commit is not started again.
+    A rehearsal already running or passed on that commit is not started again. While main's version
+    is released (#1035), it rehearses the open bump PR instead: on its branch, with no CI required,
+    when exactly one `branchPrefix` branch after main's version has an open PR into main (or
+    `version` names it), its head is the PR's head, main's head is an ancestor of it (else the
+    squash would give main another tree), and it carries that version consistently and untagged.
   - `tag` (`version?`, `skipRehearsal?`): the checkout as for bump, CI green, main's version after the
     latest tag and untagged (a release tag is never moved), its files consistent, and a successful
-    rehearsal on that commit unless `skipRehearsal: true`. Pushes the tag on main's commit by its id
+    rehearsal on that commit, or on `branchPrefix` + the version at a commit with main's tree (the
+    bump PR's rehearsal; the rule #629 uses for its CI), unless `skipRehearsal: true`. The newest of
+    those counts. Pushes the tag on main's commit by its id
     (lightweight, as before; no local tag is made) and answers the release run.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve
     (`current_user_can_approve`); otherwise it names the reviewers and the run's address. Says which
-    jobs wait; the shim's approval is the last reversible moment (docs/releasing.md).
+    jobs wait; the shim's approval is the last reversible moment (docs/releasing.md). The gate: the
+    tagged commit's own CI green, and before the shim also every other job of the run succeeded and
+    every package `release.registry.packages` names (but `release.registry.shim`) on the registry at
+    the version with `gitHead` the tagged commit (`PROJECT_BOARD_NPM_REGISTRY` points the tests at a
+    local one). `wait: true` with `confirm` (#1035) reads that gate every poll until it passes and
+    approves at once, up to `waitMinutes` (default 45, at most 60), with progress; a gate that cannot
+    pass by itself (failed CI or job, a package from other code, no permission) refuses at once, and a
+    timeout approves nothing and says what it still waited for. A waiting call does not hold other
+    board writes up (`serially` is skipped for it). The required set is the tagged commit's own
+    workflow's (`readRequired` with `at`), and a required check missing after every build run on it
+    completed refuses. A wait pins the version, tagged commit and run of its first read and refuses
+    if any changes; no job listed as waiting is "not yet"; an aborted call never approves.
   - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
     newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`

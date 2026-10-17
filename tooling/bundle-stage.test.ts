@@ -51,7 +51,7 @@ describe('where the bundle carries the shell and the content', () => {
     expect(install).toContain(`pub const DESCRIPTOR: &str = "${SHELL_DESCRIPTOR}";`)
     expect(install).toContain('resources.join("shell")')
     expect(rust('apps/desktop/src-tauri/src/shell/mod.rs')).toContain('content: resources.join("content")')
-    expect(rust('apps/desktop/src-tauri/src/sidecar.rs')).toContain('app.path().resource_dir()')
+    expect(rust('apps/desktop/src-tauri/src/sidecar/mod.rs')).toContain('app.path().resource_dir()')
   })
 
   it('the content is made from the keeper and the host the bundle carries', () => {

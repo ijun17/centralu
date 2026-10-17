@@ -24,6 +24,7 @@ export type Stray = { pid: number; command: string; cwd: string }
 export function QuitDialog({
   background,
   strays,
+  straysError = null,
   alsoStop,
   error,
   dialogRef,
@@ -34,6 +35,11 @@ export function QuitDialog({
   /** Background mode: true on, false off, null unknown or not offered (no keeper) */
   background: boolean | null
   strays: Stray[]
+  /**
+   * Why the leftover processes could not be listed (#841 item 7, #990 review): the host refuses while the keeper cannot
+   * say which processes it holds. Said, so an empty list does not read as "nothing is left running"
+   */
+  straysError?: string | null
   alsoStop: boolean
   error: string | null
   dialogRef?: Ref<HTMLDivElement>
@@ -66,6 +72,11 @@ export function QuitDialog({
           </p>
         )}
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+        {straysError && (
+          <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="quit-strays-unknown">
+            Could not check for processes left running in your project folders: {straysError}
+          </p>
+        )}
         {strays.length > 0 && (
           <div className="mt-3 rounded-md border border-line bg-surface-floor p-2" data-testid="quit-strays">
             <p className="text-xs text-ink-muted">

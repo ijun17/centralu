@@ -63,6 +63,14 @@ export const ExternalAppInfo = z.object({
    * (whether a field is empty). Setting and clearing a value goes through `apps.setSecret`.
    */
   secrets: z.array(z.object({ name: z.string(), set: z.boolean() })).optional(),
+  /**
+   * The saved secrets could not be read (#944, #841 item 2), on an app that declares secrets: `movedTo` names the copy
+   * the unreadable file was moved aside to (the values were not lost, but the app no longer gets them), or is null
+   * when it could not be moved, and saving is refused until the file is fixed or removed. `at` is when the host met
+   * it. Gone once this app has a value again (the file holds every app's, #993 review), or once a stuck file reads
+   * again; a copy moved aside is found in the data folder, so a restart says it again. Absent from older hosts.
+   */
+  secretsUnreadable: z.object({ movedTo: z.string().nullable(), at: z.number() }).optional(),
   /** Which linked machine the app lives on (#82); absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
   machine: z.string().nullable().optional(),
   /**

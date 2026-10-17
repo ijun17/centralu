@@ -111,7 +111,13 @@ export class ClaudeSession implements SessionHandle {
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
-    this.servers = new ClaudeServers({ sessionId, opts, closed: () => this.closed, query: () => this.query })
+    this.servers = new ClaudeServers({
+      sessionId,
+      opts,
+      closed: () => this.closed,
+      query: () => this.query,
+      warn: (text) => this.emit({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'apps', text }),
+    })
     this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({

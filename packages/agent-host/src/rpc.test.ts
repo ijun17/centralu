@@ -55,3 +55,13 @@ describe('host.stop', () => {
     await expect(rpc('host.stop', {})).rejects.toThrow(/quit the app instead/)
   })
 })
+
+/** #841 item 7: the processes the keeper holds are never offered as leftovers, even when it cannot say which they are */
+describe('processes.strays', () => {
+  const mgr = { folderRoots: () => ['/nowhere'] } as unknown as SessionManager
+  it('refuses to list when the keeper cannot say which processes it holds', async () => {
+    const rpc = createRpcHandler(mgr, new Map(), { heldPids: () => Promise.reject(new Error('keeper gone')) })
+    await expect(rpc('processes.strays', {})).rejects.toThrow(/keeper could not say/)
+    await expect(rpc('processes.stop', { pids: [12345] })).rejects.toThrow(/keeper could not say/)
+  })
+})

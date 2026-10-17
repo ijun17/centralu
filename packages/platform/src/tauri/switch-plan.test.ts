@@ -307,6 +307,25 @@ describe('a keeper that stays on its build while the host runs this one (#387)',
     expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, phase: 'handing_over' } })).toBe(false)
   })
 
+  /*
+   * Two local builds of one clean commit are one build to the keeper (`BuildSource::same_build`), which ignores the
+   * build time, and were two to this rule, which compared it: the bar showed the retry notice for a swap that had
+   * reached this build. The window now says which it is (`swapToThisBuild`), by the keeper's rule.
+   */
+  it("takes the window's word for whether the swap went to this build, and falls back to its own rule without it", () => {
+    const rebuilt = { ...secondTry, target: { ...app, builtAt: '2026-10-05T09:00:00Z' } }
+    expect(keeperStaysBehind({ ...behindKeeper, swap: rebuilt, swapToThisBuild: true })).toBe(true)
+    expect(buildBar(input(rebuilt, { build: { ...behindKeeper, swap: rebuilt, swapToThisBuild: true } }))).toEqual({
+      kind: 'keeper_later',
+      text: KEEPER_LATER_TEXT,
+      detail: tooLong,
+    })
+    expect(keeperStaysBehind({ ...behindKeeper, swap: secondTry, swapToThisBuild: false })).toBe(false)
+    // A window from before the field: the commit and the build time, as before
+    expect(keeperStaysBehind({ ...behindKeeper, swap: rebuilt })).toBe(false)
+    expect(keeperStaysBehind({ ...behindKeeper, swap: secondTry })).toBe(true)
+  })
+
   it('a keeper behind that has not tried yet is still offered the switch, which stops nothing', () => {
     expect(buildBar(input(undefined))).toEqual({ kind: 'other', who: 'keeper' })
   })

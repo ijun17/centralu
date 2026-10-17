@@ -46,10 +46,7 @@ impl TrustedKey {
 
 /// First 8 bytes of SHA-256 over the raw public key, lowercase hex.
 pub fn key_id(raw: &[u8; 32]) -> String {
-    Sha256::digest(raw)[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    crate::hex(&Sha256::digest(raw)[..8])
 }
 
 /// `current` and `next` from `packaging/shell/keys.json`, as built into this binary.

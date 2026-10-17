@@ -1,7 +1,7 @@
 //! Find VS Code's `code` command (#159).
 //!
 //! A `.app` launched from the GUI does not inherit the login shell's PATH, and gets only
-//! `/usr/bin:/bin:/usr/sbin:/sbin` (sidecar.rs's `resolve_node` records the same measurement).
+//! `/usr/bin:/bin:/usr/sbin:/sbin` (`host_proc::node::resolve_node` in the keeper crate records the same measurement).
 //! `code` lives in none of those four directories, so the old "Open in IDE", which just ran
 //! the command by name, always ended in `No such file or directory` on the installed app, even
 //! on a Mac with VS Code installed. `tauri dev` inherits the terminal's PATH, so this never
@@ -107,7 +107,7 @@ pub fn find_code() -> Result<PathBuf, String> {
 mod tests {
     use super::*;
 
-    /// The PATH a GUI-launched app actually gets (measured in sidecar.rs).
+    /// The PATH a GUI-launched app actually gets (measured for `host_proc::node::resolve_node`).
     #[cfg(unix)]
     const GUI_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 

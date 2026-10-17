@@ -505,8 +505,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             let Some(on) = req.get("on").and_then(Value::as_bool) else {
                 return reply(&mut stream, &json!({ "ok": false, "error": "set_background needs on: true|false" }));
             };
-            let saved = source::save_settings(&k.data, &Settings { background: on });
-            if let Err(e) = saved {
+            if let Err(e) = source::save_background(&k.data, on) {
                 return reply(&mut stream, &json!({ "ok": false, "error": format!("could not save the setting: {e}") }));
             }
             if let Ok(mut st) = k.state.lock() {

@@ -117,8 +117,7 @@ export function createRpcHandler(
     if (!themes) throw rpcError('Theme files are unavailable')
     return themes
   }
-  const held = async (): Promise<number[]> => (heldPids ? heldPids().catch(() => []) : [])
-  /** The same list, or null when the keeper could not answer: a stop must not guess (`stopStrays`) */
+  /** The pids the keeper holds for this host, or null when the keeper could not answer: a stop must not guess (`stopStrays`) */
   const heldOrUnknown = async (): Promise<number[] | null> => (heldPids ? heldPids().catch(() => null) : [])
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw rpcError('Terminals are unavailable')
@@ -603,7 +602,15 @@ export function createRpcHandler(
       const saved = mgr.setGridView(panels ?? (sessionIds ?? []).map((sessionId) => ({ kind: 'session' as const, sessionId })))
       return panels ? saved : sessionIdsOf(saved)
     },
-    'processes.strays': async () => findStrays(mgr.folderRoots(), process.pid, await held()),
+    /*
+     * Not listed with no protection (#841 item 7): a keeper that could not answer made every agent it holds a stray,
+     * offered to be stopped on quit. The stop refuses that case already; the list says it too.
+     */
+    'processes.strays': async () => {
+      const held = await heldOrUnknown()
+      if (held === null) throw rpcError('The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again')
+      return findStrays(mgr.folderRoots(), process.pid, held)
+    },
     'processes.stop': async (p) =>
       stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),

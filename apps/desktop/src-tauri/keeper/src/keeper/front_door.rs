@@ -494,9 +494,7 @@ fn log(msg: &str) {
 
 /// A token for the door: 16 random bytes from the OS, as hex.
 pub fn new_token() -> io::Result<String> {
-    let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(content_verify::hex(&crate::os::random_bytes::<16>()?))
 }
 
 #[cfg(test)]

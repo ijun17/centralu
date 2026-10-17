@@ -5,14 +5,15 @@
 // keeper and the host's tests. This answers on $GITHUB_OUTPUT what each group of jobs reads:
 //
 //   bundle      the product's sources (anything but documents and tests): the four bundles
-//   host        the product's sources outside the window (packages/ui, core, platform, apps/web):
-//               the keeper end to end, macOS and Linux, and the content verifier. The host shares
-//               only protocol with the window (docs/architecture.md §2), and none of them read a test
+//   host        the product's sources outside the window (packages/ui, core, platform, apps/web), and
+//               the few test inputs the keeper's Rust tests read (HOST_TEST_INPUTS): the keeper end to
+//               end, macOS and Linux, and the content verifier. The host shares only protocol with the
+//               window (docs/architecture.md §2), and none of them read any other test
 //   host_tests  anything but documents outside the window and e2e/: the host's tests on the Node
 //               remotes run (packages/agent-host, packages/protocol, tooling/launcher-)
 //   code        anything but documents: the UI scenarios in Chromium and the UX tasks
 //
-// `verify`, `windows tests` and the WebKit UI scenarios do not ask: they run on every commit (their
+// `verify`, the `windows tests` jobs and the WebKit UI scenarios do not ask: they run on every commit (their
 // tests read documents too; WebKit on every pull request is the owner's decision of 2026-10-11).
 //
 // Which files: everything a commit adds to main. A commit already on main (a push to main, every
@@ -38,6 +39,12 @@ import { pathToFileURL } from 'node:url'
 const DOCS = [/^docs\//, /^[^/]+\.md$/, /^\.github\/ISSUE_TEMPLATE\//, /^\.github\/PULL_REQUEST_TEMPLATE\.md$/]
 /** Tests and what only tests run: no bundle includes them */
 const TESTS = [/\.test\.(ts|tsx|mts|mjs)$/, /\.test-helpers\.(ts|mts)$/, /^e2e\//, /^tooling\//, /^vitest\.config\.ts$/]
+/**
+ * Tests' inputs outside the product that the host jobs' tests read: the keeper's Rust tests take them in with
+ * `include_str!`, and only the keeper jobs run those. So a change to one alone runs the host jobs (and the host's
+ * tests, which read them too), though no bundle carries it.
+ */
+const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/]
 /** The window: what the host, the keeper and the content verifier never load */
 const WINDOW = [/^packages\/(ui|core|platform)\//, /^apps\/web\//]
 /** What the builds, the type checker or CI itself read, wherever it sits: a change to one runs everything */
@@ -61,7 +68,7 @@ export function classify(files) {
   const product = nonDocs.filter((f) => !matches(TESTS, f))
   return {
     bundle: product.length > 0,
-    host: product.some((f) => !matches(WINDOW, f)),
+    host: product.some((f) => !matches(WINDOW, f)) || nonDocs.some((f) => matches(HOST_TEST_INPUTS, f)),
     host_tests: nonDocs.some((f) => !matches(WINDOW, f) && !f.startsWith('e2e/')),
     code: nonDocs.length > 0,
   }
