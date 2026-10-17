@@ -24,6 +24,7 @@ import {
   mergePr,
   openPrsOnBase,
   QUEUE_PR_FIELDS,
+  readChecks,
   readJobLog,
   readPr,
   readRepo,
@@ -33,7 +34,9 @@ import {
   sameRepo,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
+import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, onlySupersededFailures, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
+import { activeBatch } from './batch.mjs'
+import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { short } from './util.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
@@ -47,7 +50,7 @@ const BACKOFF_MAX_MS = 5 * 60_000
 
 // PROJECT_BOARD_QUEUE_POLL_MS: for the tests only, which cannot wait 90 s between polls
 const pollOverride = Number(process.env.PROJECT_BOARD_QUEUE_POLL_MS) || 0
-const pollMs = (kind) => pollOverride || POLL_MS[kind]
+export const pollMs = (kind) => pollOverride || POLL_MS[kind]
 export const TICK_MS = Number(process.env.PROJECT_BOARD_QUEUE_TICK_MS) || 5_000
 /** `#8` in this project's repository, `owner/repo#8` elsewhere (board.mjs's refOf, without the runtime). */
 export const queueRef = (repo, n) => (sameRepo(repo, config.repository) ? `#${n}` : `${repo}#${n}`)
@@ -147,7 +150,7 @@ export function releaseLease(dir, holder) {
 // --- One poll ----------------------------------------------------------------------------------------
 
 const permissionsSeen = new Map()
-async function permissionsOf(repo, now) {
+export async function permissionsOf(repo, now) {
   const hit = permissionsSeen.get(repo)
   if (hit && now - hit.at < PERMISSIONS_MS) return hit
   const r = await readRepo(repo)
@@ -172,7 +175,7 @@ export function latestRuns(runs, pr) {
     const cur = by.get(key)
     if (!cur || better(r, cur)) by.set(key, r)
   }
-  return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null }))
+  return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null, suite: r.check_suite_id ?? null, url: r.html_url ?? null }))
 }
 
 /** The first failing test line of a failed job, for the attention message; best effort. */
@@ -189,20 +192,50 @@ async function failingLine(repo, job) {
 }
 
 /**
- * Lands an item that is green and mergeable: checks every open lower is inside the top's head, then
- * squash-merges the top on the head that was read. Answers the outcome; `afterMerge` does the rest.
+ * Whether a pull request may share a batch (#962): not a fork's (the queue merges its head into a
+ * branch of this repository and starts CI there, with this repository's secrets), not a release bump
+ * (its CI is the release's evidence, docs/releasing.md, and it lands alone).
  */
-async function land(item, pr, ref, renew, defaultBranch) {
+export function batchable(pr) {
+  if (pr.isCrossRepository) return false
+  const prefix = config.release?.branchPrefix
+  if (prefix && String(pr.headRefName ?? '').startsWith(prefix)) return false
+  return !/^chore\(release\)!?:/.test(String(pr.title ?? ''))
+}
+
+/** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
+const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
+
+/**
+ * Lands an item that is green and mergeable: checks every open lower is inside the top's head (so
+ * the green CI, read on that head, ran on all of them) and that no lower's own latest CI run on its
+ * head failed, then squash-merges the top on the head that was read. The top's run is what proves
+ * the stack; a lower's red run is a sign it does not (a CI that tests only the top's own diff, a
+ * lower pushed again). Answers the outcome; `afterMerge` does the rest.
+ */
+export async function land(item, pr, ref, renew, defaultBranch) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   for (const l of item.lowers ?? []) {
     const lp = await readPr(repo, l)
-    if (lp.state === 'OPEN' && !(await containsCommit(repo, lp.headRefOid, pr.headRefOid)))
+    if (lp.state !== 'OPEN') continue
+    if (!(await containsCommit(repo, lp.headRefOid, pr.headRefOid)))
       return {
         state: 'attention',
         reason: {
           kind: 'stack',
           text: `${n} does not contain the head ${short(lp.headRefOid)} of ${ref(repo, l)}, which would be closed as landed. Restack ${n} onto it and push, or queue ${n} again without ${ref(repo, l)}.`,
+        },
+      }
+    // Cheap: the runs' conclusions only. Cancelled or no run at all is fine (the top's run covers it)
+    const own = latestRuns((await readWorkflowChecks(repo, lp.headRefOid, { workflows: CI.workflows })).runs, lp)
+    const red = own.find((r) => r.status === 'completed' && FAILED_RUN.has(r.conclusion))
+    if (red)
+      return {
+        state: 'attention',
+        reason: {
+          kind: 'lower-failed',
+          text: `${ref(repo, l)}, under ${n}, has a failed CI run ${red.id} on its head ${short(lp.headRefOid)}, so the stack is not landed on the top's green run alone. Fix ${ref(repo, l)} (or rerun it if it was a flake) and restack ${n}, or queue ${n} again without it.`,
         },
       }
   }
@@ -234,7 +267,7 @@ async function land(item, pr, ref, renew, defaultBranch) {
  * with "Landed in #N" and deletes their branches, unless another open pull request is based on one.
  * A lower the top does not contain stays open and is named. Answers the message for the session.
  */
-async function afterMerge(item, pr, ref, subject, { landed, defaultBranch }) {
+export async function afterMerge(item, pr, ref, subject, { landed, defaultBranch }) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   const commit = pr.mergeCommit?.oid ?? null
@@ -301,10 +334,15 @@ async function pollItem(item, { now, ref, renew, save }) {
     const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
     const runs = latestRuns(scoped.runs, pr)
+    // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
+    base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
     let lowerBranches = []
     if (checks.verdict === 'green' && pr.baseRefName !== defaultBranch && item.lowers?.length)
       lowerBranches = (await Promise.all(item.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
-    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, now, ref })
+    // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
+    let supersededOnly = false
+    if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
+    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref })
   }
 
   let wait = pollMs(d.state === 'attention' ? 'attention' : d.state === 'waiting' ? 'waiting' : 'ci')
@@ -367,13 +405,21 @@ async function pollItem(item, { now, ref, renew, save }) {
 export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
   let q = readQueue(dir)
   const active = q.items.filter((i) => ACTIVE.has(i.state))
-  if (!active.length) {
+  // A batch whose last member landed still has its end to do (its branch, the tree check)
+  if (!active.length && !activeBatch(q)) {
     releaseLease(dir, holder)
     return { did: 'idle' }
   }
   if (q.pause && Date.parse(q.pause.until) > now) return { did: 'paused', until: q.pause.until }
   if (!takeLease(dir, holder, now)) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
   q = readQueue(dir)
+  // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
+  const work = batchWork(q, now)
+  if (work?.form) {
+    updateQueue(dir, (fresh) => formDue(fresh, now, ref))
+    return { did: 'batched' }
+  }
+  if (work?.batch) return batchTick(dir, work.batch, { q, holder, now, ref })
   const item = dueItem(q, now)
   if (!item) return { did: 'idle' }
   const key = itemKey(item)

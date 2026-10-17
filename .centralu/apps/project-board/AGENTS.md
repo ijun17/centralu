@@ -115,6 +115,9 @@ intermittent failures (#368), and how long a merge may wait.
   any, else from the jobs of the `ci.workflows` files read from the base branch (so a PR cannot make
   its own checks optional), with `${{ matrix.x }}` names filled in. A job whose check name cannot be
   worked out makes every reported check count. With no set at all, every reported check counts.
+  This repository's build.yml leaves jobs out of a pull request by its files (`changes`); a left-out
+  job reports `skipped` or a stand-in under the same name, and a set written into branch protection
+  must name `changes` too (docs/releasing.md, "What CI does").
 - **`ci_status`** (`pr`, or `ref` and optional `repo`; read-only): short by default: the verdict,
   `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
   non-required checks. Compact output still says when the PR adds required jobs (#445).
@@ -131,7 +134,14 @@ intermittent failures (#368), and how long a merge may wait.
   `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
   "still running" at 240 s and follows the call with `run_status`.
-- **Never call `merge_when_green` against a real PR in a test**; the tests use a fake `gh`.
+- **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
+  merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
+  admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
+  names as `ci_status` does; pending checks do not stop it, and the answer says CI goes on. `note`
+  becomes a comment for the maintainer under the public text rules (checked before anything is
+  written), ending with the CI line. No permission check: anyone who may push to the pull request
+  may mark it ready.
+- **Never call `merge_when_green` or `mark_ready` against a real PR in a test**; the tests use a fake `gh`.
 
 ### Waiting without blocking
 
@@ -161,7 +171,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
   request, and for a top based on a branch none of its lowers has. A pull request is in one item only.
-  `owner` names the queuing session (default a new id); the answer gives the watch command.
+  `owner` names the queuing session (default a new id); the answer gives the watch command. Queued
+  again (what an attention message may ask for), an item is looked at afresh: its clocks and failure
+  count start over, a merge GitHub refused is tried again, reruns spent on its head stay spent, and
+  without a new `owner` it stays the first session's, whose watch command listens for that owner.
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY,
@@ -175,8 +188,14 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
   job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
   clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
-  UNKNOWN wait, and after 30 minutes → attention) → every open lower must be inside the top's head
-  (compare), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
+  UNKNOWN wait, and after 30 minutes → attention; one exception, #1015: UNSTABLE when every check on
+  the head passed or belongs to a run of a CI workflow that a successful run on the same head made
+  moot, cancelled or older, and every commit status succeeded, as a cancelled duplicate pull_request
+  run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
+  of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
+  (compare: the green run, read on that head, ran on all of them) and no lower's own latest CI run on
+  its head may have failed (cancelled or none is fine; a red one means the top's run may not cover it,
+  → attention `lower-failed`), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
   attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head). A stack lands only when the top merged into the default branch, here or found merged
@@ -212,6 +231,65 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - `PROJECT_BOARD_QUEUE_TICK_MS` and `PROJECT_BOARD_QUEUE_POLL_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
+
+### Batches (#962)
+
+The free plan runs about one CI build at a time, so pull requests queued together each waited for
+their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
+and the tick drives the running batch before any item, under the same lease. On while `project.json`
+has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
+
+- **Which**: active items in CI whose own CI was read on their head and has not started (every run
+  `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
+  from a batch on that head (`batchless`), not a fork's (its head would run CI in this repository's
+  branch) and not a release bump (its CI is the release's evidence), the oldest first, in one
+  repository. Sent back, an item is batchable again only after its own next poll. One batch runs at a
+  time; an item in a batch is not polled on its own (`dueItem`).
+- **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
+  branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
+  batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
+  goes on with its own CI and is not batched again on that head; so does one GitHub will not merge
+  into it for another reason (a 404 or 422, a head gone, already in main). With two or more merged, the CI
+  workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
+  permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
+  Then the members' own runs that have not started are cancelled, each written down before it is
+  cancelled (`cancelled`, which a batch split or re-formed from this one keeps for its members).
+- **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
+  required set from the default branch plus jobs the batch adds, a cancelled run rerun once, failed
+  jobs once. A member that changes meanwhile (pushed, closed, a draft, taken out, queued again) ends
+  the run; the rest are tried again without it. **Red** (failed twice): split in halves, a half of
+  two or more tried again, one alone goes back to its own CI. Anything else (no run in 15 minutes, a
+  refused rerun) sends them all back.
+- **The required-checks rule** (#962's open question, decided here): the queue's own rule, with no
+  branch protection change. A member's required checks count as passed when the batch run passed
+  every required check (the same workflow file and job names, read the same way) on a commit whose
+  tree is what the default branch becomes when it lands. GitHub is not asked to take a status in
+  place of a check: the repository has no protection rule, and if one is added that requires checks
+  on the head, GitHub answers BLOCKED and the member goes back to its own CI. Requiring only a batch
+  status in branch protection was the other option; it was not taken: it changes the repository's
+  settings, and every merge would then need a batch's status, which `merge_when_green` and a pull
+  request queued alone never get.
+- **Landing**: one member per tick, in order, as its own squash (`land`, `afterMerge`: the same
+  checks, subject, lowers and branches as alone), each only while the default branch's tree is the
+  tree the batch had before it; the last one leaves exactly the tree CI tested, and the batch's end
+  says whether it did. A member's own runs were cancelled, so GitHub may call it UNSTABLE: that alone
+  does not stop it when every check that did not pass is a run the batch cancelled
+  (`onlyCancelledByBatch`); anything else waits 30 minutes, then the rest go back. Before each merge
+  a `merge-queue` success status on its head names the batch run. The default branch moved by
+  something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
+  rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
+  batch's tree after it (a driver stopped before writing it down), it counts as landed. The batch
+  branch is deleted when the batch ends, whatever the end, but only once the queue has written down
+  that it made it (`branchMade`), and only while it is still the driver.
+- A member sent back has its own run cancelled: the item's poll reruns it (a cancelled run once per
+  head), which is what tells the session what is wrong with it, if anything.
+- The watch command does not say "Nothing left queued" while a batch with the owner's pull requests
+  still has its end to do (`watchState`); it waits for it, and its notice.
+- `merge_queue` lists running batches first, `batch` on each member, and `batches`; the screen tags a
+  member "batch N". Batch events are for the screen, not a session; a member's merge is its owner's
+  news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
+  Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
+  red and split, the default branch moved, dispatch refused, a conflict).
 
 ## Which tool for which task (#957)
 
@@ -348,7 +426,7 @@ step shows on the screen.
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
   decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
-  read_failed_job), `queue-tools.mjs` (queue_merge, merge_queue, unqueue), `help-tools.mjs` (help),
+  mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
   edit_private_words).
 - What the families share: `config.mjs` (project.json, read once at start), `board.mjs` (the cached
@@ -358,7 +436,8 @@ step shows on the screen.
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
-  lease and polls, and the watch command.
+  lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
+  (pure) and their steps on GitHub.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).

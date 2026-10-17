@@ -49,6 +49,7 @@ const ORDER = [
   'add_item',
   'ci_status',
   'merge_when_green',
+  'mark_ready',
   'help',
   'queue_merge',
   'merge_queue',

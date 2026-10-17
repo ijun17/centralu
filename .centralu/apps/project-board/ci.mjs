@@ -271,7 +271,7 @@ export const NO_PERMISSION = Object.freeze({
   action: 'refuse',
   kind: 'permission',
   reason:
-    "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and merging is the maintainer's act (#386). Mark the PR ready for review instead; the maintainer merges.",
+    "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and merging is the maintainer's act (#386). Mark it ready for review instead (mark_ready); the maintainer merges.",
 })
 
 /**

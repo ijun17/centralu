@@ -2,14 +2,14 @@ import { takeLaunchEnv } from './lifecycle/launch-env.js'
 import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
-import { homedir, hostname } from 'node:os'
+import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
-import { dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
 import { recordViewHandover, restoreViewHandover } from './view-handover.js'
@@ -131,11 +131,8 @@ const httpSecret = keeperToken ? deriveHttpSecret(keeperToken) : randomBytes(32)
 start.at('data folder')
 let movedNote: string | null = null
 function defaultDbPath(): string {
-  // Packaged when run from the bundled output, dev when run from source (the supervisor tells this)
-  const isDev = process.env.CC_DEV === '1'
-  const dir = join(homedir(), isDev ? DATA_DIR_DEV : DATA_DIR)
-  const legacy = join(homedir(), isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod)
-  movedNote = migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
+  const { dir, legacy } = chooseDataDir()
+  movedNote = legacy && migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
   mkdirSync(dir, { recursive: true })
   // Pins attachments, the orchestrator home, and worktrees to all live under here (dev and prod diverge)
   process.env.CC_DATA_DIR = dir

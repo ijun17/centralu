@@ -1,5 +1,6 @@
 import type { ToolSummary } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../apps/contract.js'
+import { jsonObject, str, type Obj } from '../json-value.js'
 
 /**
  * Whether an MCP call is one of Centralu's own tools (#843): Claude names it `mcp__centralu__<tool>`, Codex by its
@@ -10,6 +11,18 @@ import { ORCHESTRATOR_MCP_NAME } from '../apps/contract.js'
 export function isCentraluTool(call: { name: string } | { server: string; tool: string }, tool: string): boolean {
   if ('name' in call) return call.name === `mcp__${ORCHESTRATOR_MCP_NAME}__${tool}`
   return call.tool === tool && (!call.server || call.server === ORCHESTRATOR_MCP_NAME)
+}
+
+/**
+ * The command a `centralu_run` call runs (#512, the `commands` tier) and its arguments, from the call's arguments
+ * `{command, args}`, where `args` is an object or JSON text of one. A card is titled as the command it stands for, by
+ * the same rule for a Claude call and a Codex item (each kept a copy of it). Null when it names no command, which
+ * leaves the card as the call.
+ */
+export function centraluRunCommand(args: Obj): { command: string; args: Obj } | null {
+  const command = str(args.command).trim()
+  if (!/^[a-z]+(?:_[a-z]+)*$/.test(command)) return null
+  return { command, args: jsonObject(args.args) }
 }
 
 /**
