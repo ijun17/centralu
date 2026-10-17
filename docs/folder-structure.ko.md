@@ -119,7 +119,8 @@ centralu/
 │        ├─ adapters/           # claude/, codex/ + 공통 어댑터 계약(contract.ts). 도구마다의 사용량 읽기(usage.ts)와
 │        │                      #   오케스트레이터의 MCP 서버(claude/orchestrator-mcp.ts, codex/orchestrator-bridge.mjs)
 │        │                      #   도구마다 index.ts가 어댑터, session.ts가 세션이고, 세션에서 떼어 낸 부분이 옆에 있다
-│        │                      #   (#850): claude/ session-cards, session-servers, permissions; codex/ server-requests,
+│        │                      #   (#850): claude/ session-cards, session-servers, permissions, sdk-query, refresh-race,
+│        │                      #   tracked-input, schedule-look; codex/ server-requests,
 │        │                      #   thread-servers, child-threads, slash-commands, launch-config. codex/normalize.ts는 알림을
 │        │                      #   옮기고, 그것이 읽는 부분이 옆에 있다: items, approvals, thread-settings, token-readings,
 │        │                      #   child-tracker, known-notifications. claude/normalize.ts는 메시지를 옮기고, 종류마다 파일이
