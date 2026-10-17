@@ -484,22 +484,78 @@ pub fn save_settings(data: &Path, settings: &Settings) -> io::Result<()> {
     write_private(&settings_path(data), &serde_json::to_vec_pretty(settings)?)
 }
 
-/// Writes a file only this user can read, atomically (temp file + rename).
+/**
+ * Writes a file only this user can read, atomically (temp file + rename): a reader sees the old
+ * file or the new one, whole.
+ *
+ * The temporary name is this process's and this call's (#840 item 11). With one name per process,
+ * two threads writing `keeper.json` at once (the status sink and a request) truncated and wrote the
+ * same temporary file, and the rename could publish the two interleaved, or fail because the other
+ * thread had renamed it away. The data is synced before the rename, so a crash leaves the old file,
+ * not an empty new one.
+ */
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp-{}-{n}", std::process::id()));
+    let written = (|| {
         use std::io::Write;
-        let mut f = fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&tmp)?;
+        let mut f = fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&tmp)?;
         f.write_all(bytes)?;
         f.write_all(b"\n")?;
+        f.sync_all()?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+        fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-    fs::rename(&tmp, path)
+    written
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #840 item 11: threads writing the same file at once each publish their own content whole.
+    /// With one temporary name per process they truncated and wrote the same temporary file, and
+    /// a rename failed or published a mix.
+    #[test]
+    fn concurrent_private_writes_never_tear_or_fail() {
+        let dir = temp("concurrent-writes");
+        let path = dir.join("keeper.json");
+        let bodies: Vec<Vec<u8>> = (0..8u8).map(|i| vec![b'a' + i; 64 * 1024]).collect();
+        let failures = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let torn = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let threads: Vec<_> = bodies
+            .iter()
+            .cloned()
+            .map(|body| {
+                let (path, failures, torn, bodies) = (path.clone(), failures.clone(), torn.clone(), bodies.clone());
+                std::thread::spawn(move || {
+                    for _ in 0..50 {
+                        if write_private(&path, &body).is_err() {
+                            failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        if let Ok(read) = fs::read(&path) {
+                            let whole = read.last() == Some(&b'\n') && bodies.iter().any(|b| b[..] == read[..read.len() - 1]);
+                            if !whole {
+                                torn.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+        let _ = fs::remove_dir_all(&dir);
+        let (failures, torn) = (failures.load(std::sync::atomic::Ordering::SeqCst), torn.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!((failures, torn), (0, 0), "writes that failed, reads of a torn file");
+        assert_eq!(left.len(), 1, "temporary files left behind: {left:?}");
+    }
 
     fn temp(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("cc-keeper-src-{name}-{}", std::process::id()));
