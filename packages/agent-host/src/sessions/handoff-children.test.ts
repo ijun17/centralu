@@ -154,7 +154,7 @@ async function handOff(h: ReturnType<typeof host>, project: string, parent: stri
 
 /** What reaches a session's model as a report from `child` */
 const reports = (h: Handle | undefined, child: string) => (h?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))
-const marker = (sessionId: string) => store.loadMessages(sessionId, 20).map((m) => m.payload as { type?: string; note?: string }).find((p) => p.type === 'handoff')
+const marker = (sessionId: string) => store.messages.loadMessages(sessionId, 20).map((m) => m.payload as { type?: string; note?: string }).find((p) => p.type === 'handoff')
 const owner = (id: string) => store.sessions.listSessions().find((s) => s.id === id)?.askedBy
 
 describe('a handoff moves the live children to the new session (#693)', () => {
@@ -335,7 +335,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const child = await startChild(h, parent, 'long work')
     h.mgr.rename(child, 'Port the parser')
     const heir = await handOff(h, project, parent, false)
-    const notice = store.loadMessages(parent, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('Handed over'))
+    const notice = store.messages.loadMessages(parent, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('Handed over'))
     expect(notice?.text).toContain(`[${heir}]`)
     expect(notice?.text).toContain('"Port the parser" (working)')
   })
@@ -641,7 +641,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(owner(child)).toBe(heir)
     expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
     // The new session is told in its conversation; its note was read long ago
-    const notice = store.loadMessages(heir, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('was deleted'))
+    const notice = store.messages.loadMessages(heir, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('was deleted'))
     expect(notice?.text).toContain(`[${parent}]`)
     expect(notice?.text).toContain('"Release notes" (finished; waiting for more work)')
 

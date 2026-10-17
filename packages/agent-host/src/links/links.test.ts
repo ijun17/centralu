@@ -1071,7 +1071,7 @@ process.exit(127)
 describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () => {
   /** A conversation in the store: the person's line, then the agent's, `n` exchanges, seq from 1 */
   function talk(store: Store, sessionId: string, lines: [user: string, agent: string][]) {
-    store.appendMessages(
+    store.messages.appendMessages(
       lines.flatMap(([user, agent], i) => [
         { sessionId, seq: 2 * i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: user }, ts: 1_700_000_000_000 + i },
         { sessionId, seq: 2 * i + 2, role: 'assistant' as const, kind: 'text' as const, payload: { text: agent }, ts: 1_700_000_000_000 + i },
@@ -1145,11 +1145,11 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(hidden).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
     const sent = await tool('send_to_session', { sessionId: 'm1.orch', text: 'do it' })
     expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
-    expect(remote.store.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
+    expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
   })
 
   /** What the hub's orchestrator was told: the text of each message in its own session */
-  const told = (hub: Hub) => hub.store.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
+  const told = (hub: Hub) => hub.store.messages.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
 
   it('sends to a machine’s session as the hub’s orchestrator, and reports the end of that turn once (step 2)', async () => {
     const { tool, remote, hub } = await rig()
@@ -1295,7 +1295,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(r).toMatchObject({ ok: true, state: 'done', project: `m1/${name}`, sessionId: 'm1.w1' })
     expect((r as { answer: string }).answer).toContain('echo: [A session in the project "hub-project" asks this project')
     // It ran on the machine, as an instruction from the hub's session, and the answer is that machine's last words
-    const there = remote.store.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
+    const there = remote.store.messages.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
     expect(there.payload).toMatchObject({ from: { name: expect.stringContaining('on Hub mac') } })
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
   })
@@ -1385,8 +1385,8 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
     // The task did not join their turn: it is nowhere in the conversation there
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
   })
 
   it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {
@@ -1396,7 +1396,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     void hub.mgr.setProjectTrusted('p-hub', false)
     expect(card()).toBeFalsy()
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
   it('refuses an approval that comes after the trust it rested on is gone, and sends nothing to the machine', async () => {
@@ -1407,7 +1407,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     hub.store.projects.setProjectTrusted('p-hub', false)
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
   it('ends the wait with a sentence when the link drops after the task was sent, instead of "still working" for good', async () => {

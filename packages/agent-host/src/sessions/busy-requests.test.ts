@@ -45,7 +45,7 @@ describe('requests to a busy session (#677)', () => {
     return { a, b }
   }
   const reportsTo = (b: string, a: string) =>
-    w.store.loadMessages(b, 50).filter((m) => m.role === 'user' && JSON.stringify(m.payload).includes('The assigned work finished') && (m.payload as { from?: { sessionId: string } }).from?.sessionId === a)
+    w.store.messages.loadMessages(b, 50).filter((m) => m.role === 'user' && JSON.stringify(m.payload).includes('The assigned work finished') && (m.payload as { from?: { sessionId: string } }).from?.sessionId === a)
 
   it('returns the choices and sends nothing when the requester names none', async () => {
     const { a, b } = await busyChild()
@@ -187,7 +187,7 @@ describe('requests to a busy session (#677)', () => {
       return { target, asker }
     }
     const toldNotDelivered = (asker: string) =>
-      w.store.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
+      w.store.messages.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
     /** The person's turn ends, and the queue empties: a request still in it is delivered or refused now */
     const turnEnds = async (target: string) => {
       handleOf(target).answer("the person's answer")
@@ -246,7 +246,7 @@ describe('requests to a busy session (#677)', () => {
     const lowerQuietly = (id: string) => {
       ;(w.mgr as unknown as { meta: Map<string, { permissionPreset: PermissionPreset }> }).meta.get(id)!.permissionPreset = 'normal'
     }
-    const told = (id: string) => w.store.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    const told = (id: string) => w.store.messages.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
     /** An auto asker queues an ask to a busy session of the other project, with no consent remembered for the pair */
     const autoAsk = async () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
@@ -390,7 +390,7 @@ describe('requests to a busy session (#677)', () => {
       // The copy is of A's conversation, taken from the folder A runs in; the original is left running
       expect(forks).toEqual([{ from: 'ext-a', cwd: w.caller.path, to: 'fork-of-ext-a-0' }])
       expect(handleOf(fork.id).opts.resumeExternalId).toBe('fork-of-ext-a-0')
-      expect(w.store.loadMessages(fork.id, 50).map((m) => (m.payload as { text?: string }).text)).toEqual(
+      expect(w.store.messages.loadMessages(fork.id, 50).map((m) => (m.payload as { text?: string }).text)).toEqual(
         expect.arrayContaining(['first job', 'first job done']),
       )
       expect(info(a).state).toBe('working')
@@ -417,12 +417,12 @@ describe('requests to a busy session (#677)', () => {
       expect(handleOf(forkId).opts.cwd).toBe(w.caller.path)
       // Its question goes to the orchestrator, which gave it the turn (#676)
       handleOf(forkId).event({ type: 'question_request', sessionId: forkId, requestId: 'q-f', questions: [{ question: 'Which log?', header: '', options: [], multiSelect: false }] })
-      await w.until(() => w.store.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('asking a question')))
+      await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('asking a question')))
       expect(await tools.readSession(forkId)).toMatchObject({ cards: [{ requestId: 'q-f', kind: 'question' }] })
       handleOf(forkId).event({ type: 'question_resolved', sessionId: forkId, requestId: 'q-f' })
       // The orchestrator is told when the fork's turn ends, as for any work it does not wait on
       handleOf(forkId).answer('logs read')
-      await w.until(() => w.store.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The assigned work finished')))
+      await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The assigned work finished')))
       void b
     })
 
@@ -676,7 +676,7 @@ describe('a queued request across a host swap (#677)', () => {
       const { claude } = next([])
       await w.until(() => w.store.children.listQueuedRequests().length === 0)
       expect(claude.handles.get(target)?.sent ?? []).toEqual([])
-      await w.until(() => w.store.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('The asking session is no longer auto')))
+      await w.until(() => w.store.messages.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('The asking session is no longer auto')))
     },
   )
 

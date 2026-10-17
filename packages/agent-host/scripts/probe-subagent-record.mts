@@ -64,7 +64,7 @@ await new Promise((r) => setTimeout(r, 3_000))
 const error = events.find((e) => e.sessionId === session.id && e.type === 'error')
 console.log(`turn ${ended() ? 'ended' : 'timed out'} after ${Math.round((Date.now() - t0) / 1000)}s${error ? `: ${JSON.stringify(error).slice(0, 300)}` : ''}`)
 
-const rows = store.loadMessages(session.id, 1000, undefined, { full: true })
+const rows = store.messages.loadMessages(session.id, 1000, undefined, { full: true })
 console.log(`\nconversation: ${rows.length} rows`)
 for (const r of rows) {
   const p = r.payload as { summary?: { tool?: string; title?: string } | string; text?: string; callId?: string }
@@ -76,7 +76,7 @@ const launches = rows.filter((r) => r.kind === 'tool_call' && launchesSubagent((
 for (const launch of launches) {
   const callId = (launch.payload as { callId: string }).callId
   const steps = mgr.loadSubagentMessages(session.id, callId, undefined, 500)
-  const full = store.loadSubagentMessages(session.id, callId, { full: true })
+  const full = store.messages.loadSubagentMessages(session.id, callId, { full: true })
   console.log(`\nsteps under ${callId} (as the screen reads them): ${steps.length}`)
   for (const [i, s] of steps.entries()) {
     const p = s.payload as { summary?: { tool?: string; title?: string } | string; text?: string; callId?: string; input?: unknown; output?: unknown }
@@ -92,14 +92,14 @@ const sent = events.filter((e) => e.type === 'subagent_event')
 console.log(`\nbroadcast: ${sent.length} subagent_event, ${events.filter((e) => e.type === 'tool_output_delta').length} tool_output_delta`)
 // The parent's own words may quote what its subagent found; the subagent's calls must not be rows of the conversation
 const stepCalls = launches.flatMap((l) =>
-  store.loadSubagentMessages(session.id, (l.payload as { callId: string }).callId).flatMap((s) => {
+  store.messages.loadSubagentMessages(session.id, (l.payload as { callId: string }).callId).flatMap((s) => {
     const id = (s.payload as { callId?: string }).callId
     return id ? [id] : []
   }),
 )
 const inConversation = rows.filter((r) => stepCalls.includes((r.payload as { callId?: string }).callId ?? ''))
 console.log(`subagent calls among the conversation's rows: ${inConversation.length}`)
-console.log(`search hits that are not conversation rows: ${store.searchMessages('sub-probe-ok').filter((h) => !rows.some((r) => r.seq === h.seq)).length}`)
+console.log(`search hits that are not conversation rows: ${store.messages.searchMessages('sub-probe-ok').filter((h) => !rows.some((r) => r.seq === h.seq)).length}`)
 
 const externalId = store.sessions.listSessions().find((s) => s.id === session.id)?.externalId
 await mgr.disposeAll()

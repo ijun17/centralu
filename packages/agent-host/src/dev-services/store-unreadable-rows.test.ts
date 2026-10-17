@@ -29,7 +29,7 @@ function seeded(): Store {
 describe('a stored row that is not JSON fails only itself (#850)', () => {
   it('a conversation page still reads every row, the bad one with an empty payload', () => {
     const s = seeded()
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'one' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'two' }, ts: 2 },
       { sessionId: 's1', seq: 3, role: 'system', kind: 'tool_call', payload: { callId: 'c', summary: { tool: 'Bash', title: 't' }, input: {} }, ts: 3 },
@@ -40,19 +40,19 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
     dbOf(s).prepare(`UPDATE messages SET payload = 'not json' WHERE session_id = 's1' AND seq = 3`).run()
 
     // The page keeps its length: the window reads a short page as the start of the conversation
-    const page = s.loadMessages('s1', 10)
+    const page = s.messages.loadMessages('s1', 10)
     expect(page.map((m) => m.seq)).toEqual([1, 2, 3, 4])
     expect(page.map((m) => m.payload)).toEqual([{ text: 'one' }, {}, {}, { text: 'four' }])
-    expect(s.loadMessages('s1', 10, undefined, { full: true }).map((m) => m.payload)[2]).toEqual({})
-    expect(s.loadMessagesFrom('s1', 1).map((m) => m.payload)).toEqual([{}, {}, { text: 'four' }])
+    expect(s.messages.loadMessages('s1', 10, undefined, { full: true }).map((m) => m.payload)[2]).toEqual({})
+    expect(s.messages.loadMessagesFrom('s1', 1).map((m) => m.payload)).toEqual([{}, {}, { text: 'four' }])
   })
 
   it('a subagent step that is not JSON reads as an empty payload', () => {
     const s = seeded()
-    s.appendSubagentMessage('s1', 'call-1', { role: 'assistant', kind: 'text', payload: { text: 'a' }, ts: 1 })
-    s.appendSubagentMessage('s1', 'call-1', { role: 'assistant', kind: 'text', payload: { text: 'b' }, ts: 2 })
+    s.messages.appendSubagentMessage('s1', 'call-1', { role: 'assistant', kind: 'text', payload: { text: 'a' }, ts: 1 })
+    s.messages.appendSubagentMessage('s1', 'call-1', { role: 'assistant', kind: 'text', payload: { text: 'b' }, ts: 2 })
     dbOf(s).prepare(`UPDATE subagent_messages SET payload = '{' WHERE seq = 1`).run()
-    expect(s.loadSubagentMessages('s1', 'call-1').map((m) => m.payload)).toEqual([{}, { text: 'b' }])
+    expect(s.messages.loadSubagentMessages('s1', 'call-1').map((m) => m.payload)).toEqual([{}, { text: 'b' }])
   })
 
   it('the session list keeps every session when one scope list is not JSON', () => {

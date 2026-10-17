@@ -38,7 +38,7 @@ describe('child sessions and the machine (#686)', () => {
     w.mgr.useMemoryGate(g)
     return g
   }
-  const said = (id: string, what: string) => w.store.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes(what))
+  const said = (id: string, what: string) => w.store.messages.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes(what))
 
   describe('code intelligence', () => {
     it("a start_agent child starts without it and keeps that through a wake; the person's session keeps their setting", async () => {

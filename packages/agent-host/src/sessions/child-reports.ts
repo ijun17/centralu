@@ -160,7 +160,7 @@ export class ChildReports {
      */
     const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store, sessionId, 600), ending, work)
+    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600), ending, work)
   }
 
   /**
@@ -170,7 +170,7 @@ export class ChildReports {
    */
   reportedAs(m: SessionInfo): { name: string; project: string } {
     const project = m.projectId ? (this.host.projectRow(m.projectId)?.name ?? '(project no longer exists)') : '(none)'
-    return { name: labelOf(this.host.store, m), project }
+    return { name: labelOf(this.host.store.messages, m), project }
   }
 
   /** A session as Centralu's word names it to another (`reportedAs`), or its id once it is gone */
@@ -201,7 +201,7 @@ export class ChildReports {
     if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
-    await this.deliverReport(asker, sessionId, name, project, previewOf(this.host.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
+    await this.deliverReport(asker, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
   }
 
   /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */

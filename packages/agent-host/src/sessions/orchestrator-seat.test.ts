@@ -204,7 +204,7 @@ describe('a session recalls its own conversation from before its compaction (#97
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
       scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
-    store.appendMessages(
+    store.messages.appendMessages(
       rows.map(([what, text], i) => {
         const at = { sessionId, seq: i + 1, ts: 1_700_000_000_000 + i * 60_000 }
         if (what === 'user' || what === 'assistant') return { ...at, role: what, kind: 'text', payload: { text } }
@@ -476,7 +476,7 @@ describe('what read_session says of who wrote a line', () => {
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
       scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
-    store.appendMessages([
+    store.messages.appendMessages([
       { sessionId: 'a', seq: 1, role: 'user', kind: 'text', payload: { text: 'mine' }, ts: 1 },
       { sessionId: 'a', seq: 2, role: 'user', kind: 'text', payload: { text: 'report', from: { sessionId: 'w', name: 'Worker' } }, ts: 2 },
       { sessionId: 'a', seq: 3, role: 'user', kind: 'text', payload: { text: 'view', fromApp: { appId: 's', projectId: null, name: 'Slider' } }, ts: 3 },

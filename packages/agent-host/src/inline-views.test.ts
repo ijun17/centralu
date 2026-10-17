@@ -198,7 +198,7 @@ describe('calling a tool with a view attaches the view under a card', () => {
     // An open instance — the document that app served becomes the view
     await expect(frame(open!.instanceId!)).resolves.toMatchObject({ url: expect.stringContaining(`/views/${open!.instanceId}/`) })
     // The record: only the fact that viewer's view attached under this card. Carries neither the input nor the instance
-    const rows = store.loadMessages(sessionId).filter((m) => m.kind === 'app_view')
+    const rows = store.messages.loadMessages(sessionId).filter((m) => m.kind === 'app_view')
     expect(rows.map((r) => r.payload)).toEqual([
       { type: 'app_view', sessionId, callId: 'toolu_A', appId: 'viewer', projectId, tool: 'show', phase: 'open' },
     ])
@@ -229,7 +229,7 @@ describe('calling a tool with a view attaches the view under a card', () => {
       expect.objectContaining({ callId: 'toolu_S', appId: 'viewer', phase: 'rejected', reason: expect.stringContaining('This app does not serve ui://other/main') }),
     ])
     // The rejection is recorded — at that spot in the conversation, and in the host log
-    const rows = store.loadMessages(sessionId).filter((m) => m.kind === 'app_view')
+    const rows = store.messages.loadMessages(sessionId).filter((m) => m.kind === 'app_view')
     expect(rows.map((r) => (r.payload as AppView).phase)).toEqual(['rejected'])
     expect(logged.some((l) => l.includes('viewer spoof: view rejected'))).toBe(true)
   })
@@ -344,7 +344,7 @@ describe('a message a view sends into a conversation', () => {
 
     const fromApp = { appId: 'viewer', projectId, name: 'App viewer' }
     expect(events.find((e) => e.type === 'user_message')).toMatchObject({ type: 'user_message', sessionId, text, fromApp })
-    const stored = store.loadMessages(sessionId).find((m) => m.role === 'user')
+    const stored = store.messages.loadMessages(sessionId).find((m) => m.role === 'user')
     expect(stored?.payload).toEqual({ text, fromApp })
     expect(sentToAgent.get(sessionId)).toEqual([
       '[Centralu] The app "App viewer" (app-viewer) sent this message from its view in this conversation. ' +
@@ -376,7 +376,7 @@ describe('a message a view sends into a conversation', () => {
 
     const fromApp = { appId: 'viewer', projectId, name: 'App viewer' }
     expect(events.find((e) => e.type === 'user_message')).toMatchObject({ type: 'user_message', sessionId, text, fromApp })
-    expect(store.loadMessages(sessionId).find((m) => m.role === 'user')?.payload).toEqual({ text, fromApp })
+    expect(store.messages.loadMessages(sessionId).find((m) => m.role === 'user')?.payload).toEqual({ text, fromApp })
     expect(sentToAgent.get(sessionId)).toEqual([
       '[Centralu] The app "App viewer" (app-viewer) sent this message from its own view, outside this conversation. ' +
         'The person read it and chose this conversation for it, but did not write it. ' +

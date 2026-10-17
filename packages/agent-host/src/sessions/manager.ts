@@ -1307,8 +1307,8 @@ export class SessionManager {
           console.error(`[agent-host] handoff note not rewritten with the moved children: ${(e as Error).message}`)
         }
       }
-      const seq = this.store.nextSeq(id)
-      this.store.appendMessages([
+      const seq = this.store.messages.nextSeq(id)
+      this.store.messages.appendMessages([
         {
           sessionId: id,
           seq,
@@ -1324,9 +1324,9 @@ export class SessionManager {
       this.emit({ type: 'handoff', sessionId: id, seq, from })
     }
     if (params.initialPrompt) {
-      const seq = this.store.nextSeq(id)
+      const seq = this.store.messages.nextSeq(id)
       const from = params.initialFrom
-      this.store.appendMessages([
+      this.store.messages.appendMessages([
         { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt, ...(from ? { from } : {}) }, ts: Date.now() },
       ])
       info.lastSeq = seq
@@ -1506,7 +1506,7 @@ export class SessionManager {
   /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
   private openToolCalls(sessionId: string): { callId: string; tool: string }[] {
     const open = new Map<string, string>()
-    for (const r of this.store.loadMessages(sessionId, 200)) {
+    for (const r of this.store.messages.loadMessages(sessionId, 200)) {
       const p = r.payload as { callId?: unknown; summary?: { tool?: unknown } }
       if (typeof p?.callId !== 'string') continue
       if (r.kind === 'tool_call' && typeof p.summary?.tool === 'string') open.set(p.callId, p.summary.tool)
@@ -1610,7 +1610,7 @@ export class SessionManager {
        * does have an externalId.)
        */
       const boundary = Number(this.store.settings.appSetting(freshStartKey(m.id)) ?? '-1')
-      const newest = this.store.loadMessages(m.id, 1)[0]
+      const newest = this.store.messages.loadMessages(m.id, 1)[0]
       if (newest && newest.seq > boundary) {
         return {
           session: m,
@@ -2475,8 +2475,8 @@ export class SessionManager {
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
     this.record.closeStream(sessionId)
-    const seq = this.store.nextSeq(sessionId)
-    this.store.appendMessages([
+    const seq = this.store.messages.nextSeq(sessionId)
+    this.store.messages.appendMessages([
       {
         sessionId,
         seq,
@@ -2630,7 +2630,7 @@ export class SessionManager {
     // behind (there is a path where a row that came in as an event never passes through meta) — even
     // one row of drift would make the guard read it as "lost", and the session just switched would
     // fail to wake
-    this.store.settings.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
+    this.store.settings.setAppSetting(freshStartKey(m.id), String(this.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
     /*
      * The broadcast state is also written into meta (#163). It used to only broadcast idle while
      * saving meta as working, so a screen that reconnected and the orchestrator's list_sessions both
@@ -3022,7 +3022,7 @@ export class SessionManager {
    */
   searchMessages(query: string, limit?: number) {
     return this.store
-      .searchMessages(query, limit)
+      .messages.searchMessages(query, limit)
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
@@ -3805,7 +3805,7 @@ export class SessionManager {
 
   /** A summary of the orchestrator's past conversation for its next system prompt (transcript-view.ts) */
   private orchestratorMemory(sessionId: string): string {
-    return orchestratorMemory(this.store, sessionId)
+    return orchestratorMemory(this.store.messages, sessionId)
   }
 
   /**

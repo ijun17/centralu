@@ -366,7 +366,7 @@ describe('asking another project', () => {
     const restored = w.mgr.listSessions().find((s) => s.id === targetSession)!
     expect(restored.askedBy).toBeNull()
     expect(restored.name).toBe('Asked by consumer · 10:00')
-    expect(w.store.loadMessages(targetSession, 10)).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ text: 'old history' }) }))
+    expect(w.store.messages.loadMessages(targetSession, 10)).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ text: 'old history' }) }))
     expect(w.store.sessions.listSessions().find((s) => s.id === targetSession)?.askedBy).toBeNull()
   })
 
@@ -409,7 +409,7 @@ describe('asking another project', () => {
     expect(h.sent[0]).toContain(`A session in the project "${w.caller.name}" asks this project`)
     expect(h.sent[0]).toContain('export the sprites')
     // Shown in that session as sent by the caller, not by the person
-    const asked = w.store.loadMessages(d.id, 10).find((m) => m.role === 'user')
+    const asked = w.store.messages.loadMessages(d.id, 10).find((m) => m.role === 'user')
     expect((asked?.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(s)
 
     mkdirSync(join(w.target.path, 'out'))
@@ -606,7 +606,7 @@ describe('asking another project', () => {
     // Put back after this test, or every later test in the file writes its errors nowhere (#845)
     onTestFinished(() => quiet.mockRestore())
     handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
-    const told = () => w.store.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(d))
+    const told = () => w.store.messages.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(d))
     await w.until(() => told().length === 1)
     expect(told()[0]).toContain('stopped before finishing: a network error ended its turn')
   })

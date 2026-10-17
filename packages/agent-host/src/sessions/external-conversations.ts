@@ -255,7 +255,7 @@ export class ExternalConversations {
       return 0
     }
 
-    const ours = this.host.store.loadMessages(info.id, SYNC_LIMIT)
+    const ours = this.host.store.messages.loadMessages(info.id, SYNC_LIMIT)
     /*
      * loadMessages gives one row as one message (#77) — neighboring assistant rows are not merged
      * either. This restore loop stitches them back together the same way: it reconciles against the
@@ -327,8 +327,8 @@ export class ExternalConversations {
       mark()
       return 0
     }
-    const base = this.host.store.nextSeq(info.id)
-    this.host.store.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
+    const base = this.host.store.messages.nextSeq(info.id)
+    this.host.store.messages.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
     info.lastSeq = base + fresh.length - 1
     // This is a message that happened outside — since it was never read here, it stays marked unread
     this.host.store.sessions.upsertSession(info)
@@ -372,9 +372,9 @@ export class ExternalConversations {
     // inserted.**
     // Fetched once and incremented locally (otherwise every row would land on the same seq and overwrite each
     // other).
-    const base = this.host.store.nextSeq(info.id)
+    const base = this.host.store.messages.nextSeq(info.id)
     const rows: StoredMessage[] = history.map((h, i) => historyRow(info.id, base + i, h, info.createdAt))
-    this.host.store.appendMessages(rows)
+    this.host.store.messages.appendMessages(rows)
 
     info.lastSeq = rows[rows.length - 1]!.seq
     // Conversation that was loaded already counts as read — it must not flag the person with an unread marker

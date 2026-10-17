@@ -229,7 +229,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('normal')
     const child = await startRunning(s)
     await w.until(() => !!handleOf(child)?.sent.length)
-    const said = () => w.store.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
+    const said = () => w.store.messages.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
     // The report the quit's failed wait leads to, awaited to its end rather than for a while
     const reports: Promise<void>[] = []
     const reporter = (w.mgr as unknown as { reports: { deliverReport: (...a: unknown[]) => Promise<void> } }).reports
@@ -405,7 +405,7 @@ describe('starting another agent in the same project', () => {
     expect(stopped).toMatchObject({ ok: true, state: 'stopped', sessionId: requestId })
     expect(agentCard(s)).toBeUndefined()
     expect(childrenOf(s)).toEqual([])
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('was withdrawn by this session'))
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('was withdrawn by this session'))
     expect(notice).toBeDefined()
     // Another session cannot follow or withdraw it
     expect(await w.mgr.agentSession(second, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false })
@@ -432,7 +432,7 @@ describe('starting another agent in the same project', () => {
       expect(agentCard(s)).toBeUndefined()
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('stopped trusting')
-      expect(w.store.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
+      expect(w.store.messages.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
       expect(w.store.children.listAgentStartRequests()).toEqual([])
     })
 
@@ -602,7 +602,7 @@ describe('starting another agent in the same project', () => {
     expect(await p).toMatchObject({ ok: false })
     expect(childrenOf(s)).toEqual([])
     expect(w.store.children.listAgentStartRequests()).toEqual([])
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
     expect(notice).toBeDefined()
   })
 
@@ -614,7 +614,7 @@ describe('starting another agent in the same project', () => {
     ctl.abort()
     expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('withdrawn') })
     expect(agentCard(s)).toBeUndefined()
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('the call that asked was cancelled'))
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('the call that asked was cancelled'))
     expect(notice).toBeDefined()
   })
 
@@ -755,7 +755,7 @@ describe('starting another agent in the same project', () => {
     expect(h.opts.cwd).toBe(w.caller.path)
     expect(h.sent[0]).toContain("through Centralu's start_agent")
     expect(h.sent[0]).toContain('implement the parser')
-    const sent = w.store.loadMessages(c.id, 10).find((m) => m.role === 'user')
+    const sent = w.store.messages.loadMessages(c.id, 10).find((m) => m.role === 'user')
     expect((sent?.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(s)
     h.answer('Parser done.')
     expect(await p).toMatchObject({ ok: true, state: 'done', sessionId: c.id, tool: 'codex', answer: 'Parser done.' })
@@ -904,7 +904,7 @@ describe('starting another agent in the same project', () => {
     expect(h.sent[1]).toContain('A note from the parent session')
     expect(h.sent[1]).toContain('Use Chromium for e2e.')
     expect(h.interrupted).toBe(0)
-    const message = w.store.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
+    const message = w.store.messages.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
     expect(message.payload).toMatchObject({ text: h.sent[1], from: { sessionId: s } })
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'user_message', sessionId: c, text: h.sent[1], from: expect.objectContaining({ sessionId: s }) }))
     h.answer('Done with Chromium.')
@@ -1229,7 +1229,7 @@ describe('starting another agent in the same project', () => {
       expect(result.text).not.toMatch(/worktree|branch|undefined/)
       expect(w.mgr.listSessions().some((child) => child.id === c)).toBe(false)
       expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
-      expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
+      expect(w.store.messages.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
       expect(w.events).toContainEqual({ type: 'session_deleted', sessionId: c })
       await w.mgr.restoreSession(c)
       expect(childrenOf(s).map((child) => child.id)).toContain(c)
@@ -1275,7 +1275,7 @@ describe('starting another agent in the same project', () => {
       expect(await deleting).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
       expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('deleted') })
       expect(w.store.trash.trashedSession(c)).not.toBeNull()
-      expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Partial research before stop'))).toBe(true)
+      expect(w.store.messages.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Partial research before stop'))).toBe(true)
       expect(w.mgr.isLive(c)).toBe(false)
       expect(parentDispose).not.toHaveBeenCalled()
       expect(handleOf(s)!.interrupted).toBe(0)

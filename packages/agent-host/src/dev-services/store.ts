@@ -68,7 +68,7 @@ export class Store extends MigrationRunner {
   readonly projects: ProjectRecords
   readonly sessions: SessionRecords
   readonly grid: GridRecords
-  private readonly messages: MessageRecords
+  readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
   readonly trash: TrashRecords
   readonly settings: SettingsRecords
@@ -221,36 +221,16 @@ export class Store extends MigrationRunner {
     return this.messages.appendMessages(msgs)
   }
 
-  searchMessages(query: string, limit?: number): { sessionId: string; seq: number; body: string }[] {
-    return this.messages.searchMessages(query, limit)
-  }
-
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessages(sessionId, limit, beforeSeq, opts)
-  }
-
-  replyTextsContaining(sessionId: string, needle: string): string[] {
-    return this.messages.replyTextsContaining(sessionId, needle)
   }
 
   loadMessagesFrom(sessionId: string, afterSeq: number, limit?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
   }
 
-  lastContextCut(sessionId: string): number | null {
-    return this.messages.lastContextCut(sessionId)
-  }
-
   upsertMessageNoIndex(m: StoredMessage): void {
     return this.messages.upsertMessageNoIndex(m)
-  }
-
-  appendSubagentMessage(sessionId: string, parentCallId: string, m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>): number {
-    return this.messages.appendSubagentMessage(sessionId, parentCallId, m)
-  }
-
-  loadSubagentMessages(sessionId: string, parentCallId: string, opts?: ReadOpts & { afterSeq?: number; limit?: number }): StoredMessage[] {
-    return this.messages.loadSubagentMessages(sessionId, parentCallId, opts)
   }
 
   nextSeq(sessionId: string): number {

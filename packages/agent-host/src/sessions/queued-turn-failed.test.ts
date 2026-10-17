@@ -35,7 +35,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   }
   /** The reports of A's work that B was given */
   const told = (b: string, a: string) =>
-    w.store.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(a))
+    w.store.messages.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(a))
   /** The tool answers an input that names `marker` with `refusal` instead of starting a turn */
   const refuses = (a: string, marker: string, refusal: NormalizedEvent) => {
     const h = handleOf(a)
@@ -92,7 +92,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     const start = adapter.createSession.bind(adapter)
     adapter.createSession = async () => { throw new Error('the tool would not start') }
     handleOf(t).event({ type: 'error', sessionId: t, error: { code: 'adapter_crashed', message: 'the process exited', retryable: true } })
-    const notDelivered = () => w.store.loadMessages(s, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    const notDelivered = () => w.store.messages.loadMessages(s, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
     await w.until(() => notDelivered().length === 1)
     adapter.createSession = start
     await w.mgr.send(t, "the person's next thing")
@@ -159,7 +159,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     const { a, b, before, release } = await queuedThroughWake()
     handleOf(a).event({ type: 'error', sessionId: a, error: { code: 'adapter_crashed', message: 'the process exited again', retryable: true } })
     release()
-    const notDelivered = () => w.store.loadMessages(b, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    const notDelivered = () => w.store.messages.loadMessages(b, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
     await w.until(() => notDelivered().length === 1)
     await new Promise((r) => setImmediate(r))
     expect(told(b, a)).toHaveLength(before)

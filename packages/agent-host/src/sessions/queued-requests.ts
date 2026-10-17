@@ -154,7 +154,7 @@ export class QueuedRequests {
       this.queuedHandedIn.add(sessionId)
       h.send(input)
     }
-    const from = { sessionId: caller.id, name: labelOf(this.host.store, caller) }
+    const from = { sessionId: caller.id, name: labelOf(this.host.store.messages, caller) }
     const project = this.host.projectRow(m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
     let d: Delegation | undefined

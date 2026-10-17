@@ -114,7 +114,7 @@ describe('v10 migration — allows a session with no project', () => {
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
     expect(store.sessions.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
     expect(store.sessions.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
-    expect(store.loadMessages('s1').length).toBe(1)
+    expect(store.messages.loadMessages('s1').length).toBe(1)
 
     // And now a session with no project is inserted
     store.sessions.upsertSession({
@@ -203,13 +203,13 @@ describe('Store (dev sqlite)', () => {
 
   it('message append/load and seq incrementing', () => {
     const s = seeded()
-    expect(s.nextSeq('s1')).toBe(1)
-    s.appendMessages([
+    expect(s.messages.nextSeq('s1')).toBe(1)
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'hello' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'yes' }, ts: 2 },
     ])
-    expect(s.nextSeq('s1')).toBe(3)
-    const msgs = s.loadMessages('s1')
+    expect(s.messages.nextSeq('s1')).toBe(3)
+    const msgs = s.messages.loadMessages('s1')
     expect(msgs.map((m) => m.seq)).toEqual([1, 2])
     expect(msgs[0]!.payload).toEqual({ text: 'hello' })
     expect(s.sessions.listSessions()[0]!.lastSeq).toBe(2)
@@ -217,12 +217,12 @@ describe('Store (dev sqlite)', () => {
 
   it('pagination: only what comes before beforeSeq', () => {
     const s = seeded()
-    s.appendMessages(
+    s.messages.appendMessages(
       Array.from({ length: 5 }, (_, i) => ({
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { i }, ts: i,
       })),
     )
-    expect(s.loadMessages('s1', 2, 4).map((m) => m.seq)).toEqual([2, 3])
+    expect(s.messages.loadMessages('s1', 2, 4).map((m) => m.seq)).toEqual([2, 3])
   })
 
   it('the read position never moves backward', () => {
@@ -264,7 +264,7 @@ describe('migrations (E-0)', () => {
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
 
     // Only the backfill lets an old conversation be found
-    const hits = store.searchMessages('승인')
+    const hits = store.messages.searchMessages('승인')
     expect(hits.length).toBe(1)
     expect(hits[0]!.sessionId).toBe('s1')
 
@@ -282,12 +282,12 @@ describe('migrations (E-0)', () => {
 
   it('a search still matches a word with a Korean particle attached (trigram tokenizer)', () => {
     const s = seeded()
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 10, role: 'assistant', kind: 'text', payload: { text: '승인을 기다리는 중입니다' }, ts: 0 },
     ])
     // With unicode61, searching '승인' would not find '승인을' — a real problem this app runs into
-    expect(s.searchMessages('승인').length).toBe(1)
-    expect(s.searchMessages('기다리').length).toBe(1)
+    expect(s.messages.searchMessages('승인').length).toBe(1)
+    expect(s.messages.searchMessages('기다리').length).toBe(1)
     s.close()
   })
 
@@ -303,18 +303,18 @@ describe('migrations (E-0)', () => {
       sessionId: 's1', seq: 10, role: 'assistant' as const, kind: 'text' as const,
       payload: { text: 'milky way gradient' }, ts: 0,
     }
-    for (let i = 0; i < 5; i++) s.appendMessages([msg])
-    expect(s.searchMessages('milky way').length).toBe(1)
+    for (let i = 0; i < 5; i++) s.messages.appendMessages([msg])
+    expect(s.messages.searchMessages('milky way').length).toBe(1)
     s.close()
   })
 
   it('rewriting the content makes the old content unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', seq: 11, role: 'assistant' as const, kind: 'text' as const, ts: 0 }
-    s.appendMessages([{ ...at, payload: { text: 'old content' } }])
-    s.appendMessages([{ ...at, payload: { text: 'new content' } }])
-    expect(s.searchMessages('old content').length).toBe(0)
-    expect(s.searchMessages('new content').length).toBe(1)
+    s.messages.appendMessages([{ ...at, payload: { text: 'old content' } }])
+    s.messages.appendMessages([{ ...at, payload: { text: 'new content' } }])
+    expect(s.messages.searchMessages('old content').length).toBe(0)
+    expect(s.messages.searchMessages('new content').length).toBe(1)
     s.close()
   })
 
@@ -327,16 +327,16 @@ describe('migrations (E-0)', () => {
   it('rewriting an indexed spot with no body leaves the batch intact and makes the old body unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', role: 'assistant' as const, kind: 'text' as const, ts: 0 }
-    s.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
-    expect(s.searchMessages('hello').length).toBe(1)
-    s.appendMessages([
+    s.messages.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
+    expect(s.messages.searchMessages('hello').length).toBe(1)
+    s.messages.appendMessages([
       { ...at, seq: 2, role: 'user', payload: { text: 'newly arrived words' } },
       { ...at, seq: 1, payload: { type: 'tool' } },
     ])
-    expect(s.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
-    expect(s.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
-    expect(s.searchMessages('hello').length).toBe(0)
-    expect(s.searchMessages('newly arrived').length).toBe(1)
+    expect(s.messages.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
+    expect(s.messages.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
+    expect(s.messages.searchMessages('hello').length).toBe(0)
+    expect(s.messages.searchMessages('newly arrived').length).toBe(1)
     s.close()
   })
 
@@ -351,7 +351,7 @@ describe('migrations (E-0)', () => {
   it('purging a session lets the event loop go between chunks, and its messages and index rows leave together', async () => {
     const s = seeded()
     const n = 1000
-    s.appendMessages(
+    s.messages.appendMessages(
       Array.from({ length: n }, (_, i) => ({
         // A human's words are never joined together — loadMessages's count is exactly the row count
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const,
@@ -360,13 +360,13 @@ describe('migrations (E-0)', () => {
     )
     const fts = indexRowsOf(s, 's1')
     await s.trash.trashSession('s1', KEEP_ALL)
-    s.appendMessages(s.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
+    s.messages.appendMessages(s.messages.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
     expect(fts()).toBe(n)
     const seen: { messages: number; hits: number }[] = []
     let deleting = true
     const look = () => {
       if (!deleting) return
-      seen.push({ messages: s.loadMessages('s1', n).length, hits: fts() })
+      seen.push({ messages: s.messages.loadMessages('s1', n).length, hits: fts() })
       setImmediate(look)
     }
     setImmediate(look)
@@ -378,7 +378,7 @@ describe('migrations (E-0)', () => {
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
     expect(s.sessions.listSessions().map((x) => x.id)).not.toContain('s1')
     expect(s.trash.listTrash()).toEqual([])
-    expect(s.loadMessages('s1')).toEqual([])
+    expect(s.messages.loadMessages('s1')).toEqual([])
     expect(fts()).toBe(0)
     s.close()
   })
@@ -386,11 +386,11 @@ describe('migrations (E-0)', () => {
   it('returns the whole body — trimming it is left to the caller', () => {
     const s = seeded()
     const long = `${'앞'.repeat(300)}은하수${'뒤'.repeat(300)}`
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 12, role: 'assistant', kind: 'text', payload: { text: long }, ts: 0 },
     ])
     // This used to be cut off at around 15 characters by snippet(...,12), unable to tell what it was
-    expect(s.searchMessages('은하수')[0]!.body).toBe(long)
+    expect(s.messages.searchMessages('은하수')[0]!.body).toBe(long)
     s.close()
   })
 })
@@ -1256,7 +1256,7 @@ describe('WAL checkpoint', () => {
       ...sessionLiveDefaults(),
     })
     for (let i = 1; i <= 200; i++) {
-      s.appendMessages([{ sessionId: 's1', seq: i, role: 'user', kind: 'text', payload: { text: 'x'.repeat(2000) }, ts: i }])
+      s.messages.appendMessages([{ sessionId: 's1', seq: i, role: 'user', kind: 'text', payload: { text: 'x'.repeat(2000) }, ts: i }])
     }
     expect(statSync(path + '-wal').size).toBeGreaterThan(0)
     s.checkpoint()
@@ -1281,7 +1281,7 @@ describe('loadMessages reads one row as one message (#77)', () => {
 
   it('neighboring assistant rows are two messages — neither replies nor reasoning are joined', () => {
     const s = seeded()
-    s.appendMessages([
+    s.messages.appendMessages([
       ask(1, 'run the review'),
       reply(2, 'One review is still running.'),
       // A new reply with no human turn in between — a background task finished and a new turn started
@@ -1289,7 +1289,7 @@ describe('loadMessages reads one row as one message (#77)', () => {
       { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: 'earlier thought' }, ts: 4 },
       { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: 'later thought' }, ts: 5 },
     ])
-    expect(texts(s.loadMessages('s1'))).toEqual([
+    expect(texts(s.messages.loadMessages('s1'))).toEqual([
       [1, 'run the review'],
       [2, 'One review is still running.'],
       [3, 'All six reviews are in.'],
@@ -1300,28 +1300,28 @@ describe('loadMessages reads one row as one message (#77)', () => {
 
   it('limit counts rows — reading onward by cursor never overlaps or joins neighboring replies', () => {
     const s = seeded()
-    s.appendMessages([ask(1, 'question1'), reply(2, 'answer1-a'), reply(3, 'answer1-b'), ask(4, 'question2'), reply(5, 'answer2-a'), reply(6, 'answer2-b')])
-    const page = s.loadMessages('s1', 2)
+    s.messages.appendMessages([ask(1, 'question1'), reply(2, 'answer1-a'), reply(3, 'answer1-b'), ask(4, 'question2'), reply(5, 'answer2-a'), reply(6, 'answer2-b')])
+    const page = s.messages.loadMessages('s1', 2)
     expect(texts(page)).toEqual([[5, 'answer2-a'], [6, 'answer2-b']])
-    const older = s.loadMessages('s1', 2, page[0]!.seq)
+    const older = s.messages.loadMessages('s1', 2, page[0]!.seq)
     expect(texts(older)).toEqual([[3, 'answer1-b'], [4, 'question2']])
-    expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, 'question1'], [2, 'answer1-a']])
+    expect(texts(s.messages.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, 'question1'], [2, 'answer1-a']])
   })
 
   it('loadMessagesFrom reads what comes after a spot, by the same rule', () => {
     const s = seeded()
-    s.appendMessages([ask(1, 'question'), reply(2, 'the answer that came first.'), reply(3, 'the later answer.'), ask(4, 'the next question')])
-    const after = s.loadMessagesFrom('s1', 1, 10)
+    s.messages.appendMessages([ask(1, 'question'), reply(2, 'the answer that came first.'), reply(3, 'the later answer.'), ask(4, 'the next question')])
+    const after = s.messages.loadMessagesFrom('s1', 1, 10)
     expect(texts(after)).toEqual([[2, 'the answer that came first.'], [3, 'the later answer.'], [4, 'the next question']])
   })
 
   it('upsertMessageNoIndex updates only the body and leaves the index untouched', () => {
     const s = seeded()
-    s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body' }, ts: 1 })
-    expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('a growing body')
-    expect(s.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
-    s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
-    expect(s.searchMessages('a growing body').length).toBe(1)
+    s.messages.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body' }, ts: 1 })
+    expect((s.messages.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('a growing body')
+    expect(s.messages.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
+    s.messages.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
+    expect(s.messages.searchMessages('a growing body').length).toBe(1)
   })
 })
 
@@ -1347,7 +1347,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       ...sessionLiveDefaults(),
     })
     // The exact shape observed in the real data: one token is one row
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '맵 추출 어떻게 해?' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '한 ' }, ts: 2 },
       { sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '번에 ' }, ts: 3 },
@@ -1359,7 +1359,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
     ])
     s.sessions.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
-    const beforeRead = s.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
+    const beforeRead = s.messages.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
     s.close()
     return { file, beforeRead }
   }
@@ -1373,7 +1373,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const rows = s.loadMessages('s1', 50)
+    const rows = s.messages.loadMessages('s1', 50)
     const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
 
     // Different text means data was lost — the text joined from the 9 pre-move rows equals the text joined from the 5 post-move messages
@@ -1387,7 +1387,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       ['reasoning', '생각 조각'],
     ])
     // 9 rows -> 5 rows
-    const nowRows = s.loadMessages('s1', 50).length
+    const nowRows = s.messages.loadMessages('s1', 50).length
     expect(rawRows).toBe(9)
     expect(nowRows).toBe(5)
     s.close()
@@ -1400,7 +1400,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const merged = s.loadMessages('s1', 50)
+    const merged = s.messages.loadMessages('s1', 50)
     expect(merged[1]!.seq).toBe(2) // the spot where 2, 3, 4 merged is numbered 2
     // The read position (3) is unchanged, and since the first chunk (2) survives, a reply already read never comes back as unread
     expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(3)
@@ -1414,8 +1414,8 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    expect(s.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
-    expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
+    expect(s.messages.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
+    expect(s.messages.searchMessages('결과는 이렇습니다').length).toBe(1)
     s.close()
   })
 
@@ -1432,7 +1432,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const ts = s.loadMessages('s1', 50).map((m) => m.ts)
+    const ts = s.messages.loadMessages('s1', 50).map((m) => m.ts)
     // [user 1] [2+3+4 merged -> 4] [tool 5] [6+7 merged -> 7] [8+9 merged -> 9]
     expect(ts).toEqual([1, 4, 5, 7, 9])
     s.close()
@@ -1458,7 +1458,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     })
-    s0.appendMessages([
+    s0.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'question' }, ts: 100 },
       // A trampled row — it was really around 110, but the migration's own time (999999) was stamped on it
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'answer' }, ts: 999_999 },
@@ -1472,7 +1472,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     raw.close()
 
     const s = new Store(file)
-    expect(s.loadMessages('s1', 50).map((m) => m.ts)).toEqual([100, 120, 120, 130])
+    expect(s.messages.loadMessages('s1', 50).map((m) => m.ts)).toEqual([100, 120, 120, 130])
     s.close()
   })
 })
@@ -1830,7 +1830,7 @@ describe('the trash (#204)', () => {
 
   it('a trashed session leaves every listing and search at once, and keeps its messages', async () => {
     const s = seeded()
-    s.appendMessages(galaxy('s1', 5))
+    s.messages.appendMessages(galaxy('s1', 5))
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
@@ -1842,12 +1842,12 @@ describe('the trash (#204)', () => {
     expect(s.sessions.listSessions()).toEqual([])
     expect(s.sessions.orchestratorId()).toBeNull()
     expect(s.grid.listGridView()).toEqual([])
-    expect(s.searchMessages('galaxy')).toEqual([])
-    expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
+    expect(s.messages.searchMessages('galaxy')).toEqual([])
+    expect(s.messages.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
     expect(s.permissions.listApprovalRules()).toEqual([])
     expect(indexRowsOf(s, 's1')()).toBe(0)
     // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
-    expect(s.loadMessages('s1', 10)).toHaveLength(5)
+    expect(s.messages.loadMessages('s1', 10)).toHaveLength(5)
     expect(s.trash.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
       ['orch', 0, null],
       ['s1', 5, 'p1'],
@@ -1887,8 +1887,8 @@ describe('the trash (#204)', () => {
 
   it('restoring rebuilds the index and brings the session back into its project as it was', async () => {
     const s = seeded()
-    s.appendMessages(galaxy('s1', 5))
-    s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
+    s.messages.appendMessages(galaxy('s1', 5))
+    s.messages.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     const before = s.sessions.listSessions()[0]!
     await s.trash.trashSession('s1', KEEP_ALL)
@@ -1897,7 +1897,7 @@ describe('the trash (#204)', () => {
     expect(back).toEqual(before)
     expect(s.sessions.listSessions()).toEqual([before])
     expect(s.trash.listTrash()).toEqual([])
-    expect(s.searchMessages('galaxy')).toHaveLength(5)
+    expect(s.messages.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
     expect(s.permissions.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
     expect(await s.trash.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
@@ -1907,14 +1907,14 @@ describe('the trash (#204)', () => {
   it('moving to the trash and back let the event loop go between chunks, and search reaches it only once it is back', async () => {
     const s = seeded()
     const n = 1000
-    s.appendMessages(galaxy('s1', n))
+    s.messages.appendMessages(galaxy('s1', n))
     const seen: { messages: number; hits: number; listed: number }[] = []
     let busy = true
     const look = () => {
       if (!busy) return
       seen.push({
-        messages: s.loadMessages('s1', n).length,
-        hits: s.searchMessages('galaxy', n).length,
+        messages: s.messages.loadMessages('s1', n).length,
+        hits: s.messages.searchMessages('galaxy', n).length,
         listed: s.sessions.listSessions().length,
       })
       setImmediate(look)
@@ -1934,7 +1934,7 @@ describe('the trash (#204)', () => {
     busy = false
     expect(seen.length).toBeGreaterThanOrEqual(5)
     expect(seen.every((at) => at.hits === 0 && at.listed === 0)).toBe(true)
-    expect(s.searchMessages('galaxy', n)).toHaveLength(n)
+    expect(s.messages.searchMessages('galaxy', n)).toHaveLength(n)
     s.close()
   })
 
@@ -1942,7 +1942,7 @@ describe('the trash (#204)', () => {
     const s = seeded()
     session(s, 's2', 'p1')
     for (const id of ['s1', 's2']) {
-      s.appendMessages(galaxy(id, 3))
+      s.messages.appendMessages(galaxy(id, 3))
       s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
       s.sessions.recordCommit('p1', `sha-${id}`, id)
       const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
@@ -1952,7 +1952,7 @@ describe('the trash (#204)', () => {
       s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
     }
     expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
-    expect(s.loadMessages('s1', 10)).toHaveLength(3)
+    expect(s.messages.loadMessages('s1', 10)).toHaveLength(3)
 
     await s.trash.trashSession('s1', KEEP_ALL)
     expect(await s.trash.purgeSession('s1')).toBe(true)
@@ -1979,8 +1979,8 @@ describe('the trash (#204)', () => {
   it('deleting a project moves its sessions to the trash and keeps the rows that point at them', async () => {
     const s = seeded()
     session(s, 's2', 'p1')
-    s.appendMessages(galaxy('s1', 3))
-    s.appendMessages(galaxy('s2', 2))
+    s.messages.appendMessages(galaxy('s1', 3))
+    s.messages.appendMessages(galaxy('s2', 2))
     await s.trash.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
@@ -1999,7 +1999,7 @@ describe('the trash (#204)', () => {
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
     // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
     expect(trash.find((r) => r.id === 's1')?.record).toEqual(KEEP_ALL)
-    expect(s.searchMessages('galaxy')).toEqual([])
+    expect(s.messages.searchMessages('galaxy')).toEqual([])
     const db = (s as unknown as { db: Database.Database }).db
     const rows = (sql: string) => db.prepare(sql).all()
     expect(rows(`SELECT sha FROM commit_sessions`)).toEqual([{ sha: 'sha-s1' }])

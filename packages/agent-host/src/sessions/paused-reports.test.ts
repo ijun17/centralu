@@ -39,7 +39,7 @@ describe('a child that waits on its own background work (#721)', () => {
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id) ?? w.adapters.get('codex')!.handles.get(id)
   /** The reports about `child` in the caller's conversation, oldest first (what reaches its model is only a wake) */
   const reportsTo = (caller: string, child: string) =>
-    w.store.loadMessages(caller, 200)
+    w.store.messages.loadMessages(caller, 200)
       .filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId?: string } }).from?.sessionId === child)
       .map((m) => String((m.payload as { text?: string }).text))
   const wakes = (caller: string, child: string) => (handleOf(caller)?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))

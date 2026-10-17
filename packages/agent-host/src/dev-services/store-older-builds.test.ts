@@ -56,21 +56,21 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
         permissionPreset: 'normal',
       })
 
-      expect(store.loadMessages('s1').map((m) => [m.seq, m.role, m.kind, m.payload])).toEqual([
+      expect(store.messages.loadMessages('s1').map((m) => [m.seq, m.role, m.kind, m.payload])).toEqual([
         [1, 'user', 'text', { type: 'user_message', sessionId: 's1', text: 'find the galaxy colour policy' }],
         [2, 'assistant', 'text', { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'the galaxy colour policy lives in docs' }],
         [3, 'system', 'tool_call', { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Read', title: 'Read: docs/colour.md', paths: ['docs/colour.md'] } }],
         [4, 'system', 'tool_result', { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'nebula purple is the default' }],
         [5, 'assistant', 'text', { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'done reading' }],
       ])
-      expect(store.loadMessages('s2').map((m) => m.payload)).toEqual([{ type: 'user_message', sessionId: 's2', text: 'hello second' }])
+      expect(store.messages.loadMessages('s2').map((m) => m.payload)).toEqual([{ type: 'user_message', sessionId: 's2', text: 'hello second' }])
 
       // The search index holds what was said, and since v40 no tool call, whichever build indexed the row
-      expect(store.searchMessages('galaxy colour').map((h) => [h.sessionId, h.seq])).toEqual(
+      expect(store.messages.searchMessages('galaxy colour').map((h) => [h.sessionId, h.seq])).toEqual(
         expect.arrayContaining([['s1', 1], ['s1', 2]]),
       )
-      expect(store.searchMessages('galaxy colour')).toHaveLength(2)
-      expect(store.searchMessages('docs/colour.md')).toEqual([])
+      expect(store.messages.searchMessages('galaxy colour')).toHaveLength(2)
+      expect(store.messages.searchMessages('docs/colour.md')).toEqual([])
 
       expect(store.permissions.listApprovalRules()).toEqual([expect.objectContaining({ scope: 'project', projectId: 'p1', matcher: 'npm test', decision: 'allow' })])
     } finally {

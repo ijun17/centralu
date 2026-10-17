@@ -167,7 +167,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
-  store.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
 /** The start's quit notices are taken on its first timer tick; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
@@ -336,7 +336,7 @@ describe('a turn a quit stopped (#698)', () => {
     // "Quit completely": the process is gone, and the next start finds the row still working
     const b = host()
     expect(info(b, s.id)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
-    const last = store.loadMessages(s.id, 5).at(-1)!
+    const last = store.messages.loadMessages(s.id, 5).at(-1)!
     expect(last.payload).toMatchObject({ type: 'notice', level: 'warning', from: 'Centralu' })
     expect(JSON.stringify(last.payload)).toContain('Centralu quit or restarted while this turn was running')
     expect(info(b, s.id).lastSeq).toBe(last.seq)
@@ -348,10 +348,10 @@ describe('a turn a quit stopped (#698)', () => {
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'short')
     a.claude.handles.get(s.id)!.answer('done')
-    const before = store.loadMessages(s.id, 10).length
+    const before = store.messages.loadMessages(s.id, 10).length
     const b = host()
     expect(info(b, s.id)).toMatchObject({ state: 'waiting_input', interruption: null })
-    expect(store.loadMessages(s.id, 10)).toHaveLength(before)
+    expect(store.messages.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
   it('the next start tells an asker that delegated without waiting, once per child, and only while the asker exists', async () => {

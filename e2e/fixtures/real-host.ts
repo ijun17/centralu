@@ -80,8 +80,8 @@ export function seedSession(store: Store, projectId: string, id: string, name: s
 }
 
 export function storedUserLine(store: Store, sessionId: string, text: string): void {
-  const message: StoredMessage = { sessionId, seq: store.nextSeq(sessionId), role: 'user', kind: 'text', payload: { text }, ts: Date.now() }
-  store.appendMessages([message])
+  const message: StoredMessage = { sessionId, seq: store.messages.nextSeq(sessionId), role: 'user', kind: 'text', payload: { text }, ts: Date.now() }
+  store.messages.appendMessages([message])
 }
 
 export type RealHost = { port: number; child: ChildProcess; kill(signal?: NodeJS.Signals): Promise<void> }

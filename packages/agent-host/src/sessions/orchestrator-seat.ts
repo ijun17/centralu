@@ -132,7 +132,7 @@ export function orchestratorToolsFor(
    */
   const ownProjectId = () => host.meta.get(orchestratorId)?.projectId ?? null
   /** Where the calling session's context last lost what came before (#974), or null; a hub's view has no caller */
-  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.lastContextCut(orchestratorId) : null)
+  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.messages.lastContextCut(orchestratorId) : null)
   const inScope = (s: SessionInfo) =>
     // Coordinator session (#80, #81): the allow list is its entire view
     scopeIds !== undefined ? scopeIds.includes(s.id)
@@ -201,7 +201,7 @@ export function orchestratorToolsFor(
         .filter((s) => s.id !== orchestratorId && readable(s) && inProject(s.projectId, s.projectId ? (byId.get(s.projectId) ?? '') : ''))
         .map((s) => ({
           sessionId: s.id,
-          name: labelOf(host.store, s),
+          name: labelOf(host.store.messages, s),
           project: projectLabel(s.projectId, byId, untrusted),
           state: s.state,
           ...(blockedOnQuestion(s) ? { waitingOn: 'question' as const } : {}),
@@ -210,8 +210,8 @@ export function orchestratorToolsFor(
           // in progress"
           ...(s.worktreePr ? { pr: { number: s.worktreePr.number, state: s.worktreePr.state } } : {}),
           tool: s.tool,
-          preview: previewOf(host.store, s.id),
-          lastActive: lastActiveOf(host.store, s.id),
+          preview: previewOf(host.store.messages, s.id),
+          lastActive: lastActiveOf(host.store.messages, s.id),
           ...(s.interruption ? { interruption: s.interruption } : {}),
         }))
       const reader = readLinks()
@@ -319,7 +319,7 @@ export function orchestratorToolsFor(
       const untrusted = untrustedMark()
       // Fetches generously, dedupes overlapping hits, then trims — trimming before dedupe would let `limit`
       // get eaten by duplicates
-      const raw = host.store.searchMessages(query, limit * 12)
+      const raw = host.store.messages.searchMessages(query, limit * 12)
       const cut = ownCut()
       const mine = raw.filter((h) => {
         // Its own words only earlier than its last compaction (#974): the model's context lost those and our record
@@ -338,13 +338,13 @@ export function orchestratorToolsFor(
         const s = host.meta.get(h.sessionId)!
         out.push({
           sessionId: s.id,
-          session: s.id === orchestratorId ? `${labelOf(host.store, s)} (this session, before compaction)` : labelOf(host.store, s),
+          session: s.id === orchestratorId ? `${labelOf(host.store.messages, s)} (this session, before compaction)` : labelOf(host.store.messages, s),
           project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
           // nothing); its own hit stops at its compaction (#974)
-          snippet: windowAround(contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
+          snippet: windowAround(contextAt(host.store.messages, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
-          at: timeOf(host.store, h.sessionId, h.seq),
+          at: timeOf(host.store.messages, h.sessionId, h.seq),
         })
         if (out.length >= limit) break
       }
@@ -403,10 +403,10 @@ export function orchestratorToolsFor(
       const around = opts?.around
       const read = around
         ? [
-            ...host.store.loadMessages(sessionId, limit, around + 1),
-            ...host.store.loadMessagesFrom(sessionId, around, limit),
+            ...host.store.messages.loadMessages(sessionId, limit, around + 1),
+            ...host.store.messages.loadMessagesFrom(sessionId, around, limit),
           ]
-        : host.store.loadMessages(sessionId, limit * 2)
+        : host.store.messages.loadMessages(sessionId, limit * 2)
       const rows = cut === null ? read : read.filter((r) => r.seq < cut)
 
       const lines: string[] = []

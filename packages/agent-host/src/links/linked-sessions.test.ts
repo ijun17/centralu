@@ -328,7 +328,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       backgroundTasks: (id: string) => (id === 'm1' ? listed() : Promise.resolve(null)),
     } as unknown as LinkedSessions
     mgr.useLinkedReader(links)
-    const reports = () => store.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('[Centralu]'))
+    const reports = () => store.messages.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('[Centralu]'))
     const settle = async (n: number) => {
       const t0 = Date.now()
       while (reports().length < n && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10))

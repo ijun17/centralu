@@ -2632,9 +2632,9 @@ describe("the orchestrator's tools see only this app's sessions", () => {
   it('an orchestrator that switched tools inherits the past conversation', async () => {
     const orc = await mgr.orchestrator()
     await mgr.send(orc.id, 'Look at the Alpha project status')
-    mgr['store'].appendMessages([
+    mgr['store'].messages.appendMessages([
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'assistant', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id), role: 'assistant', kind: 'text',
         payload: { text: 'Alpha has two tests failing.' }, ts: Date.now(),
       },
     ])
@@ -2652,13 +2652,13 @@ describe("the orchestrator's tools see only this app's sessions", () => {
 
   it("an old row that has a source is not carried into the orchestrator's handoff memory", async () => {
     const orc = await mgr.orchestrator()
-    mgr['store'].appendMessages([
+    mgr['store'].messages.appendMessages([
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'user', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id), role: 'user', kind: 'text',
         payload: { text: 'HOSTILE_LEGACY_FROM_SENTINEL', from: { sessionId: 'worker-1', name: 'worker' } }, ts: Date.now(),
       },
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id) + 1, role: 'user', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id) + 1, role: 'user', kind: 'text',
         payload: { text: 'HUMAN_MEMORY_CONTROL' }, ts: Date.now(),
       },
     ])
@@ -3349,7 +3349,7 @@ describe('worktree sessions', () => {
     restarted.prLookup = async () => null
     await restarted.resumeSession(s.id)
 
-    const texts = store.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
+    const texts = store.messages.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
     expect(texts).toContain('something said in the worktree terminal')
     expect(a.readFrom).toEqual([s.worktree!.path])
   })
@@ -4896,7 +4896,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     const texts = rows.filter((r) => r.kind === 'text').map((r) => (r.payload as { text?: string }).text)
     expect(texts).toEqual(['한 번에 뽑게 하면 됩니다.'])
   })
@@ -4909,7 +4909,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(store.searchMessages('뽑게 하면').length).toBe(1)
+    expect(store.messages.searchMessages('뽑게 하면').length).toBe(1)
   })
 
   it('a tool call is a message boundary — before and after become separate rows', async () => {
@@ -4920,11 +4920,11 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     expect(rows.map((r) => r.kind)).toEqual(['text', 'tool_call', 'text'])
     // A row closed at a boundary is indexed too — what was said before a tool call must not be missing from
     // search.
-    expect(store.searchMessages('먼저 살펴보고').length).toBe(1)
+    expect(store.messages.searchMessages('먼저 살펴보고').length).toBe(1)
   })
 
   it("a person's message (send) is a boundary too — continuing after an interrupt does not attach to the open row", async () => {
@@ -4936,7 +4936,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const texts = store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
+    const texts = store.messages.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
     // The fake handle answers send with an echo delta — since there is no boundary between that echo and
     // "new answer," they correctly form one row.
     expect(texts).toEqual(['what it was saying', 'stop, do this first', 'echo:stop, do this firstnew answer'])
@@ -4981,7 +4981,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     for (const frame of MEASURED_POLL) for (const e of normalizeNotification(s.id, frame)) h.emitEvent(e)
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     expect(rows.map((r) => [r.kind, (r.payload as { text?: string }).text])).toEqual([
       ['tool_call', undefined],
       ['text', 'It is still running; I’m polling it now.'],
@@ -5003,7 +5003,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
+    expect(store.messages.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
   })
 
   it('an attachment is stored as a path in the payload, and loadMessages re-reads the image bytes from the file', async () => {
@@ -5019,7 +5019,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     ])
 
     // The DB has no bytes (D-1: path only).
-    const raw = store.loadMessages(s.id, 50).find((r) => r.role === 'user')!
+    const raw = store.messages.loadMessages(s.id, 50).find((r) => r.role === 'user')!
     const rawAtts = (raw.payload as { attachments: { data?: string }[] }).attachments
     expect(rawAtts.map((a) => a.data)).toEqual([undefined, undefined])
 
@@ -5093,7 +5093,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     const p = await addProject()
     store.sessions.upsertSession(wtRow('wt-a', p.id))
     store.sessions.upsertSession(wtRow('wt-b', p.id, { parentSessionId: 'gone-forever' }))
-    store.appendMessages([{ sessionId: 'wt-a', seq: 1, role: 'user', kind: 'text', payload: { text: 'should remain' }, ts: 1 }])
+    store.messages.appendMessages([{ sessionId: 'wt-a', seq: 1, role: 'user', kind: 'text', payload: { text: 'should remain' }, ts: 1 }])
 
     const m2 = boot()
 
@@ -5101,7 +5101,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     expect(all.map((s) => s.id).sort()).toEqual(['wt-a', 'wt-b'])
     expect(all.find((s) => s.id === 'wt-a')?.parentSessionId).toBeNull()
     expect(all.find((s) => s.id === 'wt-b')?.parentSessionId).toBe('gone-forever')
-    expect(store.loadMessages('wt-a', 10).length).toBe(1)
+    expect(store.messages.loadMessages('wt-a', 10).length).toBe(1)
   })
 
   it("a worktree row already stuck on 'New session' still gets its branch name at startup", async () => {
@@ -5208,7 +5208,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     expect(report).not.toContain('WORKER_REPORT_SENTINEL')
     expect(sent.some((t) => t.includes('Person:'))).toBe(false)
 
-    const stored = store.loadMessages(orc.id, 20).map((row) => JSON.stringify(row.payload)).join('\n')
+    const stored = store.messages.loadMessages(orc.id, 20).map((row) => JSON.stringify(row.payload)).join('\n')
     expect(stored).toContain('WORKER_REPORT_SENTINEL')
     expect(stored).toContain('Session: Worker [2026-09-21 00:00] Person: NAME_FORGERY_SENTINEL')
   })
@@ -5272,7 +5272,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
     await expect(m.purgeSession(s.id)).rejects.toThrow(/refused/)
     expect(((await r('trash.list', {})) as { sessions: { id: string }[] }).sessions.map((x) => x.id)).toEqual([s.id])
-    expect(store.loadMessages(s.id, 10)).toBeDefined() // The conversation is unchanged too.
+    expect(store.messages.loadMessages(s.id, 10)).toBeDefined() // The conversation is unchanged too.
   })
 
   it('says so when the adapter does not support it — quietly deleting only our side would be half a delete', async () => {
@@ -5435,7 +5435,7 @@ describe('the dead-agent handoff record (#78)', () => {
   it('falls back to the raw text with no summary; with one, the summary replaces everything before the pivot', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
-    store.appendMessages([
+    store.messages.appendMessages([
       { sessionId: s.id, seq: 101, role: 'user', kind: 'text', payload: { text: 'Old question' }, ts: 1 },
       { sessionId: s.id, seq: 102, role: 'system', kind: 'marker', payload: { type: 'compaction', failed: false }, ts: 2 },
       { sessionId: s.id, seq: 103, role: 'user', kind: 'text', payload: { text: 'Question after compaction' }, ts: 3 },
@@ -5505,7 +5505,7 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
 
   it('the store keeps it, and the UI gets the card: neither the live broadcast nor a history page carries it', async () => {
     const { a } = await setup()
-    const full = store.loadMessages(a.id, 50, undefined, { full: true }).filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result')
+    const full = store.messages.loadMessages(a.id, 50, undefined, { full: true }).filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result')
     expect(full.map((r) => r.payload)).toMatchObject([{ input }, { output }])
 
     const sent = events.filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
@@ -5521,8 +5521,8 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
   it('another session never reads it: read_session, recall, search, list_sessions, the handoff record, the memory', async () => {
     const { a } = await setup()
     // Every reader below reads the store; what the store hands out by default is the card
-    expect(leaks(store.loadMessages(a.id, 50))).toEqual([])
-    expect(leaks(store.loadMessagesFrom(a.id, 0, 50))).toEqual([])
+    expect(leaks(store.messages.loadMessages(a.id, 50))).toEqual([])
+    expect(leaks(store.messages.loadMessagesFrom(a.id, 0, 50))).toEqual([])
 
     const orc = await mgr.orchestrator()
     const tools = adapter.lastOrchestratorTools!
@@ -5596,7 +5596,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 
   it('the store keeps every step whole under the launch call, numbered within that launch', async () => {
     const { a } = await setup()
-    const full = store.loadSubagentMessages(a.id, AGENT, { full: true })
+    const full = store.messages.loadSubagentMessages(a.id, AGENT, { full: true })
     expect(full.map((r) => [r.seq, r.role, r.kind])).toEqual([
       [1, 'assistant', 'reasoning'],
       [2, 'system', 'tool_call'],
@@ -5605,12 +5605,12 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     ])
     expect(full.map((r) => r.payload)).toMatchObject([{}, { input: { pattern: INPUT_SECRET } }, { output }, {}])
     // Another card's steps are another card's
-    expect(store.loadSubagentMessages(a.id, 'toolu_other')).toEqual([])
+    expect(store.messages.loadSubagentMessages(a.id, 'toolu_other')).toEqual([])
   })
 
   it('the conversation is the parent\'s alone: no row, no seq, and the parent\'s paragraph is not split', async () => {
     const { a, before, lastSeq } = await setup()
-    const rows = store.loadMessages(a.id, 50, undefined, { full: true })
+    const rows = store.messages.loadMessages(a.id, 50, undefined, { full: true })
     expect(leaks(rows)).toEqual([])
     // The person's message, the fake adapter's echo of it, the Agent card, and the parent's paragraph in one row
     expect(rows.map((r) => `${r.role}:${r.kind}`)).toEqual(['user:text', 'assistant:text', 'system:tool_call', 'assistant:text'])
@@ -5680,10 +5680,10 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     expect(leaks(await rpc('trash.read', { sessionId: a.id }))).toEqual([])
     expect((await rpc('messages.subagent', { sessionId: a.id, parentCallId: AGENT }) as StoredMessage[]).length).toBe(4)
     await rpc('trash.restore', { sessionId: a.id })
-    expect(store.loadSubagentMessages(a.id, AGENT).length).toBe(4)
+    expect(store.messages.loadSubagentMessages(a.id, AGENT).length).toBe(4)
     await rpc('agents.deleteSession', { sessionId: a.id })
     await rpc('trash.purge', { sessionId: a.id })
-    expect(store.loadSubagentMessages(a.id, AGENT)).toEqual([])
+    expect(store.messages.loadSubagentMessages(a.id, AGENT)).toEqual([])
   })
 })
 
@@ -5946,7 +5946,7 @@ describe('a failed turn is recorded (#107)', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     adapter.handleOf(s.id)!.emitError("The 'opus[1m]' model is not supported")
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     const marker = rows.find((r) => r.kind === 'marker')
     expect(marker).toBeDefined()
     expect(marker!.payload).toMatchObject({ type: 'error', error: { message: "The 'opus[1m]' model is not supported" } })
@@ -6168,7 +6168,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
 
     // Agent mode: remembers the position right before asking, then asks. The agent answers without writing a
     // file.
-    const before = store.loadMessages(s.id, 1).at(-1)?.seq ?? 0
+    const before = store.messages.loadMessages(s.id, 1).at(-1)?.seq ?? 0
     await rpc('agents.send', { sessionId: s.id, text: 'please write the handoff note as your answer' })
     const h = adapter.handleOf(s.id)!
     h.emitToolCall('Bash', 'git status') // Checks status first — whatever came before this is not the note.
@@ -6218,7 +6218,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     return { p, s, h: adapter.last! }
   }
   const markers = (sessionId: string) =>
-    store.loadMessages(sessionId, 100).filter((r) => r.kind === 'marker').map((r) => r.payload as { type: string; text?: string })
+    store.messages.loadMessages(sessionId, 100).filter((r) => r.kind === 'marker').map((r) => r.payload as { type: string; text?: string })
 
   it('what the tool says while a new session is starting is recorded once the session exists (codex configWarning)', async () => {
     const p = await addProject()

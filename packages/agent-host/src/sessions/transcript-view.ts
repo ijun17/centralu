@@ -1,5 +1,5 @@
 import { frameField, oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
-import type { Store } from '../dev-services/store.js'
+import type { MessageRecords } from '../dev-services/store/messages.js'
 import { clipPreview, lastResponse } from './turn-answer.js'
 
 /**
@@ -7,7 +7,7 @@ import { clipPreview, lastResponse } from './turn-answer.js'
  * recall context and orchestrator memory. Only reads stored messages, so it needs no more of
  * the store than this.
  */
-export type MessageReader = Pick<Store, 'loadMessages' | 'loadMessagesFrom'>
+export type MessageReader = Pick<MessageRecords, 'loadMessages' | 'loadMessagesFrom'>
 
 /**
  * How much past conversation to hand a new orchestrator (line count and line length).

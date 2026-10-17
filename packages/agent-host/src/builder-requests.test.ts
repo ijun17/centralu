@@ -122,7 +122,7 @@ describe('apps.askBuilder', () => {
     expect(toAgent.get(builder.id)).toEqual([framed])
     // The conversation records the person's message exactly as the agent received it — what the
     // person reads and what the agent received are the same
-    expect(store.loadMessages(builder.id).filter((m) => m.role === 'user').map((m) => m.payload)).toEqual([{ text: framed }])
+    expect(store.messages.loadMessages(builder.id).filter((m) => m.role === 'user').map((m) => m.payload)).toEqual([{ text: framed }])
     expect(events.filter((e) => e.type === 'user_message')).toEqual([expect.objectContaining({ sessionId: builder.id, text: framed })])
   })
 

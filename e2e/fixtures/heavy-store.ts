@@ -738,7 +738,7 @@ function seedSession(store: Store, g: Gen, m: Material, s: SessionSeed) {
   let ts = s.createdAt
   let batch: StoredMessage[] = []
   const flush = () => {
-    if (batch.length) store.appendMessages(batch)
+    if (batch.length) store.messages.appendMessages(batch)
     batch = []
   }
   const push = (role: StoredMessage['role'], kind: StoredMessage['kind'], payload: unknown) => {
@@ -891,7 +891,7 @@ function seedSubagent(
   const calls = g.size(80, 0.6, 5, 400)
   let steps = 0
   const put = (kind: StoredMessage['kind'], role: StoredMessage['role'], payload: unknown) => {
-    store.appendSubagentMessage(s.id, parentCallId, { role, kind, payload, ts: ts + steps })
+    store.messages.appendSubagentMessage(s.id, parentCallId, { role, kind, payload, ts: ts + steps })
     steps++
   }
   for (let i = 0; i < calls; i++) {

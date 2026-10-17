@@ -28,7 +28,7 @@ function digest(s: SeedSummary): string {
   try {
     const h = createHash('sha256')
     for (const session of s.sessions) {
-      for (const m of store.loadMessagesFrom(session.id, 0, 1_000_000, { full: true })) {
+      for (const m of store.messages.loadMessagesFrom(session.id, 0, 1_000_000, { full: true })) {
         h.update(JSON.stringify(m))
       }
     }
@@ -90,7 +90,7 @@ describe('heavy-store fixture', () => {
           .sort(),
       ).toEqual(a.sessions.map((s) => s.id).sort())
       expect(store.grid.listGridView()).toHaveLength(4)
-      const rows = store.loadMessagesFrom(a.longSessionId, 0, 1_000_000)
+      const rows = store.messages.loadMessagesFrom(a.longSessionId, 0, 1_000_000)
       expect(rows).toHaveLength(a.sessions[0]!.rows)
       for (const r of rows) {
         if (r.role === 'user') continue
@@ -100,7 +100,7 @@ describe('heavy-store fixture', () => {
       expect(images).toHaveLength(2)
       for (const path of images) expect(existsSync(path), path).toBe(true)
       // A page as the window asks for it carries cards, not the tool's output
-      const page = store.loadMessages(a.longSessionId, 100)
+      const page = store.messages.loadMessages(a.longSessionId, 100)
       expect(page.some((r) => r.kind === 'tool_result' && 'output' in (r.payload as object))).toBe(false)
     } finally {
       store.close()

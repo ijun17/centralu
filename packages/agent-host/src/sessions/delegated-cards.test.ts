@@ -102,7 +102,7 @@ describe('cards in a delegated turn (#676)', () => {
   }
   /** Notices in the parent's conversation that name the child as their source */
   const notices = (parent: string, child: string) =>
-    w.store.loadMessages(parent, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
+    w.store.messages.loadMessages(parent, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
   const toAgent = (parent: string, child: string) => handleOf(parent).sent.filter((t) => t.includes(child))
   /** The handle the caller reads a card by (agent_session status), which its answer names */
   const handleIn = async (caller: string, session: string, requestId: string) => {
@@ -254,7 +254,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
 
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
   const toldOf = (caller: string, session: string) =>
-    w.store.loadMessages(caller, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === session)
+    w.store.messages.loadMessages(caller, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === session)
   const cardsOf = async (caller: string, session: string) => {
     const r = await w.mgr.agentSession(caller, { sessionId: session, action: 'status' })
     return r.ok && r.state === 'asking' ? r.cards : []
@@ -451,7 +451,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     // The parent has a conversation to resume under the next host, so a second notice would reach it
     w.adapters.get('claude')!.handles.get(parent)!.externalId = 'ext-parent'
     answering(w.adapters.get('claude')!.handles.get(child)!).ask('q-1')
-    const told = () => w.store.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
+    const told = () => w.store.messages.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
     await w.until(() => told().length === 1)
     await w.mgr.detachAll()
     expect(w.store.children.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])

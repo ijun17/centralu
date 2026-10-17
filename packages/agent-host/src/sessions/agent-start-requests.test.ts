@@ -143,7 +143,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     // Letting go is not the person's answer: the call says the request is still waiting, and nothing ended it
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId })])
-    expect(store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('No agent was started'))).toEqual([])
+    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('No agent was started'))).toEqual([])
 
     const b = host()
     expect(card(b.mgr, parent)?.requestId).toBe(requestId)

@@ -127,7 +127,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** What reaches the parent's model is a wake naming the source; the report's text is in the parent's conversation */
 const reports = (h: Handle | undefined, child: string) => (h?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))
-const stored = (parent: string) => store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work finished'))
+const stored = (parent: string) => store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work finished'))
 
 describe('the report a child owes its parent, across a host swap (#646)', () => {
   it('is written to the store when it is asked for, and cleared once delivered', async () => {
@@ -144,7 +144,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     await a.mgr.detachAll()
     // Letting go is not the end of the child's turn: no failure report, and the mark stays for the next host
-    expect(store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work'))).toEqual([])
+    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work'))).toEqual([])
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
 
     const b = host(new Set([child]))

@@ -403,7 +403,7 @@ export class AppSessions {
       const { output } = await wait.done
       // The answer is read from the store — what a person sees in that session and what the app receives are
       // the same text
-      return { sessionId: id, text: turnAnswer(this.host.store.loadMessages(id, 50)), ...(output !== undefined ? { output } : {}) }
+      return { sessionId: id, text: turnAnswer(this.host.store.messages.loadMessages(id, 50)), ...(output !== undefined ? { output } : {}) }
     } finally {
       ctx.signal.removeEventListener('abort', onAbort)
       await this.finishAppAgent(id, wait)

@@ -34,18 +34,18 @@ const OUTPUT = `${'match\n'.repeat(100)}the conclusion is at the end`
 
 /** One subagent's work, as the manager stores it */
 const steps = (s: Store, sessionId = 's1', parent = AGENT) => [
-  s.appendSubagentMessage(sessionId, parent, { role: 'assistant', kind: 'reasoning', payload: { type: 'reasoning_delta', sessionId, text: 'look at the zebracorn tests' }, ts: 1 }),
-  s.appendSubagentMessage(sessionId, parent, {
+  s.messages.appendSubagentMessage(sessionId, parent, { role: 'assistant', kind: 'reasoning', payload: { type: 'reasoning_delta', sessionId, text: 'look at the zebracorn tests' }, ts: 1 }),
+  s.messages.appendSubagentMessage(sessionId, parent, {
     role: 'system', kind: 'tool_call',
     payload: { type: 'tool_call', sessionId, callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', paths: [] }, input: { pattern: 'zebracorn' } },
     ts: 2,
   }),
-  s.appendSubagentMessage(sessionId, parent, {
+  s.messages.appendSubagentMessage(sessionId, parent, {
     role: 'system', kind: 'tool_result',
     payload: { type: 'tool_result', sessionId, callId: 'sub1', ok: true, summary: OUTPUT.slice(0, 300), output: OUTPUT },
     ts: 3,
   }),
-  s.appendSubagentMessage(sessionId, parent, { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId, role: 'assistant', text: 'zebracorn is tested twice' }, ts: 4 }),
+  s.messages.appendSubagentMessage(sessionId, parent, { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId, role: 'assistant', text: 'zebracorn is tested twice' }, ts: 4 }),
 ]
 
 const conversation: StoredMessage[] = [
@@ -62,11 +62,11 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     const s = seeded()
     expect(steps(s)).toEqual([1, 2, 3, 4])
     expect(steps(s, 's1', 'toolu_other')).toEqual([1, 2, 3, 4])
-    expect(s.loadSubagentMessages('s1', AGENT).map((r) => [r.seq, r.kind])).toEqual([
+    expect(s.messages.loadSubagentMessages('s1', AGENT).map((r) => [r.seq, r.kind])).toEqual([
       [1, 'reasoning'], [2, 'tool_call'], [3, 'tool_result'], [4, 'text'],
     ])
-    expect(s.loadSubagentMessages('s1', AGENT, { afterSeq: 1, limit: 2 }).map((r) => r.seq)).toEqual([2, 3])
-    expect(s.loadSubagentMessages('s1', 'toolu_unknown')).toEqual([])
+    expect(s.messages.loadSubagentMessages('s1', AGENT, { afterSeq: 1, limit: 2 }).map((r) => r.seq)).toEqual([2, 3])
+    expect(s.messages.loadSubagentMessages('s1', 'toolu_unknown')).toEqual([])
     s.close()
   })
 
@@ -74,35 +74,35 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     const s = seeded()
     steps(s)
     const tools = (rows: StoredMessage[]) => rows.filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result').map((r) => r.payload)
-    expect(tools(s.loadSubagentMessages('s1', AGENT))).toEqual([
+    expect(tools(s.messages.loadSubagentMessages('s1', AGENT))).toEqual([
       { type: 'tool_call', sessionId: 's1', callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', paths: [] } },
       { type: 'tool_result', sessionId: 's1', callId: 'sub1', ok: true, summary: OUTPUT.slice(0, 300) },
     ])
-    expect(tools(s.loadSubagentMessages('s1', AGENT, { full: true }))).toMatchObject([{ input: { pattern: 'zebracorn' } }, { output: OUTPUT }])
+    expect(tools(s.messages.loadSubagentMessages('s1', AGENT, { full: true }))).toMatchObject([{ input: { pattern: 'zebracorn' } }, { output: OUTPUT }])
     s.close()
   })
 
   it('the conversation does not hold them: its pages, its last seq and its search see none of it', () => {
     const s = seeded()
-    s.appendMessages(conversation)
+    s.messages.appendMessages(conversation)
     steps(s)
-    expect(s.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
-    expect(s.loadMessagesFrom('s1', 0, 200, { full: true })).toEqual(conversation)
+    expect(s.messages.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
+    expect(s.messages.loadMessagesFrom('s1', 0, 200, { full: true })).toEqual(conversation)
     expect(s.sessions.listSessions().find((x) => x.id === 's1')?.lastSeq).toBe(2)
-    expect(s.nextSeq('s1')).toBe(3)
+    expect(s.messages.nextSeq('s1')).toBe(3)
     // Not indexed, its words included: the parent's own report is what is searchable
-    expect(s.searchMessages('zebracorn').map((h) => h.seq)).toEqual([1])
-    expect(s.searchMessages('tested twice')).toEqual([])
+    expect(s.messages.searchMessages('zebracorn').map((h) => h.seq)).toEqual([1])
+    expect(s.messages.searchMessages('tested twice')).toEqual([])
     s.close()
   })
 
   it('they stay with the session in the trash and come back with it, and the purge takes them', async () => {
     const s = seeded()
-    s.appendMessages(conversation)
+    s.messages.appendMessages(conversation)
     steps(s)
     const before = s.trash.listTrash()
     await s.trash.trashSession('s1', KEEP_ALL)
-    expect(s.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
+    expect(s.messages.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
     // What the trash says it holds counts them
     const [row] = s.trash.listTrash()
     expect(before).toEqual([])
@@ -110,8 +110,8 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     expect(row!.bytes).toBeGreaterThan(ownBytes + OUTPUT.length)
     expect(row!.messages).toBe(2)
     await s.trash.restoreSession('s1', 'p1')
-    expect(s.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
-    expect(s.searchMessages('tested twice')).toEqual([])
+    expect(s.messages.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
+    expect(s.messages.searchMessages('tested twice')).toEqual([])
     await s.trash.trashSession('s1', KEEP_ALL)
     // Chunks smaller than the steps: the purge walks them in several steps, as it walks messages (#179)
     expect(await s.trash.purgeSession('s1', 3)).toBe(true)
@@ -122,7 +122,7 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
 
   it('a purge deletes them in chunks, letting the event loop run between, rather than in the session row\'s cascade', async () => {
     const s = seeded()
-    s.appendMessages(conversation)
+    s.messages.appendMessages(conversation)
     steps(s)
     await s.trash.trashSession('s1', KEEP_ALL)
     // 4 steps and 2 messages in chunks of 3: the steps take a chunk of their own before the rest goes with the session
@@ -144,7 +144,7 @@ describe('v41 — the table for subagent steps (#222)', () => {
     dir = mkdtempSync(join(tmpdir(), 'cc-v41-'))
     const file = join(dir, 'store.db')
     const old = seeded(file)
-    old.appendMessages(conversation)
+    old.messages.appendMessages(conversation)
     old.close()
     const raw = new Database(file)
     raw.exec('DROP TABLE subagent_messages')
@@ -154,13 +154,13 @@ describe('v41 — the table for subagent steps (#222)', () => {
     const s = new Store(file)
     expect(s.migrationsRun).toBe(15) // v41, then v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844)
     expect(s.schemaVersion).toBe(s.latestKnownVersion)
-    expect(s.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
+    expect(s.messages.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
     expect(steps(s)).toEqual([1, 2, 3, 4])
     s.close()
     // And it runs once
     const again = new Store(file)
     expect(again.migrationsRun).toBe(0)
-    expect(again.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
+    expect(again.messages.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
     again.close()
   })
 })

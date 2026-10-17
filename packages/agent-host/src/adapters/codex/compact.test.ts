@@ -432,7 +432,7 @@ describe('codex /goal — runs as a function', () => {
       h.send('/goal')
       await tick()
       rec.closeStream('s1')
-      const rows = store.loadMessages('s1', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
+      const rows = store.messages.loadMessages('s1', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
       expect(rows).toEqual(['Looking at the tests.', 'Goal set: all tests green', ' Still looking.', 'No goal set.'])
     } finally {
       store.close()

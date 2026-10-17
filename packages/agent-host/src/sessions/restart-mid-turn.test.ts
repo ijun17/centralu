@@ -22,7 +22,7 @@ describe('a turn its process took with it (#839)', () => {
   const parent = async () => (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
   /** The reports of a child's work the parent was given */
   const reports = (s: string, child: string) =>
-    w.store.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+    w.store.messages.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
   /** The child's tool names its conversation, as a real one does on its first output, so a restart can resume it */
   const named = (child: string) => {
     const h = handleOf(child)!

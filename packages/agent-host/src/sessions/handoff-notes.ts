@@ -113,7 +113,7 @@ export class HandoffNotes {
   async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
     const m = this.host.sessionOf(sessionId)
     if (!m.projectId) throw rpcError('Only project sessions can hand off')
-    const rows = this.host.store.loadMessages(sessionId, 1_000_000)
+    const rows = this.host.store.messages.loadMessages(sessionId, 1_000_000)
     // Pivot = the last **successful** compaction marker — a failed compaction folded nothing at all
     let pivotSeq: number | null = null
     for (const r of rows) {
@@ -156,7 +156,7 @@ export class HandoffNotes {
     if (inTurn(m.state)) return null
     let note = ''
     let asked = false
-    for (const r of this.host.store.loadMessagesFrom(sessionId, afterSeq, 1_000_000)) {
+    for (const r of this.host.store.messages.loadMessagesFrom(sessionId, afterSeq, 1_000_000)) {
       if (r.role === 'user') {
         // A person-message that comes after the request is no longer an answer to this request
         if (asked) break
