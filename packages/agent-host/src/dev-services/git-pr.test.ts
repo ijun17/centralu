@@ -182,7 +182,7 @@ describe('gh stopped by an abort (#368)', () => {
     childPid = child
     expect(await answer).toBeNull()
     expect(alive(ghPid)).toBe(false)
-    await eventually(() => !alive(child), 5_000 * SLOW)
+    await eventually(() => !alive(child), 5_000)
   })
 })
 
