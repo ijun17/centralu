@@ -30,6 +30,7 @@ export function SessionNameInput({
    * error toast pops up for no apparent reason.
    */
   const done = useRef(false)
+  const selected = useRef(false)
   const finish = (name: string) => {
     if (done.current) return
     done.current = true
@@ -42,8 +43,16 @@ export function SessionNameInput({
       className={`w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 ${ROW_PAD} pr-3 text-md text-ink outline-none`}
       value={text}
       onChange={(e) => setText(e.target.value)}
-      // An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append instead)
-      onFocus={(e) => e.currentTarget.select()}
+      /*
+        An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append
+        instead). Only on the first focus: the focus the window gives back after ⌘Tab selected the half-typed name again,
+        and the next key replaced it.
+      */
+      onFocus={(e) => {
+        if (selected.current) return
+        selected.current = true
+        e.currentTarget.select()
+      }}
       onKeyDown={(e) => {
         // Stopped here so global shortcuts (⌘K, etc.) do not intercept the typing
         e.stopPropagation()
@@ -51,8 +60,15 @@ export function SessionNameInput({
         if (isPlainEnter(e.nativeEvent)) finish(text)
         else if (isPlainEscape(e.nativeEvent)) finish(initial)
       }}
-      // Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button
-      onBlur={() => finish(text)}
+      /*
+        Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button. Not when the window
+        itself lost focus (⌘Tab to look something up, #842 item 14): the field blurs then too, and the half-typed name was
+        saved. The edit stays open, and the browser gives the field focus back with the window.
+      */
+      onBlur={() => {
+        if (typeof document !== 'undefined' && !document.hasFocus()) return
+        finish(text)
+      }}
       data-testid={`session-name-input-${id}`}
       spellCheck={false}
     />

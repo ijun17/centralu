@@ -21,7 +21,7 @@ import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
-import { type AppState, type InlineView, type Notice, type PinnedView } from './state.js'
+import { type AppState, type InlineView, type Notice, type PinnedView, type StoreSet } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
 export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
 export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
@@ -166,7 +166,21 @@ export function usageTools(s: AppState): ToolName[] {
   return out
 }
 
-export const useStore = create<AppState>((set, get) => ({
+/**
+ * The store's `set`, raising `toastAt` with every write that says a toast (#842 item 14). The actions write `toast`
+ * directly in well over a hundred places; stamping it here keeps the count right for all of them.
+ */
+export function stampToasts(set: StoreSet): StoreSet {
+  return ((partial: Parameters<StoreSet>[0], replace?: boolean) =>
+    (set as (p: unknown, r?: boolean) => void)((st: AppState) => {
+      const next = typeof partial === 'function' ? partial(st) : partial
+      return next && typeof next.toast === 'string' ? { ...next, toastAt: st.toastAt + 1 } : next
+    }, replace)) as StoreSet
+}
+
+export const useStore = create<AppState>((rawSet, get) => {
+  const set = stampToasts(rawSet)
+  return {
   platform: null,
   connection: 'connecting',
   hostResyncs: 0,
@@ -231,6 +245,7 @@ export const useStore = create<AppState>((set, get) => ({
   overlay: null,
   inboxOpen: false,
   toast: null,
+  toastAt: 0,
   appFocused: true,
   completion: null as { sessionId: string; at: number } | null,
   notices: [] as Notice[],
@@ -330,7 +345,8 @@ export const useStore = create<AppState>((set, get) => ({
   ...orchestratorActions(set, get),
   ...navigationActions(set, get),
   ...layoutActions(set, get),
-}))
+}
+})
 
 /** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
 export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
