@@ -1,7 +1,7 @@
 import { launchesSubagent, type NormalizedEvent } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { finite, trimmed } from '../../json-value.js'
-import { HISTORY_SESSION, historyEvents } from '../history-events.js'
+import { HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { normalizeMessage } from './normalize.js'
 import { toolResultEvent } from '../tool-result.js'
@@ -126,7 +126,13 @@ export async function readClaudeHistory(
 ): Promise<HistoryMessage[]> {
   const sdk = await sessionApi()
   if (!sdk?.getSessionMessages) throw new Error(UNSUPPORTED)
-  const rows = await sdk.getSessionMessages(externalId, { dir: cwd, limit })
+  /*
+   * Read whole, and the newest lines kept (#1006). The SDK's `limit` counts rows from the start (it reads the whole
+   * transcript, then slices `offset..offset + limit`), so passing it gave the oldest rows: an import showed how a long
+   * conversation began, and a catch-up of one over 600 rows never found our last message and never attached anything
+   * again. It also counted every row, a tool result's included. The lines are kept as Codex keeps them (`lastLines`).
+   */
+  const rows = await sdk.getSessionMessages(externalId, { dir: cwd })
   if (!Array.isArray(rows)) return []
   const out: HistoryMessage[] = []
   const agents = new Set<string>()
@@ -144,7 +150,7 @@ export async function readClaudeHistory(
       console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)
     }
   }
-  return out
+  return lastLines(out, limit)
 }
 
 /**

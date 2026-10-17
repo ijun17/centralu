@@ -198,6 +198,30 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  /*
+   * #1006: the SDK's `limit` slices from the start (SDK 0.3.263: the whole transcript read, then `offset..offset +
+   * limit`), which this fake does too. The reader gave the oldest rows, so a catch-up past 600 rows never matched.
+   */
+  it('keeps the newest lines of a long conversation, counting words and compactions, not tool rows', async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => [
+      { type: 'user', message: { content: [{ type: 'text', text: `q${i}` }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: `t${i}`, name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'a' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: `a${i}` }] } },
+    ]).flat()
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async (_id, o) => {
+        const from = Number(o?.offset ?? 0)
+        return typeof o?.limit === 'number' && o.limit > 0 ? rows.slice(from, from + o.limit) : rows.slice(from)
+      },
+    })
+    const out = await readClaudeHistory('s', '/p', 3)
+    expect(out.map((h) => (h.role === 'system' ? `${h.event.type}:${(h.event as { callId?: string }).callId}` : h.text))).toEqual([
+      'a8', 'q9', 'tool_call:t9', 'tool_result:t9', 'a9',
+    ])
+  })
+
   it('an older SDK (missing the function) leaves a reason instead of throwing', async () => {
     __setSessionApiForTest(null)
     await expect(listClaudeSessions('/p', 10)).rejects.toThrow(CLAUDE_UNSUPPORTED)

@@ -2873,9 +2873,12 @@ a record but the words is read by the adapter's live normalizer (`normalizeMessa
 their results and its compactions (`adapters/history-events.ts`); its thinking, usage, plan, images and activity are
 not part of a conversation read back. Before, only the words came back, with a Claude call kept as its name, so an
 imported conversation showed `Bash` where a watched one showed the command and its output. The limit counts the words
-and compactions, as before: a turn's tool rows ride along, so a turn full of calls does not push older turns out. Not
-the same as live: a Claude agent's result is its tool_result text, since `getSessionMessages` keeps no
-`tool_use_result`, and an image in a result is not brought back.
+and compactions of the newest end (`lastLines`): a turn's tool rows ride along, so a turn full of calls does not push
+older turns out. The Claude reader reads the transcript whole and keeps that end too: the SDK's own `limit` slices
+from the start, so it gave the oldest rows and counted tool rows (#1006). One import keeps the newest calls up to 400
+tool rows and each result's record up to 20,000 characters, since it writes them in one go. Not the same as live: a
+Claude agent's card says its report is not in the record, since `getSessionMessages` keeps no `tool_use_result` and its
+result is text meant for the model, and an image in a result is not brought back.
 
 **Where the tool compacted is kept** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex's history (now
 `thread/turns/list` with full items, before #342 `thread/read`) returns each compaction as a `{ type: 'contextCompaction', id }` item in the turn where it ran — a turn of its own for
