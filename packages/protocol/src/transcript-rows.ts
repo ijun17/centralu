@@ -81,10 +81,15 @@ export function recordedRowKind(e: NormalizedEvent): RecordedRowKind | null {
  * Whether the event ends the open streamed row: any recorded event (a tool call in the middle of an answer splits it),
  * and the end of a turn (turn_complete, error, a state_change that is not working), which records nothing but ends the
  * message. An event that is never recorded, like activity or usage_update, blends with the stream.
+ *
+ * An agent's image ends it too (#868): it is a row of its own between the text before it and the text after it. The
+ * host left the text row open across it, so "a", an image, "b" was stored as "ab" above the image, while the live
+ * screen drew a, the image, b.
  */
 export function endsStreamRow(e: NormalizedEvent): boolean {
   return (
     recordedRowKind(e) !== null ||
+    e.type === 'message_image' ||
     e.type === 'turn_complete' ||
     e.type === 'error' ||
     (e.type === 'state_change' && e.state !== 'working')

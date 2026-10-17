@@ -122,6 +122,7 @@ export class SessionRecord {
     // Any recorded event that is not a stream, and the end of a turn, is a message boundary (`endsStreamRow`)
     const kind = recordedRowKind(e)
     if (endsStreamRow(e)) this.closeStream(m.id)
+    if (e.type === 'message_image') return this.persistImage(e, m)
     if (!kind) return null
     const seq = this.host.store.nextSeq(m.id)
     // The record of an app view never carries the body (`appViewRecord`)
@@ -225,26 +226,46 @@ export class SessionRecord {
    * into the DB row — the same structure as a user-to-agent attachment, so the DB always stays
    * text-only.
    */
-  async persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): Promise<void> {
+  /**
+   * **Its row is taken at once, in the order the image came** (#868), and the file is written after. The row used to be
+   * taken only once the file was saved, so the text that followed the image could take its number first and be stored
+   * above it. The row first holds what the event says (a path the tool gave, a note); once the bytes are in a file it is
+   * rewritten with that file's path, or with why it could not be saved. Returns the row's number.
+   */
+  persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): number {
+    const ts = Date.now()
+    const seq = this.host.store.nextSeq(m.id)
+    const row = (path: string | undefined, note: string | undefined): StoredMessage => ({
+      sessionId: m.id, seq, role: 'system', kind: 'image', ts,
+      payload: { type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path, note } satisfies NormalizedEvent,
+    })
+    this.host.store.appendMessages([row(e.path, e.note)])
+    m.lastSeq = seq
+    if (e.data) void this.saveImage(e, m, row)
+    return seq
+  }
+
+  /** Writes an image's bytes to an attachment file and points its row at it */
+  private async saveImage(
+    e: Extract<NormalizedEvent, { type: 'message_image' }>,
+    m: SessionInfo,
+    row: (path: string | undefined, note: string | undefined) => StoredMessage,
+  ): Promise<void> {
     let stored: string | undefined
     let note = e.note
-    if (e.data) {
-      try {
-        stored = (await saveAttachment(m.id, 'agent-image', e.mime, e.data)).path
-        // Keeping under the cap is the writer's responsibility — once it overflows, the oldest files are
-        // swept first
-        void sweepAttachments().catch(() => {})
-      } catch (err) {
-        note = `Could not save the image: ${(err as Error).message}`
-      }
+    try {
+      stored = (await saveAttachment(m.id, 'agent-image', e.mime, e.data)).path
+      // Keeping under the cap is the writer's responsibility — once it overflows, the oldest files are
+      // swept first
+      void sweepAttachments().catch(() => {})
+    } catch (err) {
+      note = `Could not save the image: ${(err as Error).message}`
     }
-    const payload: NormalizedEvent = {
-      type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path: stored ?? e.path, note,
+    try {
+      this.host.store.upsertMessageNoIndex(row(stored ?? e.path, note))
+    } catch {
+      // The store is closed (the host is leaving): the row keeps what it was written with
     }
-    const seq = this.host.store.nextSeq(m.id)
-    this.host.store.appendMessages([{ sessionId: m.id, seq, role: 'system', kind: 'image', payload, ts: Date.now() }])
-    m.lastSeq = seq
-    this.host.store.upsertSession(m)
   }
 
   /**
