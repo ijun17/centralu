@@ -21,6 +21,7 @@ import { chmodSync, cpSync, mkdirSync, rmSync, existsSync, readFileSync, statSyn
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
 
 const require = createRequire(import.meta.url)
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -207,8 +208,9 @@ for (const file of ['pty.node', 'spawn-helper', 'conpty.node', 'conpty_console_l
   const from = join(ptySrc, ptyNativeDir, file)
   if (existsSync(from)) cpSync(from, join(ptyDest, ptyNativeDir, file), { recursive: true })
 }
-if (process.platform === 'win32' && !existsSync(join(ptyDest, ptyNativeDir, 'conpty', 'conpty.dll'))) {
-  throw new Error(`node-pty's conpty/conpty.dll is missing from ${join(ptySrc, ptyNativeDir)}: every terminal would fall back to a console host that is never closed`)
+if (process.platform === 'win32') {
+  const missing = CONPTY_FILES.filter((f) => !existsSync(join(ptyDest, ptyNativeDir, f)))
+  if (missing.length > 0) throw new Error(`node-pty's ${missing.join(', ')} missing from ${join(ptySrc, ptyNativeDir)}: the packaged terminals would not start`)
 }
 
 /**

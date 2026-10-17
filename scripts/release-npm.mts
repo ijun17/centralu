@@ -35,9 +35,12 @@ import {
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
+// @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
+import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
 import { hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -513,8 +516,8 @@ const TARGETS: Record<string, Target | undefined> = {
        */
       const subsystem = pe.readUInt16LE(at + 24 + 68)
       if (subsystem !== 2) fail(`centralu.exe is not a GUI program (subsystem ${subsystem}) — it would open a console window`)
-      // conpty/conpty.dll: the ConPTY the terminals run on (#849), which conpty.node loads from beside itself
-      for (const rel of ['resources/host/main.mjs', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty.node', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll']) {
+      // The ConPTY the terminals run on (#849): conpty.node, the DLL it loads and the OpenConsole.exe that starts
+      for (const rel of ['resources/host/main.mjs', ...CONPTY_FILES.map((f) => `resources/host/node_modules/node-pty/prebuilds/win32-x64/${f}`)]) {
         if (!existsSync(join(dest, rel))) fail(`${rel} is missing from the package — the app would not start its host or its terminal`)
       }
       console.log('  GUI subsystem, host and conpty present')
