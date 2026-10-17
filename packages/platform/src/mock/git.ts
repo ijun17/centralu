@@ -25,7 +25,19 @@ export class GitMock {
     ignored: { path: string; bytes: number | null }[]
     lastCommitMessage?: string
     pushed: boolean
+    /** A commit or push waits until `cancel` (a hook or a sign-in that does not end on its own, #1007) */
+    holdWrites?: boolean
   } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], truncated: [], ignored: [], pushed: false }
+
+  /** The held writes, each ended by `cancel` */
+  private held = new Set<() => void>()
+  private hold(): Promise<{ ok: boolean; message?: string; cancelled?: true } | null> {
+    if (!this.gitState.holdWrites) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const end = () => resolve({ ok: false, message: 'Cancelled', cancelled: true })
+      this.held.add(end)
+    })
+  }
 
   readonly git = {
     status: async (_projectId: string) => [...this.gitState.files],
@@ -56,13 +68,23 @@ export class GitMock {
       )
     },
     commit: async (_projectId: string, message: string) => {
+      const cancelled = await this.hold()
+      if (cancelled) return cancelled
       this.gitState.lastCommitMessage = message
       this.gitState.files = this.gitState.files.filter((f) => !f.staged)
       return { ok: true }
     },
     push: async (_projectId: string) => {
+      const cancelled = await this.hold()
+      if (cancelled) return cancelled
       this.gitState.pushed = true
       return { ok: true }
+    },
+    cancel: async (_projectId: string) => {
+      const ends = [...this.held]
+      this.held.clear()
+      for (const end of ends) end()
+      return { cancelled: ends.length > 0 }
     },
   }
 }
