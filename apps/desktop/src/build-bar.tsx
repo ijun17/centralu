@@ -1,4 +1,5 @@
 import { ShellBanner } from '@cc/ui'
+import { DesktopDialog } from './dialog-layer.js'
 import type { ShellHostBuild } from '@cc/platform/tauri'
 // The pure half, by path rather than through `@cc/platform/tauri`: the browser harness that drives
 // this bar in e2e (apps/web/src/harness/shell-banner.tsx) has no Tauri, and the index imports it
@@ -106,40 +107,28 @@ export function BuildBarView({
  */
 export function RestartKeeperDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin"
-      data-testid="confirm-restart-keeper"
-      onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Restart Centralu completely?"
-        className="w-[380px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="text-md text-ink">Restart Centralu completely?</p>
-        <p className="mt-2 text-xs leading-body text-ink-muted">
-          The background keeper that holds the agents is on an older build and could not move to this one by
-          itself. Restarting it now starts it on this build.
-        </p>
-        <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-restart-keeper-loses">
-          {RESTART_COMPLETELY_LOSES}
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
-            Not now
-          </button>
-          <button
-            className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70"
-            data-testid="confirm-restart-keeper-yes"
-            onClick={onConfirm}
-          >
-            Restart completely
-          </button>
-        </div>
+    <DesktopDialog onCancel={onCancel} testId="confirm-restart-keeper" label="Restart Centralu completely?">
+      <p className="text-md text-ink">Restart Centralu completely?</p>
+      <p className="mt-2 text-xs leading-body text-ink-muted">
+        The background keeper that holds the agents is on an older build and could not move to this one by
+        itself. Restarting it now starts it on this build.
+      </p>
+      <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-restart-keeper-loses">
+        {RESTART_COMPLETELY_LOSES}
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
+          Not now
+        </button>
+        <button
+          className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70"
+          data-testid="confirm-restart-keeper-yes"
+          onClick={onConfirm}
+        >
+          Restart completely
+        </button>
       </div>
-    </div>
+    </DesktopDialog>
   )
 }
 
