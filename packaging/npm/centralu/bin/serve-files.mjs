@@ -172,7 +172,7 @@ export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
 /** host.lock's `{ pid, started }`; a bare pid (an older host) has no start time */
 function parseLockHolder(text) {
   const t = text.trim()
-  if (/^\d+$/.test(t)) return { pid: Number(t), started: null }
+  if (/^\d+$/.test(t)) return Number(t) > 0 ? { pid: Number(t), started: null } : null
   try {
     const v = JSON.parse(t)
     return Number.isInteger(v?.pid) && v.pid > 0 ? { pid: v.pid, started: typeof v.started === 'string' ? v.started : null } : null
@@ -197,9 +197,7 @@ export function processStartTime(pid) {
 /** Who `host.lock` names as the data folder's owner, or null */
 export function lockHolderPid(dataDir) {
   try {
-    const text = readFileSync(join(dataDir, 'host.lock'), 'utf8').trim()
-    const pid = /^\d+$/.test(text) ? Number(text) : JSON.parse(text)?.pid
-    return Number.isInteger(pid) && pid > 0 ? pid : null
+    return parseLockHolder(readFileSync(join(dataDir, 'host.lock'), 'utf8'))?.pid ?? null
   } catch {
     return null
   }
