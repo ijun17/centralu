@@ -96,14 +96,9 @@ import {
   gitCommitDetail,
   gitBranches,
   gitIgnoredEntries,
-  gitCheckout,
-  gitStage,
-  gitCommit,
-  gitPush,
-  gitValidBranchName,
-  type Worktree,
-  gitWorktreeDirty,
 } from '../dev-services/git.js'
+import { gitCheckout, gitStage, gitCommit, gitPush } from '../dev-services/git-write.js'
+import { gitValidBranchName, type Worktree, gitWorktreeDirty } from '../dev-services/git-worktree.js'
 import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
 import {
   importFile,

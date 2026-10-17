@@ -19,10 +19,8 @@ import {
 } from '@cc/protocol'
 import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
 import { gigabytes, type MemoryShortfall } from './memory-gate.js'
-import {
-  gitSummary,
-  gitValidBranchName,
-} from '../dev-services/git.js'
+import { gitSummary } from '../dev-services/git.js'
+import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import type { HostAskAnswer } from './host-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
