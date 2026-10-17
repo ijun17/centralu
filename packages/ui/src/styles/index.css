@@ -101,14 +101,6 @@
   /* Lines */
   --color-line: #363636; /* hairline: borders, dividers, meter tracks */
   --color-line-strong: #4d4d4d; /* a border that has to show: focused inputs, checkboxes, graph lanes */
-  /*
-   * The sidebar's lines, a step toward the ink so they stand apart from its background (dividers between
-   * projects, "Add project", row borders). Mixed from the theme's own tokens rather than set per preset, so
-   * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
-   * swaps these in for --color-line and --color-line-strong (SIDEBAR_VARS).
-   */
-  --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
-  --color-line-strong-side: color-mix(in oklab, var(--color-line-strong) 80%, var(--color-ink-faint));
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
@@ -285,6 +277,20 @@
   --tracking-tight: -0.025em; /* names: a project, an app, the sidebar's buttons */
   --tracking-readout: 0.02em; /* figures, see .readout */
   --tracking-caps: 0.2em; /* a small uppercase label */
+}
+
+/*
+ * The sidebar's lines, a step toward the ink so they stand apart from its background (dividers between
+ * projects, "Add project", row borders). Mixed from the theme's own tokens rather than set per preset, so
+ * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
+ * swaps these in for --color-line and --color-line-strong (SIDEBAR_VARS).
+ *
+ * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
+ * holds to it), and these are derived from two of them, never set themselves.
+ */
+:root {
+  --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
+  --color-line-strong-side: color-mix(in oklab, var(--color-line-strong) 80%, var(--color-ink-faint));
 }
 
 /*
