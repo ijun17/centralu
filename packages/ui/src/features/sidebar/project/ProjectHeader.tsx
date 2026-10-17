@@ -164,9 +164,9 @@ export function ProjectHeader({
         } ${open ? 'opacity-100' : 'max-w-0 overflow-hidden opacity-0 focus-within:max-w-none group-hover:max-w-none'}`}
       >
         {/*
-          A split button (#543): the `+` starts a session at once, with what the project remembers (its last
-          tool and that tool's model and effort); the chevron beside it opens the window that asks. In the
-          common case the window's only step was Start, a decision and a click (2.7 s) every time.
+          The `+` starts a session at once, with what the project remembers (its last tool and that tool's
+          model and effort; #543). Its empty screen offers the past conversations to resume (PastConversations),
+          and the project menu's "New session…" still opens the window that chooses a tool or a worktree.
         */}
         <IconButton
           label={`New session in ${project.name}`}
@@ -174,13 +174,6 @@ export function ProjectHeader({
           testId={`project-new-session-${project.name}`}
         >
           <PlusIcon size={14} />
-        </IconButton>
-        <IconButton
-          label={`New session in ${project.name}: choose the tool, a worktree or a past conversation`}
-          onClick={() => openNewSession(projectId)}
-          testId={`project-new-session-options-${project.name}`}
-        >
-          <ChevronIcon open size={14} />
         </IconButton>
       </span>
       <span
