@@ -19,7 +19,7 @@ import { rpcError } from '../rpc-error.js'
 type RpcContext = { client: number }
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
-/** One linked machine, as the router needs it (links.ts implements it) */
+/** One linked machine, as the router needs it (linked-machine-connection.ts implements it) */
 export interface RoutedMachine {
   readonly id: string
   readonly name: string

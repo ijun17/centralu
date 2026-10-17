@@ -277,7 +277,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   it('reopening a live link ends the old forward without reporting the link down, so the link does not reconnect without end', async () => {
     const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) })
     /*
-     * What a link does on down (links.ts `transportDown`): opens again a little later. Reopening
+     * What a link does on down (linked-machine-connection.ts `transportDown`): opens again a little later. Reopening
      * ends the forward it holds, so a reopen reported as down came back as another reopen, which
      * ended the new forward, and so on: the reconnect churn of a refused token's quick retry, a
      * `machines.reconnect` or the versions poll.

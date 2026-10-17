@@ -1,11 +1,11 @@
 // The release: release_status and release.
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { pathInput } from './board.mjs'
-import { ciLines } from './ci-tools.mjs'
+import { ciLines, progress } from './ci-tools.mjs'
 import { evaluateChecks, workflowCheckNames } from './ci.mjs'
 import { APP_DIR, CI, config } from './config.mjs'
 import { openPr } from './contribute-tools.mjs'
-import { approveDeployments, cancelWorkflowRun, dispatchWorkflow, pendingDeployments, prsWithHead, readRepo, readRequired, readWorkflowChecks, runJobs, workflowRuns } from './github.mjs'
+import { activeJobs, approveDeployments, cancelWorkflowRun, dispatchWorkflow, pendingDeployments, prsWithHead, readRepo, readRequired, readWorkflowChecks, runJobs, workflowRuns } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { approveRelease, bumpRelease, cancelDuplicateRelease, guarded, rehearseRelease, releaseConfig, ReleaseRefusal, releaseStatus, tagRelease } from './release.mjs'
 import { asError, linesAnswer } from './reply.mjs'
@@ -17,14 +17,34 @@ import { BUMPS } from './versions.mjs'
 // it, the tag prefix, the workflow and its environment).
 const RELEASE = releaseConfig(config.release)
 
-/** Release CI: only configured workflow suites, on the exact commit and source event. */
-async function ciForRelease(repo, sha, { pr } = {}) {
+/**
+ * Release CI: only configured workflow suites, on the exact commit and source event. `own`: the
+ * required set from that commit's own workflows rather than main's (an approval judges the tagged
+ * commit, whose run reports the jobs its workflow had). `settled`: every build run on it completed,
+ * so a check still missing will never report.
+ */
+async function ciForRelease(repo, sha, { pr, own = false } = {}) {
   const { defaultBranch } = await readRepo(repo)
-  const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames)
+  const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames, undefined, own ? { at: sha } : {})
   const { reported, runs } = await readWorkflowChecks(repo, sha, { workflows: CI.workflows, event: pr ? 'pull_request' : 'push', ...(pr ? { pr } : { branch: defaultBranch }) })
   const checks = evaluateChecks({ required: req.names, reported, alsoReported: req.unresolved.length > 0 })
   const cancelledRuns = runs.filter((r) => r.status === 'completed' && r.conclusion === 'cancelled')
-  return { cancelledRuns, verdict: cancelledRuns.length ? 'failing' : checks.verdict, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
+  const settled = runs.length > 0 && runs.every((r) => r.status === 'completed')
+  const missing = checks.rows.filter((r) => r.state === 'missing').map((r) => r.name)
+  const running = checks.rows.some((r) => r.state === 'pending')
+  return { cancelledRuns, verdict: cancelledRuns.length ? 'failing' : checks.verdict, settled, missing, running, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
+}
+
+// PROJECT_BOARD_NPM_REGISTRY: for the tests only, which answer from a local server
+const NPM_REGISTRY = String(process.env.PROJECT_BOARD_NPM_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '')
+
+/** `name@version` on the registry: absent (404), or present with the commit npm recorded. Throws when it did not answer. */
+async function npmVersion(name, version) {
+  const r = await fetch(`${NPM_REGISTRY}/${String(name).replace('/', '%2f')}/${encodeURIComponent(version)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) })
+  if (r.status === 404) return { state: 'absent' }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const v = await r.json()
+  return { state: 'present', gitHead: typeof v.gitHead === 'string' ? v.gitHead : null }
 }
 
 /** open_pr's own code, answering whether it went and what it said. */
@@ -35,11 +55,11 @@ async function openPrResult(args) {
 }
 
 const RELEASE_STEPS = { bump: bumpRelease, rehearse: rehearseRelease, tag: tagRelease, approve: approveRelease, cancel_duplicate: cancelDuplicateRelease }
-const RELEASE_GH = { readRepo, prsWithHead, workflowRuns, runJobs, pendingDeployments, approveDeployments, dispatchWorkflow, cancelWorkflowRun }
+const RELEASE_GH = { activeJobs, readRepo, prsWithHead, workflowRuns, runJobs, pendingDeployments, approveDeployments, dispatchWorkflow, cancelWorkflowRun }
 
-async function release(args, step) {
+async function release(args, step, call) {
   const repo = config.repository
-  const ctx = { repo, dir: args.path ?? APP_DIR, cfg: RELEASE, gh: RELEASE_GH, ci: (sha, options) => ciForRelease(repo, sha, options), openPr: openPrResult }
+  const ctx = { repo, dir: args.path ?? APP_DIR, cfg: RELEASE, gh: RELEASE_GH, ci: (sha, options) => ciForRelease(repo, sha, options), openPr: openPrResult, registry: npmVersion }
   try {
     if (step === 'status') {
       const r = await guarded(() => releaseStatus(ctx))
@@ -47,7 +67,7 @@ async function release(args, step) {
     }
     // Who is asking comes first, as for merging: a contributor's agent gets no further
     ctx.permissions = (await readRepo(repo)).permissions
-    const { summary, lines, ...rest } = await guarded(() => RELEASE_STEPS[step](ctx, args))
+    const { summary, lines, ...rest } = await guarded(() => RELEASE_STEPS[step](ctx, args, { signal: call?.mcpReq?.signal, progress: (n, message) => progress(call, n, message) }))
     return linesAnswer(summary, [['lines', '', lines]], { ok: !rest.partial, step, ...rest })
   } catch (e) {
     if (!(e instanceof ReleaseRefusal)) throw e
@@ -55,6 +75,9 @@ async function release(args, step) {
     return asError(linesAnswer(`Release ${step} refused (${n === 1 ? 'one reason' : `${n} reasons`}); nothing was pushed, tagged, started or approved.`, [['problems', '', e.problems]], { ok: false, step }))
   }
 }
+
+const releaseStep = answering((args, call) => release(args, args.step, call), (args) => `Release ${args.step} stopped: `)
+const releaseStepSerially = serially(releaseStep)
 
 export const tools = {
   // The release. The status is for agents and the screen (the header's "Release" dialog); the steps
@@ -74,22 +97,25 @@ export const tools = {
     config: {
       title: 'Release: bump, rehearse, tag, approve',
       description:
-        "Instead of gh release create, git tag and gh workflow run by hand: docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. rehearse and tag may use the merged bump PR's green checks when main is its squash commit with the identical tree, and required jobs do not depend on the event; failing main CI always blocks. Both report the CI evidence used. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: requires the tagged commit's own green CI (no PR fallback; unrelated newer main commits do not gate publication), then approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
+        "Instead of gh release create, git tag and gh workflow run by hand: docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft; warns (never refuses) when other builds' jobs hold most of release.runners. rehearse: starts the release workflow on main with its dry-run input; while main's version is released, on the open bump PR's branch instead (no CI needed; the PR's head must be on main's head and carry its version consistently), so it runs beside the PR's CI.rehearse and tag may use the merged bump PR's green checks when main is its squash commit with the identical tree, and required jobs do not depend on the event; failing main CI always blocks. Both report the CI evidence used. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit or on its bump branch at a commit with the same tree (the bump PR's rehearsal, after the squash), or skipRehearsal: true; pushes the tag on main's commit and answers the release run. approve: requires the tagged commit's own green CI (no PR fallback; unrelated newer main commits do not gate publication), then approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; before the shim's approval also every other job of the run succeeded and every package the shim needs is on the registry at the version from the tagged commit; the shim's approval is the last reversible moment. approve with wait: true (and confirm) waits until that gate passes, up to waitMinutes, and approves the moment it does; a gate that cannot pass by itself (failed CI or job, a package from other code) still refuses at once.",
       inputSchema: z.object({
         step: z.enum(['bump', 'rehearse', 'tag', 'approve', 'cancel_duplicate']),
         confirm: z.boolean().optional().describe('Do it; default false (check and say what it would do)'),
-        version: z.string().optional().describe('bump: the new version (default: the next by bump). tag, approve: the version expected (default main\'s)'),
+        version: z.string().optional().describe('bump: the new version (default: the next by bump). rehearse: which open bump PR, when several. tag, approve: the version expected (default main\'s)'),
         bump: z.enum(BUMPS).optional().describe('bump: which part to count up when version is not given; default prerelease'),
         notes: z.string().max(4000).optional().describe('bump: one or two sentences on what this release ships, for the pull request; the list of merged changes is added'),
         closes: z.string().optional().describe('bump: the pull request\'s Closes line, e.g. "Refs #82"'),
         skipRehearsal: z.boolean().optional().describe('tag: tag without a successful rehearsal on the commit; default false'),
         comment: z.string().max(1000).optional().describe('approve: the comment GitHub keeps with the approval'),
+        wait: z.boolean().optional().describe('approve, with confirm: wait until the gate passes and approve the moment it does (up to waitMinutes); default false'),
+        waitMinutes: z.number().positive().max(60).optional().describe('approve with wait: how many minutes to wait at most; default 45'),
         run: z.number().int().positive().optional().describe('cancel_duplicate: the duplicate run id to cancel'),
         path: pathInput,
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    handler: serially(answering((args) => release(args, args.step), (args) => `Release ${args.step} stopped: `)),
+    // A waiting approve holds no other write of the board up; it reads everything again before it approves
+    handler: (args, call) => (args.step === 'approve' && args.wait && args.confirm ? releaseStep(args, call) : releaseStepSerially(args, call)),
   },
 }

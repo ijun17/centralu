@@ -2328,7 +2328,8 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 |---|---|---|
 | Registry | `stored.ts`, store v46 `linked_machines` | The machines the person linked: id, name, ssh target, remote shell, the `slot` for folding numbers, the version pair accepted |
 | Transport | `tunnel.ts` (`SshTunnel`) | Asks the remote for its connection line over ssh, then holds an ssh local forward |
-| Link | `links.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates |
+| Link | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates; and what the person asks of it (install, update, rollback, uninstall, autostart, activity) |
+| Links | `links-registry.ts` (`Links`), `link-deps.ts`; `links.ts` re-exports them | Every link of this hub, added and removed with the registry, and the ssh hosts and probe |
 | Client | `remote-client.ts` | The hub's WebSocket to the remote host: hello, cursor and epoch, calls, events, terminal frames |
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
@@ -2583,8 +2584,10 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   Moving to git2 (Rust) **is not done until measurement confirms a bottleneck** (m2-plan decision 3).
   The port interface is the same, so moving it later leaves the UI unchanged.
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
-  migrations; its other methods pass the call on to one module per concept in `dev-services/store/` (projects, sessions,
-  messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
+  migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
+  `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
+  `store/vacuum.ts`. Its other methods pass the call on to one module per concept in `dev-services/store/` (projects,
+  sessions, messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.

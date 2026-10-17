@@ -1,10 +1,8 @@
-import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { USER_APP_SCOPE, appKeyOf, appLabel, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
-import type { AppProcess, SpawnSpec } from './app-process.js'
-import { serveBroker } from './broker.js'
+import type { AppProcess } from './app-process.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed } from './desk.js'
 import { memoryCapabilityBook } from './capabilities.js'
 import type { AppCheckReport } from './check.js'
@@ -19,11 +17,13 @@ import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_REL, USER_APPS_REL, scanApps } from './discovery.js'
 import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
-import { SecretStore, redactor, secretValueProblem } from './secrets.js'
+import { SecretStore, secretValueProblem } from './secrets.js'
+import { AppStartEnv } from './app-start-env.js'
+import { AppResources } from './app-resources.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
 import type { Snapshot } from './versions.js'
-import { resourceUriOf, type Audience } from './visibility.js'
+import type { Audience } from './visibility.js'
 
 /**
  * The external app runtime (M4 A) — **the one file that is the door the core knows external apps
@@ -84,6 +84,10 @@ export class ExternalApps {
   private disposed = false
   private timing: RuntimeTiming
   private secrets: SecretStore
+  /** What an app process is started with: its folders, environment and secrets (`app-start-env.ts`) */
+  private startEnv: AppStartEnv
+  /** An app's resources and its fixed screen (`app-resources.ts`) */
+  private resources: AppResources
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
@@ -115,7 +119,7 @@ export class ExternalApps {
       appsChanged: () => this.appsChanged(),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       blocker: (e, opts) => this.blocker(e, opts),
-      spawnSpec: (e, pipeId) => this.spawnSpec(e, pipeId),
+      spawnSpec: (e, pipeId) => this.startEnv.spawnSpec(e, pipeId),
       snapshot: (appId, dir, stamp) => this.handover.snapshot(appId, dir, 'started', stamp),
       find: (ref) => this.find(ref),
       holdKey: (ref) => this.holdKey(ref),
@@ -146,7 +150,7 @@ export class ExternalApps {
       runs: this.deps.runs ?? null,
       blocker: (e, opts) => this.blocker(e, opts),
       boundaryOpen: (sessionId) => this.sessionBoundaryOpen(sessionId),
-      masker: (ref) => this.masker(ref),
+      masker: (ref) => this.startEnv.masker(ref),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       emitChanged: (ref, caller) => this.deps.emitChanged?.(ref, caller),
     })
@@ -154,7 +158,7 @@ export class ExternalApps {
       {
         has: (ref) => this.find(ref) !== undefined,
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
-        redactor: (ref) => this.masker(ref),
+        redactor: (ref) => this.startEnv.masker(ref),
         origin: (runId) => this.calls.chainOrigin(runId),
         chain: (runId) => this.calls.chainOf(runId),
         denied: (runId, d) => this.calls.denied(runId, d),
@@ -165,6 +169,8 @@ export class ExternalApps {
       this.deps.runs ?? null,
     )
     this.secrets = new SecretStore(deps.dataRoot)
+    this.startEnv = new AppStartEnv(this.deps, this.timing, this.secrets, this.calls, this.desk)
+    this.resources = new AppResources(this.timing, this.lifecycle, (ref) => this.require(ref))
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
     /*
      * Once at startup: closes a run that never saw its own ending, and prunes anything past
@@ -394,36 +400,14 @@ export class ExternalApps {
     return this.calls.call(this.require(ref), name, args, caller, opts)
   }
 
-  /**
-   * Reads an app's resource — the path a screen uses to read its own `ui://` document and resources
-   * (B-3, B-4's `onreadresource`). Not a tool call, so no run record is kept, but the rules for
-   * starting the app (trust, only when first needed) are the same.
-   */
-  async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
-    const e = this.require(ref)
-    return this.lifecycle.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
+  /** Reads an app's resource, starting the app the first time it is needed (`AppResources.readResource`, `app-resources.ts`) */
+  readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
+    return this.resources.readResource(ref, uri)
   }
 
-  /**
-   * The list of resources an app offers (MCP `resources/list`, following pagination) — the basis an
-   * in-conversation screen (B-1) uses to check that a `ui://` a tool declared **actually belongs to
-   * this app** (from the plan, "blocking impersonation"). Starts the app under the same rule as
-   * reading. Follows only up to a page cap — so an app that keeps handing out the next page cannot
-   * hold the host hostage.
-   */
-  async listResources(ref: AppRef, maxPages = 20): Promise<ListResourcesResult['resources']> {
-    const e = this.require(ref)
-    return this.lifecycle.use(e, async (proc) => {
-      const out: ListResourcesResult['resources'] = []
-      let cursor: string | undefined
-      for (let page = 0; page < maxPages; page++) {
-        const r = await proc.client.listResources(cursor ? { cursor } : {}, { timeout: this.timing.connectTimeoutMs })
-        out.push(...r.resources)
-        cursor = r.nextCursor
-        if (!cursor) break
-      }
-      return out
-    })
+  /** The resources an app offers, following pagination up to a cap (`AppResources.listResources`, `app-resources.ts`) */
+  listResources(ref: AppRef, maxPages?: number): Promise<ListResourcesResult['resources']> {
+    return this.resources.listResources(ref, maxPages)
   }
 
   /**
@@ -434,29 +418,9 @@ export class ExternalApps {
     return this.lifecycle.retainView(this.require(ref), ref)
   }
 
-  /**
-   * The tool that opens the fixed screen, and that screen itself (B-2) — the manifest's `home`, and
-   * that tool's declared `_meta.ui.resourceUri`. Since this needs the tool list, if the app is down,
-   * **this is where it starts**.
-   *
-   * A tool declaring no screen is never accepted. A fixed screen is one born from a tool call (from
-   * the plan, "the two places a screen can appear"), and calling a tool with no screen would leave
-   * only a result with nothing to open. Calling it anyway would leave the person watching the app's
-   * state change with nothing appearing on screen. So this is refused **before** ever calling it. The
-   * reason is worded for a person, since it shows up on screen verbatim.
-   */
-  async homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
-    const e = this.require(ref)
-    if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
-    const home = e.manifest.home
-    if (!home) throw new AppUnavailableError('This app has no screen: its manifest names no home tool')
-    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [])
-    const found = all.find((t) => t.tool.name === home)
-    if (!found) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" is not in its tool list`)
-    const ui = resourceUriOf(found.tool)
-    if (ui.error) throw new AppUnavailableError(`This app's screen is declared wrong: ${ui.error}`)
-    if (!ui.uri) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" declares no _meta.ui.resourceUri`)
-    return { tool: home, resourceUri: ui.uri }
+  /** The tool that opens the fixed screen, and that screen; starts the app when first needed (`AppResources.homeView`, `app-resources.ts`) */
+  homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
+    return this.resources.homeView(ref)
   }
 
   /**
@@ -563,7 +527,7 @@ export class ExternalApps {
       find: (ref) => this.find(ref),
       require: (ref) => this.require(ref),
       info: (e) => this.info(e),
-      dataDirOf: (ref) => this.dataDirOf(ref),
+      dataDirOf: (ref) => this.startEnv.dataDirOf(ref),
       holdKey: (ref) => this.holdKey(ref),
       removing: this.removing,
       lifecycle: this.lifecycle,
@@ -579,7 +543,7 @@ export class ExternalApps {
 
   /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */
   setSecret(ref: AppRef, name: string, value: string | null): void {
-    this.secrets.set(this.appKey(ref), name, value)
+    this.secrets.set(this.startEnv.appKey(ref), name, value)
   }
 
   /**
@@ -605,7 +569,7 @@ export class ExternalApps {
       const problem = secretValueProblem(value)
       if (problem) throw new AppUnavailableError(problem)
     }
-    this.secrets.set(this.appKey(ref), name, value)
+    this.secrets.set(this.startEnv.appKey(ref), name, value)
     const L = e.life
     const fresh = () => {
       if (!L.proc && !L.starting) resetLife(L)
@@ -714,92 +678,6 @@ export class ExternalApps {
     this.errorLog.forget(this.holdKey(ref))
   }
 
-  /**
-   * The shape to start with. What the app receives:
-   *   - cwd = the app folder
-   *   - `CENTRALU_APP_DATA` = a data folder outside the repository (created if it does not exist).
-   *     Writing this inside the app folder would get it committed and leaked to the team (from the
-   *     plan, "data and secrets")
-   *   - only the secrets the manifest **declared**, as environment variables
-   * What it never receives: the host's own variables (`CC_*`). Among them is the host's WebSocket
-   * token (`CC_HOST_TOKEN`) — handing that to an app would let it call every one of the host's RPCs.
-   */
-  private spawnSpec(e: AppEntry, pipeId: number): SpawnSpec {
-    const m = e.manifest!
-    const scopeDir = this.scopeDir(e.ref)
-    const dataDir = this.dataDirOf(e.ref)
-    mkdirSync(dataDir, { recursive: true })
-    const appKey = this.appKey(e.ref)
-    const secrets = this.secrets.forApp(appKey, m.secrets ?? [])
-    const env: NodeJS.ProcessEnv = {}
-    for (const [k, v] of Object.entries(this.deps.env ?? process.env)) {
-      if (k.startsWith('CC_') || k.startsWith('CENTRALU_')) continue
-      env[k] = v
-    }
-    Object.assign(env, secrets, { CENTRALU_APP_ID: e.ref.appId, CENTRALU_APP_DATA: dataDir })
-    return {
-      command: m.server.command,
-      args: m.server.args,
-      cwd: e.dir,
-      env,
-      logPath: join(this.deps.dataRoot, 'app-logs', scopeDir, `${e.ref.appId}.log`),
-      logMaxBytes: this.timing.logMaxBytes,
-      // Masks every stored value, even one absent from the declaration — masking it costs nothing
-      redact: this.masker(e.ref),
-      prior: e.life.verdict,
-      probeTimeoutMs: this.timing.probeTimeoutMs,
-      connectTimeoutMs: this.timing.connectTimeoutMs,
-      exitWaitMs: this.timing.startExitWaitMs,
-      serveFd3: (fd3, note) =>
-        serveBroker(
-          fd3,
-          {
-            // Only this pipe's app, and a run open on this pipe — someone else's id and a dead process's id both fail
-            openRun: (runId) => {
-              const run = this.calls.openRuns.get(runId)
-              return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
-            },
-            note,
-            refused: (tool, args, why) => this.desk.refused({ ref: e.ref, name: m.name, manifest: m }, tool, args, why),
-          },
-          /*
-           * The requesting app is this pipe's app, and the manifest is **the one read when this process
-           * started.** If the manifest changed in the meantime, a new entry was created and this process
-           * stops after finishing its call — while it is still running, it requests things under the
-           * declaration it started with (what was validated is what is used).
-           */
-          (tool, args, call) => this.desk.handle({ ref: e.ref, name: m.name, manifest: m }, tool, args, call),
-          { keepaliveMs: this.timing.brokerKeepaliveMs },
-        ),
-    }
-  }
-
-  /** An app's data folder — outside the app folder (from the plan, "data and secrets"). The app receives it as `CENTRALU_APP_DATA` */
-  private dataDirOf(ref: AppRef): string {
-    return join(this.deps.dataRoot, 'app-data', this.scopeDir(ref), ref.appId)
-  }
-
-  /** The scope name used as one path segment. A project id is a UUID — refused rather than written into a path if it does not look like one */
-  private scopeDir(ref: AppRef): string {
-    if (ref.projectId === null) return USER_SCOPE
-    if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
-    return ref.projectId
-  }
-
-  /**
-   * The function that masks every secret stored for this app (A-3, A-6) — whichever of a run's
-   * arguments, its result, its failure reason or the app's own log a value ends up mixed into, only
-   * its name survives. Built from the stored values at the moment it is asked for: a tool call's row,
-   * a broker request's row and a starting process each take their own.
-   */
-  private masker(ref: AppRef): (text: string) => string {
-    return redactor(this.secrets.all(this.appKey(ref)))
-  }
-
-  private appKey(ref: AppRef): string {
-    return `${this.scopeDir(ref)}/${ref.appId}`
-  }
-
   private label(ref: AppRef): string {
     return appLabel(ref)
   }
@@ -836,7 +714,7 @@ export class ExternalApps {
       ...(lastErrorAt !== undefined ? { lastErrorAt } : {}),
       // The panel span the app recommends on the grid (#306), already clamped by the manifest's reading
       ...(m?.view?.span ? { span: m.view.span } : {}),
-      ...this.secretSlots(e),
+      ...this.startEnv.secretSlots(e),
       ...this.importMark(e),
       // A user-folder app is available to every project already, so only a project app carries the mark (#371)
       ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
@@ -856,14 +734,6 @@ export class ExternalApps {
   private importMark(e: AppEntry): Pick<ExternalAppInfo, 'imported'> {
     const imported = e.ref.projectId === null ? this.handover.imported(e.ref.appId, e.dir) : undefined
     return imported ? { imported } : {}
-  }
-
-  /** Whether a value is set for each declared secret (E, the secrets section) — just the name and whether it is set. No field at all if there is no declaration */
-  private secretSlots(e: AppEntry): Pick<ExternalAppInfo, 'secrets'> {
-    const declared = e.manifest?.secrets ?? []
-    if (declared.length === 0) return {}
-    const stored = this.secrets.names(this.appKey(e.ref))
-    return { secrets: declared.map((name) => ({ name, set: stored.has(name) })) }
   }
 
   /**

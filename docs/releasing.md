@@ -73,7 +73,7 @@ script rehearses by default and why nothing publishes automatically.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), leaves out of a pull request
   what it cannot affect, by the files it adds to main (compared with its merge-base with main,
   whatever its base branch, so a stacked pull request is judged by the whole stack; renames count
-  as both paths): documents alone run `verify`, `windows tests` and the WebKit UI scenarios only
+  as both paths): documents alone run `verify`, the `windows tests` jobs and the WebKit UI scenarios only
   (WebKit runs on every pull request, owner decision 2026-10-11); tests alone skip the bundles,
   the keeper end to end and the content verifier; the window alone (`packages/ui`, `core`,
   `platform`, `apps/web`) skips the keeper, the content verifier and the host's tests on the
@@ -96,15 +96,24 @@ script rehearses by default and why nothing publishes automatically.
   AppImage ships for Linux: npm can unpack a folder and start an exe, but cannot run an
   installer. The installer's one advantage is that it installs the WebView2 runtime on a
   machine without it. Neither is signed, so SmartScreen asks before the first start. The
-  Windows job also runs the Rust unit tests, and a separate `windows tests` job runs the
-  four parts of `pnpm verify`, each blocking as on the other platforms. (The unit-test step
+  Windows job also runs the Rust unit tests, and separate jobs run the four parts of
+  `pnpm verify`, each blocking as on the other platforms: `windows tests` the lint, the
+  dependency rules and the types, and `windows tests (vitest 1/2)` and `(vitest 2/2)` the
+  unit tests in two `vitest --shard` halves side by side (#1035: as one job it took 16.5
+  minutes, the longest of every run). The name `windows tests` stayed with the first, so a
+  required set read from main's workflow before the split still finds it. (The unit-test step
   did not block until the W2 failures listed in #307 were fixed.) The host's own tests also
   run on the Node remotes are pinned to ([below](#the-node-remotes-run-82)). The npm
   package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
   Windows job (see [Windows](#windows-14-w3) below).
 - The same workflow runs the Playwright suite (`e2e/`) on ubuntu-24.04 in WebKit and in
   Chromium, the two engines the desktop app renders in, each split into shards that run side by
-  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). When a shard fails,
+  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). A shard that fails runs once
+  more inside its job, with a `::warning::` on the run naming it (#1035: a flaky shard cost a
+  rerun of the whole job, 5 to 7 minutes); Playwright itself does not retry, and a test that
+  passed only the second time is still one to fix. The first attempt's blob report and traces
+  are kept as the `e2e-first-attempt-<engine>-<shard>` artifact, and the jobs' 30-minute limit
+  leaves room for both runs. When a shard fails twice,
   `e2e report` merges each engine's shard reports into one HTML report with traces and uploads
   them as the `e2e-report` artifact, a folder per engine.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
@@ -115,6 +124,8 @@ A push to a branch or a merge still publishes nothing. **A `v*` tag now does** �
 the tag is for.
 
 ### Reusing the bump PR's CI (#629)
+
+The same tree rule lets `tag` count a rehearsal that ran on the bump branch (step 2 below).
 
 For `rehearse` and `tag`, the board can use the bump PR's green required checks while
 main's checks are pending or absent. The PR must be merged into main from
@@ -160,7 +171,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
@@ -263,10 +274,21 @@ The steps by hand:
    (including the shim's pins). `tooling/brand.test.ts` fails if any of them disagree, and
    `tooling/project-board-release.test.ts` if a file carries the version without being on that
    list. Commit and push — the release script refuses to run on a dirty tree, so that what ships
-   and what is in git cannot differ.
+   and what is in git cannot differ. The board's `bump` warns when other builds hold most of the
+   runners (three quarters of `release.runners`, GitHub's 20 here): the bump PR's 24 jobs would
+   then queue behind them, 5–7 min on 0.1.0-beta.26 (#1035).
 
 2. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked. It builds every
-   platform, packs every package and publishes nothing. It asks for no approval:
+   platform, packs every package and publishes nothing. Run it on the bump pull request's
+   branch while that pull request's CI runs, not after the merge (#1035, about 27 min off the
+   critical path): the board's `rehearse` does that while main's version is still the released
+   one. `guard` reads the version from that branch's `brand.ts` and checks the ref only for a
+   tag push, so a dispatch on any branch rehearses (`tooling/release-workflow.test.ts` runs its
+   script); publishing from a branch is refused by the `npm-publish` environment's branch
+   policy (main and `v*` only). The squash gives main a new commit with the same tree, and
+   `tag` accepts a successful rehearsal on the bump branch whose commit has main's tree, as
+   it accepts the bump PR's CI (#629). Rehearse only once the branch is up to date with main:
+   `rehearse` refuses otherwise, since the squash would then build other files. It asks for no approval:
    `npm pack` needs no token, and gating a rehearsal costs an approval per attempt — three
    were spent that way on the first release.
 
@@ -287,6 +309,24 @@ The steps by hand:
 4. **Approve.** Publishing waits on the `npm-publish` environment. GitHub asks twice: once
    for the four platform jobs, which wait together, and again for the shim job after all of
    them have succeeded. That second approval is the last moment anything is reversible.
+
+   The board's `approve` checks its gate each time: the tagged commit's own CI green, and
+   before the shim also every other job of the run succeeded and every platform and host-only
+   package on the registry at this version, published from the tagged commit (`gitHead`).
+   With `wait: true` (and `confirm: true`) it waits for that gate and approves the moment it
+   passes, instead of a person noticing later (#1035: 5–6 min before the platforms and 14
+   min before the shim on 0.1.0-beta.26). It waits up to `waitMinutes` (default 45, at most
+   60), and a timeout approves nothing and says what it was still waiting for. What cannot
+   pass by itself (failed CI, a failed platform job, a package from another commit) refuses at
+   once, as without `wait`. Call it once after the tag and once more after the platform
+   approval; both approvals stay.
+
+   The gate reads the tagged commit's required checks from that commit's own `build.yml`, not
+   main's: a job main gained later never reports on the tagged commit. A required check still
+   missing once every build run on that commit completed refuses at once. A wait approves only
+   what its first read found: the version, the tagged commit and the release run; if any of
+   them changes, or GitHub lists no waiting job yet (so it cannot tell the platforms from the
+   shim), it does not approve. A cancelled call approves nothing.
 
 5. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
 
