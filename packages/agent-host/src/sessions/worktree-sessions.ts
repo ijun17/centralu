@@ -20,10 +20,8 @@ import {
 import type { SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn, sessionBusy } from '../idle.js'
+import { gitSummary, gitHeadSha, gitRevParse } from '../dev-services/git.js'
 import {
-  gitSummary,
-  gitHeadSha,
-  gitRevParse,
   gitBranchDelete,
   gitWorktreeAdd,
   gitValidBranchName,
@@ -33,7 +31,7 @@ import {
   gitWorktreePaths,
   gitWorktreeList,
   gitBranchAhead,
-} from '../dev-services/git.js'
+} from '../dev-services/git-worktree.js'
 import {
   copyTree,
   dropEscapingLinks,
