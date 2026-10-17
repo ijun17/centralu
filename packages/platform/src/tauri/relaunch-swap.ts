@@ -1,4 +1,5 @@
 import { autoSwitch, type AutoSwitchInput } from './switch-plan.js'
+import { toError } from './to-error.js'
 
 type Build = AutoSwitchInput['build'] & { mode: string }
 export type RelaunchSwapResult = {
@@ -35,12 +36,12 @@ export async function finishRelaunchSwap(
         finish(new Error(next.swap.message ?? 'The host update failed'))
       } else if (next.sameBuild) finish()
     })
-    void switchBuild().catch((e: unknown) => finish(e instanceof Error ? e : new Error(String(e))))
+    void switchBuild().catch((e: unknown) => finish(toError(e)))
     const error = await outcome
     if (error) throw error
     return { tried: true }
   } catch (e) {
-    const error = e instanceof Error ? e.message : String(e)
+    const error = toError(e).message
     console.warn('Automatic relaunch swap failed; continuing on the attached host:', error)
     return { tried: true, error }
   } finally {

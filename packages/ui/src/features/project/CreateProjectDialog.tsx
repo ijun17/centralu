@@ -184,8 +184,13 @@ export function CreateProjectForm({
                 type="button"
                 className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-faint hover:text-ink"
                 onClick={async () => {
-                  const picked = await platform.system.pickDirectory()
-                  if (picked) setParent(picked)
+                  try {
+                    const picked = await platform.system.pickDirectory()
+                    if (picked) setParent(picked)
+                  } catch (e) {
+                    // A picker the shell refused is said in the form, not dropped as an unhandled rejection (#972)
+                    setError((e as Error).message)
+                  }
                 }}
                 data-testid="create-project-pick-parent"
               >

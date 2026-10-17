@@ -8,6 +8,7 @@ import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, Sy
 import type { HostBuild } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
+import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
 
 export {
@@ -129,7 +130,12 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
  * false if it was already running (an answer will follow shortly).
  */
 export async function restartHost(): Promise<boolean> {
-  return invoke<boolean>('restart_host')
+  return invoke<boolean>('restart_host').catch(rethrowAsError)
+}
+
+/** Quits the app (`quit_app`), rejecting with an Error that names the shell's reason */
+export async function quitApp(): Promise<void> {
+  await invoke('quit_app').catch(rethrowAsError)
 }
 
 /**
@@ -150,7 +156,7 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   let ask: (() => void) | null = null
   void listen('quit-requested', () => {
     if (ask) ask()
-    else void invoke('quit_app')
+    else void quitApp().catch((e: Error) => console.error('Could not quit:', e.message))
   })
   return (next) => {
     ask = next
@@ -206,7 +212,7 @@ export type ShellHostBuild = {
 }
 
 export async function hostBuild(): Promise<ShellHostBuild> {
-  return invoke<ShellHostBuild>('host_build')
+  return invoke<ShellHostBuild>('host_build').catch(rethrowAsError)
 }
 
 /**
@@ -290,14 +296,14 @@ export class TauriSystemPort implements SystemPort {
    */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
-      this.granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
+      this.granted = await asError(async () => (await isPermissionGranted()) || (await requestPermission()) === 'granted')
     }
     if (!this.granted) {
       if (this.warned) return
       this.warned = true
       throw new Error('Notifications are turned off — enable them for Centralu in System Settings')
     }
-    sendNotification({ title, body })
+    await asError(() => sendNotification({ title, body }))
   }
 
   /**
@@ -315,11 +321,11 @@ export class TauriSystemPort implements SystemPort {
    * impossible to find out.
    */
   async alert(kind: AlertKind, sound: boolean): Promise<void> {
-    await invoke('alert', { kind, sound })
+    await invoke('alert', { kind, sound }).catch(rethrowAsError)
   }
 
   async setBadge(count: number): Promise<void> {
-    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) })
+    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) }).catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
@@ -343,12 +349,14 @@ export class TauriSystemPort implements SystemPort {
 
   /** One file (M4 E-3 — the .zip to import). This is the dialog plugin's `open`, so it uses the `dialog:default` permission already granted, as is */
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
-    const picked = await openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] })
+    const picked = await asError(() =>
+      openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] }),
+    )
     return typeof picked === 'string' ? picked : null
   }
 
   async startWindowDrag(): Promise<void> {
-    await getCurrentWindow().startDragging()
+    await asError(() => getCurrentWindow().startDragging())
   }
 
   /**
@@ -358,10 +366,12 @@ export class TauriSystemPort implements SystemPort {
    * CSS colour (`rgb(15, 15, 15)`); Tauri wants channels, so anything else is left alone.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
-    const win = getCurrentWindow()
-    await win.setTheme(scheme)
-    const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
-    if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    await asError(async () => {
+      const win = getCurrentWindow()
+      await win.setTheme(scheme)
+      const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
+      if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    })
   }
 
   /**
@@ -388,26 +398,14 @@ export class TauriSystemPort implements SystemPort {
   }
 }
 
-/**
- * Turns the `Err(String)` a command gave into an Error and rethrows it.
- *
- * Tauri passes a Rust-side `Err` through as a rejection value **exactly as the string it is**.
- * Since it is not an Error, `e.message` comes out undefined, and the screen shows a failure
- * with no reason, like "Could not delete a.ts: undefined" — the most useless shape a failure
- * can take, saying that it failed without saying why.
- */
-function rethrowAsError(e: unknown): never {
-  throw e instanceof Error ? e : new Error(String(e))
-}
-
 /** Brings the window forward (a notification click, a global shortcut) */
 export async function focusWindow(): Promise<void> {
-  await invoke('focus_window')
+  await invoke('focus_window').catch(rethrowAsError)
 }
 
 /** Directory picker — replaces typing a path, which is what web dev does instead (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
-  const picked = await openDialog({ directory: true, multiple: false, title: 'Choose project directory' })
+  const picked = await asError(() => openDialog({ directory: true, multiple: false, title: 'Choose project directory' }))
   return typeof picked === 'string' ? picked : null
 }
 
@@ -418,7 +416,7 @@ export async function pickDirectory(): Promise<string | null> {
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {
-    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e) => ({ ready: false, reason: String(e) })),
+    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e: unknown) => ({ ready: false, reason: toError(e).message })),
     relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
     watchBusy: (cb) =>
       watchHostBuild(
@@ -430,7 +428,55 @@ export function tauriRelaunchPort(): RelaunchPort {
 
 export type TauriPlatform = Platform & { relaunchSwap: RelaunchSwapResult }
 
+/**
+ * Follows the host's address from before the first read of it (#972 item 1).
+ *
+ * The order `waitForHost` keeps, for the whole of startup: the listener is registered first, and only then is the
+ * address read. Startup reads the address and then awaits several more shell calls before the web platform exists; a
+ * `ready` for a new port in that gap (a crash restart, a swap) used to be lost, and the client retried the old
+ * address forever. Here the latest `ready` heard is kept, and handed to the web platform the moment it subscribes,
+ * then every later one; the client ignores an address it already has.
+ */
+async function followEndpoint(): Promise<{
+  onEndpointChange: (cb: (info: HostInfo) => void) => () => void
+  stop: () => void
+}> {
+  let latest: HostInfo | null = null
+  let forward: ((info: HostInfo) => void) | null = null
+  let stopped = false
+  // A listener that cannot be registered costs only the following, as it did before: startup itself goes on
+  const un = await listenHostStatus((p) => {
+    if (stopped || p.state !== 'ready') return
+    latest = { port: p.port, token: p.token }
+    forward?.(latest)
+  }).catch(() => () => {})
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    forward = null
+    un()
+  }
+  return {
+    onEndpointChange: (cb) => {
+      forward = cb
+      if (latest) cb(latest)
+      return stop
+    },
+    stop,
+  }
+}
+
 export async function createTauriPlatform(): Promise<TauriPlatform> {
+  const endpoint = await followEndpoint()
+  try {
+    return await createOnHost(endpoint.onEndpointChange)
+  } catch (e) {
+    endpoint.stop()
+    throw e
+  }
+}
+
+async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
   await waitForHost()
   const attached = await hostBuild().catch(() => null)
   const relaunchSwap = attached
@@ -466,6 +512,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
 
   // If the supervisor revives the host, the port and token change → this has to switch to the new address.
   // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
+  // It was registered before the address above was read (`followEndpoint`), so a restart during startup is not missed.
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
@@ -481,10 +528,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
       reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
     },
-    onEndpointChange: (cb) =>
-      onHostStatus((p) => {
-        if (p.state === 'ready') cb({ port: p.port, token: p.token })
-      }),
+    onEndpointChange,
   })
 
   return {
