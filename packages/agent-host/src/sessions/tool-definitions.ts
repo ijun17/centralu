@@ -239,7 +239,7 @@ export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
 export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly OrchestratorToolName[]
 
 /**
- * The light set every ordinary session gets (#320) — read-only, and only its own project.
+ * The light set every ordinary session gets (#320) — read-only; since #984 a trusted project's reads every project and linked machine.
  *
  * **Its own definitions, not the orchestrator's text.** The names and the execution are shared
  * (runOrchestratorTool), but the orchestrator's descriptions talk about managing, reportBack and
@@ -281,12 +281,12 @@ export const READER_TOOLS = [
   },
   {
     name: 'read_session',
-    description: "Reads one of this project's other Centralu sessions. No sessionId: lists them.",
-    schema: z.object({ sessionId: z.string().optional(), around: z.number().optional() }),
+    description: 'Reads another Centralu session. No sessionId: lists them (project narrows).',
+    schema: z.object({ sessionId: z.string().optional(), around: z.number().optional(), project: z.string().optional() }),
   },
   {
     name: 'recall',
-    description: "Searches this project's past conversations. One word works best.",
+    description: 'Searches all past conversations. One word works best.',
     schema: z.object({ query: z.string() }),
   },
   {
@@ -457,7 +457,7 @@ export const APP_ACCESS_BUDGET_CHARS = 900
  */
 export const READER_FIRST: readonly string[] = [
   'recall for earlier conversations',
-  "read_session for this project's other sessions",
+  'read_session for other sessions',
   "find_apps to use another project's app",
   'update_centralu to update Centralu',
   'ask_project to have another project do work',
@@ -612,7 +612,7 @@ const ORCHESTRATOR_ARGS = schemasOf(ORCHESTRATOR_TOOLS)
 export const TOOL_ARGS = {
   ...ORCHESTRATOR_ARGS,
   // The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required
-  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }),
+  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional() }),
   ...schemasOf(AGENT_TOOLS),
   /*
    * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one

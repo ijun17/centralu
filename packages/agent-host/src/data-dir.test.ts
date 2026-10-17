@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 
 /**
  * This function moves **the folder holding the user's conversation history**.
@@ -135,5 +135,20 @@ describe('which folder is the data folder to make private', () => {
     } finally {
       rmSync(data, { recursive: true, force: true })
     }
+  })
+})
+
+describe('which data folder the host uses (#973)', () => {
+  it('uses CC_DATA_DIR when it is set, in development too, and moves no legacy folder into it', () => {
+    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x' }, '/home/me')).toEqual({ dir: '/tmp/x', legacy: null })
+    expect(chooseDataDir({ CC_DATA_DIR: '/tmp/x', CC_DEV: '1' }, '/home/me')).toEqual({ dir: '/tmp/x', legacy: null })
+  })
+
+  it('falls back to the home folder, dev apart from the packaged app, with the legacy folder to move', () => {
+    expect(chooseDataDir({}, '/home/me')).toEqual({ dir: join('/home/me', '.centralu'), legacy: join('/home/me', '.control-center') }) // legacy-name
+    expect(chooseDataDir({ CC_DEV: '1', CC_DATA_DIR: '' }, '/home/me')).toEqual({
+      dir: join('/home/me', '.centralu-dev'),
+      legacy: join('/home/me', '.control-center-dev'), // legacy-name
+    })
   })
 })

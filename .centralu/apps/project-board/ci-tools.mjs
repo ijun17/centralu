@@ -1,11 +1,14 @@
-// CI: ci_status, merge_when_green and read_failed_job.
+// CI: ci_status, merge_when_green, mark_ready and read_failed_job.
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { detailInput, itemOf, itemRef, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, NO_PERMISSION, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config } from './config.mjs'
-import { deleteBranch, FATAL, GitHubError, mergePr, readChecks, readIssueText, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
-import { answering } from './handlers.mjs'
+import { deleteBranch, FATAL, GitHubError, markReady, mergePr, postComment, readChecks, readIssueText, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
+import { answering, serially } from './handlers.mjs'
 import { answer, asError, linesAnswer, reason } from './reply.mjs'
+import { publicTextProblems } from './rules.mjs'
+import { forgetThread } from './threads.mjs'
+import { privateWords } from './words-tools.mjs'
 import { short, sleep } from './util.mjs'
 
 // --- CI: ci_status and merge_when_green -------------------------------------------------------------
@@ -222,6 +225,46 @@ async function doMerge(repo, what, p, body, del, ci) {
   return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
 }
 
+/**
+ * The end of a contributor's flow (#386, merge policy): merging is the maintainer's act, so a
+ * contributor's agent marks the pull request ready for review instead, once nothing required has
+ * failed, and the maintainer merges. With `note`, a comment for the maintainer (the public text
+ * rules, checked before anything is written) ends with the CI line. Pending checks do not stop it:
+ * they finish while it waits for review, and the answer says so.
+ */
+async function markReadyForReview({ pr, note, detail = 'compact' }) {
+  const want = itemOf(pr)
+  const repo = want.repo
+  const what = `PR ${want.ref}`
+  const text = note?.trim() ? note.trim() : null
+  if (text) {
+    const problems = publicTextProblems(text, await privateWords(), 'The note')
+    if (problems.length) throw new GitHubError('input', problems.join(' '))
+  }
+  const p = await readPr(repo, want.number)
+  if (p.state !== 'OPEN') return asError(answer(`Not marked ready: ${what} is ${String(p.state).toLowerCase()}, not open.`, { ready: false, kind: 'state' }))
+  const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
+  const checks = await evaluate(repo, p.headRefOid, req)
+  if (checks.verdict === 'failing') {
+    const ci = ciLines(what, p.headRefOid, req, checks, await failureDetails(repo, checks), detail)
+    return ciAnswer(`Not marked ready: a required check failed. Fix it and push first (read_failed_job reads the job); a review goes to what can merge.`, ci, { ready: false, kind: 'failing', verdict: checks.verdict }, { isError: true })
+  }
+  const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
+  if (p.isDraft) await markReady(repo, p.number)
+  let comment = null
+  if (text) {
+    try {
+      comment = await postComment(repo, p.number, `${text}\n\n${ci.summary}`)
+    } finally {
+      forgetThread(repo, p.number)
+    }
+  }
+  const state = p.isDraft ? `Marked ${what} ready for review` : `${what} was ready for review already`
+  const later = checks.verdict === 'green' ? '' : ` CI is ${checks.verdict}, not green yet; it goes on meanwhile.`
+  const summary = `${state}${comment ? ', and left the note' : ''}.${later} The maintainer merges it (merge_when_green or queue_merge).`
+  return ciAnswer(summary, ci, { ready: true, marked: p.isDraft === true, verdict: checks.verdict, ...(comment ? { comment: comment.url } : {}) })
+}
+
 /** A failed Actions job's log around its first failure, so agents do not need to fetch a whole run. */
 async function readFailedJob({ job, repo }) {
   const r = repoOf(repo)
@@ -261,6 +304,22 @@ export const tools = {
       _meta: { ui: { visibility: ['model'] } },
     },
     handler: answering(ciStatus),
+  },
+
+  mark_ready: {
+    config: {
+      title: 'Mark a pull request ready for review',
+      description:
+        "Instead of gh pr ready: the end of a contributor's flow, since merging is the maintainer's (merge_when_green and queue_merge refuse without maintain or admin). Marks a draft ready for review unless a required check failed (then it names the failure, like ci_status); pending checks do not stop it. With note, leaves a comment for the maintainer (English, no private word, no attribution line), ending with the CI line.",
+      inputSchema: z.object({
+        pr: itemRef.describe(`The pull request: ${REF_HELP}`),
+        note: z.string().max(4000).optional().describe('A comment for the maintainer: what to look at, what was not exercised'),
+        detail: detailInput.describe('"full" lists passed and non-required checks too'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    handler: answering(serially(markReadyForReview), 'Not marked ready: '),
   },
 
   merge_when_green: {

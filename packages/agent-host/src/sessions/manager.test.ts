@@ -24,7 +24,7 @@ import { join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryEvent, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
@@ -1988,7 +1988,7 @@ describe('catching up on a conversation continued outside', () => {
   const rows = async (call: ReturnType<typeof createRpcHandler>, id: string) =>
     ((await call('messages.load', { sessionId: id, limit: 200 })) as { kind: string; payload: { text?: string; type?: string } }[])
       .map((r) => (r.kind === 'marker' ? `[${r.payload.type}]` : r.payload.text))
-  const compaction = { role: 'system', marker: 'compaction' } as const
+  const compaction = { role: 'system', event: { type: 'compaction', sessionId: '', failed: false } } as const
 
   it('stores a compaction in the tool\'s record as the marker a live compaction leaves (import)', async () => {
     const { a, call } = setup()
@@ -2018,6 +2018,133 @@ describe('catching up on a conversation continued outside', () => {
     expect(await rows(call, s.id)).toEqual([
       'First question', 'First answer', '[compaction]', 'said in the terminal', '[compaction]', 'a terminal answer',
     ])
+  })
+
+  /*
+   * #843: the tool's record holds a turn's tool calls too, read by the adapter's live normalizer. They are stored as
+   * the rows the same events leave live, and once: a call that ran while the app watched is already ours.
+   */
+  const toolCall = (callId: string, command: string): HistoryEvent => ({ type: 'tool_call', sessionId: '', callId, summary: { tool: 'Bash', title: command, paths: [] }, input: { command } })
+  const toolResult = (callId: string, output: string): HistoryEvent => ({ type: 'tool_result', sessionId: '', callId, ok: true, summary: output, output })
+  const recorded = (e: HistoryEvent) => ({ role: 'system', event: e }) as const
+  const shapes = (rows: StoredMessage[]) =>
+    rows.map((r) => (r.kind === 'text' ? r.payload : { kind: r.kind, payload: { ...(r.payload as object), sessionId: undefined } }))
+
+  it("stores the tool calls in the tool's record as the rows live ones leave (import)", async () => {
+    const { a, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [
+      { role: 'user', text: 'List the files' },
+      recorded(toolCall('tu1', 'ls')),
+      recorded(toolResult('tu1', 'a.txt')),
+      { role: 'assistant', text: 'One file' },
+    ]
+    const imported = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    const stored = (await call('messages.load', { sessionId: imported.id, limit: 200 })) as StoredMessage[]
+    expect(stored.filter((r) => r.kind !== 'text').map((r) => r.payload)).toEqual([
+      expect.objectContaining({ type: 'tool_call', sessionId: imported.id, callId: 'tu1' }),
+      expect.objectContaining({ type: 'tool_result', sessionId: imported.id, callId: 'tu1' }),
+    ])
+    // The same call made while the app watched leaves the same rows
+    const watched = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    for (const e of [toolCall('tu1', 'ls'), toolResult('tu1', 'a.txt')]) a.last!.emitEvent({ ...e, sessionId: watched.id })
+    const live = (await call('messages.load', { sessionId: watched.id, limit: 200 })) as StoredMessage[]
+    expect(shapes(stored.filter((r) => r.kind !== 'text'))).toEqual(shapes(live.filter((r) => r.kind !== 'text')))
+  })
+
+  it('a tool call seen live is not stored again when catching up, and one made outside is', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'List the files' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    // While the app watched: the model said something and ran a command, then the process went away
+    a.last!.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Let me look' })
+    a.last!.emitEvent({ ...toolCall('tu1', 'ls'), sessionId: s.id })
+    a.last!.emitEvent({ ...toolResult('tu1', 'a.txt'), sessionId: s.id })
+    await m.disposeAll()
+    // The tool's record has that call too, then work went on in the terminal with a call of its own
+    a.toolHistory.push(
+      { role: 'assistant', text: 'Let me look' },
+      recorded(toolCall('tu1', 'ls')),
+      recorded(toolResult('tu1', 'a.txt')),
+      { role: 'user', text: 'said in the terminal' },
+      recorded(toolCall('tu2', 'pwd')),
+      recorded(toolResult('tu2', '/work')),
+      { role: 'assistant', text: 'a terminal answer' },
+    )
+    await m.resumeSession(s.id)
+    const stored = (await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]
+    expect(stored.map((r) => (r.kind === 'text' ? (r.payload as { text: string }).text : `${r.kind}:${(r.payload as { callId: string }).callId}`))).toEqual([
+      'List the files', 'Let me look', 'tool_call:tu1', 'tool_result:tu1',
+      'said in the terminal', 'tool_call:tu2', 'tool_result:tu2', 'a terminal answer',
+    ])
+  })
+
+  /*
+   * The stretch of events after our last message need not match the record's order, nor start with one we hold
+   * (#843 review): every event our record holds there is skipped, wherever it stands, and only the others are stored.
+   */
+  const label = (r: StoredMessage) =>
+    r.kind === 'text' ? (r.payload as { text: string }).text : r.kind === 'marker' ? `[${(r.payload as { type: string }).type}]` : `${r.kind}:${(r.payload as { callId: string }).callId}`
+  const catchUp = async (live: NormalizedEvent[], outside: HistoryMessage[]) => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'List the files' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    a.last!.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Let me look' })
+    for (const e of live) a.last!.emitEvent({ ...e, sessionId: s.id } as NormalizedEvent)
+    await m.disposeAll()
+    a.toolHistory.push({ role: 'assistant', text: 'Let me look' }, ...outside)
+    await m.resumeSession(s.id)
+    return ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
+  }
+
+  it('parallel calls the host saw start, listed by the record each with its result, are stored once', async () => {
+    // Live, both calls started before the host went away; the thread lists each call with its result
+    const rows = await catchUp(
+      [toolCall('tc1', 'a'), toolCall('tc2', 'b')],
+      [recorded(toolCall('tc1', 'a')), recorded(toolResult('tc1', 'A')), recorded(toolCall('tc2', 'b')), recorded(toolResult('tc2', 'B')), { role: 'assistant', text: 'done' }],
+    )
+    expect(rows).toEqual(['List the files', 'Let me look', 'tool_call:tc1', 'tool_call:tc2', 'tool_result:tc1', 'tool_result:tc2', 'done'])
+  })
+
+  it('parallel calls that finished in another order live than the record lists them are stored once', async () => {
+    const rows = await catchUp(
+      [toolCall('tc1', 'a'), toolCall('tc2', 'b'), toolResult('tc2', 'B'), toolResult('tc1', 'A')],
+      [recorded(toolCall('tc1', 'a')), recorded(toolResult('tc1', 'A')), recorded(toolCall('tc2', 'b')), recorded(toolResult('tc2', 'B')), { role: 'assistant', text: 'done' }],
+    )
+    expect(rows).toEqual(['List the files', 'Let me look', 'tool_call:tc1', 'tool_call:tc2', 'tool_result:tc2', 'tool_result:tc1', 'done'])
+  })
+
+  it('an event our record lacks, first in the stretch, is stored, and the ones after it we hold are not', async () => {
+    const rows = await catchUp(
+      [toolCall('tc2', 'b'), toolResult('tc2', 'B')],
+      [recorded(toolCall('tc0', 'z')), recorded(toolResult('tc0', 'Z')), recorded(toolCall('tc2', 'b')), recorded(toolResult('tc2', 'B'))],
+    )
+    expect(rows).toEqual(['List the files', 'Let me look', 'tool_call:tc2', 'tool_result:tc2', 'tool_call:tc0', 'tool_result:tc0'])
+  })
+
+  it("a background agent's launch, whose result the record has right after it and live never sent, is not stored twice", async () => {
+    const agent: HistoryEvent = { type: 'tool_call', sessionId: '', callId: 'tu9', summary: { tool: 'Agent', title: 'Review', paths: [] } }
+    const rows = await catchUp(
+      [agent, toolCall('tu10', 'ls'), toolResult('tu10', 'a.txt')],
+      [recorded(agent), recorded(toolResult('tu9', 'launched')), recorded(toolCall('tu10', 'ls')), recorded(toolResult('tu10', 'a.txt'))],
+    )
+    expect(rows).toEqual(['List the files', 'Let me look', 'tool_call:tu9', 'tool_call:tu10', 'tool_result:tu10', 'tool_result:tu9'])
+  })
+
+  it('rows an older host stored (a compaction, the interrupted command not kept) get no second compaction marker', async () => {
+    const rows = await catchUp(
+      [{ type: 'compaction', sessionId: '', failed: false }],
+      [recorded(toolCall('tc1', 'sleep 100')), compaction, { role: 'assistant', text: 'after' }],
+    )
+    expect(rows).toEqual(['List the files', 'Let me look', '[compaction]', 'tool_call:tc1', 'after'])
   })
 
   it('does not append when the last message we know cannot be found (better than piling up a duplicate)', async () => {
@@ -2594,8 +2721,8 @@ describe("the orchestrator's tools see only this app's sessions", () => {
  * The light, read-only set every ordinary session gets (#320).
  *
  * Owner decision 2026-10-05: on by default, no role-changing instructions, sending and creating stay
- * with the orchestrator. The boundary that matters is the project: a session reads its own project's
- * sessions and nothing else — not another project's, not the orchestrator's.
+ * with the orchestrator. Since #984 (owner decision 2026-10-17) it reads every project's sessions, on this computer
+ * and the linked machines, but never the orchestrator's; acting stays inside its project and behind consent.
  */
 describe("an ordinary session's reader set (#320)", () => {
   const dirs: string[] = []
@@ -2642,29 +2769,35 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
   })
 
-  it('lists, reads and recalls only its own project — another project\'s session cannot be reached', async () => {
-    const { a1, a2, b, orc } = await setup()
+  it("lists, reads and recalls every project's sessions, its own project's first, but never the orchestrator (#984)", async () => {
+    const { shop, a1, a2, b, orc } = await setup()
+    // From an untrusted project it reads its own project only, as before (#984, the #382 rule)
+    expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toEqual([a2.id])
+    expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
+    store.setProjectTrusted(shop.id, true)
     const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
-    expect(listed).toEqual([a2.id])
-    expect(listed).not.toContain(b.id)
+    expect(listed).toEqual([a2.id, b.id])
     expect(listed).not.toContain(orc.id)
 
     expect((await a1.tools.readSession(a2.id)).ok).toBe(true)
-    expect(await a1.tools.readSession(b.id)).toEqual({ ok: false, error: `Not a session in this project: ${b.id}` })
-    expect((await a1.tools.readSession(orc.id)).ok).toBe(false)
+    const other = await a1.tools.readSession(b.id)
+    expect(other.ok && other.lines?.join('\n')).toContain('zanzibar')
+    expect(await a1.tools.readSession(orc.id)).toEqual({ ok: false, error: `Not a session you can read: ${orc.id}` })
 
     expect((await a1.tools.recall('pgdump')).hits.map((h) => h.sessionId)).toEqual([a2.id])
-    expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
+    expect((await a1.tools.recall('zanzibar')).hits.map((h) => h.sessionId)).toEqual([b.id])
 
-    // The same boundary through the bridge's door, by name — what a Codex session would call
+    // The same through the bridge's door, by name — what a Codex session would call — each row naming its project
     const viaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', { sessionId: b.id })
-    expect(viaBridge.isError).toBe(true)
-    expect(viaBridge.text).not.toContain('zanzibar')
+    expect(viaBridge.isError).toBeFalsy()
+    expect(viaBridge.text).toContain('zanzibar')
     const listedViaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', {})
     expect(listedViaBridge.text).toContain(a2.id)
-    expect(listedViaBridge.text).not.toContain(b.id)
+    expect(listedViaBridge.text).toContain(b.id)
+    expect(listedViaBridge.text).not.toContain(orc.id)
     const recalled = await mgr.runOrchestratorTool(a1.id, 'recall', { query: 'zanzibar' })
-    expect(recalled.text).not.toContain(b.id)
+    expect(recalled.text).toContain(`read_session(sessionId="${b.id}"`)
+    expect(recalled.text).toMatch(/- \[[^\]]+\] other-project/)
   })
 
   it('cannot act: no send, create or settings tool by name, and the object it holds refuses them too', async () => {

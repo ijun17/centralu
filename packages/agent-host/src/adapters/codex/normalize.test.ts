@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, CodexChildTracker, CodexRequestInputs, fileChangesOf, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
+import { approvalDetailFrom, toCodexDecision } from './approvals.js'
+import { CodexChildTracker } from './child-tracker.js'
+import { fileChangesOf } from './items.js'
+import { CompactionMarks, normalizeNotification } from './normalize.js'
+import { __resetWarningsForTest, CodexRequestInputs } from './token-readings.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually

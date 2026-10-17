@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type AdapterCapabilities, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
@@ -76,12 +77,90 @@ describe('the scope of a seat', () => {
     expect(await tools.sendToSession('a', 'hi')).toEqual({ ok: false, error: 'Not a member of this coordinating session: a' })
   })
 
-  it("a project's reader view is its own project; a session with no project sees nothing", async () => {
-    expect((await orchestratorToolsFor(host, 'a', undefined, true).listSessions()).map((s) => s.sessionId)).toEqual([])
+  /** p1 trusted ("shop"), p2 not ("clone"), and a linked machine with a session of each kind a reader may meet there */
+  const wideWorld = () => {
+    store.addProject({ id: 'p1', path: join(tmpdir(), 'p1'), name: 'shop', trusted: true })
+    store.addProject({ id: 'p2', path: join(tmpdir(), 'p2'), name: 'clone' })
     meta.set('a2', session('a2'))
-    expect((await orchestratorToolsFor(host, 'a', undefined, true).listSessions()).map((s) => s.sessionId)).toEqual(['a2'])
-    meta.set('loose', session('loose', { projectId: null }))
-    expect(await orchestratorToolsFor(host, 'orch', undefined, true).listSessions()).toEqual([])
+    meta.set('coord', session('coord', { kind: 'coordinator', projectId: 'p2' }))
+    meta.set('agent', session('agent', { projectId: 'p2', appId: 'notes' }))
+    meta.set('builder', session('builder', { projectId: null, appId: 'notes' }))
+    const read = vi.fn(async () => ({ ok: true as const, state: 'idle' as const, lines: ['{"role":"user","text":"over there"}'] }))
+    const remote = (sessionId: string, project: string) => ({ sessionId, name: sessionId, project, machine: 'Far', state: 'idle', tool: 'claude' })
+    const facts: Record<string, { app: boolean; trusted: boolean }> = {
+      'm1.x': { app: false, trusted: true },
+      'm1.u': { app: false, trusted: false },
+      'm1.app': { app: true, trusted: true },
+    }
+    linked = {
+      machineOf: (id: string) => (id.startsWith('m1.') ? 'Far' : null),
+      readerFacts: (id: string) => facts[id] ?? null,
+      list: async () => [remote('m1.x', 'site'), remote('m1.u', 'fork'), remote('m1.app', 'site'), remote('m1.new', 'site')],
+      read,
+      recall: async () => ({
+        hits: [['m1.x', 'm1.u', 'm1.app', 'm1.new'].map((id, i) => ({ sessionId: id, session: id, project: 'site', machine: 'Far', snippet: 'the far plan', seq: i + 1 }))],
+        notSearched: [],
+      }),
+    } as unknown as LinkedSessions
+    return { read }
+  }
+
+  it("a reader of a trusted project reads every project's ordinary sessions, here and on the linked machines, marking the untrusted (#984)", async () => {
+    const { read } = wideWorld()
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    // Its own project's sessions first, then the other projects', then the machines'. Never an orchestrator, a
+    // coordinator or an app's session (its agent, its builder), nor a machine's session the hub's mirror does not hold
+    expect((await reader.listSessions()).map((s) => [s.sessionId, s.project])).toEqual([
+      ['a2', 'shop'],
+      ['b', 'clone (not trusted)'],
+      ['m1.x', 'site'],
+      ['m1.u', 'fork (not trusted)'],
+    ])
+    expect((await reader.listSessions({ project: 'CLONE' })).map((s) => s.sessionId)).toEqual(['b'])
+    expect(await reader.readSession('m1.x', 40, { around: 3 })).toMatchObject({ ok: true, lines: ['{"role":"user","text":"over there"}'] })
+    expect(read).toHaveBeenCalledWith('m1.x', 40, { around: 3 })
+    expect(await reader.readSession('m1.u')).toMatchObject({ ok: true, untrusted: true })
+    expect(await reader.readSession('b')).toMatchObject({ ok: true, untrusted: true })
+    expect(await reader.readSession('a2')).not.toHaveProperty('untrusted')
+    for (const id of ['orch', 'coord', 'agent', 'builder', 'm1.app', 'm1.new']) {
+      expect(await reader.readSession(id)).toEqual({ ok: false, error: `Not a session you can read: ${id}` })
+    }
+    expect(read).toHaveBeenCalledTimes(2)
+    expect((await reader.recall('plan')).hits.map((h) => [h.sessionId, h.project])).toEqual([
+      ['m1.x', 'site'],
+      ['m1.u', 'site (not trusted)'],
+    ])
+    // Acting stays inside its own project: another project's session, or a machine's, is out of reach
+    expect(await reader.sendToSession('b', 'do it')).toEqual({ ok: false, error: 'Not a session in this project: b' })
+    expect(await reader.sendToSession('m1.x', 'do it')).toEqual({ ok: false, error: 'Not a session in this project: m1.x' })
+    expect(host.send).not.toHaveBeenCalled()
+  })
+
+  it('a reader of an untrusted project reads its own project only, and no linked machine (#984, the #382 rule)', async () => {
+    const { read } = wideWorld()
+    meta.set('c2', session('c2', { projectId: 'p2' }))
+    const reader = orchestratorToolsFor(host, 'c2', undefined, true)
+    // Its own project as before (#320), the coordinator and the app's agent there included; nothing marked
+    expect((await reader.listSessions()).map((s) => [s.sessionId, s.project])).toEqual([
+      ['b', 'clone'],
+      ['coord', 'clone'],
+      ['agent', 'clone'],
+    ])
+    expect(await reader.readSession('a2')).toEqual({ ok: false, error: 'Not a session in this project: a2' })
+    expect(await reader.readSession('m1.x')).toEqual({ ok: false, error: 'Not a session in this project: m1.x' })
+    expect(await reader.readSession('b')).not.toHaveProperty('untrusted')
+    expect((await reader.recall('plan')).hits).toEqual([])
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('a coordinator reads its members only, and never a linked machine', async () => {
+    const { read } = wideWorld()
+    const lead = orchestratorToolsFor(host, 'orch', ['a2'])
+    expect((await lead.listSessions()).map((s) => s.sessionId)).toEqual(['a2'])
+    expect(await lead.readSession('b')).toEqual({ ok: false, error: 'Not a member of this coordinating session: b' })
+    expect(await lead.readSession('m1.x')).toEqual({ ok: false, error: 'Not a member of this coordinating session: m1.x' })
+    expect((await lead.recall('plan')).hits).toEqual([])
+    expect(read).not.toHaveBeenCalled()
   })
 
   it('only the central orchestrator reaches a handoff, of a session on this computer in its view (#694)', async () => {
@@ -102,8 +181,119 @@ describe('the scope of a seat', () => {
 
   it('never reads or sends to itself', async () => {
     const tools = orchestratorToolsFor(host, 'orch')
-    expect(await tools.readSession('orch')).toEqual({ ok: false, error: 'Does not read itself' })
+    expect(await tools.readSession('orch')).toEqual({
+      ok: false,
+      error: 'Does not read itself: your conversation has not been compacted, so all of it is still in your context.',
+    })
     expect(await tools.sendToSession('orch', 'x')).toEqual({ ok: false, error: 'Cannot send to itself' })
+  })
+})
+
+describe('a session recalls its own conversation from before its compaction (#974)', () => {
+  type Row = ['user' | 'assistant', string] | ['compaction' | 'failed' | 'reset']
+  /** One session's conversation, seq from 1 */
+  const put = (sessionId: string, rows: Row[]) => {
+    const s = meta.get(sessionId)!
+    if (s.projectId && !store.listProjects().some((p) => p.id === s.projectId)) store.addProject({ id: s.projectId, path: join(tmpdir(), s.projectId), name: s.projectId, trusted: s.projectId === 'p1' })
+    store.upsertSession({
+      id: sessionId, projectId: s.projectId, kind: s.kind, tool: 'claude', externalId: null, name: s.name, autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
+      scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+    store.appendMessages(
+      rows.map(([what, text], i) => {
+        const at = { sessionId, seq: i + 1, ts: 1_700_000_000_000 + i * 60_000 }
+        if (what === 'user' || what === 'assistant') return { ...at, role: what, kind: 'text', payload: { text } }
+        const payload = what === 'reset' ? { type: 'conversation_reset', sessionId } : { type: 'compaction', sessionId, failed: what === 'failed' }
+        return { ...at, role: 'system', kind: 'marker', payload }
+      }),
+    )
+  }
+  /** Long enough apart that `dedupeNearbyHits` keeps both */
+  const filler = (n: number): Row[] => Array.from({ length: n }, (_, i): Row => ['assistant', `step ${i} went fine`])
+  const compacted: Row[] = [
+    ['user', 'run the zebracorn migration with flag --keep-42'],
+    ...filler(8),
+    ['compaction'],
+    ...filler(8),
+    ['user', 'is the zebracorn migration done?'],
+  ]
+  const ownHits = async (tools: OrchestratorTools, own: string) =>
+    (await tools.recall('zebracorn')).hits.filter((h) => h.sessionId === own)
+
+  it('recall finds its own words from before the compaction, marked as its own, in every seat with recall', async () => {
+    put('orch', compacted)
+    put('a', compacted)
+    const seats: [OrchestratorTools, string][] = [
+      [orchestratorToolsFor(host, 'orch'), 'orch'],
+      [orchestratorToolsFor(host, 'orch', ['b']), 'orch'],
+      [orchestratorToolsFor(host, 'a', undefined, true), 'a'],
+    ]
+    for (const [tools, own] of seats) {
+      const hits = await ownHits(tools, own)
+      expect(hits.map((h) => h.seq)).toEqual([1])
+      expect(hits[0]!.session).toBe(`${own === 'orch' ? 'Orchestrator' : 'a'} (this session, before compaction)`)
+      expect(hits[0]!.snippet).toContain('--keep-42')
+    }
+  })
+
+  it('its own words after the compaction, or with none that folded anything, stay out', async () => {
+    put('a', [['user', 'the zebracorn plan'], ...filler(8), ['user', 'the zebracorn plan again']])
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    expect(await ownHits(reader, 'a')).toEqual([])
+    put('a', [['user', 'the zebracorn plan'], ...filler(8), ['failed'], ...filler(8), ['user', 'the zebracorn plan again']])
+    expect(await ownHits(reader, 'a')).toEqual([])
+    // A fresh conversation (/clear) is a cut too: the model knows nothing above it
+    put('a', [['user', 'the zebracorn plan'], ...filler(8), ['reset'], ...filler(8), ['user', 'the zebracorn plan again']])
+    expect((await ownHits(reader, 'a')).map((h) => h.seq)).toEqual([1])
+  })
+
+  it("only its own hits carry the label; another session's, in any project, read as that session's (#984)", async () => {
+    put('a', compacted)
+    put('b', compacted)
+    const hits = (await orchestratorToolsFor(host, 'a', undefined, true).recall('zebracorn')).hits
+    expect(hits.map((h) => [h.sessionId, h.session])).toEqual(
+      expect.arrayContaining([
+        ['a', 'a (this session, before compaction)'],
+        ['b', 'b'],
+      ]),
+    )
+    // The other session's words from after its compaction are not this session's echo, so they come too
+    expect(hits.some((h) => h.sessionId === 'b' && h.seq === 19)).toBe(true)
+  })
+
+  it("its own hit's snippet stops at the compaction: what follows is still in its context", async () => {
+    put('a', [['assistant', 'step one went fine'], ['user', 'zebracorn deploy uses --keep-42'], ['compaction'], ['assistant', 'after the cut secret-77']])
+    const hits = await ownHits(orchestratorToolsFor(host, 'a', undefined, true), 'a')
+    expect(hits.map((h) => h.seq)).toEqual([2])
+    expect(hits[0]!.snippet).toContain('--keep-42')
+    expect(hits[0]!.snippet).not.toContain('secret-77')
+  })
+
+  it("a reader's own project's hits come first (#984)", async () => {
+    meta.set('a2', session('a2'))
+    put('b', [['user', 'zebracorn']])
+    put('a2', [['user', 'a long line about many other things, and somewhere near its end the zebracorn too']])
+    const hits = (await orchestratorToolsFor(host, 'a', undefined, true).recall('zebracorn')).hits
+    expect(hits.map((h) => h.sessionId)).toEqual(['a2', 'b'])
+  })
+
+  it('read_session reads itself only around a hit from before the cut, and only up to the cut', async () => {
+    put('a', compacted)
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    const r = await reader.readSession('a', 40, { around: 1 })
+    if (!r.ok) throw new Error(r.error)
+    const lines = r.lines ?? []
+    expect(lines.join('\n')).toContain('--keep-42')
+    // The rest is still in its context: the window stops at the compaction
+    expect(lines.join('\n')).not.toContain('is the zebracorn migration done?')
+    // The person's line, then the eight replies as one answer
+    expect(lines).toHaveLength(2)
+    const refused = 'Reads itself only before its last compaction, from a recall hit: search with recall, then pass that hit\'s seq as around.'
+    expect(await reader.readSession('a')).toEqual({ ok: false, error: refused })
+    expect(await reader.readSession('a', 40, { around: 10 })).toEqual({ ok: false, error: refused })
+    expect(await reader.readSession('a', 40, { around: 19 })).toEqual({ ok: false, error: refused })
   })
 })
 

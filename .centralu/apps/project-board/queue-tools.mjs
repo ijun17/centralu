@@ -9,7 +9,8 @@ import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR } from './config.mjs'
 import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
-import { ACTIVE, dequeue, enqueue, itemLine } from './queue.mjs'
+import { BATCH_ACTIVE, batchLine } from './batch.mjs'
+import { ACTIVE, dequeue, enqueue, findItem, itemLine } from './queue.mjs'
 import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
@@ -51,19 +52,37 @@ const COUNTS = [
   ['closed', 'closed'],
 ]
 
-/** The queue for agents and the screen: one line per item, attention first. */
+/**
+ * The queue for agents and the screen: one line per item, attention first. Within a state the items waiting or acting
+ * are in the order they were queued, which a poll does not change (it sets `updatedAt` on every read, so by that the
+ * order followed whichever was read last); those ended come newest first.
+ */
 export function queueView({ all = false } = {}) {
   const q = readQueue(dataDir())
   const order = ['attention', 'ci', 'waiting', 'merged', 'closed']
   const items = q.items
     .filter((i) => all || ACTIVE.has(i.state) || Date.now() - Date.parse(i.updatedAt) < 24 * 3600_000)
-    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (ACTIVE.has(a.state) ? String(a.queuedAt).localeCompare(String(b.queuedAt)) : String(b.updatedAt).localeCompare(String(a.updatedAt))))
   const counts = Object.fromEntries(COUNTS.map(([s]) => [s, items.filter((i) => i.state === s).length]))
   const parts = COUNTS.filter(([s]) => counts[s]).map(([s, words]) => `${counts[s]} ${words}`)
   const summary = `Merge queue: ${parts.length ? parts.join(', ') : 'empty'}. ${driverLine(q)}`
+  // Batches (#962): the running ones, and those ended in the last day (or all, with `all`)
+  const batches = (q.batches ?? []).filter((b) => all || BATCH_ACTIVE.has(b.state) || Date.now() - Date.parse(b.updatedAt) < 24 * 3600_000)
+  const byId = new Map((q.batches ?? []).map((b) => [b.id, b]))
   return {
     summary,
-    lines: items.map((i) => itemLine(i, queueRef)),
+    lines: [...batches.filter((b) => BATCH_ACTIVE.has(b.state)).map((b) => batchLine(b, queueRef)), ...items.map((i) => itemLine(i, queueRef))],
+    batches: batches.map((b) => ({
+      id: b.id,
+      branch: b.branch,
+      state: b.state,
+      prs: (b.steps?.length ? b.steps : b.members).map((m) => m.pr),
+      landed: b.landed ?? 0,
+      head: b.head ?? null,
+      run: b.run ?? null,
+      line: batchLine(b, queueRef),
+      updatedAt: b.updatedAt,
+    })),
     counts,
     pause: q.pause,
     seq: q.seq,
@@ -81,6 +100,7 @@ export function queueView({ all = false } = {}) {
       queuedAt: i.queuedAt,
       updatedAt: i.updatedAt,
       lastError: i.lastError ?? null,
+      batch: i.batch != null && byId.has(i.batch) ? { id: i.batch, branch: byId.get(i.batch).branch, state: byId.get(i.batch).state } : null,
     })),
     events: q.events.filter((e) => e.notify).slice(-10),
   }
@@ -109,13 +129,17 @@ async function queueMerge({ pr, lowers = [], owner, deleteBranch = true }) {
     problems.push(`${top.ref} is based on ${p.baseRefName}, not ${defaultBranch}: give the PRs under it as lowers, so the stack lands through ${top.ref}.`)
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: 'refused' }))
 
-  const who = owner?.trim() || `queue-${randomBytes(3).toString('hex')}`
+  // No owner given: a new id, unless it is queued already (queued again, it stays the session's that
+  // queued it first, whose watch command still listens for that owner)
+  const given = owner?.trim() || null
   const at = new Date().toISOString()
   const r = updateQueue(dataDir(), (q) => {
-    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner: who, deleteBranch, title: p.title, at }, queueRef)
+    const owner = given ?? findItem(q, top.repo, top.number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
+    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, deleteBranch, title: p.title, at }, queueRef)
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length }
   })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))
+  const who = r.item.owner
   const watch = watchCommand({ owner: who, after: r.seq })
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
   const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${who}. ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`
@@ -129,7 +153,7 @@ async function queueMerge({ pr, lowers = [], owner, deleteBranch = true }) {
 
 async function mergeQueue({ all = false }) {
   const v = queueView({ all })
-  return linesAnswer(v.summary, [['items', '', v.lines]], { counts: v.counts, queue: v.queue, events: v.events, pause: v.pause, seq: v.seq })
+  return linesAnswer(v.summary, [['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, pause: v.pause, seq: v.seq })
 }
 
 async function unqueue({ pr }) {
@@ -140,7 +164,7 @@ async function unqueue({ pr }) {
 }
 
 const QUEUE_DESCRIPTION =
-  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; failing again, DIRTY, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; merges only when every required check of the CI workflow passed and GitHub says CLEAN (UNSTABLE waits), never a draft. The answer gives a watch command to run in the background: it exits with the message when an item needs you or lands.'
+  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; failing again, DIRTY, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; merges only when every required check of the CI workflow passed and GitHub says CLEAN, never a draft; UNSTABLE waits unless every check that did not pass is a cancelled duplicate or older run of CI on that head, or a run a batch cancelled. Several PRs whose own CI has not started are tested together in one run on a queue/batch-N branch and then land one by one in order, each only while main has the tree the batch had before it (their own waiting runs are cancelled; a red batch is split). The answer gives a watch command to run in the background: it exits with the message when an item needs you or lands.'
 
 export const tools = {
   queue_merge: {
@@ -163,7 +187,7 @@ export const tools = {
     config: {
       title: 'The merge queue',
       description:
-        'The merge queue (queue_merge): each item waiting, in CI, needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, who drives it now, and the latest messages. Instead of gh pr list / gh run list to follow merges.',
+        'The merge queue (queue_merge): each item waiting, in CI (alone or in a batch), needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, the batches, who drives it now, and the latest messages. Instead of gh pr list / gh run list to follow merges.',
       inputSchema: z.object({ all: z.boolean().optional().describe('Also items finished more than a day ago') }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

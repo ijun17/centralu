@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
@@ -9,6 +8,7 @@ import { launchFor } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { withCodexClient } from './short-lived.js'
+import { codexHome } from './home.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
@@ -29,18 +29,6 @@ const exec = promisify(execFile)
  * Design verification target (A-4): does adding only this directory leave the UI and core
  * unchanged? Rule: Codex types end here — the only thing that leaves is NormalizedEvent.
  */
-
-/**
- * Codex's settings folder.
- *
- * The codex CLI itself honors `CODEX_HOME` — if we alone hard-code the home path, we end up
- * answering whether a person using `CODEX_HOME` is logged in **by looking at the wrong folder**
- * (showing "login required" while actually logged in, or the reverse).
- */
-function codexHome(): string {
-  const custom = process.env.CODEX_HOME?.trim()
-  return custom ? custom : join(homedir(), '.codex')
-}
 
 /**
  * The verbosity levels (#54). `model/list` does not report them per model, so we write them here

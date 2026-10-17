@@ -53,8 +53,10 @@ describe('which checks a workflow requires', () => {
     const w = workflowCheckNames(text)
     // The names `gh pr checks` showed for #415, without the discord-notify job, plus the content
     // verifier's two rows (#440), the keeper's Linux job (#350) and the host's tests on the remote's pinned Node
-    // (remote-hub.md §10.9), and the e2e suite's WebKit and Chromium shards with the report that merges them
+    // (remote-hub.md §10.9), and the e2e suite's WebKit and Chromium shards with the report that merges them, and the
+    // job that says which of them a commit needs (their stand-ins report the same names)
     expect([...w.names].sort()).toEqual([
+      'changes',
       'content verify (macos-14)',
       'content verify (ubuntu-24.04)',
       'darwin-arm64',
@@ -350,6 +352,15 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (st.mergeError) fail(st.mergeError)
   st.merged = true
   save()
+} else if (args[0] === 'pr' && args[1] === 'ready') {
+  st.readied = [...(st.readied ?? []), args[2]]
+  st.pr.isDraft = false
+  save()
+} else if (path === R + '/issues/77/comments' && args.includes('POST')) {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8')).body
+  st.comments = [...(st.comments ?? []), body]
+  save()
+  out({ id: 5, node_id: 'IC_5', html_url: 'https://github.com/ijun17/centralu/pull/77#issuecomment-5', user: { login: 'contributor' }, created_at: '2026-10-17T10:00:00Z', body })
 } else if (args[0] === 'issue' && args[1] === 'view') {
   out({ body: st.issue, comments: [], state: 'OPEN' })
 } else if (path === R) {
@@ -463,6 +474,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(r.ok).toBe(true)
     expect(r.text).toContain('ci_status — reads, model')
     expect(r.text).toContain('merge_when_green — changes, model')
+    expect(r.text).toContain('mark_ready — changes, model')
   })
 
   it('reports the required checks of a pull request compactly, with the first failing test and the known flake it matches', async () => {
@@ -747,4 +759,53 @@ it('keeps release bump builds out of the concurrency group cancelled by ordinary
   expect(group('chore(release): next (#900)', 'a')).not.toBe(group('fix(ui): two', 'b'))
   expect(group('chore(release): next (#900)', 'a')).not.toBe(group('chore(release): later (#901)', 'b'))
   expect(group('chore(release): next', 'a', 'pull_request', 'refs/pull/900/merge')).toBe(group('chore(release): next', 'b', 'pull_request', 'refs/pull/900/merge'))
+})
+
+/**
+ * #386, merge policy (owner, 2026-10-05): merging is the maintainer's act, and "for a contributor,
+ * the end of the flow is mark_ready". merge_when_green and queue_merge refuse without maintain or
+ * admin and told the agent to mark the PR ready, but no tool did it, so agents typed gh pr ready.
+ */
+describe('the project board app: mark_ready', { timeout: 30_000 * SLOW }, () => {
+  const state = (patch: Record<string, unknown> = {}) => {
+    const s = ghState({ permissions: { push: true }, ...patch })
+    ;(s.pr as Record<string, unknown>).isDraft = true
+    return s
+  }
+  const gh = () => JSON.parse(readFileSync(statePath, 'utf8')) as { readied?: string[]; comments?: string[] }
+
+  it('marks a draft ready for review for a contributor once nothing required failed, and says the maintainer merges', async () => {
+    runtime(state())
+    const r = await call('mark_ready', { pr: 77 })
+    expect(r.isError).toBe(false)
+    expect(r.text.split('\n')[0]).toBe('Marked PR #77 ready for review. The maintainer merges it (merge_when_green or queue_merge).')
+    expect(r.data).toMatchObject({ ready: true, marked: true, verdict: 'green' })
+    expect(gh().readied).toEqual(['77'])
+    expect(gh().comments).toBeUndefined()
+    // Ready already: nothing to change, and it says so
+    const again = await call('mark_ready', { pr: 77 })
+    expect(again.text.split('\n')[0]).toBe('PR #77 was ready for review already. The maintainer merges it (merge_when_green or queue_merge).')
+    expect(gh().readied).toEqual(['77'])
+  })
+
+  it('refuses while a required check failed, naming it, and changes nothing', async () => {
+    runtime(state({ checkRuns: [[ghRun('verify', 'success', 11), ghRun('windows tests', 'failure', 12), ghRun('linux-x64', 'success', 13)]] }))
+    const r = await call('mark_ready', { pr: 77 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('Not marked ready: a required check failed.')
+    expect(r.text).toContain('windows tests: failed')
+    expect(gh().readied).toBeUndefined()
+  })
+
+  it('leaves the note for the maintainer with the CI line, while checks still run; a note that breaks the public text rules stops it first', async () => {
+    runtime(state({ checkRuns: [[ghRun('verify', null, 11), ghRun('windows tests', 'success', 12), ghRun('linux-x64', 'success', 13)]] }))
+    const bad = await call('mark_ready', { pr: 77, note: '리뷰 부탁드립니다' })
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toMatch(/^Not marked ready: The note /)
+    expect(gh().readied).toBeUndefined()
+    const r = await call('mark_ready', { pr: 77, note: 'Ready: the Windows path is not exercised.' })
+    expect(r.isError).toBe(false)
+    expect(r.text.split('\n')[0]).toBe('Marked PR #77 ready for review, and left the note. CI is pending, not green yet; it goes on meanwhile. The maintainer merges it (merge_when_green or queue_merge).')
+    expect(gh().comments).toEqual(['Ready: the Windows path is not exercised.\n\nPR #77 at c0ffee0: pending — 2/3 passed, 1 pending.'])
+  })
 })

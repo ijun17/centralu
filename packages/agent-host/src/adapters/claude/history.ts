@@ -1,6 +1,10 @@
+import { launchesSubagent, type NormalizedEvent } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { finite, trimmed } from '../../json-value.js'
+import { HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
+import { normalizeMessage } from './normalize.js'
+import { toolResultEvent } from '../tool-result.js'
 
 /**
  * Reads past sessions Claude Code has kept.
@@ -122,43 +126,108 @@ export async function readClaudeHistory(
 ): Promise<HistoryMessage[]> {
   const sdk = await sessionApi()
   if (!sdk?.getSessionMessages) throw new Error(UNSUPPORTED)
-  const rows = await sdk.getSessionMessages(externalId, { dir: cwd, limit })
+  /*
+   * Read whole, and the newest lines kept (#1006). The SDK's `limit` counts rows from the start (it reads the whole
+   * transcript, then slices `offset..offset + limit`), so passing it gave the oldest rows: an import showed how a long
+   * conversation began, and a catch-up of one over 600 rows never found our last message and never attached anything
+   * again. It also counted every row, a tool result's included. The lines are kept as Codex keeps them (`lastLines`).
+   */
+  const rows = await sdk.getSessionMessages(externalId, { dir: cwd })
   if (!Array.isArray(rows)) return []
   const out: HistoryMessage[] = []
+  const agents = new Set<string>()
   for (const r of rows) {
-    const role = r?.type === 'user' ? 'user' : r?.type === 'assistant' ? 'assistant' : null
-    if (!role) continue
-    // Only stripped from user turns — a tag inside the model's own words is something the model actually wrote.
-    const raw = textOf(r.message)
-    if (role === 'user' && COMPACT_SUMMARY.test(raw)) {
-      out.push({ role: 'system', marker: 'compaction' })
-      continue
+    /*
+     * One row the reader cannot read costs that row, not the import (#843 review): the live normalizer expects the
+     * SDK's shapes, and a transcript another build wrote may not have them. A failed import says "Could not load past
+     * conversation" and a failed catch-up retries, and fails, at every wake.
+     */
+    try {
+      const message = readableMessage(r?.message)
+      if (r?.type === 'assistant') out.push(...assistantLines(message, agents))
+      else if (r?.type === 'user') out.push(...userLines(message, agents))
+    } catch (err) {
+      console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)
     }
-    const text = role === 'user' ? stripInjectedBlocks(raw) : raw
-    if (!text) continue
-    out.push({ role, text })
+  }
+  return lastLines(out, limit)
+}
+
+/**
+ * A message as the live normalizer reads it: a text body becomes its one text block, and a content list keeps only
+ * its blocks (objects), so a string, an object or a `null` where the SDK has a list reads as no content.
+ */
+function readableMessage(message: unknown): unknown {
+  if (typeof message === 'string') return { content: [{ type: 'text', text: message }] }
+  if (typeof message !== 'object' || message === null) return { content: [] }
+  const content = (message as { content?: unknown }).content
+  if (typeof content === 'string') return { ...message, content: [{ type: 'text', text: content }] }
+  const blocks = Array.isArray(content) ? content.filter((b): b is object => typeof b === 'object' && b !== null) : []
+  return { ...message, content: blocks }
+}
+
+/**
+ * A model message read back: its words, then its tool calls, as the live normalizer reads the same message when it
+ * arrives whole (#843). Tool calls used to be dropped, leaving only the tool's name as a line of the model's words, so
+ * an imported conversation showed `Bash` where a watched one showed the command and its output. Its thinking, usage
+ * and plan are not part of a conversation read back (`historyEvents`). A call that launches a subagent is noted in
+ * `agents`, for its result (`userLines`).
+ */
+function assistantLines(message: unknown, agents: Set<string>): HistoryMessage[] {
+  const out: HistoryMessage[] = []
+  const events = normalizeMessage({ type: 'assistant', message }, HISTORY_SESSION)
+  for (const e of events) {
+    // A tag inside the model's own words is something the model actually wrote, so nothing is stripped here
+    if (e.type === 'message_delta' && e.text.trim()) out.push({ role: 'assistant', text: e.text.trim() })
+    else out.push(...historyEvents([e]))
+    if (e.type === 'tool_call' && launchesSubagent(e.summary.tool)) agents.add(e.callId)
   }
   return out
 }
 
+/** Text a subagent's result carries for the model, not for the person (claude/normalize.ts `backgroundLaunch`, `agentReport`) */
+const FOR_THE_MODEL = /^(Async agent launched successfully|\[Subagent hand-back\])/
+
+/** What an agent card read back says in place of its result (see `agentResult`) */
+export const AGENT_REPORT_NOT_RECORDED = "the agent's report is not in this record"
+
 /**
- * Anthropic message to the text shown in the UI.
- *
- * Tool calls and results are dropped on purpose. The point of loading history is **to bring
- * back the conversation**, not to replay the execution log — pulling the log in as well just
- * lengthens the scroll and buries what was actually said. (Only the tool name is kept, as a
- * single line.)
+ * An agent call's result read back (#843 review). Live, the card is closed from the SDK's `tool_use_result`: a
+ * foreground agent's report without the model-directed hand-back, a background one by its `task_notification` while the
+ * launch's own result only says it started. `getSessionMessages` keeps neither (SDK 0.3.263: `type`, `uuid`, `message`,
+ * the parent ids), so the result is the text meant for the model: "Async agent launched successfully … never quote …"
+ * or "[Subagent hand-back] The text below is …". That text is not put on the card: it says the report is not in the
+ * record, as a note, and keeps nothing as output.
  */
-function textOf(message: unknown): string {
+function agentResult(e: Extract<NormalizedEvent, { type: 'tool_result' }>, agents: ReadonlySet<string>): NormalizedEvent {
+  if (!agents.has(e.callId) && !FOR_THE_MODEL.test(e.output ?? e.summary)) return e
+  return toolResultEvent(HISTORY_SESSION, e.callId, e.ok, '', AGENT_REPORT_NOT_RECORDED)
+}
+
+/**
+ * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
+ * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843).
+ */
+function userLines(message: unknown, agents: ReadonlySet<string>): HistoryMessage[] {
+  const raw = userText(message)
+  if (COMPACT_SUMMARY.test(raw)) return [{ role: 'system', event: { type: 'compaction', sessionId: HISTORY_SESSION, failed: false } }]
+  const text = stripInjectedBlocks(raw)
+  const out: HistoryMessage[] = text ? [{ role: 'user', text }] : []
+  const events = normalizeMessage({ type: 'user', message }, HISTORY_SESSION)
+  out.push(...historyEvents(events.map((e) => (e.type === 'tool_result' ? agentResult(e, agents) : e))))
+  return out
+}
+
+/** The text blocks of a user message: what the person typed, before injected blocks are stripped */
+function userText(message: unknown): string {
   if (typeof message === 'string') return message.trim()
   const content = (message as { content?: unknown } | null)?.content
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const b of content) {
-    const block = b as { type?: unknown; text?: unknown; name?: unknown }
+    const block = b as { type?: unknown; text?: unknown }
     if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
-    else if (block?.type === 'tool_use' && typeof block.name === 'string') parts.push(`\`${block.name}\``)
   }
   return parts.join('\n\n').trim()
 }

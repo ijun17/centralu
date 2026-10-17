@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 /**
@@ -51,6 +53,16 @@ const ENGINE = process.env.E2E_BROWSER
 const BROWSER = ENGINE === 'webkit' ? 'webkit' : 'chromium'
 const WEBKIT_TWIN = /-webkit\.spec\.ts/
 const WEBKIT_ONLY = /grid-ring\.spec\.ts/
+/**
+ * Every dev server runs under scripts/e2e-web-server.mjs (#651): Playwright starts a `webServer` once, so a vite
+ * that died mid-run (a V8 abort under Node 26.9) failed every later test with ERR_CONNECTION_RESET. The script
+ * says that it died and how, and starts it again. A `webServer` command runs in this file's folder.
+ */
+const SERVE = (url: string) => `node ../scripts/e2e-web-server.mjs --url ${url} --`
+// Where the servers record a death, read after the run by web-server-report.ts. Set once, by the runner: the workers
+// load this file too, and inherit the runner's value
+process.env.E2E_WEB_SERVER_EVENTS ??= join(tmpdir(), `centralu-e2e-web-server-${process.pid}-${Date.now()}.jsonl`)
+
 const leftOut = ENGINE === 'webkit' ? [WEBKIT_TWIN] : ENGINE === 'chromium' ? [WEBKIT_TWIN, WEBKIT_ONLY] : []
 
 export default defineConfig({
@@ -67,6 +79,8 @@ export default defineConfig({
   reporter: [['list']],
   // The engine's first page on a machine is slow (WebKit builds its caches): opened here, not in a test (warm-engine.ts)
   globalSetup: './warm-engine.ts',
+  // A dev server that died and was started again is said as a warning, even in a green run (#651)
+  globalTeardown: './web-server-report.ts',
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
     { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...leftOut] },
@@ -78,7 +92,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm --filter @cc/web exec vite --port 5174 --strictPort',
+      command: `${SERVE('http://127.0.0.1:5174')} pnpm --filter @cc/web exec vite --port 5174 --strictPort`,
       url: 'http://127.0.0.1:5174',
       // Reuse a dev server already running locally, but always start a fresh one in CI, since
       // attaching to someone else's server there would leave it unclear what was tested
@@ -86,7 +100,7 @@ export default defineConfig({
       timeout: 60000,
     },
     {
-      command: `pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${STARTUP_PORT} --strictPort`,
+      command: `${SERVE(STARTUP_URL)} pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${STARTUP_PORT} --strictPort`,
       url: STARTUP_URL,
       // An empty value makes bootstrap treat it as 'absent' — this way even a person who has
       // exported a token in their shell gets the same test
@@ -95,7 +109,7 @@ export default defineConfig({
       timeout: 60000,
     },
     {
-      command: `pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${RECOVERY_PORT} --strictPort`,
+      command: `${SERVE(RECOVERY_URL)} pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${RECOVERY_PORT} --strictPort`,
       url: RECOVERY_URL,
       // Must match RECOVERY_TOKEN and RECOVERY_RELAY_PORT in e2e/fixtures/real-host.ts
       env: { VITE_HOST_TOKEN: 'e2e-recovery-token', VITE_HOST_URL: 'ws://127.0.0.1:5178' },
@@ -103,7 +117,7 @@ export default defineConfig({
       timeout: 60000,
     },
     {
-      command: `pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${LINKED_PORT} --strictPort`,
+      command: `${SERVE(LINKED_URL)} pnpm --filter @cc/web exec vite --host 127.0.0.1 --port ${LINKED_PORT} --strictPort`,
       url: LINKED_URL,
       // Must match LINKED_TOKEN and LINKED_RELAY_PORT in e2e/fixtures/linked-hosts.ts
       env: { VITE_HOST_TOKEN: 'e2e-linked-token', VITE_HOST_URL: 'ws://127.0.0.1:5180' },

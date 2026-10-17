@@ -12,6 +12,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      everything:
+        description: Run every job, whatever the commit changes
+        type: boolean
+        default: true
 
 # Ordinary pushes supersede earlier work. A release bump can be tagged while its build
 # still runs, so its commit gets a separate group: a later merge must not cancel the
@@ -21,8 +26,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which jobs a pull request needs, from the files it adds to main (.github/scripts/ci-changes.mjs,
+  # 2026-10-17). About 25 jobs run per push and the free plan runs about 20 at once, so every job a
+  # change cannot affect delays the next run. Documents run only `verify`, `windows tests` and the
+  # WebKit UI scenarios; tests skip the bundles, the keeper and the content verifier; the window alone
+  # (packages/ui, core, platform, apps/web) skips the keeper, the content verifier and the host's tests
+  # on the remotes' Node; a build or CI config runs everything. A commit already on main runs
+  # everything. A pull request is compared with its merge-base with main, whatever its base branch, so
+  # a stacked one is judged by the whole stack. The rule reads no event context (docs/releasing.md,
+  # event audit). `changes` must be in any required set: it is what the gated jobs wait on.
+  #
+  # A job left out still reports its check under its own name, which a required check waits for:
+  # a job without a matrix reports `skipped`; a matrix job has a `…-skipped` stand-in with the same
+  # name and matrix, since a skipped matrix job reports its name unexpanded (`${{ matrix.target }}`).
+  # Each pair is `== 'true'` / `== 'false'`, so a missing answer runs neither and the check never
+  # reports, instead of passing unbuilt. tooling/build-workflow.test.ts holds the pairs together.
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    outputs:
+      bundle: ${{ steps.classify.outputs.bundle }}
+      host: ${{ steps.classify.outputs.host }}
+      host_tests: ${{ steps.classify.outputs.host_tests }}
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # main and the history back to the merge-base, without file contents: names are all it compares
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Classify the changed files
+        id: classify
+        env:
+          # Unset on a push or a pull request; a manual run asks for everything by default
+          EVERYTHING: ${{ inputs.everything }}
+        run: node .github/scripts/ci-changes.mjs
+
   bundle:
     name: ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.bundle == 'true'
     runs-on: ${{ matrix.runner }}
     # A broken Linux build must not hide a working macOS one — that is exactly the
     # comparison this workflow exists to give us.
@@ -219,6 +263,18 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 
+  # The bundles' checks when nothing a bundle is built from changed (see `changes`)
+  bundle-skipped:
+    name: ${{ matrix.target }}
+    needs: changes
+    if: needs.changes.outputs.bundle == 'false'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [linux-x64, linux-arm64, darwin-arm64, windows-x64]
+    steps:
+      - run: echo "Nothing a bundle is built from changed (.github/scripts/ci-changes.mjs)"
+
   # `pnpm verify` on every pull request (2026-10-05). Until this job existed the full suite ran
   # only inside release.yml, so a change merged with a partial local run surfaced in the release
   # rehearsal instead: #333 renamed the Windows package, and tooling/release-workflow.test.ts,
@@ -248,6 +304,8 @@ jobs:
   # exclusive rename, which are spelled differently on each (renamex_np, renameat2).
   content-verify:
     name: content verify (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.host == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -260,6 +318,17 @@ jobs:
 
       - name: cargo test
         run: cargo test --manifest-path apps/desktop/content-verify/Cargo.toml
+
+  content-verify-skipped:
+    name: content verify (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.host == 'false'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, macos-14]
+    steps:
+      - run: echo "Nothing outside the window and the tests changed (.github/scripts/ci-changes.mjs)"
 
   # The TypeScript suite on Windows (#14). Until this job existed `pnpm verify` ran only inside
   # release.yml, on Linux and macOS, so nothing ever told us what breaks on Windows.
@@ -300,7 +369,8 @@ jobs:
   # The UI scenarios (e2e/, Playwright) in WebKit, on every pull request (owner decision,
   # 2026-10-11). The desktop app is WKWebView, and until this job existed no CI job ran Playwright at
   # all: nine WebKit-only failures piled up on main unseen (#424), two of them real product bugs
-  # (#480). `E2E_BROWSER=webkit` runs every spec in WebKit (e2e/playwright.config.ts).
+  # (#480). `E2E_BROWSER=webkit` runs every spec in WebKit (e2e/playwright.config.ts). Not gated by
+  # `changes`: every pull request runs it, documents only included (owner decision, 2026-10-11).
   #
   # Sharded so the job finishes inside the time the slowest other job already takes (`windows
   # tests`, about 6.5 minutes). Measured 2026-10-11: the suite is about 18 minutes of one runner's
@@ -361,6 +431,8 @@ jobs:
   # Its own job, not a row of the one above, so each engine can have its own shard count.
   e2e-chromium:
     name: e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -403,6 +475,19 @@ jobs:
           path: blob-report
           retention-days: 7
           if-no-files-found: error
+
+  # The Chromium shards' checks when only documents changed (see `changes`)
+  e2e-chromium-skipped:
+    name: e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        shards: [5]
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - run: echo "Only documents changed (.github/scripts/ci-changes.mjs)"
 
   # One HTML report per engine out of its shards' blob reports, with the traces of the tests that
   # failed. Per engine, because both runs have the same projects and test ids: merged together, one
@@ -465,6 +550,8 @@ jobs:
   # the slowest e2e shard takes 4 to 5.
   ux-tasks:
     name: ux tasks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -511,6 +598,8 @@ jobs:
   # (scripts/node-pin.mjs --set) moves this job with it; tooling/node-pin.test.ts holds the two together.
   host-tests-remote-node:
     name: host tests, remote Node (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.host_tests == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -549,6 +638,17 @@ jobs:
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
         run: pnpm exec vitest run packages/agent-host packages/protocol tooling/launcher-
 
+  host-tests-remote-node-skipped:
+    name: host tests, remote Node (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.host_tests == 'false'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, windows-2022]
+    steps:
+      - run: echo "Nothing these tests run changed (.github/scripts/ci-changes.mjs)"
+
   # The keeper end to end, with the real binary and the real host (2026-10-05). Neither the unit
   # tests nor e2e start a keeper: when #329 put an `await` in the host's startup before the server
   # existed, every host restart that held a terminal or a dev server crashed five times until the
@@ -560,6 +660,8 @@ jobs:
   # kqueue. The same image as the darwin bundle above. Linux (pidfd) is the `keeper-linux` job below.
   keeper:
     name: keeper e2e
+    needs: changes
+    if: needs.changes.outputs.host == 'true'
     runs-on: macos-14
     timeout-minutes: 30
     env:
@@ -648,6 +750,8 @@ jobs:
   # shell is macOS's, though the content script builds and runs it here like any unix program.
   keeper-linux:
     name: keeper e2e (linux)
+    needs: changes
+    if: needs.changes.outputs.host == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:

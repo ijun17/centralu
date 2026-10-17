@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import type { AgentTokens, AppRunListed, AppRunRow, RunLedger } from './runs.js'
 import type { BrokerHost } from './desk.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Shared helpers for external-app tests — plant an app folder, and wait until a condition holds.
@@ -37,7 +38,7 @@ export function plantApp(
 }
 
 /** Waits for something that happens "soon", like an fs watch. If it does not settle in time, fails with the last value. */
-export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs = 4000): Promise<T> {
+export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs = 4000 * SLOW): Promise<T> {
   const deadline = Date.now() + timeoutMs
   let v = read()
   while (!ok(v)) {

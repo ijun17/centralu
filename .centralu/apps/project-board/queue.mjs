@@ -30,24 +30,36 @@ export const ERROR_LIMIT = 3
 export const MAX_EVENTS = 200
 export const MAX_DONE = 40
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
-// An unattended queue is strict: CLEAN only. UNSTABLE (a check outside the required set failed) and
+// An unattended queue is strict: CLEAN, and UNSTABLE only where the queue can prove why (runs a
+// successful one made moot, #1015; runs a batch cancelled, batch.mjs). Any other UNSTABLE and
 // HAS_HOOKS wait, and say so after UNCLEAN_MS.
 const MERGEABLE_STATES = new Set(['CLEAN'])
 
-export const emptyQueue = () => ({ version: 1, seq: 0, pause: null, items: [], events: [] })
+export const emptyQueue = () => ({ version: 1, seq: 0, pause: null, items: [], events: [], batches: [], batchSeq: 0, batchOff: null })
+/** A batch's states that are still running; one at a time is driven (batch.mjs has the batch rules). */
+export const BATCH_ACTIVE = new Set(['building', 'ci', 'landing'])
 
 /** A queue read from the file, with every field present (an older or hand-edited file still reads). */
 export function normalize(q) {
   const base = emptyQueue()
   if (!q || typeof q !== 'object') return base
+  const batches = Array.isArray(q.batches) ? q.batches.filter((b) => b && Number.isInteger(b.id) && typeof b.repo === 'string' && Array.isArray(b.members)).map((b) => ({ steps: [], cancelled: [], reruns: {}, landed: 0, ...b })) : []
+  const running = new Set(batches.filter((b) => BATCH_ACTIVE.has(b.state)).map((b) => b.id))
   return {
     ...base,
     ...q,
     seq: Number.isFinite(q.seq) ? q.seq : 0,
+    batchSeq: Number.isInteger(q.batchSeq) ? q.batchSeq : Math.max(0, ...batches.map((b) => b.id)),
+    batches,
     items: Array.isArray(q.items)
       ? q.items
           .filter((i) => i && Number.isInteger(i.pr) && typeof i.repo === 'string')
-          .map((i) => ({ ...i, lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [], reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {} }))
+          .map((i) => {
+            const it = { ...i, lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [], reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {} }
+            // In a batch that is no longer running (an older file, a batch dropped by hand): its own again
+            if (it.batch != null && !running.has(it.batch)) delete it.batch
+            return it
+          })
       : [],
     events: Array.isArray(q.events) ? q.events : [],
   }
@@ -79,9 +91,26 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
     if (both.length) return { error: `${both.map((n) => ref(repo, n)).join(', ')} ${both.length === 1 ? 'is' : 'are'} already queued with ${ref(other.repo, other.pr)}.` }
   }
   if (mine) {
-    // Queued again (what an attention message may ask for): it is looked at afresh, and a merge
-    // GitHub refused is tried again; reruns already spent on this head stay spent
-    Object.assign(mine, { lowers, owner: owner ?? mine.owner, deleteBranch, state: 'waiting', reason: null, noticeKey: null, updatedAt: at, nextAt: at })
+    // Queued again (what an attention message may ask for): it is looked at afresh, so its clocks
+    // and failure count start again and a merge GitHub refused is tried again; reruns already spent
+    // on this head stay spent. Queued again without an owner, it stays the first session's
+    Object.assign(mine, {
+      lowers,
+      owner: owner ?? mine.owner,
+      deleteBranch,
+      state: 'waiting',
+      reason: null,
+      noticeKey: null,
+      noCiSince: null,
+      missingSince: null,
+      uncleanSince: null,
+      errors: 0,
+      updatedAt: at,
+      nextAt: at,
+    })
+    // Out of any batch it was in (the batch sees it gone and carries on without it)
+    delete mine.batch
+    delete mine.batchless
     pushEvent(q, mine, { kind: 'queued', text: `${ref(repo, pr)} queued again${lowers.length ? ` with ${lowers.map((n) => ref(repo, n)).join(', ')}` : ''}.`, at })
     return { item: mine, replaced: true }
   }
@@ -124,9 +153,9 @@ export function dequeue(q, { repo, pr, at }, ref = refIn(repo)) {
   return item
 }
 
-/** The item due first (its `nextAt` passed), or null. */
+/** The item due first (its `nextAt` passed), or null. An item in a batch is the batch's to read. */
 export function dueItem(q, now) {
-  return q.items.filter((i) => ACTIVE.has(i.state) && Date.parse(i.nextAt ?? 0) <= now).sort((a, b) => Date.parse(a.nextAt ?? 0) - Date.parse(b.nextAt ?? 0))[0] ?? null
+  return q.items.filter((i) => ACTIVE.has(i.state) && i.batch == null && Date.parse(i.nextAt ?? 0) <= now).sort((a, b) => Date.parse(a.nextAt ?? 0) - Date.parse(b.nextAt ?? 0))[0] ?? null
 }
 
 // --- The decision for one poll -------------------------------------------------------------------
@@ -160,17 +189,14 @@ export function resetFor(item, head) {
 }
 
 /**
- * The decision once CI is read. `checks` is evaluateChecks' answer for the head; `runs` the latest
- * run of each CI workflow on it (only read when the checks failed or none are reported);
- * `lowerBranches` the head branches of the item's lowers (a stack's top is based on one of them).
- * Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
- * `retarget` (onto the default branch) or `merge`.
+ * What CI says about one commit, for an item's head or a batch's (`subject`: anything with `head`,
+ * `reruns`, `noCiSince` and `missingSince`). `checks` is evaluateChecks' answer for `head`; `runs`
+ * the latest run of each CI workflow on it. Answers `{ state: 'green' }`, or a decision as decideCi's
+ * (`ci` with a rerun to ask for, or attention); `n` names the subject in the texts.
  */
-export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], now, ref }) {
-  const n = ref(item.repo, item.pr)
-  const head = pr.headRefOid
+export function decideRun({ subject, head, checks, runs = [], now, n }) {
   const at = new Date(now).toISOString()
-  const reruns = item.head === head ? (item.reruns ?? {}) : {}
+  const reruns = subject.head === head ? (subject.reruns ?? {}) : {}
   const verdict = checks.verdict
   const failedJobs = checks.rows.filter((r) => r.state === 'failed')
   const job = failedJobs[0] ? { name: failedJobs[0].name, id: failedJobs[0].check?.jobId ?? null } : null
@@ -210,7 +236,7 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
 
   if (verdict === 'none' || verdict === 'pending') {
     if (verdict === 'none' && !runs.length) {
-      const since = item.head === head && item.noCiSince ? item.noCiSince : at
+      const since = subject.head === head && subject.noCiSince ? subject.noCiSince : at
       if (now - Date.parse(since) > NO_CI_MS)
         return attention('no-ci', `${n}: no CI run has started on ${short(head)} in ${Math.round(NO_CI_MS / 60_000)} minutes. Push again, or start the build on GitHub; the queue carries on once checks report.`)
       return { state: 'ci', patch: { noCiSince: since } }
@@ -219,7 +245,7 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     const missing = checks.rows.filter((r) => r.state === 'missing')
     const running = checks.rows.some((r) => r.state === 'pending') || runs.some((r) => r.status !== 'completed')
     if (!missing.length || running) return { state: 'ci', patch: { noCiSince: null, missingSince: null } }
-    const since = item.head === head && item.missingSince ? item.missingSince : at
+    const since = subject.head === head && subject.missingSince ? subject.missingSince : at
     if (now - Date.parse(since) > MISSING_MS)
       return attention(
         'missing-check',
@@ -229,6 +255,23 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
   }
 
   if (verdict !== 'green') return attention('internal', `${n}: unknown CI verdict ${verdict}.`)
+  return { state: 'green' }
+}
+
+/**
+ * The decision once CI is read. `checks` is evaluateChecks' answer for the head; `runs` the latest
+ * run of each CI workflow on it (only read when the checks failed or none are reported);
+ * `lowerBranches` the head branches of the item's lowers (a stack's top is based on one of them);
+ * `supersededOnly` that GitHub's UNSTABLE comes only from runs a successful one made moot
+ * (onlySupersededFailures). Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
+ * `retarget` (onto the default branch) or `merge`.
+ */
+export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], supersededOnly = false, now, ref }) {
+  const n = ref(item.repo, item.pr)
+  const head = pr.headRefOid
+  const at = new Date(now).toISOString()
+  const run = decideRun({ subject: item, head, checks, runs, now, n })
+  if (run.state !== 'green') return run
 
   if (pr.baseRefName !== defaultBranch) {
     if (lowerBranches.includes(pr.baseRefName)) return { state: 'waiting', action: { type: 'retarget', base: defaultBranch }, event: `${n}: green; moved its base from ${pr.baseRefName} to ${defaultBranch} to land the stack through it.` }
@@ -242,17 +285,52 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     return attention('subject', `${n}: the squash subject "${subject}" is ${[...subject].length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
-  if (pr.mergeable !== 'MERGEABLE' || !MERGEABLE_STATES.has(pr.mergeStateStatus)) {
+  // UNSTABLE only from a run a successful one made moot (a cancelled duplicate, #1015): as CLEAN
+  const clean = MERGEABLE_STATES.has(pr.mergeStateStatus) || (pr.mergeStateStatus === 'UNSTABLE' && supersededOnly)
+  if (pr.mergeable !== 'MERGEABLE' || !clean) {
     // GitHub still working it out (UNKNOWN), or not CLEAN (UNSTABLE, HAS_HOOKS): wait, and say so in time
     const since = item.head === head && item.uncleanSince ? item.uncleanSince : at
     if (now - Date.parse(since) > UNCLEAN_MS)
       return attention(
         'not-clean',
-        `${n} is green, but GitHub has said ${pr.mergeStateStatus ?? 'nothing'} (not CLEAN) for ${Math.round(UNCLEAN_MS / 60_000)} minutes, and the queue merges only CLEAN. UNSTABLE: a check outside the required set failed; rerun or fix it.`,
+        `${n} is green, but GitHub has said ${pr.mergeStateStatus ?? 'nothing'} (not CLEAN) for ${Math.round(UNCLEAN_MS / 60_000)} minutes, and the queue merges only CLEAN (or UNSTABLE from a cancelled duplicate or an older run of CI on this head, which this is not). UNSTABLE: a check that did not pass, outside the required set or from another run; rerun or fix it.`,
       )
     return { state: 'waiting', patch: { uncleanSince: since } }
   }
   return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
+}
+
+/**
+ * The check suites of runs a successful run has made moot (#1015): for each CI workflow that has a
+ * completed, successful run on the head, its other runs on that head that were cancelled or started
+ * before the newest successful one. `runs` are the raw workflow runs on the head (readWorkflowChecks).
+ */
+export function supersededSuites(runs) {
+  const key = (r) => r.workflow_id ?? r.path ?? r.name ?? 'ci'
+  const out = new Set()
+  const byWorkflow = new Map()
+  for (const r of runs ?? []) byWorkflow.set(key(r), [...(byWorkflow.get(key(r)) ?? []), r])
+  for (const list of byWorkflow.values()) {
+    const ok = list.filter((r) => r.status === 'completed' && OK_CONCLUSIONS.has(r.conclusion))
+    if (!ok.length) continue
+    const newest = ok.map((r) => String(r.created_at ?? '')).sort().at(-1)
+    for (const r of list)
+      if (!ok.includes(r) && r.check_suite_id != null && r.status === 'completed' && (r.conclusion === 'cancelled' || String(r.created_at ?? '') < newest)) out.add(r.check_suite_id)
+  }
+  return out
+}
+
+/**
+ * Whether GitHub's UNSTABLE comes only from runs a successful run made moot (#1015): every check on
+ * the head passed, or belongs to such a run; every commit status succeeded. A cancelled duplicate run
+ * (a second pull_request run started for the same head) otherwise kept a green pull request UNSTABLE
+ * for as long as its head stayed, and the queue waits for CLEAN.
+ */
+export function onlySupersededFailures(checks, runs) {
+  const moot = supersededSuites(runs)
+  return checks.every((c) =>
+    c.kind === 'status' ? c.state === 'success' : (c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)) || moot.has(c.suiteId),
+  )
 }
 
 /** A rerun GitHub refused, as attention: the run, and what GitHub said. */
@@ -268,6 +346,24 @@ export function errorReason(n, count, message) {
 /** The key that makes "one message per change": the same reason on the same head is not news. */
 export const noticeKey = (reason, head) => `${reason.kind}:${head ?? ''}:${reason.job?.id ?? reason.job?.name ?? ''}`
 
+/**
+ * What the watch command (bin/merge-queue.mjs) sees for `owner` (null: every owner) after `after`:
+ * the messages, the items still queued, and whether a batch with one of the owner's pull requests
+ * has its end still to do (the last member landed: its branch, and the check that main is the tree
+ * CI tested, whose notice goes to that member's owner). Answers `{ news, left, batchPending, done }`;
+ * `done` is when the command may exit: news while something is left, or nothing left at all, but
+ * not while such a batch is still finishing, which would say "Nothing left queued" before its notice.
+ */
+export function watchState(q, { owner = null, after }) {
+  const mine = (x) => !owner || x.owner === owner
+  const news = q.events.filter((e) => e.seq > after && e.notify && mine(e))
+  const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
+  const owned = new Set(q.items.filter(mine).map((i) => i.pr))
+  const batchPending = (q.batches ?? []).some((b) => BATCH_ACTIVE.has(b.state) && b.members.some((m) => !owner || owned.has(m.pr)))
+  const done = left.length ? news.length > 0 : !batchPending
+  return { news, left, batchPending, done }
+}
+
 /** The text the queuing session gets for an item that needs it. */
 export function attentionText(item, reason, ref = refIn(item.repo)) {
   const title = item.title ? ` (${item.title})` : ''
@@ -281,8 +377,10 @@ export function itemLine(item, ref = refIn(item.repo)) {
   const what =
     item.state === 'attention'
       ? `needs attention: ${item.reason?.kind ?? '?'} — ${item.reason?.text ?? ''}`
-      : item.state === 'ci'
-        ? `CI${item.head ? ` at ${short(item.head)}` : ''}${item.lastError ? `; last poll failed: ${item.lastError}` : ''}`
+      : item.state === 'ci' && item.batch != null
+        ? `CI in batch ${item.batch}${item.head ? ` at ${short(item.head)}` : ''}`
+        : item.state === 'ci'
+          ? `CI${item.head ? ` at ${short(item.head)}` : ''}${item.lastError ? `; last poll failed: ${item.lastError}` : ''}`
         : item.state === 'waiting'
           ? `waiting${item.lastError ? `; last poll failed: ${item.lastError}` : ''}`
           : item.state === 'merged'
