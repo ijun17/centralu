@@ -51,10 +51,9 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
@@ -83,30 +82,6 @@ function check(cond, what, detail = '') {
   }
   return cond
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function waitFor(fn, timeoutMs, stepMs = 100) {
-  const end = Date.now() + timeoutMs
-  for (;;) {
-    let v
-    try {
-      v = await fn()
-    } catch {
-      v = undefined
-    }
-    if (v) return v
-    if (Date.now() > end) return undefined
-    await sleep(stepMs)
-  }
-}
-function alive(pid) {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return e.code === 'EPERM'
-  }
-}
 
 /** Hosts whose command line names this data folder's store — what "a host for this folder" means */
 function hostsFor(data) {
@@ -117,32 +92,6 @@ function hostsFor(data) {
     .filter((l) => l.includes(`${data}/store.db`) && l.includes('main.mjs'))
     .map((l) => ({ pid: Number(l.split(/\s+/, 1)[0]), command: l.replace(/^\d+\s+/, '') }))
 }
-
-function request(sock, body, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const c = createConnection(sock)
-    let buf = ''
-    const timer = setTimeout(() => {
-      c.destroy()
-      reject(new Error('timeout'))
-    }, timeoutMs)
-    c.on('connect', () => c.write(`${JSON.stringify(body)}\n`))
-    c.on('data', (d) => {
-      buf += d
-      const nl = buf.indexOf('\n')
-      if (nl >= 0) {
-        clearTimeout(timer)
-        c.end()
-        resolve(JSON.parse(buf.slice(0, nl)))
-      }
-    })
-    c.on('error', (e) => {
-      clearTimeout(timer)
-      reject(e)
-    })
-  })
-}
-const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 
 /**
  * `extra`: more descriptors for the keeper to inherit from 3 on, as an AppImage's window passes its
@@ -494,41 +443,6 @@ async function hostClient(port, token) {
       }),
     close: () => ws.close(),
   }
-}
-
-/**
- * What the keeper's child service holds: the terminals, commands and agents it keeps for the host.
- * The child socket answers `hello` first; `list` after it carries a request id.
- */
-function heldChildren(data, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const c = createConnection(join(data, 'children.sock'))
-    let buf = ''
-    const timer = setTimeout(() => {
-      c.destroy()
-      reject(new Error('timeout'))
-    }, timeoutMs)
-    c.on('connect', () => c.write(`${JSON.stringify({ op: 'hello', protocol: 1 })}\n`))
-    c.on('data', (d) => {
-      buf += d
-      const lines = buf.split('\n')
-      buf = lines.pop()
-      for (const l of lines) {
-        const v = JSON.parse(l)
-        if (v.rid === undefined && v.keeperPid) {
-          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
-          continue
-        }
-        clearTimeout(timer)
-        c.end()
-        return resolve(v.children ?? [])
-      }
-    })
-    c.on('error', (e) => {
-      clearTimeout(timer)
-      reject(e)
-    })
-  })
 }
 
 /**

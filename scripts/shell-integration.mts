@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { rawPublicKey, throwawayKey, writeContentManifest, type SigningKey } from './content-manifest.mjs'
 import { buildShellExe } from './shell-bundle.mjs'
+import { alive } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const FAKE_KEEPER = join(ROOT, 'scripts/shell-fake-keeper.cjs')
@@ -78,15 +79,6 @@ const keepersIn = (data: string): FakeRun[] =>
         .split('\n')
         .map((l) => JSON.parse(l) as FakeRun)
     : []
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 /** One request on a keeper socket, as `client::request` sends it. */
 function ask(sock: string, op: string): Promise<{ ok?: boolean } | undefined> {

@@ -1,8 +1,9 @@
 /**
- * Ending everything a keeper integration script started, pass or fail, and saying what went wrong.
- * Shared by `keeper-integration.mjs`, `keeper-children-integration.mjs` and
- * `keeper-handoff-integration.mjs`, which run in CI as well as by hand (the `keeper` job in
- * `.github/workflows/build.yml`).
+ * Ending everything a keeper integration script started, pass or fail, and saying what went wrong;
+ * and talking to a keeper's sockets and waiting on processes, the same way in every script.
+ * Shared by `keeper-integration.mjs`, `keeper-children-integration.mjs`,
+ * `keeper-handoff-integration.mjs` and `keeper-content-integration.mts`, which run in CI as well as
+ * by hand (the `keeper` job in `.github/workflows/build.yml`).
  *
  * Killing the pids a script recorded is not enough. The keeper starts every child in a session of
  * its own (`setsid`), and the processes those children start (a dev server under `sh -c`, a command
@@ -17,7 +18,84 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import { createConnection } from 'node:net'
 import { join } from 'node:path'
+
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Polls `fn` until it gives a truthy value and returns it, or `undefined` once `timeoutMs` has
+ * passed. A throw counts as not yet: a socket that is not there yet throws.
+ */
+export async function waitFor(fn, timeoutMs, stepMs = 100) {
+  const end = Date.now() + timeoutMs
+  for (;;) {
+    let v
+    try {
+      v = await fn()
+    } catch {
+      v = undefined
+    }
+    if (v) return v
+    if (Date.now() > end) return undefined
+    await sleep(stepMs)
+  }
+}
+
+/** Whether `pid` names a live process. EPERM means it exists and is someone else's */
+export function alive(pid) {
+  if (!pid) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+/**
+ * One request, one answer line, on a fresh connection to a keeper socket.
+ *
+ * 8 s: under CI load a keeper busy starting or swapping a host takes seconds to answer, and the 5 s
+ * one script had while the others had 8 s failed its `status` first. The child socket answers a
+ * hello with a greeting that carries no `rid`; the request after it (`list`) is what is answered.
+ */
+export function request(sock, body, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const c = createConnection(sock)
+    let buf = ''
+    const timer = setTimeout(() => {
+      c.destroy()
+      reject(new Error('timeout'))
+    }, timeoutMs)
+    c.on('connect', () => c.write(`${JSON.stringify(body)}\n`))
+    c.on('data', (d) => {
+      buf += d
+      const lines = buf.split('\n')
+      for (const l of lines.slice(0, -1)) {
+        const v = JSON.parse(l)
+        if (body.op === 'hello' && v.rid === undefined && v.keeperPid) {
+          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
+          continue
+        }
+        clearTimeout(timer)
+        c.end()
+        return resolve(v)
+      }
+      buf = lines.at(-1)
+    })
+    c.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+  })
+}
+
+/** The keeper's `status` view */
+export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
+
+/** What the keeper holds, from its child socket */
+export const heldChildren = (data) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => r.children ?? [])
 
 /** pid, parent and process group of every process, from one `ps` (the same flags on macOS and Linux) */
 function processTable() {
