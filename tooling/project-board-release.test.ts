@@ -254,6 +254,7 @@ if (args[0] === 'api') {
     json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...releaseChecks] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
+  if (path === R + '/actions/runs') json({ workflow_runs: (st.activeRuns || []).filter((r) => r.status === q.get('status')) })
   if (path === R + '/actions/workflows/release.yml/runs')
     json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha')) && (!q.get('branch') || r.head_branch === q.get('branch'))).reverse() })
   const jobs = /\/actions\/runs\/(\d+)\/jobs$/.exec(path)
@@ -283,6 +284,8 @@ type State = {
   dispatchSha?: string
   cancelled?: string[]
   seq?: Record<string, unknown[]>
+  /** Every workflow's runs not completed, for how busy the runners are */
+  activeRuns?: { id: number; status: string }[]
   /** The npm registry: package name → the commit it was published from; a name not here is absent */
   registry?: Record<string, string | null>
   /** How many more times the registry answers 404 for a name before it shows what `registry` holds */
@@ -820,7 +823,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
     const r = await call('release', { step: 'bump', path: s.work, confirm: true, notes: 'Ship the two changes.', closes: 'Refs #386' })
     expect(r.isError).toBe(false)
-    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Merge it once CI is green (merge_when_green), then rehearse and tag.`)
+    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.`)
     expect(r.data.lines).not.toContain(`Merged since v${APP_VERSION} (2):`)
     const pushed = remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)!
     expect(g(s.origin, 'rev-parse', `${pushed}^`)).toBe(s.tip)
@@ -1034,6 +1037,30 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       `${APP_VERSION} is not after v${APP_VERSION}, the latest release tag.`,
       `v${APP_VERSION} is tagged already.`,
     ])
+  })
+
+  it('warns at the bump, without refusing it, when other builds hold most runners', async () => {
+    const s = repo()
+    const jobs = (n: number, status: string) => Array.from({ length: n }, (_, i) => ({ name: `job ${i}`, status, conclusion: null }))
+    patchState((st) => {
+      st.activeRuns = [{ id: 81, status: 'in_progress' }, { id: 82, status: 'queued' }]
+      st.jobs['81'] = [...jobs(8, 'in_progress'), ...jobs(3, 'completed'), ...jobs(2, 'waiting')]
+      st.jobs['82'] = jobs(4, 'queued')
+    })
+    runtime()
+    const quiet = await call('release', { step: 'bump', path: s.work })
+    expect(quiet.isError, quiet.text).toBe(false)
+    expect(quiet.data.warning).toBeNull()
+    patchState((st) => (st.jobs['81'] = jobs(12, 'in_progress')))
+    const busy = await call('release', { step: 'bump', path: s.work })
+    expect(busy.isError, busy.text).toBe(false)
+    const warning = "Runners are busy: 12 jobs of other builds running and 4 queued, against 20 runners (2 active runs). The bump PR's CI will wait for them; push it once they drain, or cancel builds that no longer matter."
+    expect(busy.data.warning).toBe(warning)
+    expect(busy.data.summary).toContain(warning)
+    expect(busy.data.lines).toContain(warning)
+    const r = await call('release', { step: 'bump', path: s.work, confirm: true })
+    expect(r.data.pushed, r.text).toBe(true)
+    expect(r.data.summary).toContain(warning)
   })
 
   it('refuses a bump whose branch or pull request exists already', async () => {

@@ -265,7 +265,9 @@ The steps by hand:
    (including the shim's pins). `tooling/brand.test.ts` fails if any of them disagree, and
    `tooling/project-board-release.test.ts` if a file carries the version without being on that
    list. Commit and push — the release script refuses to run on a dirty tree, so that what ships
-   and what is in git cannot differ.
+   and what is in git cannot differ. The board's `bump` warns when other builds hold most of the
+   runners (three quarters of `release.runners`, GitHub's 20 here): the bump PR's 24 jobs would
+   then queue behind them, 5–7 min on 0.1.0-beta.26 (#1035).
 
 2. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked. It builds every
    platform, packs every package and publishes nothing. Run it on the bump pull request's

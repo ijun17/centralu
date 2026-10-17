@@ -152,6 +152,8 @@ bump는 원격 main에서 git이 추적하는 모든 텍스트 파일을 검사�
 
 1. `packages/protocol/src/brand.ts`의 `APP_VERSION`을 올리고, 같은 버전을 `.centralu/apps/project-board/project.json`의 `release.versionFiles`에 있는 모든 파일에 반영한다: `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`(과 `Cargo.lock`), `apps/desktop/package.json`, 그리고 모든 `packaging/npm/*/package.json`(shim의 핀 포함). 하나라도 어긋나면 `tooling/brand.test.ts`가 실패하고, 버전을 가진 파일이 그 목록에 없으면 `tooling/project-board-release.test.ts`가 실패한다. 커밋하고 push한다 — 릴리스 스크립트는 더러운 트리에서는 실행을 거부하므로, 배포되는 것과 git에 있는 것이 서로 다를 수 없다.
 
+   보드의 `bump`는 다른 빌드가 러너 대부분(`release.runners`의 4분의 3, 여기서는 GitHub의 20)을 쓰고 있으면 경고한다: bump PR의 잡 24개가 그 뒤에서 기다리게 되고, 0.1.0-beta.26에서 5–7분이 들었다(#1035).
+
 2. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 둔다. 모든 플랫폼을 빌드하고 모든 패키지를 pack하되 아무것도 배포하지 않는다. 머지한 뒤가 아니라 bump 풀 리퀘스트의 CI가 도는 동안 그 브랜치에서 돌린다(#1035, 임계 경로에서 약 27분): main의 버전이 아직 릴리스된 버전인 동안 보드의 `rehearse`가 그렇게 한다. `guard`는 그 브랜치의 `brand.ts`에서 버전을 읽고 ref는 태그 push에서만 확인하므로 어느 브랜치에서 실행해도 리허설이 된다(`tooling/release-workflow.test.ts`가 그 스크립트를 돌린다). 브랜치에서의 배포는 `npm-publish` 환경의 브랜치 정책(main과 `v*`만)이 거부한다. squash는 main에 트리가 같은 새 커밋을 만들고, `tag`는 bump PR의 CI를 받아들이듯(#629) 커밋 트리가 main과 같은 bump 브랜치의 성공한 리허설을 받아들인다. 브랜치가 main에 맞춰져 있을 때만 리허설한다: 그렇지 않으면 squash가 다른 파일을 빌드하게 되므로 `rehearse`가 거부한다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.
 
    각 패키지의 `npm pack` 출력을 읽는다. shim 잡은 플랫폼 패키지들이 이 버전으로 레지스트리에 없다는 노란 경고로 끝나는데, 그것은 리허설이라는 사실 그대로일 뿐 결함이 아니다.

@@ -5,7 +5,7 @@
 // short in-memory cache and nothing on disk.
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { short } from './util.mjs'
+import { mapLimit, short } from './util.mjs'
 
 const GH_TIMEOUT_MS = 30_000
 const MAX_PAGES = 20
@@ -867,5 +867,25 @@ export async function dispatchWorkflow(repo, workflow, ref, inputs) {
   } catch (e) {
     if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
     throw new GitHubError('github', `GitHub refused to start ${workflow}: ${firstLine(e)}`)
+  }
+}
+
+/**
+ * How busy the repository's runners are: the jobs of every queued or running workflow run, those on a
+ * runner now (`running`) and those waiting for one (`queued`). A job held by an environment approval
+ * holds no runner and is not counted.
+ */
+export async function activeJobs(repo) {
+  checkRepo(repo)
+  const runs = new Map()
+  for (const status of ['in_progress', 'queued']) {
+    const r = await restJson(`repos/${repo}/actions/runs?status=${status}&per_page=100`)
+    for (const run of r?.workflow_runs ?? []) runs.set(run.id, run)
+  }
+  const jobs = (await mapLimit([...runs.keys()], 4, (id) => runJobs(repo, id))).flat()
+  return {
+    runs: runs.size,
+    running: jobs.filter((j) => j.status === 'in_progress').length,
+    queued: jobs.filter((j) => ['queued', 'pending', 'requested'].includes(j.status)).length,
   }
 }

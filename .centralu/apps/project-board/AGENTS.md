@@ -396,6 +396,8 @@ step shows on the screen.
     in a temporary index (the checkout, its index and branches never move), pushes
     `chore/release-<version>` (never forced) and opens the pull request through `open_pr`'s own code,
     checked with `dryRun` before the push: the merged list under Why, the files under What changed.
+    It warns, never refuses, when other builds' jobs (running plus queued, of every active run) reach
+    three quarters of `release.runners` (default 20): the bump PR's CI would queue behind them (#1035).
   - `rehearse`: CI green, the version untagged and its files consistent; starts the workflow on main
     with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
     A rehearsal already running or passed on that commit is not started again. While main's version

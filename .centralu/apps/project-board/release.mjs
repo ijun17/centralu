@@ -64,6 +64,9 @@ export function releaseConfig(c = {}) {
     // The packages that must be on the registry before the shim's approval: every package.json these
     // name at the tagged commit, but the shim's own
     registry: { packages: c.registry?.packages ?? ['packaging/npm/*/package.json'], shim: c.registry?.shim ?? 'packaging/npm/centralu/package.json' },
+    // How many jobs the repository's runners take at once (GitHub's 20 for a free account), for the
+    // bump's warning when other builds hold most of them
+    runners: Number(c.runners) > 0 ? Number(c.runners) : 20,
   }
 }
 
@@ -388,6 +391,25 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
 
 // --- bump ---------------------------------------------------------------------------------------------
 
+// Busy: other builds' jobs on a runner or waiting for one, at least this share of `runners` (#1035)
+const BUSY_SHARE = 0.75
+
+/**
+ * A warning when other builds hold most runners: the bump PR's CI then queues behind them (5-7 min on
+ * 0.1.0-beta.26, #1035). Never a refusal; a failed read says so and the bump goes on.
+ */
+async function runnerWarning(repo, cfg, gh) {
+  let load
+  try {
+    load = await gh.activeJobs(repo)
+  } catch (e) {
+    return `How busy the runners are could not be read (${e.message}); the bump goes on.`
+  }
+  const used = load.running + load.queued
+  if (used < cfg.runners * BUSY_SHARE) return null
+  return `Runners are busy: ${plural(load.running, 'job')} of other builds running and ${load.queued} queued, against ${cfg.runners} runners (${plural(load.runs, 'active run')}). The bump PR's CI will wait for them; push it once they drain, or cancel builds that no longer matter.`
+}
+
 const wrap = (text, width = 72) => {
   const out = []
   let line = ''
@@ -452,13 +474,16 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
 
   const message = `${title}\n\n${wrap(`The version ${s.version} → ${next} in ${vf.named.join(', ')}.`)}\n`
   const changed = Object.entries(vf.counts).map(([p, n]) => `${p}: ${plural(n, 'place')}`)
-  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`)]
+  const warning = await runnerWarning(repo, cfg, gh)
+  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`), ...(warning ? [warning] : [])]
+  const note = warning ? ` ${warning}` : ''
   if (!confirm)
     return {
-      summary: `Ready to bump ${s.version} → ${next} on ${s.main} at ${short(s.tip)}, as ${branch}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.`,
+      summary: `Ready to bump ${s.version} → ${next} on ${s.main} at ${short(s.tip)}, as ${branch}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.${note}`,
       lines: [...lines, ...notesLines(s)],
       next,
       pushed: false,
+      warning,
     }
   const commit = await commitFiles(s.root, s.tip, vf.files, message)
   try {
@@ -471,10 +496,11 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
   if (!opened.ok) return { summary: `Pushed ${branch}, but the pull request was not opened: ${opened.text}`, lines, next, pushed: true, partial: true }
   lines.push(opened.text)
   return {
-    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Merge it once CI is green (merge_when_green), then rehearse and tag.`,
+    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.${note}`,
     lines,
     next,
     pushed: true,
+    warning,
     number: opened.number,
     url: opened.url,
   }
