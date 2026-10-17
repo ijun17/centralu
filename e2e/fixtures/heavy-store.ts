@@ -661,7 +661,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
     for (let i = 0; i < spec.appRuns; i++) {
       const id = `run-${i + 1}`
       const createdAt = T0 + i * 600_000
-      store.beginAppRun({
+      store.appRuns.beginAppRun({
         id,
         projectId: projects[0]!.id,
         appId: g.pick(['project-board', 'notes', 'release-check']),
@@ -678,7 +678,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
         createdAt,
         sessionId: null,
       })
-      store.endAppRun(id, {
+      store.appRuns.endAppRun(id, {
         status: g.chance(0.93) ? 'ok' : 'error',
         durationMs: g.int(5, 40_000),
         error: null,

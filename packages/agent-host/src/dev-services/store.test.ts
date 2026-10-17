@@ -1705,7 +1705,7 @@ describe('the run log chain (M4 D-6)', () => {
   const t0 = 1_760_000_000_000
   let seq = 0
   const put = (s: Store, id: string, appId: string, parentRunId: string | null, over: Record<string, unknown> = {}) =>
-    s.beginAppRun({
+    s.appRuns.beginAppRun({
       id, projectId: 'p1', appId, kind: 'tool', tool: 't', callerKind: parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0 + seq++, sessionId: null, ...over,
     })
@@ -1720,17 +1720,17 @@ describe('the run log chain (M4 D-6)', () => {
     put(s, 'c1', 'other', null) // an unrelated app
     put(s, 'lonely', 'notes', null, { kind: 'broker', tool: 'host_data', callerKind: 'app', status: 'rejected' }) // requested with no open run
 
-    const ids = (appId: string, limit: number) => s.listAppRuns('p1', appId, limit).map((r) => r.id)
+    const ids = (appId: string, limit: number) => s.appRuns.listAppRuns('p1', appId, limit).map((r) => r.id)
     expect(ids('notes', 10)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
     // The limit counts roots — rows below a root do not push a root out
     expect(ids('notes', 2)).toEqual(['lonely', 'a2'])
     expect(ids('notes', 3)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
     // In helper's log, the row notes called is the root — its parent (notes's own row) does not belong to helper
     expect(ids('helper', 10)).toEqual(['b1-ask', 'b1'])
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
 
-    s.linkAppRunSession('a1', 's-1')
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
+    s.appRuns.linkAppRunSession('a1', 's-1')
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
   })
 
   it('v36 records all come up as tool-call rows', () => {
@@ -1748,7 +1748,7 @@ describe('the run log chain (M4 D-6)', () => {
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10)).toEqual([
       expect.objectContaining({ id: 'r1', kind: 'tool', sessionId: null, tool: 'echo', status: 'ok' }),
     ])
     s.close()
@@ -1769,23 +1769,23 @@ describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
 
   it('only counts run_agent rows a session stood up — duration and tokens are summed, and a run with no reported tokens is left out only of the token sum', () => {
     const s = new Store()
-    s.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
-    s.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
-    s.beginAppRun(row('a', { sessionId: 's1' }))
-    s.endAppRun('a', { status: 'ok', durationMs: 4_000, error: null, tokens: { input: 1_200, output: 80 } })
-    s.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
-    s.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
-    s.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
+    s.appRuns.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
+    s.appRuns.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
+    s.appRuns.beginAppRun(row('a', { sessionId: 's1' }))
+    s.appRuns.endAppRun('a', { status: 'ok', durationMs: 4_000, error: null, tokens: { input: 1_200, output: 80 } })
+    s.appRuns.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
+    s.appRuns.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
+    s.appRuns.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
     // A request that never stood up an agent, an unrelated request, another app's agent
-    s.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
-    s.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
-    s.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
+    s.appRuns.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
+    s.appRuns.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
+    s.appRuns.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
 
-    expect(s.appAgentUse('p1', 'notes', t0)).toEqual({ runs: 3, durationMs: 6_500, tokens: { input: 1_200, output: 80 } })
-    expect(s.appAgentUse('p1', 'notes', t0 - 60_000)).toEqual({ runs: 4, durationMs: 13_500, tokens: { input: 6_200, output: 580 } })
-    expect(s.appAgentUse('p1', 'nobody', 0)).toEqual({ runs: 0, durationMs: 0, tokens: null })
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a')?.tokens).toEqual({ input: 1_200, output: 80 })
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
+    expect(s.appRuns.appAgentUse('p1', 'notes', t0)).toEqual({ runs: 3, durationMs: 6_500, tokens: { input: 1_200, output: 80 } })
+    expect(s.appRuns.appAgentUse('p1', 'notes', t0 - 60_000)).toEqual({ runs: 4, durationMs: 13_500, tokens: { input: 6_200, output: 580 } })
+    expect(s.appRuns.appAgentUse('p1', 'nobody', 0)).toEqual({ runs: 0, durationMs: 0, tokens: null })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a')?.tokens).toEqual({ input: 1_200, output: 80 })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
   })
 
   it('v37 records gain the token columns, and old rows are empty', () => {
@@ -1803,8 +1803,8 @@ describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([expect.objectContaining({ id: 'r1', kind: 'broker', sessionId: 's1', tokens: null })])
-    expect(s.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10)).toEqual([expect.objectContaining({ id: 'r1', kind: 'broker', sessionId: 's1', tokens: null })])
+    expect(s.appRuns.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
     s.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1947,9 +1947,9 @@ describe('the trash (#204)', () => {
       s.recordCommit('p1', `sha-${id}`, id)
       const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
         status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
-      s.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
-      s.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
-      s.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
+      s.appRuns.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
+      s.appRuns.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
+      s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
     }
     expect(await s.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
     expect(s.loadMessages('s1', 10)).toHaveLength(3)
@@ -1988,8 +1988,8 @@ describe('the trash (#204)', () => {
     s.recordCommit('p1', 'sha-gone', 'purged-long-ago')
     const run = { projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: 'view', parentRunId: null,
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
-    s.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
-    s.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
+    s.appRuns.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
+    s.appRuns.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
 
     s.deleteProject('p1')
 

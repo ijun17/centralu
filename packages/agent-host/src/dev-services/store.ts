@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { AgentUse, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -73,7 +73,7 @@ export class Store extends MigrationRunner {
   private readonly trash: TrashRecords
   private readonly settings: SettingsRecords
   private readonly permissions: PermissionRecords
-  private readonly appRuns: AppRunRecords
+  readonly appRuns: AppRunRecords
   private readonly children: ChildOwnershipRecords
   private readonly machines: LinkedMachineRecords
 
@@ -475,40 +475,6 @@ export class Store extends MigrationRunner {
 
   listProjectConsents(): ConsentRow[] {
     return this.permissions.listProjectConsents()
-  }
-
-  // ── AppRunRecords (store/app-runs.ts) ──
-
-  beginAppRun(r: AppRunRecord): void {
-    return this.appRuns.beginAppRun(r)
-  }
-
-  linkAppRunSession(id: string, sessionId: string): void {
-    return this.appRuns.linkAppRunSession(id, sessionId)
-  }
-
-  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null; tokens?: { input: number; output: number } | null }): void {
-    return this.appRuns.endAppRun(id, end)
-  }
-
-  appAgentUse(projectId: string | null, appId: string, since: number): AgentUse {
-    return this.appRuns.appAgentUse(projectId, appId, since)
-  }
-
-  keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
-    return this.appRuns.keepAppRunFailure(f, keep)
-  }
-
-  listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null })[] {
-    return this.appRuns.listAppRuns(projectId, appId, limit)
-  }
-
-  pruneAppRuns(before: number): number {
-    return this.appRuns.pruneAppRuns(before)
-  }
-
-  settleUnfinishedAppRuns(error: string): number {
-    return this.appRuns.settleUnfinishedAppRuns(error)
   }
 
   // ── ChildOwnershipRecords (store/child-ownership.ts) ──

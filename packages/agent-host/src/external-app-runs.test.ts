@@ -186,15 +186,15 @@ describe('cleanup at startup', () => {
 
   it('a record older than 30 days and its original text are swept, while what is within that window remains', () => {
     const day = 24 * 60 * 60 * 1000
-    store.beginAppRun(row('old', Date.now() - 31 * day, 'error'))
-    store.keepAppRunFailure({ runId: 'old', projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: Date.now() - 31 * day }, 20)
-    store.beginAppRun(row('recent', Date.now() - 29 * day))
+    store.appRuns.beginAppRun(row('old', Date.now() - 31 * day, 'error'))
+    store.appRuns.keepAppRunFailure({ runId: 'old', projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: Date.now() - 31 * day }, 20)
+    store.appRuns.beginAppRun(row('recent', Date.now() - 29 * day))
     make()
     expect(runs().map((r) => r.id)).toEqual(['recent'])
   })
 
   it('a run that never saw its own end (the host died) closes as error — so it never appears to be running forever', () => {
-    store.beginAppRun(row('orphan', Date.now() - 1000, 'running'))
+    store.appRuns.beginAppRun(row('orphan', Date.now() - 1000, 'running'))
     make()
     expect(byId('orphan')).toMatchObject({ status: 'error', error: 'the host stopped before this call finished' })
   })
@@ -222,6 +222,6 @@ describe('RPC and project deletion', () => {
     expect(listed[0]).toMatchObject({ callerKind: 'view', status: 'ok', argsSummary: '{"text":"via rpc"}' })
 
     await rpc('projects.delete', { projectId: id })
-    expect(store.listAppRuns(id, 'notes', 10)).toEqual([])
+    expect(store.appRuns.listAppRuns(id, 'notes', 10)).toEqual([])
   })
 })
