@@ -302,9 +302,8 @@ export function UsageDonuts() {
 }
 
 /**
- * One linked machine's donuts, behind a hairline and its name (#82).
- *
- * The name is the same hairline chip in the faint ink as `MachineTag`, so the bar does not gain a new kind of mark.
+ * One linked machine's donuts and its name on one soft tinted pill (#82): the pill says which donuts are that machine's,
+ * so the name inside needs no chip of its own. A fill rather than a border, so it adds no height to the bar's lines.
  * A machine that is not connected shows its state in place of donuts (the sidebar's words for it), and is not asked.
  * One that is connected but has no usable tool says so in the same faint words as this computer would, so a missing
  * group never reads as "this machine has no limits".
@@ -325,7 +324,7 @@ function MachineGroup({
   const connected = info.status === 'connected'
   return (
     <span
-      className="ml-1 flex items-center gap-0.5 border-l border-line pl-1.5"
+      className="ml-1.5 flex items-center gap-0.5 rounded-full bg-surface-hover/30 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -341,7 +340,7 @@ function MachineGroup({
           </span>
         }
       >
-        <span className="block max-w-[96px] truncate rounded-md border border-line px-1 text-2xs leading-body text-ink-faint">
+        <span className="block max-w-[96px] truncate pr-0.5 text-2xs leading-body text-ink-faint">
           {info.name}
         </span>
       </Tooltip>
