@@ -661,6 +661,13 @@ pick a worktree as described; Codex (it reaches MCP tools through `exec`, §6).
 defers `agent_session`, so its resident cost does not move there. The line naming the delete once a child's answer is
 used rides in the answers (`done`, `at_rest`, a finished turn's report), at no resident cost. Not measured live.
 
+**#861: `name` (2026-10-17).** `start_agent` gained `name`, a bare optional string with no description: a short name
+for the child, shown in the sidebar, that its new worktree's branch is made from. Characters (`residentCost`): the
+agent set 1,333 → 1,358 (`AGENT_BUDGET_CHARS` 1,350 → 1,375); every ordinary Claude request carries the 25, as
+`start_agent` is loaded there. Not measured live: about 7 tokens at the ratio §10 measured. Without a name, the child's
+name and branch skip the leading words its task shares with a sibling's name (`distinguishingText`), which costs no
+schema.
+
 ## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
 
 The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person

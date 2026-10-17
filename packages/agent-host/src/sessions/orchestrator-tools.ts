@@ -149,6 +149,7 @@ const HANDLERS: ToolHandlers = {
     const effort = filled(args.effort)
     const { difficulty } = args
     const branch = filled(args.branch)
+    const name = filled(args.name)
     return agentRunText(
       await tools.startAgent(
         {
@@ -161,6 +162,7 @@ const HANDLERS: ToolHandlers = {
           ...(args.worktree === true || branch ? { worktree: true } : {}),
           ...(branch ? { branch } : {}),
           ...(typeof args.lsp === 'boolean' ? { lsp: args.lsp } : {}),
+          ...(name ? { name } : {}),
         },
         signal,
       ),

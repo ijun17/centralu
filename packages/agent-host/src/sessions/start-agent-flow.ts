@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentName, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentName, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
@@ -291,9 +291,18 @@ export class AgentStartFlow {
     progress.unchecked = unchecked
     const found = await adapter.detect()
     if (!found.installed || !found.loggedIn) return done({ ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}. ${ASK_THE_PERSON}` })
+    /*
+     * The name the child starts with and the words its branch is made of (#861): the caller's short name, or the task
+     * from the first word that tells it apart from this caller's other children
+     */
+    const given = givenAgentName(opts.name)
+    const siblings = [...this.host.meta.values()].filter((s) => s.askedBy === callerId).map((s) => s.name)
+    const basis = given ?? distinguishingText(opts.task, siblings)
     // A new worktree (part 2): its branch is settled before the card, which names it
-    const worktree = opts.worktree || opts.branch ? await this.agentWorktreeBranch(project, opts) : null
+    const worktree = opts.worktree || opts.branch ? await this.agentWorktreeBranch(project, opts, basis) : null
     if (worktree && 'error' in worktree) return done({ ok: false, error: worktree.error })
+    // A worktree child is named by its branch, as every worktree session is, unless the caller named it
+    const name = given ?? (worktree ? undefined : agentName(basis))
 
     progress.stage = 'asking'
     const detail: Extract<ApprovalDetail, { kind: 'agent_start' }> = {
@@ -305,6 +314,7 @@ export class AgentStartFlow {
       preset: caller.permissionPreset,
       ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
       text: taskLine(opts.task),
+      ...(given ? { name: given } : {}),
     }
     const choice = {
       tool,
@@ -314,6 +324,7 @@ export class AgentStartFlow {
       task: opts.task,
       ...(unchecked ? { unchecked } : {}),
       ...(opts.lsp !== undefined ? { lsp: opts.lsp } : {}),
+      ...(name ? { name } : {}),
     }
     let request: AgentStartRequest | undefined
     const consent = await this.ensureAgentConsent(callerId, detail, signal, (requestId) => {
@@ -386,7 +397,7 @@ export class AgentStartFlow {
   private async createAgentChild(
     callerId: string,
     project: { id: string; name: string; path: string },
-    choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked' | 'lsp'>,
+    choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked' | 'lsp' | 'name'>,
     progress: StartProgress,
     approvedPreset?: PermissionPreset,
     /** The start request this child is made for, if one stood: withdrawn while the child is made, it gets no task (#839) */
@@ -415,7 +426,7 @@ export class AgentStartFlow {
         callerId,
         caller,
         project,
-        { tool, model, effort, unchecked, task: choice.task, ...(choice.lsp !== undefined ? { lsp: choice.lsp } : {}) },
+        { tool, model, effort, unchecked, task: choice.task, ...(choice.lsp !== undefined ? { lsp: choice.lsp } : {}), ...(choice.name ? { name: choice.name } : {}) },
         worktree,
         progress,
         release,
@@ -497,7 +508,7 @@ export class AgentStartFlow {
     callerId: string,
     caller: SessionInfo,
     project: { id: string; name: string; path: string },
-    choice: { tool: string; model?: string; effort?: string; unchecked?: string; task: string; lsp?: boolean },
+    choice: { tool: string; model?: string; effort?: string; unchecked?: string; task: string; lsp?: boolean; name?: string },
     worktree: { branch: string } | null,
     progress: StartProgress,
     release: () => void,
@@ -544,11 +555,13 @@ export class AgentStartFlow {
       (callerNow && !presetWithin(child.permissionPreset, callerNow.permissionPreset)
         ? `This session's permissions were lowered to ${callerNow.permissionPreset} while the session was being made.`
         : null)
-    if (late) return done(await this.abandonChild(child, late, worktree ? undefined : agentName(choice.task)))
+    // A request stored by an older host carries no name: named from its task, as that host did
+    const name = choice.name ?? (worktree ? undefined : agentName(choice.task))
+    if (late) return done(await this.abandonChild(child, late, name))
     progress.stage = 'created'
     progress.childId = child.id
-    // A worktree session is named by its branch, as every worktree session is; otherwise by its job
-    if (!worktree) this.host.rename(child.id, agentName(choice.task))
+    // A worktree session is named by its branch, as every worktree session is, unless the caller named it (#861)
+    if (name) this.host.rename(child.id, name)
     const key = `${callerId}>${child.id}`
     const d = this.flow.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
     // The delegation counts the child now
@@ -571,12 +584,12 @@ export class AgentStartFlow {
    * named from the job (`agentBranch`). Refused before the card when the project is no git repository, so the person
    * is never asked about a worktree that cannot be made.
    */
-  async agentWorktreeBranch(project: { id: string; path: string }, opts: StartAgentOpts): Promise<{ branch: string } | { error: string }> {
+  async agentWorktreeBranch(project: { id: string; path: string }, opts: StartAgentOpts, basis = opts.task): Promise<{ branch: string } | { error: string }> {
     const summary = await gitSummary(project.path, this.host.gitTrust(project.id))
     if (!summary.isRepo) return { error: 'This project is not a git repository, so it has no worktrees. Start the agent without one.' }
     const asked = opts.branch?.trim()
     if (asked) return (await gitValidBranchName(asked)) ? { branch: asked } : { error: `Not a valid branch name: ${asked}` }
-    return { branch: agentBranch(opts.task, randomUUID()) }
+    return { branch: agentBranch(basis, randomUUID()) }
   }
 
   /** A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. */

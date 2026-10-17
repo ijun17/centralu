@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
@@ -86,8 +86,36 @@ describe('the branch named from a job (part 2)', () => {
   it('is a slug of the job under the prefix, with a few characters of the id; an empty slug is "agent"', () => {
     expect(agentBranch('Write the parser!', '1A2b-3c')).toBe('centralu/write-the-parser-1a2b')
     expect(agentBranch('파서를 써 줘', 'abcd')).toBe('centralu/agent-abcd')
-    expect(agentBranch('a'.repeat(80), 'abcd')).toBe(`centralu/${'a'.repeat(40)}-abcd`)
+    expect(agentBranch('a'.repeat(80), 'abcd')).toBe(`centralu/${'a'.repeat(35)}-abcd`)
     expect(agentBranch('fix: the --flag handling ', 'abcd')).toBe('centralu/fix-the-flag-handling-abcd')
+  })
+
+  // #861: `centralu/round-4-refactor-of-centralu-area-c-stor-c6cf`, cut inside the word that told six apart
+  it('stays within 40 characters after the prefix and is cut at a word', () => {
+    const branch = agentBranch('Round 4 refactor of Centralu, area C (stored data)', 'c6cf')
+    expect(branch).toBe('centralu/round-4-refactor-of-centralu-area-c-c6cf')
+    expect(branch.length - 'centralu/'.length).toBeLessThanOrEqual(40)
+  })
+})
+
+describe('the words that tell a child apart (#861)', () => {
+  const task = (area: string) => `Round 4 refactor of Centralu, area ${area} (stored data and the rest)`
+  it('skips the leading words a task shares with a sibling, by name or by branch', () => {
+    expect(distinguishingText(task('D'), ['Round 4 refactor of Centralu, area C (stored…'])).toBe('D (stored data and the rest)')
+    expect(distinguishingText(task('D'), ['centralu/round-4-refactor-of-centralu-area-c-c6cf'])).toBe('D (stored data and the rest)')
+    expect(agentBranch(distinguishingText(task('D'), ['centralu/round-4-refactor-of-centralu-area-c-c6cf']), 'ab12')).toBe('centralu/d-stored-data-and-the-rest-ab12')
+  })
+  it('keeps the task whole with no sibling, one word shared, or nothing left after the shared words; two shared are left out', () => {
+    expect(distinguishingText(task('C'), [])).toBe(task('C'))
+    expect(distinguishingText('Write the parser', ['Write the lexer'])).toBe('parser')
+    expect(distinguishingText('Write tests', ['Write docs'])).toBe('Write tests')
+    expect(distinguishingText('Write the parser', ['Write the parser'])).toBe('Write the parser')
+  })
+  it('a given name is one line of at most 40 characters; a blank one is none', () => {
+    expect(givenAgentName('  Area C\nstore  ')).toBe('Area C store')
+    expect(givenAgentName('x'.repeat(50))).toBe(`${'x'.repeat(40)}…`)
+    expect(givenAgentName('   ')).toBeUndefined()
+    expect(givenAgentName(undefined)).toBeUndefined()
   })
 })
 
@@ -1592,6 +1620,42 @@ describe('starting another agent in the same project', () => {
       } finally {
         logged.mockRestore()
       }
+    })
+
+    // #861: six children named from their tasks' first words read alike in the sidebar
+    it('names the child and its branch by the short name the caller gave, said on the card', async () => {
+      repo()
+      const s = await session('safe')
+      const p = w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area C (stored data)', worktree: true, name: 'Area C: stored data', wait: false })
+      await w.until(() => !!agentCard(s))
+      const detail = agentCard(s)!.detail as { name?: string; worktree?: { branch: string } }
+      expect(detail.name).toBe('Area C: stored data')
+      expect(detail.worktree?.branch).toMatch(/^centralu\/area-c-stored-data-[a-z0-9]{4}$/)
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      expect(await p).toMatchObject({ ok: true })
+      const c = childrenOf(s)[0]!
+      expect(c.name).toBe('Area C: stored data')
+      expect(c.worktree?.branch).toBe(detail.worktree?.branch)
+    })
+
+    it("without a name, a second child's branch skips the words its task shares with the first", async () => {
+      repo()
+      allowProject()
+      const s = await session()
+      await w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area C (stored data)', worktree: true, wait: false })
+      await w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area D (the apps runtime)', worktree: true, wait: false })
+      const [first, second] = childrenOf(s)
+      expect(first!.name).toMatch(/^centralu\/round-4-refactor-of-centralu-area-c-[a-z0-9]{4}$/)
+      expect(second!.name).toMatch(/^centralu\/d-the-apps-runtime-[a-z0-9]{4}$/)
+    })
+
+    it('without a worktree, a named child is called by its name, and one without by what tells its task apart', async () => {
+      allowProject()
+      const s = await session()
+      await w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area B (protocol)', name: 'Area B', wait: false })
+      await w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area C (stored data)', wait: false })
+      await w.mgr.startAgent(s, { task: 'Round 4 refactor of Centralu, area D (the apps runtime)', wait: false })
+      expect(childrenOf(s).map((c) => c.name)).toEqual(['Area B', 'Round 4 refactor of Centralu, area C (stored dat…', 'D (the apps runtime)'])
     })
 
     it('opens the child in a worktree on a branch named from its job, said on the card, linked to its parent', async () => {

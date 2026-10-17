@@ -29,6 +29,8 @@ export type AgentStartRequest = {
   unchecked?: string
   /** start_agent's code intelligence choice (#686) */
   lsp?: boolean
+  /** The name the child starts with (#861): the caller's, or one made from its task; absent for a worktree child named by its branch */
+  name?: string
   /**
    * The start is allowed (by the card or the project's trust) and waits only for memory (#686): a host that takes it
    * over starts it when memory allows, without raising the card again

@@ -537,8 +537,8 @@ below retained for `safe` and `normal`:
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
 project's repository instead of the caller's folder, through the same path as the new-session window's worktree
 option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step;
-`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
-`centralu/write-the-parser-1a2b`), settled before the card, which names it. It forks from the caller's own branch
+`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job or from the caller's `name` (`agentBranch`:
+`centralu/write-the-parser-1a2b`, at most 40 characters after the prefix, cut at a word, #861), settled before the card, which names it. It forks from the caller's own branch
 when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
@@ -747,10 +747,12 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 1,332 characters (`AGENT_BUDGET_CHARS` 1,350; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,357 characters (`AGENT_BUDGET_CHARS` 1,375; 1,332 before #861's `name`, a bare string; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
-`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
-is named from its task and the person renames it.
+`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. `name` (#861) is a short name
+the caller gives: the child's name in the sidebar, and what its new worktree's branch is made from. Without one, the
+child is named from its task (a worktree child by its branch), skipping the leading words the task shares with a
+sibling's name (`distinguishingText`, at least two of them), and the person renames it.
 
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that

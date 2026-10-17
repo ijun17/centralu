@@ -110,7 +110,9 @@ export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_sta
   const where = d.worktree ? `${quoted(d.project.name)}, in a new worktree on ${quoted(d.worktree.branch)},` : `${quoted(d.project.name)},`
   // A model the person's setting chose for the difficulty the caller named (#729) says so: the person picked it, not the agent
   const model = d.model ? ` (${d.model}${d.difficulty ? `, your choice for ${d.difficulty} work` : ''})` : ''
-  return `Start ${d.tool}${model} in ${where} with ${d.preset} permissions, to ${d.text}?`
+  // The name the caller gave it (#861) is what the sidebar will show, so the person reads it here first
+  const named = d.name ? ` as ${quoted(d.name)}` : ''
+  return `Start ${d.tool}${model}${named} in ${where} with ${d.preset} permissions, to ${d.text}?`
 }
 
 /** The question an update card asks (#581) */

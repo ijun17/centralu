@@ -338,8 +338,9 @@ export const DELEGATE_BUDGET_CHARS = 450
  *
  * Two tools, as the issue proposed: starting is the request a person makes in words ("have Codex write it"), so it is
  * loaded; working with a child already started is reached from start_agent's own answer, which names agent_session,
- * so on Claude it waits behind tool search (the attach_app pattern, #522). No `name` argument: the child is named from
- * its task, and the person renames it; each argument rides in every request.
+ * so on Claude it waits behind tool search (the attach_app pattern, #522). `name` (#861): six children named from their
+ * tasks' first words read alike in the sidebar; a short name the caller gives is the name and the branch, and without
+ * one the name skips the words the task shares with its siblings. No description: each word rides in every request.
  */
 export const AGENT_TOOLS = [
   {
@@ -371,6 +372,7 @@ export const AGENT_TOOLS = [
        * caller's call per task (refactors and wide cross-file changes)
        */
       lsp: z.boolean().optional(),
+      name: z.string().optional(),
     }),
   },
   {
@@ -401,8 +403,9 @@ export const AGENT_TOOLS = [
  * 1,085 → 1,332), loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, measured live
  * (docs/tool-cost.md §10). Guidance a caller needs before
  * its first call has no answer to ride in. #690's `list` made the set 1,333 (agent_session 534 → 535, deferred on Claude).
+ * 1,350 until #861's `name` (a bare string, 25 characters: the set 1,333 → 1,358).
  */
-export const AGENT_BUDGET_CHARS = 1350
+export const AGENT_BUDGET_CHARS = 1375
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
