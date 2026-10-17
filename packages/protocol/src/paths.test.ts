@@ -55,11 +55,13 @@ describe('a clone source', () => {
 describe('a remote address as one repository', () => {
   it('reads https, ssh and scp-like addresses of one repository as the same', () => {
     const one = [
-      'https://github.com/Me/App.git',
+      'https://GitHub.com/me/app.git',
       'https://github.com/me/app/',
       'https://user@github.com:443/me/app',
+      'https://user:ghp_secret@github.com/me/app.git',
       'ssh://git@github.com/me/app.git',
       'ssh://git@github.com:22/me/app',
+      'ssh://git@github.com/~/me/app',
       'git@github.com:me/app.git',
       'github.com:me/app',
       '  git@github.com:me/app.git/  ',
@@ -67,17 +69,20 @@ describe('a remote address as one repository', () => {
     for (const url of one) expect(gitRemoteKey(url), url).toBe('github.com/me/app')
   })
 
-  it('tells two repositories, or two hosts, apart', () => {
+  it('tells two repositories, two hosts, or two cases of a path apart', () => {
     expect(gitRemoteKey('git@github.com:me/app.git')).not.toBe(gitRemoteKey('git@github.com:me/app-two.git'))
     expect(gitRemoteKey('git@github.com:me/app.git')).not.toBe(gitRemoteKey('git@gitlab.com:me/app.git'))
     expect(gitRemoteKey('https://github.com/me/app')).not.toBe(gitRemoteKey('https://github.com/you/app'))
+    // Only the host is lowercased: a host may tell these apart
+    expect(gitRemoteKey('https://git.example/Team/App')).toBe('git.example/Team/App')
+    expect(gitRemoteKey('https://git.example/Team/App')).not.toBe(gitRemoteKey('https://git.example/team/app'))
   })
 
-  it('keeps a local path as a path, with one kind of separator, and has no key for nothing', () => {
-    expect(gitRemoteKey('C:\\repos\\app.git')).toBe('c:/repos/app')
-    expect(gitRemoteKey('/srv/git/app.git')).toBe('/srv/git/app')
-    expect(gitRemoteKey('file:///srv/git/app.git')).toBe('/srv/git/app')
-    expect(gitRemoteKey('   ')).toBeNull()
+  // A folder names a repository only on its own computer (#1038 review): two machines' local remotes are never one
+  it('has no key for a local path, a file:// address, or nothing', () => {
+    for (const url of ['C:\\repos\\app.git', '/srv/git/app.git', '../app.git', './app', 'file:///srv/git/app.git', '\\\\server\\share\\app', '   ']) {
+      expect(gitRemoteKey(url), url).toBeNull()
+    }
   })
 })
 

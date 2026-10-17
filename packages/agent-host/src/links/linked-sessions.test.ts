@@ -64,6 +64,24 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     })
   })
 
+  // #1038 review: a machine from before #1038 drops createSession's agentDepth, so start_agent must know it is one
+  it("says a project's origin cannot be read on a machine from before projects.origin, apart from a failure", async () => {
+    const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
+    const [project] = await linkedSessions(() => [m]).findProjects('apps')
+    const older = linkedSessions(() => [m], async (method) => {
+      throw new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
+    })
+    expect(await older.origin(project!)).toMatchObject({ ok: false, olderBuild: true })
+    const failing = linkedSessions(() => [m], async () => {
+      throw new Error('git said no')
+    })
+    const r = await failing.origin(project!)
+    expect(r).toMatchObject({ ok: false, error: 'git said no' })
+    expect('olderBuild' in r).toBe(false)
+    const reading = linkedSessions(() => [m], async () => ({ origin: 'git@github.com:me/apps.git' }))
+    expect(await reading.origin(project!)).toEqual({ ok: true, origin: 'git@github.com:me/apps.git' })
+  })
+
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
   it('creates a machine’s session under the preset the caller gives, normal when it gives none', async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })

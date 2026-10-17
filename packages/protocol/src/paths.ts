@@ -136,33 +136,37 @@ export function gitSourceError(url: string): string | null {
 /**
  * Which repository a remote address names, for telling two checkouts of one repository apart from two repositories
  * (#1038: start_agent on a linked machine finds the project there that is a checkout of the caller's). Every way to
- * write one address gives one key: the scheme, the user, a port, a trailing `/` or `.git` and the case are dropped, so
- * `git@github.com:Me/App.git`, `ssh://git@github.com/me/app` and `https://github.com/me/app/` are all
- * `github.com/me/app`. A local path keeps its separators as `/`. Null for an empty address.
+ * write one network address gives one key: the scheme, the user (and any password), a port, a trailing `/` or `.git`
+ * are dropped and the host is lowercased, so `git@GitHub.com:me/app.git`, `ssh://git@github.com/me/app` and
+ * `https://user:token@github.com/me/app/` are all `github.com/me/app`. The path keeps its case: a host may tell
+ * `Me/App` from `me/app`. Null for an empty address and for a local path or `file://` address: a folder names a
+ * repository only on the computer it is on, so two machines' local remotes are never one repository.
  */
 export function gitRemoteKey(url: string): string | null {
   let u = url.trim()
   if (!u) return null
   u = u.replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '').replace(/[/\\]+$/, '')
   const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(u)
-  let key: string
+  let host: string
+  let path: string
   if (scheme) {
-    // [user@]host[:port]/path; a file:// address is its path
+    if (scheme[1]!.toLowerCase() === 'file') return null
+    // [user[:password]@]host[:port]/path
     const rest = scheme[2]!
-    if (scheme[1]!.toLowerCase() === 'file') key = rest
-    else {
-      const slash = rest.indexOf('/')
-      const authority = slash < 0 ? rest : rest.slice(0, slash)
-      const host = authority.replace(/^[^@]*@/, '').replace(/:\d*$/, '')
-      key = `${host}/${slash < 0 ? '' : rest.slice(slash + 1)}`
-    }
+    const slash = rest.indexOf('/')
+    const authority = slash < 0 ? rest : rest.slice(0, slash)
+    host = authority.replace(/^.*@/, '').replace(/:\d*$/, '')
+    path = slash < 0 ? '' : rest.slice(slash + 1)
   } else {
-    // scp-like [user@]host:path, where the host is more than a Windows drive letter; otherwise a local path
-    const scp = /^(?:[^@/\\]+@)?([A-Za-z0-9.-]{2,}):(.+)$/.exec(u)
-    key = scp ? `${scp[1]}/${scp[2]}` : u
+    // scp-like [user@]host:path, where the host is more than a Windows drive letter; anything else is a local path
+    const scp = /^(?:[^@/\\]+@)?([A-Za-z0-9.-]{2,}):(?![/\\]{2})(.+)$/.exec(u)
+    if (!scp) return null
+    host = scp[1]!
+    path = scp[2]!
   }
-  key = key.replace(/\\/g, '/').replace(/\/~\//, '/').replace(/\/{2,}/g, '/').replace(/\/+$/, '').toLowerCase()
-  return key || null
+  path = path.replace(/\\/g, '/').replace(/^~\//, '').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!host || !path) return null
+  return `${host.toLowerCase()}/${path}`
 }
 
 /** The folder name a clone of `url` gets by default: the repository's own name, without `.git` (#515) */

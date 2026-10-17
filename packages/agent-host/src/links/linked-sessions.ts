@@ -275,10 +275,18 @@ export function linkedSessions(
     async origin(project) {
       const m = owner(project.id)
       if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
-      return attempt(m, async () => {
-        const r = (await route('projects.origin', { projectId: project.id })) as { origin?: unknown }
-        return { origin: typeof r?.origin === 'string' ? r.origin : null }
+      // A build from before #1038 has no `projects.origin`, and drops `agentDepth` too: said as such, not as a failure
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const r = (await route('projects.origin', { projectId: project.id })) as { origin?: unknown }
+          return { origin: typeof r?.origin === 'string' ? r.origin : null }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: projects.origin')) older = true
+          throw err
+        }
       })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1038`, olderBuild: true } : r
     },
 
     async interrupt(sessionId) {

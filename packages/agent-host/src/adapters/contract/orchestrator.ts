@@ -103,8 +103,11 @@ export type LinkedSessions = {
     project: LinkedProject,
     opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number },
   ): Promise<Outcome<{ sessionId: string; name: string }>>
-  /** A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none */
-  origin(project: LinkedProject): Promise<Outcome<{ origin: string | null }>>
+  /**
+   * A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none. `olderBuild`: the
+   * machine runs a Centralu from before it, which also drops `createSession`'s `agentDepth`
+   */
+  origin(project: LinkedProject): Promise<Outcome<{ origin: string | null }> | { ok: false; error: string; olderBuild: true }>
   /** Stops a machine's session's running turn (`agents.interrupt` there, #1038) */
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
