@@ -116,7 +116,8 @@ describe.skipIf(process.platform === 'win32')('the data folder is its owner’s 
 // Compared as real paths (#838 review): a trailing slash or a link to the data folder used to skip the mode fix
 describe('which folder is the data folder to make private', () => {
   it('the store’s folder when it is the data folder, however the data folder is spelled; none elsewhere', () => {
-    const data = realpathSync(mkdtempSync(join(tmpdir(), 'cc-private-')))
+    // native: on Windows the temp folder can be an 8.3 short name (RUNNER~1), which only the native call expands, as canonicalPath does
+    const data = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-private-')))
     try {
       expect(privateDataFolderFor(join(data, 'store.db'), `${data}${sep}`)).toBe(data)
       expect(privateDataFolderFor(join(data, 'store.db'), data)).toBe(data)
