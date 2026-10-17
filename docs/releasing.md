@@ -108,7 +108,10 @@ script rehearses by default and why nothing publishes automatically.
   Windows job (see [Windows](#windows-14-w3) below).
 - The same workflow runs the Playwright suite (`e2e/`) on ubuntu-24.04 in WebKit and in
   Chromium, the two engines the desktop app renders in, each split into shards that run side by
-  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). When a shard fails,
+  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). A shard that fails runs once
+  more inside its job, with a `::warning::` on the run naming it (#1035: a flaky shard cost a
+  rerun of the whole job, 5 to 7 minutes); Playwright itself does not retry, and a test that
+  passed only the second time is still one to fix. When a shard fails twice,
   `e2e report` merges each engine's shard reports into one HTML report with traces and uploads
   them as the `e2e-report` artifact, a folder per engine.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every

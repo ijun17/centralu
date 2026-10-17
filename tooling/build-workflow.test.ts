@@ -82,6 +82,17 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
 
+  // #1035: a flaky shard cost a rerun of its whole job, 5 to 7 minutes with the queue
+  it('runs a failed e2e shard once more inside its job, saying so', () => {
+    for (const id of ['e2e', 'e2e-chromium']) {
+      const body = job(id).body
+      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(body.slice(body.indexOf('- name: pnpm e2e')))?.[1] ?? ''
+      const lines = run.split('\n').map((l) => l.trim()).filter(Boolean)
+      expect(lines[0], id).toMatch(/^e2e\(\) \{ pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} .*; \}$/)
+      expect(lines.slice(1), id).toEqual(['if e2e; then exit 0; fi', expect.stringMatching(/^echo "::warning title=e2e \(/), 'e2e'])
+    }
+  })
+
   it('gives each gated matrix job a stand-in with the same checks, run on the other answer only', () => {
     for (const j of jobs.filter((x) => gate(x.body)?.[2] === 'true' && /^ {4}strategy:/m.test(x.body))) {
       const stand = job(`${j.id}-skipped`)
