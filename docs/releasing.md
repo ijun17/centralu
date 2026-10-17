@@ -288,6 +288,17 @@ The steps by hand:
    for the four platform jobs, which wait together, and again for the shim job after all of
    them have succeeded. That second approval is the last moment anything is reversible.
 
+   The board's `approve` checks its gate each time: the tagged commit's own CI green, and
+   before the shim also every other job of the run succeeded and every platform and host-only
+   package on the registry at this version, published from the tagged commit (`gitHead`).
+   With `wait: true` (and `confirm: true`) it waits for that gate and approves the moment it
+   passes, instead of a person noticing later (#1035: 5–6 min before the platforms and 14
+   min before the shim on 0.1.0-beta.26). It waits up to `waitMinutes` (default 45, at most
+   60), and a timeout approves nothing and says what it was still waiting for. What cannot
+   pass by itself (failed CI, a failed platform job, a package from another commit) refuses at
+   once, as without `wait`. Call it once after the tag and once more after the platform
+   approval; both approvals stay.
+
 5. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
 
 ### What the job graph guarantees

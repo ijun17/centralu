@@ -42,6 +42,7 @@
     "branchPrefix": "chore/release-",
     "workflow": ".github/workflows/release.yml",
     "rehearsalInputs": { "dry_run": "true" },
-    "environment": "npm-publish"
+    "environment": "npm-publish",
+    "registry": { "packages": ["packaging/npm/*/package.json"], "shim": "packaging/npm/centralu/package.json" }
   }
 }

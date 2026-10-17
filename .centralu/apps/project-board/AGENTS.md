@@ -406,7 +406,15 @@ step shows on the screen.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve
     (`current_user_can_approve`); otherwise it names the reviewers and the run's address. Says which
-    jobs wait; the shim's approval is the last reversible moment (docs/releasing.md).
+    jobs wait; the shim's approval is the last reversible moment (docs/releasing.md). The gate: the
+    tagged commit's own CI green, and before the shim also every other job of the run succeeded and
+    every package `release.registry.packages` names (but `release.registry.shim`) on the registry at
+    the version with `gitHead` the tagged commit (`PROJECT_BOARD_NPM_REGISTRY` points the tests at a
+    local one). `wait: true` with `confirm` (#1035) reads that gate every poll until it passes and
+    approves at once, up to `waitMinutes` (default 45, at most 60), with progress; a gate that cannot
+    pass by itself (failed CI or job, a package from other code, no permission) refuses at once, and a
+    timeout approves nothing and says what it still waited for. A waiting call does not hold other
+    board writes up (`serially` is skipped for it).
   - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
     newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
