@@ -52,6 +52,8 @@ import {
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
 import { SLOW } from './test-timing.js'
 import { alive } from '../packages/agent-host/src/process.test-helpers.js'
 
@@ -164,6 +166,100 @@ describe('the data folder and the state file', () => {
     writeFileSync(join(d, SERVE_STATE_FILE), 'not json')
     expect(() => ensureServeState(d)).toThrow(/not a serve state file/)
     expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).toBe('not json')
+  })
+
+  // #1041: on Windows a rename over a file fails with EPERM while another handle has it open without sharing deletes
+  // (a `--detach` reading serve.json, a virus scanner), which left the port unrecorded. Node's own handles share
+  // deletes, so a second process holds it, the way a reader that does not.
+  it.skipIf(POSIX)('records the port even while another program holds serve.json open (Windows)', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const file = join(d, SERVE_STATE_FILE)
+    const holder = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `$f = [System.IO.File]::Open('${file}', 'Open', 'Read', 'Read'); [Console]::Out.WriteLine('held'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 1000; $f.Dispose()`],
+      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
+    )
+    started.push(holder)
+    await new Promise<void>((resolve, reject) => {
+      holder.stdout!.on('data', (b) => String(b).includes('held') && resolve())
+      holder.once('error', reject)
+      holder.once('exit', () => reject(new Error('the holder ended before it held the file')))
+    })
+    recordServePort(d, 9300)
+    expect(readServeState(d)?.port).toBe(9300)
+    expect(existsSync(`${file}.${process.pid}.tmp`)).toBe(false)
+  }, 30_000 * SLOW)
+})
+
+describe('replacing a file that a reader holds open (#1041)', () => {
+  const busy = (code: string) => Object.assign(new Error(`${code}: busy`), { code })
+  const quick = { sleep: () => {}, retry: true }
+
+  it('tries a refused rename again on Windows until it goes through', () => {
+    let calls = 0
+    const rename = () => {
+      if (++calls < 4) throw busy(['EPERM', 'EBUSY', 'EACCES'][calls - 1]!)
+    }
+    renameRetrying('a', 'b', { ...quick, rename })
+    expect(calls).toBe(4)
+  })
+
+  it('gives up with the last error once the time is spent, and waits longer between tries', () => {
+    const waits: number[] = []
+    let t = 0
+    const rename = () => {
+      throw busy('EPERM')
+    }
+    expect(() => renameRetrying('a', 'b', { retry: true, rename, sleep: (ms: number) => ((t += ms), waits.push(ms)), now: () => t, budgetMs: 500 })).toThrow(/EPERM/)
+    expect(waits.slice(0, 4)).toEqual([10, 20, 40, 80])
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(500)
+  })
+
+  it('does not retry anywhere else, nor an error that is not a busy file', () => {
+    let calls = 0
+    const rename = () => {
+      calls++
+      throw busy('EPERM')
+    }
+    expect(() => renameRetrying('a', 'b', { retry: false, rename, sleep: () => {} })).toThrow(/EPERM/)
+    expect(calls).toBe(1)
+    calls = 0
+    const enoent = () => {
+      calls++
+      throw busy('ENOENT')
+    }
+    expect(() => renameRetrying('a', 'b', { ...quick, rename: enoent })).toThrow(/ENOENT/)
+    expect(calls).toBe(1)
+  })
+
+  it('leaves the old file whole and no temporary file when the rename never goes through', () => {
+    const d = tempDir()
+    const file = join(d, 'f.json')
+    writeFileSync(file, 'old')
+    const rename = () => {
+      throw busy('EBUSY')
+    }
+    expect(() => replaceFile(file, 'new', { ...quick, rename, budgetMs: 0 })).toThrow(/EBUSY/)
+    expect(readFileSync(file, 'utf8')).toBe('old')
+    expect(existsSync(`${file}.${process.pid}.tmp`)).toBe(false)
+  })
+
+  it('reads serve.json again when the first read is refused or half there', () => {
+    const d = tempDir()
+    const state = ensureServeState(d)
+    const file = join(d, SERVE_STATE_FILE)
+    const whole = readFileSync(file, 'utf8')
+    writeFileSync(file, whole.slice(0, 20))
+    let sleeps = 0
+    expect(readServeState(d, { sleep: () => (++sleeps === 2 ? writeFileSync(file, whole) : undefined) })).toEqual(state)
+    expect(sleeps).toBe(2)
+  })
+
+  it('still says there is no state when serve.json is absent, without waiting', () => {
+    let sleeps = 0
+    expect(readServeState(tempDir(), { sleep: () => sleeps++ })).toBeNull()
+    expect(sleeps).toBe(0)
   })
 })
 

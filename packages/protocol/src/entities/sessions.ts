@@ -182,6 +182,17 @@ export const ToolSummary = z.object({
    */
   readOnly: z.boolean().optional(),
   paths: z.array(z.string()).default([]),
+  /**
+   * A call to one of Centralu's own tools (#730): the `centralu` server's, or an app's (`app-<id>`, `app` its id). The
+   * points where an agent reaches other sessions, projects, machines or apps, which the card draws apart from an
+   * ordinary call. The adapter knows it from the server, which only Claude's name carries in the tool name: Codex
+   * names the server apart, so the screen cannot read it from `tool`. `tool` is the bare tool name here
+   * (`start_agent`), `label` what the call does in words ("Started an agent"), `sessionId` the session the call names
+   * when it names one. Absent from an older host's records, where the screen reads Claude's `mcp__centralu__…` name.
+   */
+  centralu: z
+    .object({ tool: z.string(), app: z.string().optional(), label: z.string().optional(), sessionId: z.string().optional() })
+    .optional(),
 })
 export type ToolSummary = z.infer<typeof ToolSummary>
 

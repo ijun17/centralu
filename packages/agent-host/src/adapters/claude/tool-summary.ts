@@ -1,6 +1,6 @@
-import { launchesSubagent, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
+import { launchesSubagent, mcpNameParts, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
 import { diffLines, fileEditDetail, type FileChange } from '../file-changes.js'
-import { isCentraluTool } from '../tool-titles.js'
+import { centraluMark, centraluRunCommand, isCentraluTool } from '../tool-titles.js'
 import { str, type Json } from './json.js'
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -11,17 +11,8 @@ const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
  */
 function commandRunOf(name: string, input: Json): { name: string; input: Json } | null {
   if (!isCentraluTool({ name }, 'centralu_run')) return null
-  const command = str(input.command).trim()
-  if (!/^[a-z]+(?:_[a-z]+)*$/.test(command)) return null
-  let args: unknown = input.args ?? {}
-  if (typeof args === 'string') {
-    try {
-      args = JSON.parse(args)
-    } catch {
-      args = {}
-    }
-  }
-  return { name: name.slice(0, -'centralu_run'.length) + command, input: typeof args === 'object' && args !== null && !Array.isArray(args) ? (args as Json) : {} }
+  const run = centraluRunCommand(input)
+  return run ? { name: name.slice(0, -'centralu_run'.length) + run.command, input: run.args } : null
 }
 
 export function toolSummary(name: string, input: Json): ToolSummary {
@@ -41,14 +32,18 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
   // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer
-  else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project, name)
+  // A blank project is the name, as no project is (#730 review): the card then says "another project"
+  else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project).trim() || name
   /*
    * An agent card's title is the work handed to it (#98). While it was just the name, every card
    * said "Agent Agent", and launching three agents side by side left no way to tell which card was
    * which (a dogfooding session: all three showed the same line).
    */
   else if (launchesSubagent(name)) title = str(input.description, name)
-  return { tool: name, title, paths }
+  // Centralu's own servers (#730): marked, and titled by what the call does
+  const parts = mcpNameParts(name)
+  const mark = parts ? centraluMark(parts.server, parts.tool, input) : null
+  return { tool: name, title: mark?.title ?? title, paths, ...(mark ? { centralu: mark.centralu } : {}) }
 }
 
 /**

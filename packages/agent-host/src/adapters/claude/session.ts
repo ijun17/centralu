@@ -1,91 +1,34 @@
-import { query, type McpServerConfig, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope, QuestionAnswer } from '@cc/protocol'
-import { isNewerVersion } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
-import { readClaudeTranscriptTail } from './history.js'
 import type { UsageQuery } from './usage.js'
-import type { ModelQuery } from './models.js'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
-import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
+import { spawnLocalAgent } from '../local-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
-import { withoutCrossSessionMessaging } from './cross-session.js'
 import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
-
-type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean }
-
-/**
- * Only the part of the SDK Query that we use.
- * We write down only the minimal surface, so external types do not leave the adapter.
- */
-type QueryHandle = AsyncIterable<unknown> &
-  UsageQuery &
-  ModelQuery & {
-    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
-    /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
-    interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
-    /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
-    cancelAsyncMessage?(uuid: string): Promise<boolean>
-    /** Stops one background task; a task_notification with status 'stopped' follows (sdk.d.ts, measured — #290). */
-    stopTask(taskId: string): Promise<void>
-    supportedCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]>
-    /** Closes the query and terminates the CLI process (sdk.d.ts) — called by dispose (#157). */
-    close(): void
-    /**
-     * **Replaces the whole set** of dynamically attached MCP servers (sdk.d.ts). The in-process
-     * server originally passed via `mcpServers` is also part of this set (measured in the
-     * installed sdk.mjs from 0.3.263: the initial SDK server sits in the same map) — so every call
-     * has to carry the orchestrator server along with everything else.
-     */
-    setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ added: string[]; removed: string[]; errors: Record<string, string> }>
-  }
-/**
- * The first CLI whose result names every input it folded in (`user_message_uuids`): tracked notes need it (#592).
- * Measured on the installed CLI and the pinned SDK's schema.
- */
-const TRACKED_INPUT_SINCE = '2.1.289'
+import { claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
+import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
+import { tracksInputs } from './tracked-input.js'
+import { ClaudeScheduleLook } from './schedule-look.js'
+import { keepAttachedAppMarks } from '../tool-titles.js'
 
 /** `/goal`, alone or with an argument — not a message that merely starts with those letters ("/goal's syntax?"). */
 function isGoalCommand(text: string): boolean {
   return /^\/goal(\s|$)/.test(text.trim())
 }
 
-/**
- * Claude Code's words when a process lost the race to refresh the sign-in (#353). Read in the CLI
- * (2.1.289): the error is an API error message the CLI writes itself (`error: "server_error"`), in
- * one of two wordings — the first in a headless session like ours, the second in the terminal:
- *
- *   Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. …
- *   Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · …
- *
- * The turn then ends with an error result carrying the same text.
- */
-const REFRESH_RACE = /another Claude Code process is refreshing/i
-
-/** How many of an adopted conversation's last messages are read for the timers it set (#568): a few /loop turns */
-const SCHEDULE_TAIL = 400
-
-type RaceMsg = { type?: string; subtype?: unknown; is_error?: unknown; result?: unknown; errors?: unknown; message?: { content?: unknown } }
-
-/** The text of a result or an assistant message, if it is the refresh race */
-function refreshRaceText(m: RaceMsg): string | null {
-  const texts: string[] = []
-  if (typeof m.result === 'string') texts.push(m.result)
-  if (Array.isArray(m.errors)) texts.push(...m.errors.filter((x): x is string => typeof x === 'string'))
-  if (m.type === 'assistant' && Array.isArray(m.message?.content)) {
-    for (const b of m.message.content as { type?: string; text?: unknown }[]) if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text)
-  }
-  return texts.find((t) => REFRESH_RACE.test(t)) ?? null
-}
+/** A message as the stream loop reads it */
+type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
 
 /**
  * How this adapter starts Claude processes, shared by every session it creates (#353): where the
@@ -144,14 +87,10 @@ export class ClaudeSession implements SessionHandle {
   private adopted = false
   /** Letting go of the process for the next host: its stream ending is not a crash */
   private detaching = false
-  /** The messages the CLI has read since its last result: what a retried turn sends again (#353) */
-  private inTurn: ClaudeInput[] = []
-  /** This turn already went again once after losing the sign-in refresh race */
-  private raceRetried = false
-  /** An assistant message in the current turn carried the refresh-race error */
-  private raceSeen: string | null = null
-  /** A resend waiting out its delay, and what it will send */
-  private retry: { timer: ReturnType<typeof setTimeout>; texts: ClaudeInput[] } | null = null
+  /** A turn that lost the sign-in refresh race goes again once (see `ClaudeRaceRetry`, #353) */
+  private readonly raceRetry: ClaudeRaceRetry
+  /** The CLI's timers, looked at again when due (see `ClaudeScheduleLook`, #568) */
+  private readonly schedules: ClaudeScheduleLook
   /** The link folder this session's process runs from, released when the process is gone */
   private runKey: string | null = null
   /** Settles once the stream ended: the CLI process is gone, or this host let go of it */
@@ -169,6 +108,9 @@ export class ClaudeSession implements SessionHandle {
     private launch: ClaudeLaunch,
   ) {
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
+    // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
+    const sink = emit
+    this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     this.servers = new ClaudeServers({ sessionId, opts, closed: () => this.closed, query: () => this.query })
     this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
@@ -179,29 +121,27 @@ export class ClaudeSession implements SessionHandle {
       serviceTier: opts.serviceTier ?? null,
     }))
     this.stream.goal.seed(opts.knownGoal)
+    this.raceRetry = new ClaudeRaceRetry({
+      sessionId,
+      emit: (e) => this.emit(e),
+      closed: () => this.closed,
+      retryDelay: () => this.launch.retryDelay(),
+      resend: (sent) => {
+        this.queue.push(...sent)
+        this.turnOpen = true
+        this.notify?.()
+        this.notify = null
+      },
+    })
+    this.schedules = new ClaudeScheduleLook({ sessionId, emit: (e) => this.emit(e), closed: () => this.closed, tasks: this.stream.tasks })
     // An adopted CLI announces its id only with its next turn's init; it is the conversation we resume
     if (opts.processSource?.adopt) this.externalId = opts.resumeExternalId ?? null
-    if (opts.processSource?.adopt && opts.resumeExternalId) void this.recoverSchedules(opts.resumeExternalId, opts.cwd)
+    if (opts.processSource?.adopt && opts.resumeExternalId) void this.schedules.recover(opts.resumeExternalId, opts.cwd)
     // The background work the previous host saw in this process (#648): the CLI will not list it again by itself
     if (opts.processSource?.adopt?.backgroundTasks?.length) this.stream.tasks.seed(opts.processSource.adopt.backgroundTasks)
   }
 
-  /**
-   * An adopted process (#280 step 2) still holds the timers the previous host saw it set (`/loop`'s wake-ups, scheduled
-   * prompts, #568), but this host's stream never saw them. They are read back from the conversation's last messages,
-   * conservatively (a wake-up's time is taken as the asked delay from now), so the session is not put to sleep or
-   * restarted under them.
-   */
-  private async recoverSchedules(externalId: string, cwd: string): Promise<void> {
-    const tail = await readClaudeTranscriptTail(externalId, cwd, SCHEDULE_TAIL).catch(() => [])
-    if (this.closed || tail.length === 0) return
-    for (const e of this.stream.tasks.recover(tail as Record<string, unknown>[])) this.emit(e)
-    this.armScheduleLook()
-  }
-
   async start(): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the instance needs to be reachable inside an async generator
-    const self = this
     const preset = this.opts.permissionPreset
 
     /*
@@ -229,136 +169,19 @@ export class ClaudeSession implements SessionHandle {
     this.runKey = run?.key ?? null
     this.launch.links.acquire(this.runKey)
 
-    async function* input() {
-      while (!self.closed) {
-        const next = self.queue.shift()
-        if (next !== undefined) {
-          self.inTurn.push(next)
-          if (!next.parentNote) self.personInputs.add(next.uuid)
-          yield {
-            type: 'user' as const,
-            parent_tool_use_id: null,
-            session_id: self.externalId ?? '',
-            uuid: next.uuid,
-            message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
-          }
-          continue
-        }
-        await new Promise<void>((r) => (self.notify = r))
-      }
-    }
-
     // Usage is a property of the account, but the SDK only exposes the method on a Query — this borrows a live query for it (liveQueries).
     const q: QueryHandle = (this.query = query({
-      prompt: input(),
-      options: withoutCrossSessionMessaging({
-        cwd: this.opts.cwd,
-        model: this.opts.model,
-        /**
-         * The SDK looks for the native CLI it bundles itself, and bundling the host breaks that
-         * path ("Native CLI binary for darwin-arm64 not found" — every session creation failed in
-         * the packaged app). This points directly at the `claude` the user already has installed.
-         * It behaves the same way in dev.
-         */
-        pathToClaudeCodeExecutable: run?.path ?? undefined,
-        /*
-         * Under the keeper (#280 step 2) the CLI is spawned there, or an already running one is
-         * adopted, so the process outlives this host. Measured (CLI 2.1.282, SDK 0.3.263, haiku,
-         * 2026-10-04): a new `query()` whose `spawnClaudeCodeProcess` returns the pipes of a
-         * claude another host started is accepted mid-turn — its re-`initialize` re-delivers a
-         * pending approval to the new `canUseTool` at once, and the rest of a running turn
-         * (three more Bash calls, the result) arrives through it.
-         *
-         * Without a keeper the CLI is still spawned here rather than by the SDK, which signals only
-         * the CLI's own pid: in a process group of its own (Windows: a tree), stopping it also ends
-         * the helpers it started (a language server and its `tsserver`, MCP servers), and so does
-         * its exit (`local-process.ts`).
-         */
-        spawnClaudeCodeProcess: (o: LocalSpawnSpec) =>
-          (this.opts.processSource ? this.spawnProcess(o) : (this.proc = spawnLocalAgent(o))) as never,
-        /*
-         * Reasoning effort. It only matters when the model supports it, so deciding support is
-         * left to whatever provides the list (supportedModels) — this just passes through the
-         * value it received.
-         */
-        effort: this.opts.effort as never,
-        includePartialMessages: true,
-        /*
-         * A subagent's text and thinking, not only its tool blocks (#222). sdk.d.ts: "By default, only
-         * tool_use/tool_result blocks from subagents are emitted … When true, the full subagent conversation is
-         * forwarded so consumers can render a nested transcript." The normalizer keeps them under the launch card,
-         * out of the parent's conversation (#98).
-         */
-        forwardSubagentText: true,
-        // MCP servers — the orchestrator's tools and any attached external apps (including approved MCP servers). See mcpServers().
-        ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
-        /*
-         * Which settings files get read (settingSourcesFor) — orchestrator/coordination sessions
-         * **never read instructions from a file.**
-         *
-         * A worker session only has permissions in its own project, but it can still write files.
-         * If it wrote an instruction into the orchestrator's own folder, the orchestrator — which
-         * can instruct every session — would read that as its own instruction: a path from low
-         * privilege to high privilege.
-         *
-         * Measured values (probe):
-         *   omitted       CLAUDE.md read, 3 of the user's global hooks ran
-         *   ['project']   CLAUDE.md read, 0 hooks
-         *   []            nothing read at all      ← this is the only one the control tower uses
-         *
-         * The role is injected directly through `systemPrompt` below instead. It never goes
-         * through a file, so nobody can rewrite it along the way. For a project's own session,
-         * whether it receives tools (manager, builder sessions) or not (worker) makes no
-         * difference — the project's own trust decides it (#92, #152).
-         */
-        ...settingSourcesFor(this.opts),
-        // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
-        ...(this.opts.readableDirs?.length ? { additionalDirectories: this.opts.readableDirs } : {}),
-        ...(this.opts.orchestratorTools
-          ? {
-              /*
-               * The role is guaranteed here, not by a file. AGENTS.md is a file the person can
-               * and should edit, so nothing that must never be erased belongs there.
-               */
-              ...(this.opts.systemPromptAppend
-                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: this.opts.systemPromptAppend } }
-                : {}),
-            }
-          : {}),
-        ...permissionOptions,
-        ...codeIntelligence,
-        // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
-        ...(probeIds.has(this.sessionId) ? { strictMcpConfig: true } : {}),
-        /*
-         * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
-         * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,
-         * haiku): the CLI adds a `StructuredOutput` tool, and if the model answers in plain text
-         * first, a "[structured-output-enforce]" message makes it call that tool instead. That
-         * tool never went through `canUseTool` (no approval card appears). The answer arrives on
-         * `result.structured_output` — the normalizer moves it to `turn_complete.output`.
-         */
-        ...(this.opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: this.opts.outputSchema } } : {}),
-        resume: this.opts.resumeExternalId,
-        // allowedTools is never set (M0: it would shadow canUseTool).
-        /*
-         * **The callback is passed even in auto** (#171). It used to be omitted for auto, and
-         * AskUserQuestion never reached the person — no choice card appeared, and the model moved
-         * on without an answer. Measured (probe-auto-callback.mts, CLI 2.1.282, SDK 0.3.263,
-         * haiku, a temp folder, 2026-09-27) — passing a callback alongside bypassPermissions:
-         *
-         *   AskUserQuestion                             reaches the callback (a tool asked about even before bypass)
-         *   ordinary Bash                                does not reach it — bypass just lets it through
-         *   Bash caught by an `ask` rule in the settings file   reaches the callback → answering allow runs it
-         *   the same request, with no callback (old-style auto)   denied — "Claude requested permissions to use Bash, but you haven't granted it yet."
-         *
-         * So auto's own callback only accepts question choices and Centralu's own tools (which every
-         * preset lets through, #382), and **denies everything else the way it used to.** Allowing it here would let our own callback approve an `ask` rule
-         * written into a trusted project's own `.claude/settings.json` — the opposite direction
-         * from #92, which exists so files from the repo cannot decide approvals. (The SDK leaves a
-         * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
-         */
-        canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => self.cards.canUseTool(preset, toolName, toolInput, options),
-      }, preset),
+      prompt: this.input(),
+      options: claudeQueryOptions({
+        sessionId: this.sessionId,
+        opts: this.opts,
+        executablePath: run?.path ?? undefined,
+        servers,
+        permissionOptions,
+        codeIntelligence,
+        spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = spawnLocalAgent(o))),
+        canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
+      }),
     }))
     // A usage probe (#726) is not a session anyone else may borrow: a model list asked meanwhile would use a query about to close
     if (!probeIds.has(this.sessionId)) liveQueries.add(q)
@@ -376,199 +199,161 @@ export class ClaudeSession implements SessionHandle {
     // Follows the server set when apps come and go, and that server's list when its tools change — never restarting the session.
     this.stopAppWatch = this.opts.apps?.onChange(() => this.servers.syncApps()) ?? null
 
-    void (async () => {
-      try {
-        /*
-         * The normalizer remembers what a single message cannot decide on its own — whether the
-         * body already went out as deltas, or a background agent that is still running. See
-         * `ClaudeStreamNormalizer`. A local synthetic response like /usage produces zero deltas
-         * (measured), and without that memory there would be no way to decide whether to emit the
-         * whole-response body — emitting it always gets it appended twice on an ordinary turn,
-         * and never emitting it means it never shows up at all.
-         */
-        for await (const msg of q) {
-          /*
-           * **Nothing arriving after close is accepted** (#157). Even after dispose terminates
-           * the process, a few already-buffered messages can still come through — the tail text
-           * and result of a turn that was wrapping up. A new process may already be sitting in
-           * that session's slot, so the end of the old turn must never land in the new process's
-           * own record.
-           */
-          if (this.closed) break
-          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
-          if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
-            this.turnOpen = true
-            if (!this.cards.pending.size && !this.cards.questions.size) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-          }
-          if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
-          if (m.type === 'system' && m.subtype === 'init' && !this.trackedInputKnown) {
-            this.trackedInputKnown = true
-            // 2.1.289's result UUID array includes inputs folded between tool rounds (verified in
-            // the installed CLI and pinned SDK schema). The single UUID only names the first input.
-            // Refuse older/unknown protocols before a note is recorded, rather than guessing from
-            // results: background task notifications legitimately produce results without IDs.
-            // Compared as semver (`isNewerVersion`), so a suffixed version (`2.1.290-beta.1`) is read, not refused;
-            // anything that does not start like a version stays unknown, and unknown is refused
-            const version = typeof m.claude_code_version === 'string' ? /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/.exec(m.claude_code_version.trim())?.[0] : undefined
-            const supported = !!version && !isNewerVersion(TRACKED_INPUT_SINCE, version)
-            if (supported && Array.isArray(m.capabilities) && m.capabilities.includes('interrupt_receipt_v1') && m.capabilities.includes('interrupt_cancel_queued_v1')) {
-              this.sendTracked = (text, observer) => {
-                const receipt = this.inputReceipts.create(observer)
-                this.sendInput(text, receipt.id, receipt)
-                return receipt.done
-              }
-            }
-          }
-          // The CLI's own version, for moving the session to a newer install (#297). Once per process: init repeats per query
-          if (m.type === 'system' && m.subtype === 'init' && typeof m.claude_code_version === 'string' && m.claude_code_version !== this.reportedVersion) {
-            this.reportedVersion = m.claude_code_version
-            this.emit({ type: 'agent_version', sessionId: this.sessionId, version: m.claude_code_version })
-          }
-          if (m.type === 'system' && m.subtype === 'init' && Array.isArray(m.slash_commands)) {
-            this.goalCommand = m.slash_commands.includes('goal')
-            this.settleGoalKnown()
-          }
-          this.servers.noteAppCalls(msg)
-          if (m.type === 'assistant') this.raceSeen ??= refreshRaceText(msg as RaceMsg)
-          if (m.type === 'result') this.turnOpen = false
-          let events = this.stream.push(msg)
-          const retrying = m.type === 'result' && this.retryAfterRefreshRace(msg as RaceMsg)
-          if (m.type === 'result' && !retrying) {
-            const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
-            for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
-          }
-          let completedInputs: string[] | undefined
-          if (m.type === 'result' && !retrying && this.inputReceipts.size && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
-            const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
-            const ids = result.user_message_uuids ?? []
-            const failure = events.find((e) => e.type === 'error')
-            if (ids.length && failure?.type === 'error') this.cancelParentNotes(new Error(failure.error.message))
-            else if (ids.length) completedInputs = ids
-            // ID-less results belong to synthetic/task-notification turns, not a parent note.
-          }
-          // The turn goes again instead of failing: its error marker would end the turn on screen
-          if (retrying) events = events.filter((e) => e.type !== 'error')
-          for (const e of events) {
-            this.emit(e)
-            // Capture this result before a later turn's frames can overwrite the host's answer.
-            if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.complete(completedInputs)
-          }
-          this.armScheduleLook()
-          // Once a turn ends, asks what is currently in the context window (FR-14).
-          if (m.type === 'result' && !retrying) void this.reportContext(q)
+    void this.read(q)
+  }
+
+  /** What the CLI reads: each message queued for it, in order, until the session closes */
+  private async *input() {
+    while (!this.closed) {
+      const next = this.queue.shift()
+      if (next !== undefined) {
+        this.raceRetry.read(next)
+        if (!next.parentNote) this.personInputs.add(next.uuid)
+        yield {
+          type: 'user' as const,
+          parent_tool_use_id: null,
+          session_id: this.externalId ?? '',
+          uuid: next.uuid,
+          message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
         }
+        continue
+      }
+      await new Promise<void>((r) => (this.notify = r))
+    }
+  }
+
+  /** Reads the CLI's stream until it ends, and says how it ended */
+  private async read(q: QueryHandle): Promise<void> {
+    try {
+      /*
+       * The normalizer remembers what a single message cannot decide on its own — whether the
+       * body already went out as deltas, or a background agent that is still running. See
+       * `ClaudeStreamNormalizer`. A local synthetic response like /usage produces zero deltas
+       * (measured), and without that memory there would be no way to decide whether to emit the
+       * whole-response body — emitting it always gets it appended twice on an ordinary turn,
+       * and never emitting it means it never shows up at all.
+       */
+      for await (const msg of q) {
         /*
-         * **If the stream ended and we did not close it, the CLI died.**
-         *
-         * When the CLI process disappears silently, the stream can sometimes just end with no
-         * exception at all. If nothing is emitted at that point, the UI stays "working" forever
-         * and the next message goes nowhere — this raises the same signal the codex adapter raises
-         * from `onExit(expected=false)`.
+         * **Nothing arriving after close is accepted** (#157). Even after dispose terminates
+         * the process, a few already-buffered messages can still come through — the tail text
+         * and result of a turn that was wrapping up. A new process may already be sitting in
+         * that session's slot, so the end of the old turn must never land in the new process's
+         * own record.
          */
-        liveQueries.delete(q)
-        this.settleGoalKnown()
-        // A stream that ends because this host let go of the process is not a death (#280 step 2)
-        if (!this.closed && !this.detaching) {
-          this.releaseAgents('The session process ended before this agent reported back')
-          this.emit({
-            type: 'error',
-            sessionId: this.sessionId,
-            error: { code: 'adapter_crashed', message: 'claude process ended unexpectedly', retryable: true },
-          })
-        }
-      } catch (err) {
-        liveQueries.delete(q)
-        this.settleGoalKnown()
-        /*
-         * **An exception from a process we ourselves closed is not a crash** (#157). Same rule as
-         * the clean-exit branch above. If settings change after a stopped turn (the last result
-         * was `error_during_execution`), the old CLI ends still carrying an error result, and the
-         * SDK turns that into a thrown exception, "Claude Code returned an error result: …". This
-         * used to surface as adapter_crashed, and the manager would treat the brand-new process it
-         * had just started as dead and close it.
-         */
-        if (this.closed || this.detaching) return
+        if (this.closed) break
+        this.onMessage(q, msg)
+      }
+      /*
+       * **If the stream ended and we did not close it, the CLI died.**
+       *
+       * When the CLI process disappears silently, the stream can sometimes just end with no
+       * exception at all. If nothing is emitted at that point, the UI stays "working" forever
+       * and the next message goes nowhere — this raises the same signal the codex adapter raises
+       * from `onExit(expected=false)`.
+       */
+      liveQueries.delete(q)
+      this.settleGoalKnown()
+      // A stream that ends because this host let go of the process is not a death (#280 step 2)
+      if (!this.closed && !this.detaching) {
         this.releaseAgents('The session process ended before this agent reported back')
-        /*
-         * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
-         * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
-         * added the same way, so a CLI that fails to start still says why.
-         */
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
-          error: { code: 'adapter_crashed', message: withStderrTail((err as Error).message, this.proc), retryable: true },
+          error: { code: 'adapter_crashed', message: 'claude process ended unexpectedly', retryable: true },
         })
-      } finally {
-        // The process is gone (or another host holds it now): its link may go once nothing else runs from it
-        this.launch.links.release(this.runKey)
-        this.runKey = null
-        this.markEnded()
       }
-    })()
+    } catch (err) {
+      liveQueries.delete(q)
+      this.settleGoalKnown()
+      /*
+       * **An exception from a process we ourselves closed is not a crash** (#157). Same rule as
+       * the clean-exit branch above. If settings change after a stopped turn (the last result
+       * was `error_during_execution`), the old CLI ends still carrying an error result, and the
+       * SDK turns that into a thrown exception, "Claude Code returned an error result: …". This
+       * used to surface as adapter_crashed, and the manager would treat the brand-new process it
+       * had just started as dead and close it.
+       */
+      if (this.closed || this.detaching) return
+      this.releaseAgents('The session process ended before this agent reported back')
+      /*
+       * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
+       * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
+       * added the same way, so a CLI that fails to start still says why.
+       */
+      this.emit({
+        type: 'error',
+        sessionId: this.sessionId,
+        error: { code: 'adapter_crashed', message: withStderrTail((err as Error).message, this.proc), retryable: true },
+      })
+    } finally {
+      // The process is gone (or another host holds it now): its link may go once nothing else runs from it
+      this.launch.links.release(this.runKey)
+      this.runKey = null
+      this.markEnded()
+    }
   }
 
-  /**
-   * A turn that lost the race to refresh the sign-in goes again once, after a few seconds (#353).
-   *
-   * Claude Code lets one process at a time refresh an expired sign-in; another process that needs it
-   * at that moment ends its turn with "another Claude Code process is refreshing it", which the CLI
-   * itself calls transient. By the time the delay is over the other process has written the new
-   * token, and the resent turn reads it. The person sees why in the conversation: the CLI's own words
-   * and a notice that the message goes again, instead of a failed turn. A second loss in a row is
-   * reported as the failure it is.
-   *
-   * What goes again is what the CLI read since its last result. The CLI has already recorded those
-   * messages in its conversation, so the model reads them twice, next to each other — the cost of
-   * not losing what the person sent.
-   *
-   * @returns whether the turn goes again (its error is then not reported)
-   */
-  private retryAfterRefreshRace(result: RaceMsg): boolean {
-    const sent = this.inTurn.splice(0)
-    const seen = this.raceSeen
-    this.raceSeen = null
-    const failed = result.is_error === true || result.subtype !== 'success'
-    const race = failed ? (refreshRaceText(result) ?? seen) : null
-    if (!race) {
-      this.raceRetried = false
-      return false
-    }
-    if (this.raceRetried || sent.length === 0 || this.closed) {
-      this.raceRetried = false
-      return false
-    }
-    this.raceRetried = true
-    const delay = Math.max(0, this.launch.retryDelay())
-    this.emit({
-      type: 'notice',
-      sessionId: this.sessionId,
-      level: 'warning',
-      from: 'Claude Code',
-      label: 'sign-in',
-      audience: 'centralu',
-      text: race,
-      summary: `Claude Code could not refresh its sign-in because another Claude Code process was refreshing it at the same moment. Centralu sends the message again in ${Math.max(1, Math.round(delay / 1000))} s.`,
-    })
-    const timer = setTimeout(() => {
-      this.retry = null
-      if (this.closed) return
-      this.queue.push(...sent)
+  /** One message of the stream, in the order the CLI sent it */
+  private onMessage(q: QueryHandle, msg: unknown): void {
+    const m = msg as StreamMsg
+    if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
-      this.notify?.()
-      this.notify = null
-    }, delay)
-    this.retry = { timer, texts: sent }
-    return true
+      if (!this.cards.pending.size && !this.cards.questions.size) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+    }
+    if (m.type === 'system' && m.subtype === 'init') this.onInit(m)
+    this.servers.noteAppCalls(msg)
+    if (m.type === 'assistant') this.raceRetry.seen(msg as RaceMsg)
+    if (m.type === 'result') this.turnOpen = false
+    let events = this.stream.push(msg)
+    const retrying = m.type === 'result' && this.raceRetry.afterResult(msg as RaceMsg)
+    if (m.type === 'result' && !retrying) {
+      const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
+      for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
+    }
+    let completedInputs: string[] | undefined
+    if (m.type === 'result' && !retrying && this.inputReceipts.size && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
+      const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
+      const ids = result.user_message_uuids ?? []
+      const failure = events.find((e) => e.type === 'error')
+      if (ids.length && failure?.type === 'error') this.cancelParentNotes(new Error(failure.error.message))
+      else if (ids.length) completedInputs = ids
+      // ID-less results belong to synthetic/task-notification turns, not a parent note.
+    }
+    // The turn goes again instead of failing: its error marker would end the turn on screen
+    if (retrying) events = events.filter((e) => e.type !== 'error')
+    for (const e of events) {
+      this.emit(e)
+      // Capture this result before a later turn's frames can overwrite the host's answer.
+      if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.complete(completedInputs)
+    }
+    this.schedules.arm()
+    // Once a turn ends, asks what is currently in the context window (FR-14).
+    if (m.type === 'result' && !retrying) void this.reportContext(q)
   }
 
-  /** A resend still waiting out its delay is called off; returns how many messages it would have sent */
-  private cancelRetry(): number {
-    if (!this.retry) return 0
-    clearTimeout(this.retry.timer)
-    const n = this.retry.texts.length
-    this.retry = null
-    return n
+  /** The CLI's init message: its conversation id, what it can track, its version and its commands */
+  private onInit(m: StreamMsg): void {
+    if (m.session_id) this.externalId = m.session_id
+    if (!this.trackedInputKnown) {
+      this.trackedInputKnown = true
+      if (tracksInputs(m)) {
+        this.sendTracked = (text, observer) => {
+          const receipt = this.inputReceipts.create(observer)
+          this.sendInput(text, receipt.id, receipt)
+          return receipt.done
+        }
+      }
+    }
+    // The CLI's own version, for moving the session to a newer install (#297). Once per process: init repeats per query
+    if (typeof m.claude_code_version === 'string' && m.claude_code_version !== this.reportedVersion) {
+      this.reportedVersion = m.claude_code_version
+      this.emit({ type: 'agent_version', sessionId: this.sessionId, version: m.claude_code_version })
+    }
+    if (Array.isArray(m.slash_commands)) {
+      this.goalCommand = m.slash_commands.includes('goal')
+      this.settleGoalKnown()
+    }
   }
 
   /**
@@ -706,6 +491,12 @@ export class ClaudeSession implements SessionHandle {
     this.cards.applyRules(matchers)
   }
 
+  /** The list of slash commands (an SDK public API). */
+  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    if (!this.query) throw new Error('Session is not ready yet')
+    return this.query.supportedCommands()
+  }
+
   /**
    * Reports context usage (FR-14).
    *
@@ -717,12 +508,6 @@ export class ClaudeSession implements SessionHandle {
    * A failure here is swallowed quietly — the gauge briefly disappearing is better than blocking
    * the conversation.
    */
-  /** The list of slash commands (an SDK public API). */
-  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
-    if (!this.query) throw new Error('Session is not ready yet')
-    return this.query.supportedCommands()
-  }
-
   private async reportContext(q: QueryHandle): Promise<void> {
     try {
       const usage = await q.getContextUsage()
@@ -753,7 +538,7 @@ export class ClaudeSession implements SessionHandle {
     // The SDK's plain interrupt leaves queued commands alive; cancelQueued maps to control-request cancel_queued.
     this.inputReceipts.failAll(reason)
     const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote).length : 0) +
-      (this.retry?.texts.filter((input) => !input.parentNote).length ?? 0)
+      this.raceRetry.held.filter((input) => !input.parentNote).length
     if (cancelQueued) this.queue.length = 0
     this.reportUndelivered(held)
     /*
@@ -764,7 +549,7 @@ export class ClaudeSession implements SessionHandle {
      */
     this.opts.apps?.cancelAll()
     // A turn waiting to go again after the sign-in race (#353) is stopped as well: it is the same turn
-    this.cancelRetry()
+    this.raceRetry.cancel()
     this.cards.releaseApprovals('Stopped by user')
     this.cards.releaseQuestions('Stopped by user')
     /*
@@ -793,17 +578,12 @@ export class ClaudeSession implements SessionHandle {
     const ids = this.inputReceipts.ids
     this.inputReceipts.failAll(reason)
     this.queue = this.queue.filter((input) => !input.parentNote)
-    if (this.retry) {
-      // The retry timer captured this array; remove notes in place so it cannot requeue cancelled input.
-      const texts = this.retry.texts
-      texts.splice(0, texts.length, ...texts.filter((input) => !input.parentNote))
-      if (!texts.length) this.cancelRetry()
-    }
+    this.raceRetry.dropNotes()
     const query = this.query
     // The CLI can cancel an already-dequeued representative UUID's entire coalesced batch
     // (SDKControlInterruptResponse). A mixed batch could contain person input, so leave the SDK
     // queue intact when that race is possible; only local notes have been removed above.
-    if (!query?.cancelAsyncMessage || this.personInputs.size || this.queue.length || this.retry?.texts.length || this.sendGate) return
+    if (!query?.cancelAsyncMessage || this.personInputs.size || this.queue.length || this.raceRetry.held.length || this.sendGate) return
     for (const id of ids) void query.cancelAsyncMessage(id).catch((error: Error) => {
       this.emit({ type: 'error', sessionId: this.sessionId, error: {
         code: 'internal', message: `Could not cancel the parent note: ${error.message}`, retryable: false,
@@ -850,7 +630,7 @@ export class ClaudeSession implements SessionHandle {
      * a "sent, but the agent never read it" state.
      */
     // A turn waiting out its delay after the sign-in race (#353) holds messages the same way
-    const held = this.queue.length + this.cancelRetry()
+    const held = this.queue.length + this.raceRetry.cancel()
     if (held > 0) {
       this.queue.length = 0
       this.emit(undeliveredError(this.sessionId, held, 'were still queued when the session closed'))
@@ -889,31 +669,8 @@ export class ClaudeSession implements SessionHandle {
    */
   private releaseAgents(why: string): void {
     this.inputReceipts.failAll(new Error(why))
-    if (this.scheduleLook) clearTimeout(this.scheduleLook)
-    this.scheduleLook = null
+    this.schedules.stop()
     for (const e of this.stream.release(why)) this.emit(e)
-  }
-
-  /** A look at the scheduled wake-ups when the next one is due (#568, `ClaudeSchedules`) */
-  private scheduleLook: ReturnType<typeof setTimeout> | null = null
-
-  /**
-   * The CLI's timers (`/loop`'s wake-ups, scheduled prompts) are listed as background work until they are due. Nothing
-   * arrives at that moment when the loop has ended without saying so, so the list is looked at again then: a second
-   * past the time, by which a wake-up that fired has started its turn.
-   */
-  private armScheduleLook(): void {
-    if (this.scheduleLook) clearTimeout(this.scheduleLook)
-    this.scheduleLook = null
-    const due = this.stream.tasks.nextDue()
-    if (due === null || this.closed) return
-    this.scheduleLook = setTimeout(() => {
-      this.scheduleLook = null
-      for (const e of this.stream.tasks.tick()) this.emit(e)
-      this.armScheduleLook()
-    }, Math.max(0, due - Date.now()) + 1000)
-    // A timer to look at is no reason to keep the host alive
-    this.scheduleLook.unref?.()
   }
 
 }

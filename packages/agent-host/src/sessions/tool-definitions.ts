@@ -379,10 +379,11 @@ export const AGENT_TOOLS = [
      * "answer" (#676): a card of the turn the caller gave, which status shows; `card` only when more than one stands.
      * Not in the description: the answer that shows a card names the call, and the description rides in every request.
      */
-    description: 'Checks, messages, waits for, stops or deletes a session start_agent started.',
+    description: 'Lists, checks, messages, waits for, stops or deletes sessions start_agent started.',
     schema: z.object({
-      sessionId: z.string(),
-      action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer']),
+      // Not needed for "list" (#690): the caller's own children, so a parent that forgot one finds it in one call
+      sessionId: z.string().optional(),
+      action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer', 'list']),
       text: z.string().optional(),
       card: z.string().optional(),
       // #677: send to a busy session returns its choices, which name this argument
@@ -399,7 +400,7 @@ export const AGENT_TOOLS = [
  * 1,100 until #729: start_agent's `difficulty` and the words on it and on `worktree` (551 → 798 characters, the set
  * 1,085 → 1,332), loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, measured live
  * (docs/tool-cost.md §10). Guidance a caller needs before
- * its first call has no answer to ride in.
+ * its first call has no answer to ride in. #690's `list` made the set 1,333 (agent_session 534 → 535, deferred on Claude).
  */
 export const AGENT_BUDGET_CHARS = 1350
 

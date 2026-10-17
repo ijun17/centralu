@@ -1,17 +1,18 @@
 import type { NormalizedEvent, RequestInput, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
-import { inlineImageEvent, undrawnImageEvent } from '../images.js'
-import { todoWritePlan } from '../plan.js'
 import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
-import { stepLine } from '../tool-titles.js'
+import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
+import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import { str, type Json } from './json.js'
+import { assistantEvents, backgroundLaunch, streamEventEvents, userEvents } from './model-messages.js'
 import { ClaudeTaskPlan } from './task-plan.js'
-import { agentReport, agentStats, approvalDetail, editedPaths, resultOutput, toolSummary } from './tool-summary.js'
+import { agentReport, agentStats, approvalDetail, editedPaths, toolSummary } from './tool-summary.js'
+import { rateLimitEvents, resultEvents } from './turn-ending.js'
 
 export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary }
 
@@ -22,26 +23,6 @@ export type ClaudeLaunchedSettings = { model: string | null; effort: string | nu
  * Converts Claude SDK messages into NormalizedEvent (a pure function, so contract tests are
  * possible). SDK types end here — only protocol types ever leave.
  */
-
-/**
- * Is this user message **the result of launching a background agent** (#98)?
- *
- * Measured (probe-subagent-stream.mts): the Agent call's `tool_result` arrives the instant it is
- * launched, and its body is text meant for the model — "Async agent launched successfully. (This
- * tool result is internal metadata — never quote or paste any part of it … into a user-facing
- * reply.)". The agent's actual completion is the `system/task_notification` that arrives much
- * later. The judgment is made from the shape of `tool_use_result` (sdk-tools.d.ts `AgentOutput`):
- * only an agent has `status === 'async_launched'` together with an `agentId` (a workflow instead
- * carries a `taskId`). This only applies when there is exactly one result block — a message has
- * only one `tool_use_result`, so with more than one block there is no way to tell which block it
- * belongs to.
- */
-function backgroundLaunch(m: Json): string | null {
-  const r = (m.tool_use_result ?? {}) as Json
-  if (str(r.status) !== 'async_launched' || !str(r.agentId)) return null
-  const blocks = (((m.message as Json | undefined)?.content ?? []) as Json[]).filter((b) => str(b.type) === 'tool_result')
-  return blocks.length === 1 ? str(blocks[0]?.tool_use_id) || null : null
-}
 
 /**
  * One SDK message to 0..N events.
@@ -114,410 +95,33 @@ export function normalizeMessage(
   const parent = str(m.parent_tool_use_id)
   if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
     if (type === 'stream_event') return out
-    for (const e of normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId)) {
-      if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      } else if (e.type === 'tool_call') {
-        out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(e.summary)}\n` })
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      } else if (e.type === 'tool_result') {
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      }
-    }
-    return out
+    return subagentSteps(sessionId, parent, normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId))
   }
 
   /*
-   * What is currently happening.
-   *
-   * A probe confirmed the actual ordering:
-   *   status:'compacting' → (39 seconds) → status:null + compact_result:'success' → compact_boundary
-   * For those 39 seconds, the UI looked no different from ordinary "waiting for response" — a
-   * problem that surfaced from dogfooding.
+   * One family per file: what the CLI says about itself (cli-messages.ts), what the model says (model-messages.ts),
+   * and how the turn ends (turn-ending.ts).
    */
-  /*
-   * `/clear` (#304). Measured (CLI 2.1.289 through SDK 0.3.263, haiku, 2026-10-04): `/clear` passes straight through
-   * to the CLI, which sends `conversation_reset {new_conversation_id, trigger: 'clear', user_message_uuid}`, then an
-   * `init` carrying a **new `session_id`** (19eced5a… → b7843a7a…) and a result with `num_turns: 0`. The adapter
-   * already follows the new id; what was missing is any sign on screen that the model now knows nothing above this
-   * point. The context gauge read 15,967 before and 14,093 after (the system prompt alone).
-   */
-  if (type === 'conversation_reset') {
-    const trigger = str(m.trigger)
-    out.push({ type: 'conversation_reset', sessionId, ...(trigger ? { trigger } : {}) })
-    return out
+  switch (type) {
+    case 'conversation_reset':
+      return conversationResetEvents(m, sessionId)
+    case 'system':
+      return systemEvents(m, sessionId)
+    case 'active_goal':
+      return activeGoalEvents(m, sessionId)
+    case 'stream_event':
+      return streamEventEvents(m, sessionId)
+    case 'assistant':
+      return assistantEvents(m, sessionId, opts)
+    case 'user':
+      return userEvents(m, sessionId)
+    case 'rate_limit_event':
+      return rateLimitEvents(m, sessionId)
+    case 'result':
+      return resultEvents(m, sessionId)
+    default:
+      return out
   }
-
-  /*
-   * Text the CLI shows its own user (#304). `system/informational` carries hook feedback: measured (CLI 2.1.289), a
-   * `UserPromptSubmit` hook that exits 2 sends `{content: "UserPromptSubmit operation blocked by hook:\n[<command>]:
-   * <its stderr>\n\nOriginal prompt: …", level: 'warning', prevent_continuation: true}`, then a result with
-   * `num_turns: 0`. Nothing reached the screen before: the prompt simply went unanswered. The SDK says level `info`
-   * "shows only in transcript mode", so the CLI itself hides it, and so does this.
-   */
-  if (type === 'system' && str(m.subtype) === 'informational') {
-    const text = str(m.content).trim()
-    const level = str(m.level)
-    if (text && level !== 'info') {
-      // Who is speaking and what kind (#342). A hook is part of the person's own setup (theirs or the project's)
-      const hook = /\bblocked by hook\b/.test(text)
-      out.push({
-        type: 'notice',
-        sessionId,
-        level: level === 'warning' ? 'warning' : 'info',
-        text,
-        from: 'Claude Code',
-        label: hook ? 'hook' : 'notice',
-        ...(hook ? { audience: 'you' as const } : {}),
-      })
-    }
-    return out
-  }
-
-  /*
-   * The CLI's notification queue (#304, not exercised: it carries things like fast-mode credits running out or a model
-   * the organization denies). Its colour and priority fold into the notice's level. "Error compacting conversation" is
-   * left out: the failed-compaction marker (`status` below) already says so, with the reason.
-   */
-  if (type === 'system' && str(m.subtype) === 'notification') {
-    const text = str(m.text).trim()
-    if (!text || str(m.key) === 'error-compacting-conversation') return out
-    const color = str(m.color)
-    const priority = str(m.priority)
-    const level = color === 'error' ? 'error' : color === 'warning' || priority === 'high' || priority === 'immediate' ? 'warning' : 'info'
-    out.push({ type: 'notice', sessionId, level, text, from: 'Claude Code', label: 'notice' })
-    return out
-  }
-
-  /*
-   * The CLI is retrying a failed API call (#304), the twin of Codex's `error {willRetry}`. Measured (CLI 2.1.289, an
-   * `ANTHROPIC_BASE_URL` answering 529, `CLAUDE_CODE_MAX_RETRIES=2`): `{attempt: 1, max_retries: 2, retry_delay_ms: 556,
-   * error_status: 529, error: 'overloaded'}`, the same for attempt 2, then a synthetic assistant message "API Error: 529
-   * Overloaded…" and an error result. Nothing came between the attempts, so the screen read "waiting for a reply" for
-   * the whole time. It shows as the `retrying` activity (`ClaudeStreamNormalizer` puts back what was showing once output
-   * flows again) and goes to host.log with the reason.
-   */
-  if (type === 'system' && str(m.subtype) === 'api_retry') {
-    const status = typeof m.error_status === 'number' ? `${m.error_status} ` : ''
-    const delay = typeof m.retry_delay_ms === 'number' ? ` in ${m.retry_delay_ms}ms` : ''
-    console.error(
-      `[claude] ${sessionId.slice(0, 8)} retrying after: ${status}${str(m.error, 'connection error')} (attempt ${String(m.attempt ?? '?')}/${String(m.max_retries ?? '?')}${delay})`,
-    )
-    out.push({ type: 'activity', sessionId, activity: 'retrying' })
-    return out
-  }
-
-  if (type === 'system' && str(m.subtype) === 'status') {
-    out.push({ type: 'activity', sessionId, activity: m.status === 'compacting' ? 'compacting' : null })
-    /*
-     * A failure is never swallowed. If compaction fails, the context stays exactly as it was, but
-     * the UI would otherwise look as if nothing had happened — a case that measured, actually
-     * occurred ("Not enough messages to compact.").
-     */
-    if (str(m.compact_result) === 'failed') {
-      out.push({ type: 'compaction', sessionId, failed: true, reason: str(m.compact_error, 'Unknown reason') })
-    }
-    return out
-  }
-
-  /*
-   * A goal-status notification (2026-09-07 — /goal's Stop hook, SDKActiveGoalMessage). The same
-   * category as #58: while this type was not handled, goal state was silently dropped. A `value`
-   * of null means the goal was cleared (including having been achieved), and while one is set,
-   * Claude's status vocabulary has exactly one word, 'active' — the iteration count and the reason
-   * it has not been reached are the actual content.
-   *
-   * **The installed CLI does not send this to us** (measured 2026-10-03, CLI 2.1.282 through SDK
-   * 0.3.263, whose runtime does pass the type through): the CLI's headless loop folds the event into
-   * its own state, and writes it to stdout only in a remote (`CLAUDE_CODE_REMOTE`) session. So the
-   * badge is driven by `ClaudeGoalTracker` below; this stays for a CLI that starts sending it, and
-   * when one does, the tracker stands down.
-   */
-  if (type === 'active_goal') {
-    const v = (m.value ?? null) as Json | null
-    out.push({
-      type: 'goal',
-      sessionId,
-      goal: v
-        ? {
-            objective: str(v.condition),
-            status: 'active',
-            ...(typeof v.iterations === 'number' ? { iterations: v.iterations } : {}),
-            ...(str(v.last_reason) ? { reason: str(v.last_reason) } : {}),
-          }
-        : null,
-    })
-    return out
-  }
-
-  /*
-   * The output of a local command (SDKLocalCommandOutputMessage — the **generalized channel** for
-   * things like /usage).
-   *
-   * This is the sibling of the dogfooding incident where /usage's answer arrived as a delta-less
-   * assistant message and never showed up: the output of a command the CLI handles locally can
-   * also arrive as this system message, and dropping it means the command ran but only the answer
-   * disappeared. To the person, this occupies the same place as something the assistant said.
-   */
-  if (type === 'system' && str(m.subtype) === 'local_command_output') {
-    const content = str(m.content)
-    if (content) out.push({ type: 'message_delta', sessionId, role: 'assistant', text: content })
-    return out
-  }
-
-  /*
-   * The point where compaction finished (FR-14).
-   *
-   * Without this, **a compaction marker never once appeared in a Claude session** — only Codex
-   * had one. Without a marker, there is no way to know where the fold is, so "scroll back past
-   * this point" cannot work either.
-   */
-  if (type === 'system' && str(m.subtype) === 'compact_boundary') {
-    const meta = (m.compact_metadata ?? {}) as Json
-    out.push({
-      type: 'compaction',
-      sessionId,
-      failed: false,
-      before: typeof meta.pre_tokens === 'number' ? meta.pre_tokens : undefined,
-      after: typeof meta.post_tokens === 'number' ? meta.post_tokens : undefined,
-    })
-    return out
-  }
-
-  // Streaming deltas (needs includePartialMessages: true — confirmed in M0).
-  if (type === 'stream_event') {
-    const e = m.event as Json | undefined
-    if (str(e?.type) === 'content_block_delta') {
-      const d = e?.delta as Json | undefined
-      if (str(d?.type) === 'text_delta') {
-        out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d?.text) })
-      }
-      /*
-       * Thinking (measured in #58, 2026-08-26): the whole body arrives encrypted, so `thinking`
-       * is always "" and only `estimated_tokens` (an increment) comes through. So this can only
-       * emit **the fact of progress** — "thinking, ~N tokens" — rather than the text; it never
-       * pretends content exists that is not there. If the CLI ever starts sending readable text
-       * here, the `text` field just flows through as-is.
-       */
-      if (str(d?.type) === 'thinking_delta') {
-        const text = str(d?.thinking)
-        const estTokens = typeof d?.estimated_tokens === 'number' ? d.estimated_tokens : undefined
-        if (text || estTokens) {
-          out.push({ type: 'reasoning_delta', sessionId, ...(text ? { text } : {}), ...(estTokens ? { estTokens } : {}) })
-        }
-      }
-    }
-    return out
-  }
-
-  if (type === 'assistant') {
-    const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
-    // The only way out for a body that arrives with no deltas at all (see the opts.textStreamed comment above — /usage arrives this way).
-    // Thinking follows the same rule as text, but on its own flag: a message can stream its thinking and
-    // then call a tool without any text, and then only the thinking has already gone out.
-    if (!opts?.reasoningStreamed) {
-      const thinking = content
-        .filter((b) => str(b.type) === 'thinking')
-        .map((b) => str(b.thinking))
-        .join('')
-      if (thinking) out.push({ type: 'reasoning_delta', sessionId, text: thinking })
-    }
-    if (!opts?.textStreamed) {
-      const text = content
-        .filter((b) => str(b.type) === 'text')
-        .map((b) => str(b.text))
-        .join('')
-      if (text) out.push({ type: 'message_delta', sessionId, role: 'assistant', text })
-    }
-    for (const block of content) {
-      if (str(block.type) === 'tool_use') {
-        const name = str(block.name)
-        const input = (block.input ?? {}) as Json
-        /*
-         * `input` is the record (#221): a Write's content and an Edit's both sides, which the title reduces to a path.
-         * The files it changes are marked when its result says it went through (`ClaudeStreamNormalizer`, #843).
-         */
-        out.push({
-          type: 'tool_call',
-          sessionId,
-          callId: str(block.id),
-          summary: toolSummary(name, input),
-          ...(block.input !== undefined ? { input: block.input } : {}),
-        })
-        // The todo list is the session's plan too (#843); a subagent's is not, and its steps keep no plan
-        out.push(...todoWritePlan(sessionId, name, block.input))
-      }
-    }
-    // Usage also comes carried on an assistant message: this one request's, which `ClaudeStreamNormalizer` adds to the running reading
-    const usage = (m.message as Json | undefined)?.usage as Json | undefined
-    if (usage) {
-      out.push({
-        type: 'usage_update',
-        sessionId,
-        tokens: {
-          inputTokens: tokenCount(usage.input_tokens),
-          outputTokens: tokenCount(usage.output_tokens),
-          cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
-          cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
-        },
-      })
-    }
-    return out
-  }
-
-  if (type === 'user') {
-    const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
-    /*
-     * The result of launching a background agent is **not actually a result** (#98). Closing the
-     * card here would show the text meant only for the model ("never quote…") as its result, and
-     * make the card look already finished while the agent is still genuinely working. This leaves
-     * the card open with only a one-line status, and `task_notification` closes it when the agent
-     * actually finishes (`ClaudeStreamNormalizer`).
-     */
-    const launched = backgroundLaunch(m)
-    if (launched) return [{ type: 'tool_output_delta', sessionId, callId: launched, text: 'Running in the background\n' }]
-    /*
-     * A foreground agent's result is drawn from `tool_use_result` — the SDK says to do exactly
-     * that (sdk.d.ts: "For the Agent/Task tool the completed shape is the subagent's final report
-     * without the model-directed agentId/usage trailer, plus run totals — render from it
-     * instead of parsing the tool_result text."). Using the body as-is would put JSON starting
-     * with "[Subagent hand-back] The text below is…" on the card (measured).
-     */
-    const agent = (m.tool_use_result ?? {}) as Json
-    // The finished agent's whole report is the result's record (#221); the card shows its head
-    const agentDone =
-      str(agent.status) === 'completed' && str(agent.agentId) && Array.isArray(agent.content) &&
-      content.filter((b) => str(b.type) === 'tool_result').length === 1
-        ? agentReport(
-            (agent.content as Json[]).map((b) => str(b.text)).join('\n'),
-            agentStats(agent.totalToolUseCount, agent.totalDurationMs),
-          )
-        : null
-    for (const block of content) {
-      if (str(block.type) === 'tool_result') {
-        const c = block.content
-        /*
-         * The card reads the answer as the record does (#843): a list of blocks used to be cut out of its JSON, so a
-         * card, and every session reading it (read_session, recall, the handoff record), got `[{"type":"text",…` or
-         * an image's base64 instead of the text.
-         */
-        out.push(toolResultEvent(sessionId, str(block.tool_use_id), block.is_error !== true, agentDone ?? resultOutput(c)))
-        /*
-         * An image carried in a tool result (#40). This is where one arrives when a screenshot is
-         * taken or an image file is Read — the measured shape:
-         * {type:'image', source:{type:'base64', data, media_type}}. (An assistant body never
-         * carries an image — a tool result is the only way one arrives.)
-         */
-        if (Array.isArray(c)) {
-          for (const part of c as Json[]) {
-            if (str(part.type) !== 'image') continue
-            const source = (part.source ?? {}) as Json
-            /*
-             * A non-base64 source (a URL, say) used to vanish silently (found during the #58
-             * investigation). There is nothing we can do about failing to render it, but the fact
-             * that it failed to render still has to be shown — this uses the same box as the
-             * existing image-failure cases (too large, file missing).
-             */
-            if (str(source.type) !== 'base64' || !str(source.data)) {
-              out.push(undrawnImageEvent(sessionId, `Cannot display an image of this format yet (source: ${str(source.type) || 'none'})`))
-              continue
-            }
-            // Beyond the ceiling every image is held to (adapters/images.ts), this explains why it is not shown instead of rendering it
-            out.push(inlineImageEvent(sessionId, str(source.media_type), str(source.data)))
-          }
-        }
-      }
-    }
-    return out
-  }
-
-  /*
-   * A limit (M0 finding: `rate_limit_event.rate_limit_info`).
-   *
-   * **Only an actual block counts as a limit.** There are three statuses (SDK:
-   * 'allowed' | 'allowed_warning' | 'rejected'). While this checked `!== 'allowed'`,
-   * `allowed_warning` — "getting close, but still going through" — was treated the same as
-   * `rejected`, and a limit banner appeared on a session that was never actually blocked
-   * (dogfooding: "it showed up in the tab even though the limit had not been reached").
-   *
-   * The Codex adapter fixed the same mistake first and cited this file as its own reference, but
-   * the reference itself was wrong. Codex has it right now — this only reacts to the explicit
-   * signal the tool actually gives. The warning is not discarded: the usage window
-   * (agents.usage) still shows remaining headroom as a percentage. The banner says "cannot be
-   * used right now", and showing it while it can still be used would make that a lie.
-   */
-  if (type === 'rate_limit_event') {
-    const info = (m.rate_limit_info ?? {}) as Json
-    if (str(info.status) === 'rejected') {
-      const resetsAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : undefined
-      out.push({
-        type: 'limit_reached',
-        sessionId,
-        resumeAt: resetsAt,
-        windowMins: str(info.rateLimitType) === 'five_hour' ? 300 : undefined,
-      })
-    }
-    return out
-  }
-
-  if (type === 'result') {
-    const modelUsage = (m.modelUsage ?? {}) as Record<string, Json>
-    const models = Object.values(modelUsage)
-    if (models.length > 0) {
-      /*
-       * Context usage is never computed here.
-       *
-       * `modelUsage` is a **session-wide accumulation**. Re-reading the cache
-       * (`cacheReadInputTokens`) adds to it every single turn, so summing it here quickly exceeds
-       * the window size — this actually showed up as "context 533%". What is currently in the
-       * window is instead known by the SDK's own `getContextUsage()`, which the adapter asks at
-       * the end of a turn to emit `context_update`.
-       */
-      /*
-       * **Every model is summed.** `modelUsage` has one entry per model (sdk.d.ts: meant to
-       * count tokens and cost across everything, including internal calls like the main loop, a
-       * subagent, or compaction), and a single turn can involve more than one model — a small
-       * model used to title something or shorten a tool result can appear before the main model
-       * does. While only the first entry was read, an app-requested agent's own run was recorded
-       * as "1.1k tokens": the log lines were 1108/13 and 1038/16, while the model actually seen in
-       * the CLI log (Opus) used only 200/363 output tokens against 24k-80k cache input tokens.
-       * What got recorded was the small model's share.
-       */
-      const sum = (field: string) => models.reduce((n, u) => n + tokenCount(u[field]), 0)
-      out.push({
-        type: 'usage_update',
-        sessionId,
-        tokens: {
-          inputTokens: sum('inputTokens'),
-          outputTokens: sum('outputTokens'),
-          cacheReadTokens: sum('cacheReadInputTokens'),
-          cacheCreationTokens: sum('cacheCreationInputTokens'),
-          costUsd: typeof m.total_cost_usd === 'number' ? m.total_cost_usd : undefined,
-        },
-      })
-    }
-    if (str(m.subtype) !== 'success' || m.is_error === true) {
-      /*
-       * A failed ending has no `result`, only `errors` (a list of strings) (sdk.d.ts
-       * `SDKResultError`). If both are empty, this still carries at least the name of how it
-       * ended — when an app-requested agent (M4 D-1) never manages to match its structured output
-       * (`error_max_structured_output_retries`), that name is the only reason the app ever
-       * receives.
-       */
-      const errors = Array.isArray(m.errors) ? m.errors.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
-      out.push({
-        type: 'error',
-        sessionId,
-        error: { code: 'internal', message: str(m.result) || errors.join('\n') || `Turn failed: ${str(m.subtype)}`, retryable: true },
-      })
-    } else {
-      // The answer of a turn that answered with a schema (M4 D-1) — it never arrives as text, only here (see protocol's turn_complete comment).
-      out.push(m.structured_output === undefined ? { type: 'turn_complete', sessionId } : { type: 'turn_complete', sessionId, output: m.structured_output })
-    }
-    return out
-  }
-
-  return out
 }
 
 /**

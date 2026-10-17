@@ -52,13 +52,17 @@ const COUNTS = [
   ['closed', 'closed'],
 ]
 
-/** The queue for agents and the screen: one line per item, attention first. */
+/**
+ * The queue for agents and the screen: one line per item, attention first. Within a state the items waiting or acting
+ * are in the order they were queued, which a poll does not change (it sets `updatedAt` on every read, so by that the
+ * order followed whichever was read last); those ended come newest first.
+ */
 export function queueView({ all = false } = {}) {
   const q = readQueue(dataDir())
   const order = ['attention', 'ci', 'waiting', 'merged', 'closed']
   const items = q.items
     .filter((i) => all || ACTIVE.has(i.state) || Date.now() - Date.parse(i.updatedAt) < 24 * 3600_000)
-    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (ACTIVE.has(a.state) ? String(a.queuedAt).localeCompare(String(b.queuedAt)) : String(b.updatedAt).localeCompare(String(a.updatedAt))))
   const counts = Object.fromEntries(COUNTS.map(([s]) => [s, items.filter((i) => i.state === s).length]))
   const parts = COUNTS.filter(([s]) => counts[s]).map(([s, words]) => `${counts[s]} ${words}`)
   const summary = `Merge queue: ${parts.length ? parts.join(', ') : 'empty'}. ${driverLine(q)}`
