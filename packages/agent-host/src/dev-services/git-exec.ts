@@ -73,6 +73,12 @@ export type RunGitOptions = {
    * reads (`GIT_DIR`, `GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`, `HOME`) must not share one. `GIT_INDEX_FILE` does not.
    */
   filters?: GitFilterListings
+  /**
+   * Ends git as a timeout does (`endGit`: SIGTERM so git takes its `index.lock` away, SIGKILL after a grace) when it
+   * fires, and rejects with `aborted` (code `ABORT_ERR`): the person cancelling a commit or push still running (#1007).
+   * Already fired, git is not started.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -263,17 +269,23 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
   const output = opts.outputFile ? await open(opts.outputFile, 'w', 0o600) : undefined
   try {
     return await new Promise<string>((resolve, reject) => {
+      if (opts.signal?.aborted) return reject(gitCancelled())
       const child = startGit(cwd, argv, ['pipe', output ? output.fd : 'pipe', 'pipe'], opts.env)
       const max = opts.maxBuffer ?? DEFAULTS.maxBuffer
       const timeout = opts.timeout ?? DEFAULTS.timeout
-      let ended: 'timedOut' | 'overflow' | null = null
+      let ended: 'timedOut' | 'overflow' | 'aborted' | null = null
       let settled = false
-      const end = (why: 'timedOut' | 'overflow') => {
+      const end = (why: 'timedOut' | 'overflow' | 'aborted') => {
         if (ended) return
         ended = why
         endGit(child)
       }
       const timer = setTimeout(() => end('timedOut'), timeout)
+      // Not once git has exited: what it did then is done, and the answer is git's own
+      const onAbort = () => {
+        if (running(child)) end('aborted')
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true })
       const collect = (stream: Readable | null) => {
         const chunks: Buffer[] = []
         let bytes = 0
@@ -291,11 +303,14 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
         if (settled) return
         settled = true
         clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', onAbort)
         child.stdout?.destroy()
         child.stderr?.destroy()
         const out = stdout()
         const err = stderr()
-        if (!ended && code === 0) return resolve(out)
+        // A git that finished before the cancel reached it did the write: that is the answer, not "cancelled"
+        if ((!ended || ended === 'aborted') && code === 0) return resolve(out)
+        if (ended === 'aborted') return reject(Object.assign(gitCancelled(), { signal, stdout: out, stderr: err }))
         const message =
           ended === 'timedOut' ? `git did not answer within ${timeout} ms` : ended === 'overflow' ? 'Git output exceeded maxBuffer' : err || `Git exited with ${code ?? signal}`
         reject(Object.assign(new Error(message), { code, signal, stdout: out, stderr: err, ...(ended === 'timedOut' ? { timedOut: true, killed: true } : {}) }))
@@ -304,6 +319,7 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
         if (settled) return
         settled = true
         clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', onAbort)
         reject(e)
       })
       // `close` once every holder of git's output has let go; after git's `exit`, a short grace for that
@@ -323,6 +339,16 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
   } finally {
     await output?.close()
   }
+}
+
+/** What `runGit` rejects with when its `signal` fires: git was ended, or never started */
+export function gitCancelled(): Error & { code: 'ABORT_ERR'; aborted: true } {
+  return Object.assign(new Error('Cancelled'), { code: 'ABORT_ERR' as const, aborted: true as const })
+}
+
+/** Whether a call failed because its `signal` fired (`gitCancelled`) */
+export function isGitCancelled(e: unknown): boolean {
+  return (e as { aborted?: unknown } | null)?.aborted === true
 }
 
 /** Why a streamed read ended without git's own answer: it ran past its time, or the caller stopped it */

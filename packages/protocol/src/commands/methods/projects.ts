@@ -39,19 +39,29 @@ export const projectMethods = {
   },
   'git.checkout': {
     params: z.object({ projectId: ProjectId, branch: z.string(), dryRun: z.boolean().optional() }),
-    result: z.object({ ok: z.boolean(), conflicts: z.array(z.string()), message: z.string().optional() }),
+    result: z.object({ ok: z.boolean(), conflicts: z.array(z.string()), message: z.string().optional(), cancelled: z.literal(true).optional() }),
   },
   'git.stage': {
     params: z.object({ projectId: ProjectId, paths: z.array(z.string()), unstage: z.boolean().optional() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /** `cancelled`: the person ended it with `git.cancel` (#1007); the screen says so rather than that it failed */
   'git.commit': {
     params: z.object({ projectId: ProjectId, message: z.string() }),
-    result: z.object({ ok: z.boolean(), message: z.string().optional() }),
+    result: z.object({ ok: z.boolean(), message: z.string().optional(), cancelled: z.literal(true).optional() }),
   },
   'git.push': {
     params: z.object({ projectId: ProjectId }),
-    result: z.object({ ok: z.boolean(), message: z.string().optional() }),
+    result: z.object({ ok: z.boolean(), message: z.string().optional(), cancelled: z.literal(true).optional() }),
+  },
+  /**
+   * Ends the git write still running for this project (a switch, stage, commit or push from the git panel, #1007): a
+   * hook or a credential helper waiting on a sign-in otherwise holds the panel for up to ten minutes. git is ended as
+   * a timeout ends it, so it takes its `index.lock` away. `cancelled` is whether there was one to end.
+   */
+  'git.cancel': {
+    params: z.object({ projectId: ProjectId }),
+    result: z.object({ cancelled: z.boolean() }),
   },
   /** The host saves a pasted image as a file (so base64 never goes into the database) */
   'attachments.save': {

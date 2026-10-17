@@ -107,7 +107,7 @@ export type ProjectsSlice = {
    * be a status call whose answer can only be identical.
    */
   gitStage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
-  gitCommit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
+  gitCommit(projectId: string, message: string): Promise<{ ok: boolean; message?: string; cancelled?: true }>
   /** Switching branch is the one of these that moves the **name** the sidebar shows, not the count */
   gitCheckout(
     projectId: string,

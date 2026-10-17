@@ -17,9 +17,7 @@ import {
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import {
-  gitWorktreeRemove,
-} from '../dev-services/git.js'
+import { gitWorktreeRemove } from '../dev-services/git-worktree.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
 import { codeIntelligenceKey } from './tool-profiles.js'

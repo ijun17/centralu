@@ -149,6 +149,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'git.stage': project(),
   'git.commit': project(),
   'git.push': project(),
+  'git.cancel': project(),
   'fs.listDir': project(),
   'fs.watch': project(),
   'fs.readFile': project(),

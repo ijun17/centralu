@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
-import { gitBranchPr } from './git.js'
+import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
 
@@ -146,13 +146,13 @@ describe('gh stopped by an abort (#368)', () => {
     const bound = 3_000 * SLOW
     const started = Date.now()
     const answer = gitBranchPr(project, 'feat/x', undefined, bound)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(await answer).toBeNull()
     expect(Date.now() - started).toBeLessThan(bound + 5_000 * SLOW)
     expect(alive(ghPid)).toBe(false)
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
   // #982 review: in the host's process group the tree kill spared what gh started (git, reading the remotes); gh now
@@ -177,12 +177,12 @@ describe('gh stopped by an abort (#368)', () => {
     __forgetPrograms()
 
     const answer = gitBranchPr(project, 'feat/x', undefined, 3_000 * SLOW)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(await answer).toBeNull()
     expect(alive(ghPid)).toBe(false)
-    await until(() => !alive(child), 5_000 * SLOW)
+    await eventually(() => !alive(child), 5_000 * SLOW)
   })
 })
 

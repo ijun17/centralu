@@ -4416,7 +4416,7 @@ describe('worktree sessions', () => {
     it.each(['worktree', 'branch'] as const)('review: reports deleted with a warning when %s removal fails after trashing', async (failure) => {
       const { s, managerId } = await makeChild(`feat/leftover-${failure}`)
       writeFileSync(join(s.worktree!.path, 'wip.txt'), 'saved\n')
-      const gitModule = await import('../dev-services/git.js')
+      const gitModule = await import('../dev-services/git-worktree.js')
       const removal = vi.spyOn(gitModule, failure === 'worktree' ? 'gitWorktreeRemove' : 'gitBranchDelete').mockRejectedValueOnce(new Error('removal denied'))
       const sessionTool = vi.spyOn(wtMgr, 'agentSession')
       try {

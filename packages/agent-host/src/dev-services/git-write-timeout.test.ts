@@ -24,7 +24,7 @@ vi.mock('./git-exec.js', async (importOriginal) => {
   }
 })
 
-const { WRITE_TIMEOUT_MS, gitCommit, gitPush, gitStage } = await import('./git.js')
+const { WRITE_TIMEOUT_MS, gitCommit, gitPush, gitStage } = await import('./git-write.js')
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })

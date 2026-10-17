@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
-import { gitSummary, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreeRemove } from './git.js'
+import { gitSummary } from './git.js'
+import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreeRemove } from './git-worktree.js'
 
 /**
  * A worktree can only be tested against **real git.**

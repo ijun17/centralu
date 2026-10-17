@@ -4,17 +4,16 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  gitCheckout,
   gitCommitDetail,
   gitDiff,
   gitIgnoredEntries,
   gitLog,
   gitStatusFiles,
   gitSummary,
-  gitWorktreeAdd,
-  gitWorktreeDirty,
   type GitTrust,
 } from './git.js'
+import { gitCheckout } from './git-write.js'
+import { gitWorktreeAdd, gitWorktreeDirty } from './git-worktree.js'
 import { gitArgv } from './git-exec.js'
 import { listDir } from './fs.js'
 import { invalidateFileIndex, searchFiles } from './file-search.js'
