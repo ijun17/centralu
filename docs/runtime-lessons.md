@@ -1833,7 +1833,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 14 | PA15: a child's environment keeps `SystemRoot` | `host/` spawn sites | Windows | 9 |
 | 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server/start.rs` | macOS, Linux | 2 |
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
-| 35 | SU8: the window reaps every child | `window/lib.rs` | all | 7 |
+| 35 | SU8: the window reaps every child | `window/os_integration.rs` | all | 7 |
 | 36 | KL3: `stopGroup` never fires at our own group | `host/dev-services/kill-tree.ts` | macOS, Linux | 8 |
 | 37 | KL6: strays measured again before the kill; the `systemd --user` subreaper | `host/dev-services/strays.ts` | macOS, Linux | 8 |
 | 38 | KL8: no HUP on Windows when closing a terminal | `host/dev-services/terminal.ts` | Windows | 8 |
@@ -1857,8 +1857,8 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 60 | TC6: `open` bounded at 15 s | `window/shell/start.rs` | macOS | 6 |
 | 61 | TC7: a keeper exiting 3 while another answers counts as ready | `shell/run.rs` | macOS | 6 |
 | 62 | TC15: one shell fallback lasts the window's life | `window/sidecar/link.rs` (`KeeperLink`) | macOS | 7 |
-| 63 | TC17: trash without an automation prompt | `window/lib.rs` | macOS | — |
-| 64 | UP1: the custom Quit item (Rust side) | `window/lib.rs` | macOS | 7 |
+| 63 | TC17: trash without an automation prompt | `window/os_integration.rs` | macOS | — |
+| 64 | UP1: the custom Quit item (Rust side) | `window/quit.rs` | macOS | 7 |
 | 65 | UP2: the exit gate | `window/lib.rs` | all | 7 |
 | 66 | UP3: under a keeper quitting only detaches | `window/sidecar/mod.rs` | all | 7 |
 | 67 | UP5: relaunch through `request_restart` | `window/lib.rs` | macOS | 7 |

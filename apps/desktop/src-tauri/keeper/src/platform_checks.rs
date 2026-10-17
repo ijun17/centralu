@@ -28,8 +28,9 @@ const SCANNED: &[&str] = &["keeper/src", "src"];
 /// Where it may be asked. A trailing `/` names a folder and everything under it.
 const MAY_ASK: &[&str] = &["keeper/src/os/", "keeper/src/start_plan.rs"];
 
-/// The window's OS integration, not the runtime: finding VS Code's `code`.
-const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs"];
+/// The window's OS integration, not the runtime: finding VS Code's `code`, the badge, sounds, the
+/// trash and the file manager, app links and the Quit menu item.
+const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs", "src/os_integration.rs", "src/app_links.rs", "src/quit.rs"];
 
 /// Today's sites outside the OS layer, with how many each has. Only shrinks.
 const NOT_YET: &[(&str, usize)] = &[
@@ -38,10 +39,9 @@ const NOT_YET: &[(&str, usize)] = &[
     ("keeper/src/host_proc/mod.rs", 6),
     ("keeper/src/lib.rs", 1),
     ("src/bin/centralu-keeper.rs", 2),
-    // The window's start and quit (step 7). `src/lib.rs` also holds the window's own OS
-    // integration (menus, traffic lights, badge, trash), which moves out of it to a module of its
-    // own then, so that what is left here is runtime.
-    ("src/lib.rs", 36),
+    // The window's start and quit (step 7). Its own OS integration (the badge, the trash, app links,
+    // the Quit menu item) is in `WINDOW_INTEGRATION`'s files, so what is left here is runtime.
+    ("src/lib.rs", 14),
     ("src/sidecar/mod.rs", 27),
 ];
 
