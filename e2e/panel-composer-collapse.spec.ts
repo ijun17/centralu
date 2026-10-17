@@ -29,6 +29,19 @@ async function settled(loc: ReturnType<Page['getByTestId']>): Promise<{ x: numbe
   return (await loc.boundingBox())!
 }
 
+/**
+ * The same wait as `settled`, for every transition inside `loc` too (a card rising and the padding that follows
+ * it). Only transitions: an animation such as a working session's pulse never finishes and moves nothing measured.
+ */
+async function transitionsDone(loc: ReturnType<Page['getByTestId']>): Promise<void> {
+  await loc.evaluate(async (el) => {
+    const running = () => el.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition)
+    for (let now = running(); now.length > 0; now = running()) {
+      await Promise.allSettled(now.map((a) => a.finished))
+    }
+  })
+}
+
 /** The height of the strip that raises a collapsed composer (the same value as SessionView's COMPOSER_REACH) */
 const COMPOSER_REACH = 54
 
@@ -223,8 +236,8 @@ test('a raised composer neither covers nor pushes the last line', async ({ page 
   const box = (await panel.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
   await expect(panel.getByTestId('composer-shell')).toHaveAttribute('data-up', 'true')
-  // Wait for the transition to finish — measuring mid-transition records a position in transit as fact
-  await page.waitForTimeout(700)
+  // Wait for the transitions to finish — measuring mid-transition records a position in transit as fact
+  await transitionsDone(panel)
 
   const up = await read()
   // The padding has been the card's height since it was collapsed, and stays that way once risen

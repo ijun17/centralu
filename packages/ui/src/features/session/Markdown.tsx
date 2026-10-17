@@ -108,7 +108,24 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           if (ref) return <FileLink refInfo={ref} projectId={projectId}>{children}</FileLink>
           if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
             return (
-              <a {...props} href={href} target="_blank" rel="noreferrer noopener">
+              <a
+                {...props}
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                /*
+                 * Opened through the platform, like terminal links and apps' links: the desktop's WebView does not
+                 * open a new window for target="_blank" by itself. The href stays for hover, copy and the context menu.
+                 */
+                onClick={(e) => {
+                  const platform = useStore.getState().platform
+                  if (!platform) return
+                  e.preventDefault()
+                  void platform.system.openUrl(href).catch((err: unknown) =>
+                    useStore.getState().setToast(`Could not open the link: ${err instanceof Error ? err.message : String(err)}`),
+                  )
+                }}
+              >
                 {children}
               </a>
             )

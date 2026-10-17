@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { setup, newSession, injectApproval, emitEvent } from './fixtures/control.js'
+import { setup, newSession, injectApproval, emitEvent, watchAppearance } from './fixtures/control.js'
 
 /**
  * The control loop's scenarios on unread marks and the finished cards: when they appear, call out, and clear. Moved out of control-loop.spec.ts by subject (#845); the
@@ -66,19 +66,16 @@ test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
 })
 
 /**
- * Checks closely whether the gust **ever appeared at all**, even once.
+ * Whether the gust **ever appeared at all**, even once, from now on: install it before the cause.
  *
  * `toHaveCount(0)` cannot catch it — that auto-retries, so it passes as soon as the gust appears
  * and then disappears ("eventually 0", not "never appeared"). This gap actually let a test meant
- * to catch a trigger bug pass anyway.
+ * to catch a trigger bug pass anyway. Polling for it for a while instead (it used to look every
+ * 50ms for 900ms) passes on a machine slow enough that the gust comes after the polling stops.
+ * Each check below first waits for what the same cause did draw (the card, the session it moved
+ * to): the gust is decided in that same store update and drawn within a frame of it.
  */
-async function blew(page: import('@playwright/test').Page, ms = 900): Promise<boolean> {
-  for (let i = 0; i < ms / 50; i++) {
-    if ((await page.getByTestId('gust').count()) > 0) return true
-    await page.waitForTimeout(50)
-  }
-  return false
-}
+const watchGust = (page: Page) => watchAppearance(page, 'gust')
 
 /**
  * A gust that sweeps across the screen once a reply finishes.
@@ -108,11 +105,12 @@ test("A gust does not blow when an off-screen session finishes — that is the c
   await newSession(page, 'alpha', 'second') // Watching this one
 
   // Session 0 (not being watched) finishes
+  const blew = await watchGust(page)
   await emitEvent(page, 0, { type: 'turn_complete' })
-  expect(await blew(page)).toBe(false)
   // A lingering signal arrives instead of a passing one — since it was not being watched, a
   // passing signal would be missed
   await expect(page.getByTestId('notice')).toHaveCount(1)
+  expect(await blew()).toBe(false)
 })
 
 /*
@@ -202,11 +200,12 @@ test('When the app is in the background, the card persists even if the session b
   // Switch to another app
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))
 
+  const blew = await watchGust(page)
   await emitEvent(page, 0, { type: 'turn_complete' })
 
   // Not the window being watched, so nobody sees the gust -> it must be a lingering signal
-  expect(await blew(page)).toBe(false)
   await expect(page.getByTestId('notice')).toHaveCount(1)
+  expect(await blew()).toBe(false)
 
   // Returning means it is being seen then, so it clears
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -238,8 +237,9 @@ test('When it is right in front of the person, only the card stays and no sound 
   await emitEvent(page, 0, { type: 'turn_complete' })
 
   // Unseen, so the card stays. But calling with a sound at someone right in front of it is just noise.
+  // The card and any sound are decided in the same handling of the event (store/events/notices.ts),
+  // and the mock records an alert as it is asked for, so once the card is drawn the count is final.
   await expect(page.getByTestId('notice')).toHaveCount(1)
-  await page.waitForTimeout(300)
   expect(
     await page.evaluate(() => (window as never as { __mock: { alerts: unknown[] } }).__mock.alerts.length),
   ).toBe(0)
@@ -388,11 +388,13 @@ test('Moving to an already-finished session does not trigger a gust', async ({ p
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second') // Watching this one
 
+  const blewAtFinish = await watchGust(page)
   await emitEvent(page, 0, { type: 'turn_complete' }) // The unseen one finishes
-  await page.waitForTimeout(200)
-  await expect(page.getByTestId('gust')).toHaveCount(0)
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+  expect(await blewAtFinish()).toBe(false)
 
   // Move to that finished session — nothing new has finished
+  const blew = await watchGust(page)
   const moved = await page.evaluate(() => {
     const store = (window as never as { __store: { getState(): Record<string, never> } }).__store
     const st = store.getState() as unknown as {
@@ -408,8 +410,10 @@ test('Moving to an already-finished session does not trigger a gust', async ({ p
   })
   // **Confirm the move happened first** — if it never moved, "no gust" proves nothing
   expect(moved.after).toBe(moved.target)
+  // ...and that the screen shows it, which is the render a gust tied to "is finished" would come with
+  await expect(page.getByTestId('chat-stream')).toContainText('first')
 
-  expect(await blew(page)).toBe(false)
+  expect(await blew()).toBe(false)
 })
 
 /*
@@ -432,8 +436,12 @@ test('Moving away and back does not make a past completion blow again', async ({
       ;(st as unknown as { focusSession(id: string): void }).focusSession(list[idx]!.id)
     }, i)
 
+  let blew = await watchGust(page)
   await swap(0)
-  expect(await blew(page, 300)).toBe(false)
+  await expect(page.getByTestId('chat-stream')).toContainText('first')
+  expect(await blew()).toBe(false)
+  blew = await watchGust(page)
   await swap(1) // Back again. Nothing finished in between.
-  expect(await blew(page, 300)).toBe(false)
+  await expect(page.getByTestId('chat-stream')).toContainText('second')
+  expect(await blew()).toBe(false)
 })

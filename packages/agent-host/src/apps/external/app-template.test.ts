@@ -1,10 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import type { Socket } from 'node:net'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +12,7 @@ import { ExternalApps, resultText, type AgentRunRequest, type AppRef, type Broke
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { StreamTransport } from './stream-transport.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The app template and its runtime (M4 C-1) — exercised by starting a template-scaffolded app with a
@@ -32,7 +32,7 @@ let projRoot = ''
 let rt: ExternalApps | null = null
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-template-')))
+  root = tempRoot('cc-app-template-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
   mkdirSync(dataRoot)
@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 /** Expands the template into a project app's location — the same function creation (C-1b) uses */
@@ -70,16 +70,36 @@ const serverUsing = (body: string) => `import { McpServer, serveStdio, z, centra
 ${body}
 `
 
+/**
+ * A `--import` module that fails the app's start if it resolves any module outside `dir` (Node's own `node:` modules
+ * aside), for import and require alike: "starts with no install" is then true wherever the copy is.
+ *
+ * The test used to check instead that no node_modules or package.json was anywhere above the copy, and failed on a
+ * Windows machine whose profile had them: the temporary folder is inside the profile there, and an `npm install` run at
+ * the top of the profile leaves both. That check said nothing about the template, and Node would have used such an
+ * install without a word, so it did not prove the claim either.
+ */
+function onlyInside(dir: string): string {
+  const hook = join(root, 'only-inside.mjs')
+  const inside = JSON.stringify(pathToFileURL(join(dir, '/')).href)
+  writeFileSync(
+    hook,
+    `import module from 'node:module'
+const inside = ${inside}
+const check = (url) => {
+  if (url.startsWith('file:') && !url.startsWith(inside)) throw new Error('the app resolved a module outside its folder: ' + url)
+}
+// registerHooks (Node 22.15) sees require() too; register sees import only
+if (module.registerHooks) module.registerHooks({ resolve: (s, c, next) => { const r = next(s, c); check(r.url); return r } })
+else module.register('data:text/javascript,' + encodeURIComponent('const inside = ' + JSON.stringify(inside) + '; export async function resolve(s, c, next) { const r = await next(s, c); if (r.url.startsWith("file:") && !r.url.startsWith(inside)) throw new Error("the app resolved a module outside its folder: " + r.url); return r }'))
+`,
+  )
+  return pathToFileURL(hook).href
+}
+
 describe('the expanded template starts with node alone', () => {
-  it('a clean copy — no node_modules or package.json above it, an environment of PATH alone — answers the tool list and keeps state in the data folder', async () => {
+  it('a clean copy — nothing resolved outside its folder, an environment of PATH alone — answers the tool list and keeps state in the data folder', async () => {
     const dir = scaffold('counter')
-    // Only if there is no trace of an install anywhere above this copy is "no install" actually true
-    const above: string[] = []
-    for (let d = dir; ; d = dirname(d)) {
-      for (const f of ['node_modules', 'package.json']) if (existsSync(join(d, f))) above.push(join(d, f))
-      if (d === dirname(d)) break
-    }
-    expect(above).toEqual([])
     const src = readFileSync(join(dir, 'server.mjs'), 'utf8')
     const bare = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]!).filter((s) => !s.startsWith('.') && !s.startsWith('node:'))
     expect(bare).toEqual([])
@@ -87,7 +107,12 @@ describe('the expanded template starts with node alone', () => {
     const data = join(root, 'app-data')
     const connect = async () => {
       const c = new Client({ name: 'host', version: '0' }, { versionNegotiation: { mode: 'auto' } })
-      await c.connect(new StdioClientTransport({ command: 'node', args: ['--enable-source-maps', 'server.mjs'], cwd: dir, env: { PATH: process.env.PATH!, CENTRALU_APP_DATA: data }, stderr: 'pipe' }))
+      const transport = new StdioClientTransport({ command: 'node', args: ['--import', onlyInside(dir), '--enable-source-maps', 'server.mjs'], cwd: dir, env: { PATH: process.env.PATH!, CENTRALU_APP_DATA: data }, stderr: 'pipe' })
+      let stderr = ''
+      transport.stderr?.on('data', (b: Buffer) => (stderr += b.toString()))
+      await c.connect(transport).catch((e: Error) => {
+        throw new Error(`${e.message}; the app's stderr: ${stderr}`)
+      })
       return c
     }
     const c = await connect()

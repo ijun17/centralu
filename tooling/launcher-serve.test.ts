@@ -27,6 +27,8 @@ import {
   ensureServeState,
   hostCommand,
   hostEnv,
+  takesTokenOnStdin,
+  tokenLine,
   launcherScript,
   ensureLauncher,
   mismatchServerVersion,
@@ -286,16 +288,42 @@ describe('the connection line', () => {
 describe('how the host is started', () => {
   const env = { PATH: '/usr/bin', DISPLAY: ':0', WAYLAND_DISPLAY: 'wayland-0', CC_KEEPER: '1', CC_DEV: '1', CC_HOST_TOKEN: 'old' }
 
-  it('passes the token in the environment, never on the command line', () => {
-    const e = hostEnv(env, { token: 'secret-token', dataDir: '/d', version: '1.0.0', hostDir: '/h' })
-    expect(e.CC_HOST_TOKEN).toBe('secret-token')
+  /*
+   * #538: a process's start environment stays readable to every process of its user while it runs (#502), and its
+   * arguments to every user. The token goes as the first line on the host's stdin, a pipe to this launcher.
+   */
+  it('hands the token over on stdin, never in the environment or on the command line', () => {
+    const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: '/h' })
+    expect(e.CC_HOST_TOKEN).toBeUndefined()
+    expect(Object.values(e).some((v) => String(v).includes('secret-token') || String(v).includes('old'))).toBe(false)
+    expect(e.CC_HOST_TOKEN_ON_STDIN).toBe('1')
+    expect(tokenLine('secret-token')).toBe('{"token":"secret-token"}\n')
     const plan = hostCommand('/usr/bin/node', '/h/main.mjs', { port: 17175, dataDir: '/d', platform: 'linux' })
     expect(plan.args.join(' ')).not.toContain('secret-token')
     expect(plan.args).not.toContain('--token')
   })
 
+  // Review of #1100: CENTRALU_HOST_ENTRY can point at a bundle from before #538, which reads only CC_HOST_TOKEN
+  it('gives a host bundle from before the stdin token its token in the environment, as before', () => {
+    const d = mkdtempSync(join(tmpdir(), 'cc-token-entry-'))
+    try {
+      writeFileSync(join(d, 'main.mjs'), '')
+      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1 }))
+      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(false)
+      const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: d, legacyToken: 'secret-token' })
+      expect(e.CC_HOST_TOKEN).toBe('secret-token')
+      expect(e.CC_HOST_TOKEN_ON_STDIN).toBeUndefined()
+      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1, tokenOnStdin: 1 }))
+      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(true)
+      // The source, which has no bundle-info.json, reads it from stdin
+      expect(takesTokenOnStdin(join(ROOT, 'packages/agent-host/src/main.ts'))).toBe(true)
+    } finally {
+      rmSync(d, { recursive: true, force: true })
+    }
+  })
+
   it('starts the host with no display and none of the keeper’s or dev mode’s variables', () => {
-    const e = hostEnv(env, { token: 't', dataDir: '/d', version: '1.0.0', hostDir: '/h' })
+    const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: '/h' })
     for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_DEV']) expect(e[k]).toBeUndefined()
     expect(e.CC_DATA_DIR).toBe('/d')
     expect(e.PATH).toBe('/usr/bin')
@@ -932,9 +960,20 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         const deadline = Date.now() + 60_000
         while (!out.includes('"hostRunning":true') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
         expect(out).toContain('"detach":{"ok":true')
+        /*
+         * What lets the launcher and the host outlive the session is being outside its process group (#845). The test
+         * used to kill the group, wait a fixed second and find the host answering, which a loaded machine could do
+         * before a kill that reached the host had landed. The groups are read first, so no wait decides it.
+         */
+        const { pid, hostPid } = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
+        const groups = [pid, hostPid].map((p) => Number(spawnSync('ps', ['-o', 'pgid=', '-p', String(p)], { encoding: 'utf8' }).stdout.trim()))
+        expect(groups.every((g) => g > 0)).toBe(true)
+        expect(groups).not.toContain(session.pid)
         // The session ends the way sshd can end one: every process in its group, at once
+        const ended = new Promise((r) => session.once('exit', r))
         process.kill(-session.pid!, 'SIGKILL')
-        await new Promise((r) => setTimeout(r, 1000))
+        await ended
+        expect(alive(pid) && alive(hostPid)).toBe(true)
         expect((await connection(d)).hostRunning).toBe(true)
         expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, how: 'asked' })
       } finally {

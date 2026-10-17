@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Drain, DrainCut } from './drain.js'
 import { bridgeAddress, ControlChannel, runDrain, standby, viewPort, type StandbyDeps } from './swap-control.js'
+import { readHandedToken } from './lifecycle/handed-token.js'
 import type { StoreInspection } from './dev-services/store.js'
 import { bridgeSessionOf } from './transport/bridge-token.js'
 
@@ -71,6 +72,24 @@ describe('the control channel on the host’s stdin (#280 step 3)', () => {
     input.write('in","timeoutMs":10}\n\n[1,2]\n')
     await new Promise((r) => setImmediate(r))
     expect(seen).toEqual(['drain 10'])
+  })
+
+  /*
+   * #538: the keeper writes the token as the first line on this same stdin, and the host reads it first
+   * (`readHandedToken`), which leaves the stream paused with what followed put back. A listener alone does not
+   * restart a paused stream: without the channel's own resume, every control line after the token went unread.
+   */
+  it('reads the control lines that came after the token line, from the paused stream it is handed', async () => {
+    const input = new PassThrough()
+    const token = readHandedToken(input, 1000)
+    input.write('{"token":"t-1"}\n{"op":"drain","timeoutMs":5}\n')
+    expect(await token).toBe('t-1')
+    const ch = new ControlChannel(input)
+    const seen: string[] = []
+    ch.on('drain', (m) => seen.push(`drain ${m.timeoutMs}`))
+    input.write('{"op":"drain","timeoutMs":6}\n')
+    await new Promise((r) => setImmediate(r))
+    expect(seen).toEqual(['drain 5', 'drain 6'])
   })
 
   it('a line that grows past 64 KiB without a newline is dropped, even one that would parse, and the next line is read (HO12)', async () => {

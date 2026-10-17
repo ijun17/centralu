@@ -11,7 +11,7 @@
 //!     host's protocol; a relay of bytes cannot be broken by a change to that protocol. The HTTP
 //!     door (app views) rides the same relay for free.
 //!   - **The token stays stable anyway.** The keeper makes one per keeper lifetime and hands it to
-//!     every host it starts (`CC_HOST_TOKEN`), so the host checks the same token clients already
+//!     every host it starts (on the host's stdin, #538), so the host checks the same token clients already
 //!     hold, and the Origin rule still sees the browser's own header. A Codex bridge, which gets its
 //!     address and a credential derived from this token once when its thread starts, keeps working
 //!     across every swap (the host's `transport/bridge-token.ts`, #382).

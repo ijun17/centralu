@@ -280,6 +280,9 @@ impl Reactor {
                     self.hold_next_poll = true;
                     let _ = done.send(());
                 }
+                Cmd::List(reply) => {
+                    let _ = reply.send(self.children.iter().map(|(&n, c)| c.info(n)).collect());
+                }
                 Cmd::Reap(reply) => {
                     let mut reaped = Vec::new();
                     for c in self.children.values_mut().filter(|c| c.exit.is_none()) {
@@ -318,7 +321,7 @@ impl Reactor {
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     self.accept_errors.accepted();
-                    if !accept::from_this_user(&stream, log) {
+                    if !accept::from_this_user(&stream, log) || !self.shared.answers(&stream) {
                         continue;
                     }
                     if stream.set_nonblocking(true).is_err() {

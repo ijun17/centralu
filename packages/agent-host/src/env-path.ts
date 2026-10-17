@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 
@@ -168,19 +168,25 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
  *
  * Only absolute PATH entries are searched on Windows: a relative one is resolved against the
  * working directory, which may be a cloned repository.
+ *
+ * And no narrower than Windows' own search (review of #1073): since a tool not found here is never
+ * spawned by its bare name, a tool Windows would start has to be found here too. An entry is read
+ * without its quotes (`"C:\Program Files\Git\cmd"`, as Windows reads it), and a name counts as there
+ * when the name itself is (`presentOnWindows`), an App Execution Alias in WindowsApps included.
  */
 export function whichTool(
   name: string,
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
-  exists: (path: string) => boolean = existsSync,
+  exists: (path: string) => boolean = platform === 'win32' ? presentOnWindows : existsSync,
 ): string | null {
   if (platform === 'win32') {
     // Lowercased: NTFS ignores case, and `claude.cmd` is the name npm actually wrote.
     const exts = /\.[^\\/.]+$/.test(name)
       ? ['']
       : (envVar(env, 'PATHEXT') || DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase())
-    for (const dir of (envVar(env, 'PATH') ?? '').split(';')) {
+    for (const entry of (envVar(env, 'PATH') ?? '').split(';')) {
+      const dir = entry.replaceAll('"', '')
       if (!dir || !win32.isAbsolute(dir)) continue
       for (const ext of exts) {
         const candidate = win32.join(dir, name + ext)
@@ -195,6 +201,22 @@ export function whichTool(
     if (exists(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * Whether a name in a PATH folder is there, as Windows' search asks it: of the name itself, never of where it leads.
+ * `existsSync` follows a reparse point, and an App Execution Alias (`winget.exe`, a Store-installed tool, in
+ * `%LOCALAPPDATA%\Microsoft\WindowsApps`) leads somewhere only process creation can open, so it answered false for a
+ * tool Windows starts (measured on Windows 11: `existsSync` false, `lstat` a link).
+ */
+function presentOnWindows(path: string): boolean {
+  if (existsSync(path)) return true
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** What Windows assumes when PATHEXT is not set */

@@ -90,6 +90,8 @@ export class ControlChannel {
       if (l) this.dispatch(l)
     }, { maxLine: MAX_LINE })
     input.on('data', (chunk: string | Buffer) => lines.push(chunk))
+    // Paused when the token line was read first (`readHandedToken`, #538); a listener alone does not restart it
+    input.resume()
     const end = () => this.end()
     input.on('end', end)
     input.on('close', end)

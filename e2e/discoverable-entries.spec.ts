@@ -31,18 +31,19 @@ test('the Search button opens the palette and says its key', async ({ page }) =>
   await expect(page.getByTestId('palette-input')).toHaveAttribute('placeholder', /apps/)
 })
 
-test("the project the person is in shows its +, others only on hover, and the chevron beside it opens that project's dialog", async ({ page }) => {
+test("the project the person is in shows its +, others only on hover, and the project menu's New session opens that project's dialog", async ({ page }) => {
   await demo(page)
   const here = page.getByTestId('project-new-session-centralu')
-  const options = page.getByTestId('project-new-session-options-centralu')
   const there = page.getByTestId('project-new-session-landing-site')
   // Opacity, not presence: the other project's + is still reachable by hover and Tab
   await page.mouse.move(900, 500)
   await expect.poll(() => seen(here)).toBe(1)
-  await expect.poll(() => seen(options)).toBe(1)
   await expect.poll(() => seen(there)).toBe(0)
+  // The chevron beside the + is gone (2026-10-17): the dialog that chooses a tool or a worktree is in the project menu
+  await expect(page.getByTestId('project-new-session-options-centralu')).toHaveCount(0)
 
-  await options.click()
+  await page.getByTestId('project-menu-centralu').click()
+  await page.getByTestId('new-session-centralu').click()
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await expect(page.getByTestId('new-session-dialog')).toContainText('centralu')
 })

@@ -18,6 +18,12 @@
 // requires checks on the head, GitHub answers BLOCKED and the pull request goes back to its own CI.
 // The queue posts a `merge-queue` success status on each head it lands from a batch, naming the
 // batch run, so the pull request says why it merged with its own run cancelled.
+//
+// Two tiers of CI (project.json `ci.fullTier`, 2026-10-18): a pull request's own run is the quick tier,
+// and a batch's (a manual run) the full one. Every item lands through a batch then, a batch of one
+// included: the batch also takes items whose quick tier passed, one sent back from a batch goes alone,
+// and one whose batch of one ended without landing it is not batched again on that head (`alone`):
+// the queue tells its session why (queue.mjs decideCi).
 import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent } from './queue.mjs'
 import { short } from './util.mjs'
 
@@ -40,23 +46,29 @@ const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
  * bump (`ci.batchable`, from the item's poll), their own CI read on the head they have and not finished (pending or nothing yet), with every run of it not started, and not
  * sent back from a batch on this head. The oldest first, at most `max`, in one repository (the
  * oldest item's).
+ *
+ * With two tiers (`tiers`), also the items whose own quick tier passed (`ci.verdict` `quick`), since
+ * they land only through a batch; one sent back from a batch on this head is taken alone, when it is
+ * the oldest, and one whose batch of one ended without landing it (`alone`) not on this head.
  */
-export function batchCandidates(q, { max }) {
+export function batchCandidates(q, { max, tiers = false }) {
+  const waiting = (i) => (i.ci.verdict === 'pending' || i.ci.verdict === 'none') && i.ci.runs?.length > 0 && i.ci.runs.every((r) => NOT_STARTED.has(r.status))
   const ok = q.items.filter(
     (i) =>
       i.state === 'ci' &&
       !i.batch &&
       i.head &&
-      i.batchless !== i.head &&
+      (tiers ? i.alone?.head !== i.head : i.batchless !== i.head) &&
       i.ci?.head === i.head &&
       i.ci.batchable !== false &&
-      (i.ci.verdict === 'pending' || i.ci.verdict === 'none') &&
-      i.ci.runs?.length > 0 &&
-      i.ci.runs.every((r) => NOT_STARTED.has(r.status)),
+      (waiting(i) || (tiers && i.ci.verdict === 'quick')),
   )
   ok.sort((a, b) => String(a.queuedAt).localeCompare(String(b.queuedAt)))
   const repo = ok[0]?.repo
-  return ok.filter((i) => String(i.repo).toLowerCase() === String(repo).toLowerCase()).slice(0, max)
+  const same = ok.filter((i) => String(i.repo).toLowerCase() === String(repo).toLowerCase())
+  if (!tiers) return same.slice(0, max)
+  if (same[0] && same[0].batchless === same[0].head) return [same[0]]
+  return same.filter((i) => i.batchless !== i.head).slice(0, max)
 }
 
 /**
@@ -98,9 +110,11 @@ export function batchEvent(q, b, text, at) {
  * that read makes them batchable again (`ci` goes), so a batch that keeps failing to build cannot
  * keep the queue from polling them. `batchless` (the default) keeps them out of a new batch on the
  * same head: their own run, cancelled for the batch, is rerun by the item's poll (a cancelled run is
- * rerun once per head) and says what is wrong with them, if anything.
+ * rerun once per head) and says what is wrong with them, if anything. With two tiers, a batchless
+ * one is batched again alone; the one member of a batch of one is marked `alone` with `why`, and is
+ * not batched again on this head.
  */
-export function releaseMembers(q, b, prs, { at, batchless = true } = {}) {
+export function releaseMembers(q, b, prs, { at, batchless = true, why = null } = {}) {
   for (const pr of prs) {
     const it = findItem(q, b.repo, pr)
     if (!it || it.batch !== b.id) continue
@@ -108,20 +122,26 @@ export function releaseMembers(q, b, prs, { at, batchless = true } = {}) {
     delete it.ci
     it.nextAt = at
     if (batchless) it.batchless = it.head
+    if (batchless && b.members.length === 1) it.alone = { head: it.head, text: why ?? `batch ${b.branch} ended without landing it.` }
   }
 }
 
-/** Keeps items out of any batch on the head they have (one that conflicts with the others). */
-export function markBatchless(q, repo, prs) {
+/**
+ * Keeps items out of any batch on the head they have (one that conflicts with the others). `alone`:
+ * why the batch it was alone in could not take it, which keeps it out of a batch of one too.
+ */
+export function markBatchless(q, repo, prs, alone = null) {
   for (const pr of prs) {
     const it = findItem(q, repo, pr)
-    if (it) it.batchless = it.head
+    if (!it) continue
+    it.batchless = it.head
+    if (alone) it.alone = { head: it.head, text: alone }
   }
 }
 
-/** Ends a batch: every member not landed goes back to its own CI. */
-export function endBatch(q, b, state, { at, batchless = true } = {}) {
-  releaseMembers(q, b, b.members.slice(b.landed ?? 0).map((m) => m.pr), { at, batchless })
+/** Ends a batch: every member not landed goes back to its own CI. `why`: for a batch of one's member (releaseMembers). */
+export function endBatch(q, b, state, { at, batchless = true, why = null } = {}) {
+  releaseMembers(q, b, b.members.slice(b.landed ?? 0).map((m) => m.pr), { at, batchless, why })
   b.state = state
   b.updatedAt = at
   b.endedAt = at

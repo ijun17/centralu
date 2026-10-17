@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Errors reach the builder — the host's half of it (M4 C-6). Failing to start, crashing, and a tool
@@ -18,7 +18,7 @@ let projRoot = ''
 let rt: ExternalApps
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-errors-')))
+  root = tempRoot('cc-app-errors-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
   mkdirSync(dataRoot)
@@ -27,7 +27,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
@@ -165,9 +165,9 @@ describe('the bundle sent to the building session (C-6)', () => {
     // right after the failure — sent 150ms before stderr is re-captured
     expect(r.markErrorSent(ref('thrower'), at)).toMatchObject({ kind: 'tool', at })
     expect(r.markErrorSent(ref('thrower'), at)).toBe('sent')
-    await new Promise((res) => setTimeout(res, 300))
+    // Waits for the re-capture itself: a fixed 300 ms could end before the app's late line reached the host (#845)
+    await until(() => r.errors(ref('thrower')).latest!.stderr.join('\n'), (t) => t.includes('written after the reply'))
     expect(r.errors(ref('thrower')).latest).toMatchObject({ at, sentAt: expect.any(Number) })
-    expect(r.errors(ref('thrower')).latest!.stderr.join('\n')).toContain('written after the reply')
     r.unmarkErrorSent(ref('thrower'), at)
     expect(r.errors(ref('thrower')).latest?.sentAt).toBeNull()
     expect(r.markErrorSent(ref('thrower'), at + 1)).toBeNull()

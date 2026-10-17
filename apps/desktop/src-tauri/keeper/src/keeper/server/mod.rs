@@ -112,6 +112,13 @@ pub(super) struct State {
     pub(super) reattach_until: Option<Instant>,
 }
 
+/// Has the child socket answer this keeper's current host (the supervisor's, its own or handed over)
+/// and a swap's standby (`swap::Plan::standby`), and no other process of this user (#538).
+pub(in crate::keeper) fn answer_hosts(k: &Arc<Keeper>) {
+    let weak = Arc::downgrade(k);
+    k.children.answer_hosts(Arc::new(move || weak.upgrade().and_then(|k| k.sup.pid())));
+}
+
 impl State {
     /// A fresh keeper's state: no host yet, the next launch runs `desired`.
     pub(super) fn new(desired: BuildSource, settings: Settings) -> State {
@@ -482,6 +489,12 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
         "attach" => attach(k, stream, reader, &req, guard),
+        // What the keeper holds (#538): read-only, for this user's tools and the integration scripts,
+        // which can no longer ask the child socket
+        "children" => match k.children.list(Duration::from_secs(2)) {
+            Some(list) => reply(&mut stream, &json!({ "ok": true, "children": list })),
+            None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
+        },
         "stop" => {
             reply(&mut stream, &json!({ "ok": true }));
             drop(stream);

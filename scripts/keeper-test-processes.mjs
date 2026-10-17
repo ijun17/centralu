@@ -57,8 +57,7 @@ export function alive(pid) {
  * One request, one answer line, on a fresh connection to a keeper socket.
  *
  * 8 s: under CI load a keeper busy starting or swapping a host takes seconds to answer, and the 5 s
- * one script had while the others had 8 s failed its `status` first. The child socket answers a
- * hello with a greeting that carries no `rid`; the request after it (`list`) is what is answered.
+ * one script had while the others had 8 s failed its `status` first.
  */
 export function request(sock, body, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
@@ -74,10 +73,6 @@ export function request(sock, body, timeoutMs = 8000) {
       const lines = buf.split('\n')
       for (const l of lines.slice(0, -1)) {
         const v = JSON.parse(l)
-        if (body.op === 'hello' && v.rid === undefined && v.keeperPid) {
-          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
-          continue
-        }
         clearTimeout(timer)
         c.end()
         return resolve(v)
@@ -94,8 +89,8 @@ export function request(sock, body, timeoutMs = 8000) {
 /** The keeper's `status` view */
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 
-/** What the keeper holds, from its child socket */
-export const heldChildren = (data) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => r.children ?? [])
+/** What the keeper holds, from `keeper.sock`: the child socket answers only the keeper's hosts (#538) */
+export const heldChildren = (data) => request(join(data, 'keeper.sock'), { op: 'children' }).then((r) => r.children ?? [])
 
 /** pid, parent and process group of every process, from one `ps` (the same flags on macOS and Linux) */
 function processTable() {

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { APP_VERSION } from '@cc/protocol'
-import { setup } from './fixtures/control.js'
+import { nextFrames, setup } from './fixtures/control.js'
 
 /**
  * The control loop's scenarios on updates: checking, installing, applying now or when idle, and relaunch refusals. Moved out of control-loop.spec.ts by subject (#845); the
@@ -111,17 +111,26 @@ test('Applying automatically waits until nothing is running (#352)', async ({ pa
   await box.check()
   await expect(page.getByTestId('update-state')).toContainText('Installed 9.9.9')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(false))
+  /*
+   * Something is running: it waits. Whether to apply is decided on each render
+   * (autoApplyDecision in apply-update.ts), and "applies when idle" is drawn only by a render
+   * that decided to wait; the relaunch would be asked in the effect after a render that decided
+   * to apply. So the line on screen, plus the frames that let effects run, is the moment the
+   * decision is known; nothing re-decides it while the keeper's report stays the same.
+   */
   await expect(page.getByTestId('update-waiting')).toBeVisible()
-  // Something is running: it waits
-  await page.waitForTimeout(1500)
+  await nextFrames(page)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
 
   // The keeper reports idle: it applies, once
   await page.evaluate(() => (window as any).__mock.setHostBusy(false))
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
+  // Busy and idle again, each as its own render (a report the screen never rendered could not
+  // ask for a second relaunch, so it would prove nothing)
   await page.evaluate(() => (window as any).__mock.setHostBusy(true))
+  await nextFrames(page)
   await page.evaluate(() => (window as any).__mock.setHostBusy(false))
-  await page.waitForTimeout(500)
+  await nextFrames(page)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
 })
 

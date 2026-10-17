@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { setup, newSession, pickSetting, emitEvent, dropFile, seedLongChat, distanceFromBottom } from './fixtures/control.js'
+import { setup, newSession, pickSetting, emitEvent, dropFile, seedLongChat, distanceFromBottom, nextFrames } from './fixtures/control.js'
 
 /**
  * The control loop's scenarios on the grid: adding and arranging panels, their composers, drafts and answering look. Moved out of control-loop.spec.ts by subject (#845); the
@@ -676,8 +676,13 @@ test('scrolled up to read, a grid panel does not yank you back down (#31)', asyn
   await page.getByTestId('grid-button').click()
   await expect(stream).toBeVisible()
 
-  // Give the follow logic every chance to drag us down before we believe it did not
-  await page.waitForTimeout(300)
+  /*
+   * Give the follow logic every chance to drag us down before we believe it did not. The rebuilt
+   * panel stays hidden while it settles (data-settling), and its landing pass re-aims for at most
+   * LANDING_FRAMES (30) frames (useChatScroll.ts); counting 40 frames past the moment it shows
+   * covers that pass however slowly frames come.
+   */
+  await nextFrames(page, 40)
   expect(await distanceFromBottom(stream)).toBeGreaterThan(80)
 })
 

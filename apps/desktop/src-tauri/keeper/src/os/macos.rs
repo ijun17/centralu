@@ -11,6 +11,23 @@ use super::children::{set_cloexec, ExitStatus, Seen, Watch};
 pub const RECV_FLAGS: libc::c_int = 0;
 
 /// The uid of the process on the other end of a unix socket.
+/// `LOCAL_PEERPID` (sys/un.h): the pid of the process that connected, recorded at `connect`.
+const LOCAL_PEERPID: libc::c_int = 0x002;
+/// `SOL_LOCAL` (sys/un.h): the level of the local-socket options.
+const SOL_LOCAL: libc::c_int = 0;
+
+/// The pid of the process at the other end of a unix socket (`LOCAL_PEERPID`), as of its `connect`.
+pub fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: pid and len are valid out-pointers of the size LOCAL_PEERPID writes.
+    let rc = unsafe { libc::getsockopt(stream.as_raw_fd(), SOL_LOCAL, LOCAL_PEERPID, &mut pid as *mut libc::pid_t as *mut libc::c_void, &mut len) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    u32::try_from(pid).ok().filter(|&p| p > 0).ok_or_else(|| io::Error::other("the kernel named no peer process"))
+}
+
 pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     let mut uid: libc::uid_t = 0;
     let mut gid: libc::gid_t = 0;

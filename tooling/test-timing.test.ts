@@ -13,14 +13,24 @@ import { eventually, SLOW } from './test-timing.js'
  * `lazy-resume`, `start-agent`, `versions`, `git-pr` and others set 10–30 s and ran out there while
  * the rest of the suite had three times the room. This reads each test file's syntax tree and lists
  * every limit passed to `it`/`test`/`describe` or a hook (`it(name, fn, 30_000)`,
- * `{ timeout: 10_000 }`), or set for a whole file (`vi.setConfig({ testTimeout: 30_000 })`), that
- * does not multiply by `SLOW`.
+ * `{ timeout: 10_000 }`), set for a whole file (`vi.setConfig({ testTimeout: 30_000 })`), or given to
+ * a wait (`vi.waitFor(fn, { timeout: 3_000 })`, `vi.waitUntil(fn, 3_000)`, `expect.poll(fn, { timeout })`),
+ * that does not multiply by `SLOW`. A wait's limit is not scaled by anything else: vitest's own default
+ * for one is a fixed second.
  */
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const RUNNERS = new Set(['it', 'test', 'describe', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach'])
 /** What `vi.setConfig` takes that is a time limit */
 const CONFIG_LIMITS = new Set(['testTimeout', 'hookTimeout'])
+
+/** The calls that wait for something and take a limit as their second argument */
+const WAITS = new Set(['vi.waitFor', 'vi.waitUntil', 'vitest.waitFor', 'vitest.waitUntil', 'expect.poll'])
+
+/** `vi.waitFor(...)`, `vi.waitUntil(...)` or `expect.poll(...)` */
+function isWait(e: ts.Expression): boolean {
+  return ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && WAITS.has(`${e.expression.text}.${e.name.text}`)
+}
 
 /** `vi.setConfig(...)` (or `vitest.setConfig`), which sets the limits of every test in the file after it */
 function isSetConfig(e: ts.Expression): boolean {
@@ -36,7 +46,7 @@ function runnerOf(e: ts.Expression): string | null {
   }
 }
 
-/** The limits a file sets for its tests and hooks, as `line: text` */
+/** The limits a file sets for its tests, hooks and waits, as `line: text` */
 export function limitsIn(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const found: ts.Expression[] = []
@@ -46,6 +56,12 @@ export function limitsIn(file: string, source: string): string[] {
         if (!ts.isObjectLiteralExpression(a)) continue
         for (const p of a.properties) if (ts.isPropertyAssignment(p) && CONFIG_LIMITS.has(p.name.getText(sf))) found.push(p.initializer)
       }
+    }
+    if (ts.isCallExpression(n) && isWait(n.expression)) {
+      const limit = n.arguments[1]
+      if (limit && ts.isObjectLiteralExpression(limit)) {
+        for (const p of limit.properties) if (ts.isPropertyAssignment(p) && p.name.getText(sf) === 'timeout') found.push(p.initializer)
+      } else if (limit) found.push(limit)
     }
     if (ts.isCallExpression(n) && RUNNERS.has(runnerOf(n.expression) ?? '')) {
       const args = n.arguments

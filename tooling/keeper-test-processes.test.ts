@@ -59,15 +59,15 @@ describe('keeper integration helpers', () => {
     await expect(request(sock, { op: 'status' }, 200)).rejects.toThrow('timeout')
   })
 
-  it('reads the held children past the child socket greeting', async () => {
+  // The child socket answers only the keeper's hosts (#538), so the scripts ask keeper.sock what it holds
+  it('reads the held children from keeper.sock', async () => {
     const d = tempDir()
     const children = [{ id: 'c1', tag: { kind: 'terminal', id: 't1' } }]
-    const sock = await fakeKeeper(d, 'children.sock', (req, c) => {
-      if (req.op === 'hello') c.write(`${JSON.stringify({ keeperPid: 1234 })}\n`)
-      if (req.op === 'list') c.write(`${JSON.stringify({ rid: req.rid, children })}\n`)
+    const sock = await fakeKeeper(d, 'keeper.sock', (req, c) => {
+      c.write(`${JSON.stringify(req.op === 'children' ? { ok: true, children } : { ok: false, error: `unknown op ${String(req.op)}` })}\n`)
     })
     // heldChildren takes a data folder; on Windows the stand-in is a pipe, so ask it directly
-    const held = process.platform === 'win32' ? ((await request(sock, { op: 'hello', protocol: 1 })) as { children: unknown }).children : await heldChildren(d)
+    const held = process.platform === 'win32' ? ((await request(sock, { op: 'children' })) as { children: unknown }).children : await heldChildren(d)
     expect(held).toEqual(children)
   })
 

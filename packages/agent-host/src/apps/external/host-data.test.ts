@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppRef, type HostCapability } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, plantApp } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Host data (M4 D-3) — when an app asks for `host_data` over fd 3, the desk consults the closed
@@ -27,7 +27,7 @@ const ask = async (appId: string, args: Record<string, unknown>) => {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-host-data-')))
+  root = tempRoot('cc-host-data-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   asked = []
@@ -50,7 +50,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('host_data — closed list, default is refusal', () => {

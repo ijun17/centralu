@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { __forgetPrograms, launchFor, nodeShimEntry, programPath, resolveCommand, shimTarget, toolExecutable } from './tool-launch.js'
+import { win32 } from 'node:path'
+import { __forgetPrograms, launchFor, nodeShimEntry, notOnPath, programPath, resolveCommand, shimTarget, toolCommand, toolExecutable } from './tool-launch.js'
 
 /**
  * Windows (#14), simulated. Node refuses to spawn a `.cmd` without a shell, and a shell would read
@@ -198,7 +199,7 @@ describe('a program the host runs in a project folder', () => {
   it('a found path is remembered; a miss is asked again', () => {
     let asked = 0
     const find = () => (++asked > 1 ? 'C:\\Git\\cmd\\git.exe' : null)
-    expect(programPath('git', 'win32', find)).toBe('git')
+    expect(programPath('git', 'win32', find)).toBe(notOnPath('git'))
     expect(programPath('git', 'win32', find)).toBe('C:\\Git\\cmd\\git.exe')
     expect(programPath('git', 'win32', find)).toBe('C:\\Git\\cmd\\git.exe')
     expect(asked).toBe(2)
@@ -206,6 +207,26 @@ describe('a program the host runs in a project folder', () => {
 
   it('off Windows the bare name, as before', () => {
     expect(programPath('git', 'darwin', () => '/opt/homebrew/bin/git')).toBe('git')
+  })
+
+  /*
+   * #838: with git or gh not on PATH at all, the bare name was the answer, and Windows looks a bare name up in the
+   * child's working folder first: the project's, where a planted git.exe or gh.exe then ran before any trust.
+   */
+  it('on Windows never the bare name when nothing is found: a path only an administrator can make, which is not there', () => {
+    for (const name of ['git', 'gh']) {
+      const path = programPath(name, 'win32', () => null)
+      expect(path).toBe(win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'centralu-not-on-path', `${name}.exe`))
+      expect(win32.isAbsolute(path)).toBe(true)
+    }
+    expect(notOnPath('git', { SystemRoot: '' })).toBe('C:\\Windows\\System32\\centralu-not-on-path\\git.exe')
+  })
+
+  it('an agent CLI the same way: the path found, else the bare name off Windows and never on it', () => {
+    expect(toolCommand('codex', 'win32', () => 'C:\\npm\\codex.cmd')).toBe('C:\\npm\\codex.cmd')
+    expect(toolCommand('codex', 'win32', () => null)).toBe(notOnPath('codex'))
+    expect(toolCommand('claude', 'win32', () => null)).toBe(notOnPath('claude'))
+    expect(toolCommand('codex', 'darwin', () => null)).toBe('codex')
   })
 
   /*

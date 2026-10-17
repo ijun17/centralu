@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -6,10 +6,10 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, fakeServe, tarGz, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
-import { connectionCommand, SshTunnel } from './tunnel.js'
+import { connectionCommand, SshTunnel, type RemoteCommand } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rmFakeDir } from '../fake-exe.test-helpers.js'
-import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath } from './windows-remote.test-helpers.js'
+import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath, clixmlErrors, remoteScriptText } from './windows-remote.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -61,6 +61,30 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   })
   afterEach(() => rmFakeDir(join(home, '.centralu')))
 
+  /*
+   * What each command the hub ran there answered, printed when a test fails (#845). On loaded windows-2022 runners a
+   * step sometimes got no answer: "The remote did not answer the install check", "Stopping Centralu on box gave no
+   * answer (exit 1)". Those reasons leave out what the remote printed, and Windows PowerShell started with
+   * -EncodedCommand writes its own errors to stderr as CLIXML, which the reason drops as noise, so the CI logs said
+   * nothing about why.
+   */
+  const ran: string[] = []
+  beforeEach(({ onTestFailed }) => {
+    ran.length = 0
+    onTestFailed(() => console.error(`The commands this test ran on the "remote", last ${ran.length > 6 ? 6 : ran.length}:\n${ran.slice(-6).join('\n')}`))
+  })
+  const recorded = (t: SshTunnel) => async (c: RemoteCommand) => {
+    const what = remoteScriptText(c)
+    try {
+      const r = await t.exec(c)
+      ran.push(`- ${what}\n  exit ${r.code}\n  stdout: ${JSON.stringify(r.stdout.slice(-1_000))}\n  stderr: ${JSON.stringify(clixmlErrors(r.stderr).slice(-2_000))}`)
+      return r
+    } catch (e) {
+      ran.push(`- ${what}\n  rejected: ${(e as Error).message}`)
+      throw e
+    }
+  }
+
   const data = (...p: string[]) => join(home, '.centralu', ...p)
   const remote = (...p: string[]) => data('remote', ...p)
   const events = () => (existsSync(data('events')) ? readFileSync(data('events'), 'utf8').trim().split('\n') : [])
@@ -68,7 +92,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   const tunnel = (env: Record<string, string> = {}) => new SshTunnel({ target: 'box', remote: { shell: 'powershell' }, ssh: join(root, 'ssh.exe'), env: windowsRemoteEnv(home, env) })
   const install = (version: string, o: { runtime?: RemoteRuntime; env?: Record<string, string> } = {}) => {
     const t = tunnel(o.env)
-    return installRemote({ exec: (c) => t.exec(c), spec: { shell: 'powershell' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
+    return installRemote({ exec: recorded(t), spec: { shell: 'powershell' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
   }
 
   describe('installing', () => {
@@ -147,7 +171,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       const t = tunnel(env)
       const seen: string[] = []
       const c: HostControl = {
-        exec: (cmd) => t.exec(cmd),
+        exec: recorded(t),
         spec: { shell: 'powershell' },
         target: 'box',
         script: installScript(),

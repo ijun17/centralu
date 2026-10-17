@@ -107,6 +107,7 @@ describe("the launcher's variables (ST16)", () => {
       CC_FRONT_DOOR: 'ws://127.0.0.1:4100',
       CC_SERVE: '1',
       CC_HOST_TOKEN: 'secret',
+      CC_HOST_TOKEN_ON_STDIN: '1',
       CC_DATA_DIR: '/d',
       PATH: '/bin',
     }
@@ -116,6 +117,7 @@ describe("the launcher's variables (ST16)", () => {
       frontDoor: 'ws://127.0.0.1:4100',
       startedByServe: true,
       token: 'secret',
+      tokenOnStdin: true,
     })
     for (const name of LAUNCH_VARIABLES) expect(env, name).not.toHaveProperty(name)
     expect(env).toEqual({ CC_DATA_DIR: '/d', PATH: '/bin' })

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fakeExe, fakeNodeExe } from '../fake-exe.test-helpers.js'
 import { sha256, type FakePackage } from './fake-registry.test-helpers.js'
 import type { RemoteRuntime } from './install.js'
+import { PS_PREAMBLE, type RemoteCommand } from './tunnel.js'
 
 /**
  * This Windows machine playing the Windows machine a hub links to (docs/plans/remote-hub.md §10), for
@@ -78,6 +79,32 @@ export function windowsPackages(version: string, centralu: { mjs: string; serve:
     },
     ...(hostOnly ? [{ name: '@centralu/host-win32-x64', version, files: { 'package.json': JSON.stringify({ name: '@centralu/host-win32-x64', version }), 'host/main.mjs': 'export {}\n' } }] : []),
   ]
+}
+
+/**
+ * The script a command for the remote runs, as text, for a failing test's report: the `-EncodedCommand` decoded (or the
+ * script it sends on stdin), without the preamble every script starts with, on one line.
+ */
+export function remoteScriptText(c: RemoteCommand): string {
+  const encoded = /-EncodedCommand (\S+)/.exec(typeof c === 'string' ? c : c.command)?.[1]
+  let script = encoded ? Buffer.from(encoded, 'base64').toString('utf16le') : typeof c === 'string' ? c : c.command
+  if (typeof c !== 'string') script = Buffer.from(c.stdin.replace(/[^A-Za-z0-9+/=]/g, ''), 'base64').toString('utf8')
+  if (script.startsWith(PS_PREAMBLE)) script = script.slice(PS_PREAMBLE.length)
+  const line = script.replace(/\s+/g, ' ').trim()
+  return line.length > 160 ? `${line.slice(0, 160)}…` : line
+}
+
+/**
+ * Windows PowerShell's stderr with its CLIXML made readable: the error records' text (`<S S="Error">`, with `_x000D__x000A_`
+ * for a line break), and none of the progress records ("Preparing modules for first use"). What a command PowerShell ran
+ * wrote to stderr itself lands between the `#< CLIXML` header and the records, and is kept.
+ */
+export function clixmlErrors(stderr: string): string {
+  const errors = [...stderr.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)].map((m) =>
+    m[1]!.replace(/_x([0-9A-Fa-f]{4})_/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
+  )
+  const plain = stderr.replace(/<Objs[\s\S]*?<\/Objs>/g, '').replace(/^#< CLIXML\r?$/gm, '').trim()
+  return [plain, errors.join('')].filter(Boolean).join('\n')
 }
 
 /**

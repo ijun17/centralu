@@ -1,9 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IMPORTS_FILE, ImportBook } from './import-book.js'
 import { SECRETS_FILE, SecretStore } from './secrets.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The two private JSON files of the app runtime (#850 item 6, #841 item 2), through the classes that
@@ -15,16 +15,16 @@ let dataRoot = ''
 let appDir = ''
 
 beforeEach(() => {
-  dataRoot = mkdtempSync(join(tmpdir(), 'cc-private-json-'))
+  dataRoot = tempRoot('cc-private-json-')
   appDir = join(dataRoot, 'some-app')
   mkdirSync(appDir)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  rmSync(dataRoot, { recursive: true, force: true })
+  await removeTree(dataRoot)
 })
 
 /** One write through each owner, and how to read back what it wrote */

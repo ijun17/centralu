@@ -257,7 +257,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     expect(await listening(mapper.port)).toBe(true)
 
     views.close(mapper.instanceId)
-    await expect.poll(() => listening(mapper.port), { timeout: 3_000 }).toBe(false)
+    await expect.poll(() => listening(mapper.port), { timeout: 3_000 * SLOW }).toBe(false)
     expect(await listening(atlas.port)).toBe(true)
     expect(book!.assigned['p1/mapper']).toBe(mapper.port)
   }, 20_000 * SLOW)
@@ -270,7 +270,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     expect(await listening(first.port)).toBe(true)
 
     await removeApp('mapper')
-    await expect.poll(() => listening(first.port), { timeout: 3_000 }).toBe(false)
+    await expect.poll(() => listening(first.port), { timeout: 3_000 * SLOW }).toBe(false)
 
     plant('mapper', { view: { origin: 'app' } })
     rt.refresh()

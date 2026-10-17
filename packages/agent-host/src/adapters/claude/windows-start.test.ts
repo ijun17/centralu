@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { NormalizedEvent } from '@cc/protocol'
+import { eventually } from '../../../../../tooling/test-timing.js'
 
 /**
  * How the Claude adapter starts its processes on Windows (#353), with the platform passed in and the
@@ -429,11 +430,15 @@ describe('spacing Claude starts on Windows (#353)', () => {
   })
 
   it('by default only Windows waits', async () => {
-    // Windows' default gap is 1.5 s. Held to it, the second start could not come before t0 + 1.5 s
+    /*
+     * On fake timers (#845): Windows' default gap is 1.5 s, and a second start held to it would wait on a timer this
+     * test never runs, so it would not reach the CLI and the test would time out. It used to measure the start against
+     * a bound of 1.5 s, which a loaded machine could cross with no gap at all.
+     */
+    vi.useFakeTimers()
     const a = new ClaudeAdapter({ platform: 'darwin', executable: () => exe })
-    const t0 = Date.now()
     const all = await Promise.all([session(a, 'a'), session(a, 'b')])
-    expect(sdk.started.at(-1)!.at - t0).toBeLessThan(1_500)
+    expect(sdk.started).toHaveLength(2)
     await Promise.all(all.map((s) => s.handle.dispose()))
   })
 })
@@ -529,7 +534,11 @@ describe('a turn that lost the sign-in refresh race (#353)', () => {
     handle.send('fix the build')
     await cli.input.next()
     cli.push({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 500', modelUsage: {} })
-    await tick()
+    /*
+     * Waits for the error itself (#845): a fixed 5 ms said nothing once the machine was slower than that. A retry's
+     * sign-in notice is emitted while the result is handled, before the result's own events, so none by then is none.
+     */
+    await eventually(() => events.some((e) => e.type === 'error'), 2_000)
     expect(events.filter((e) => e.type === 'error')).toHaveLength(1)
     expect(events.find((e) => e.type === 'notice')).toBeUndefined()
     await handle.dispose()

@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import type { AgentTokens, AppRunListed, AppRunRow, RunLedger } from './runs.js'
 import type { BrokerHost } from './desk.js'
-import { SLOW } from '../../../../../tooling/test-timing.js'
+import { eventually } from '../../../../../tooling/test-timing.js'
 
 /**
  * Shared helpers for external-app tests — plant an app folder, and wait until a condition holds.
@@ -37,16 +38,21 @@ export function plantApp(
   return dir
 }
 
-/** Waits for something that happens "soon", like an fs watch. If it does not settle in time, fails with the last value. */
-export async function until<T>(read: () => T, ok: (v: T) => boolean, timeoutMs = 4000 * SLOW): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  let v = read()
-  while (!ok(v)) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting; last value: ${JSON.stringify(v)}`)
-    await new Promise((r) => setTimeout(r, 25))
-    v = read()
-  }
-  return v
+/**
+ * Waits for something that happens "soon", like an fs watch, and returns the value `read` gave once `ok` held. If it
+ * does not settle in time, fails with the last value.
+ *
+ * `eventually()` with a value and a test kept apart, so a value that is itself falsy (`alive(pid) === false`) can be
+ * waited for and returned. The limit is `ms` × `SLOW`, as for `eventually()`: a caller's own limit (`6_000` for a
+ * process tree to end) used to replace the scaled default and so skipped the scaling on Windows (#845).
+ */
+export async function until<T>(read: () => T, ok: (v: T) => boolean, ms = 4_000): Promise<T> {
+  const got = await eventually(() => {
+    const v = read()
+    if (!ok(v)) throw new Error(`the last value was ${inspect(v, { depth: 3 })}`)
+    return { v }
+  }, ms)
+  return got.v
 }
 
 /**

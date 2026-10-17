@@ -66,24 +66,43 @@ script rehearses by default and why nothing publishes automatically.
 
 ## What CI does
 
-- `.github/workflows/build.yml` — builds every platform on every push and PR and uploads
+- `.github/workflows/build.yml` — builds every platform on every push to main and every full run (below) and uploads
   the bundles as artifacts. Since nobody on the project owns a Linux machine, this is the
   only place a Linux build is ever exercised. Download the artifact to try it; GitHub
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
-- Its first job, `changes` (`.github/scripts/ci-changes.mjs`), leaves out of a pull request
-  what it cannot affect, by the files it adds to main (compared with its merge-base with main,
-  whatever its base branch, so a stacked pull request is judged by the whole stack; renames count
-  as both paths): documents alone run `verify`, the `windows tests` jobs and the WebKit UI scenarios only
-  (WebKit runs on every pull request, owner decision 2026-10-11); tests alone skip the bundles,
-  the keeper end to end and the content verifier; the window alone (`packages/ui`, `core`,
-  `platform`, `apps/web`) skips the keeper, the content verifier and the host's tests on the
-  remotes' Node; a build or CI config (`tsconfig*.json`, `package.json`, the lockfile, a vite
-  config, `.github/`) runs everything. **A commit already on main runs everything**, so main's own
-  runs never skip. A left-out check still reports under its name (`skipped`, or a `…-skipped`
-  stand-in for a matrix job), so a required set sees it. If branch protection or a ruleset ever
-  names the required checks, it must include `changes`: the gated jobs and their stand-ins wait
-  on it, and without it a failed `changes` leaves both skipped. A manual run
-  (`workflow_dispatch`) runs everything unless `everything` is unticked.
+- **Two tiers** (owner decision, 2026-10-18): a full run is about 24 jobs and the free plan runs 20
+  at once, so every push of every pull request used to queue a whole run behind the others. A pull
+  request now runs the **quick tier**: `changes`, `verify` and the Windows unit tests
+  (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
+  94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
+  is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
+  run (`workflow_dispatch`: the merge queue's batches, or a person) and on a release bump's pull
+  request (one that changes `packages/protocol/src/brand.ts`, where the version is declared). Its
+  `full tier` job passes on a full run only and is skipped on a quick one: that is how the board
+  tells the two apart, since a skipped job counts as passed and a quick run alone looks green.
+  **Nothing lands that has not passed the full tier on what lands**: the merge queue lands a pull
+  request through a batch built on main and run in full (a batch of one included) or from a full run
+  on its own head, and `merge_when_green` refuses one whose own run was quick. To run the full tier
+  on a pull request yourself (before queueing UI work, say):
+  `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
+  the pull request.
+- Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
+  tier, leaves out what a run cannot affect, by the files it adds to main (compared with its
+  merge-base with main, whatever its base branch, so a stacked pull request is judged by the whole
+  stack; renames count as both paths): documents alone run `verify`, the `windows tests` jobs and the
+  WebKit UI scenarios only; tests alone skip the bundles, the keeper end to end and the content
+  verifier; the window alone (`packages/ui`, `core`, `platform`, `apps/web`) skips the keeper, the
+  content verifier and the host's tests on the remotes' Node; a build or CI config (`tsconfig*.json`,
+  `package.json`, the lockfile, a vite config, `.github/`) runs everything. **A commit already on
+  main runs everything**, so main's own runs never skip. On a full run a left-out check still reports
+  under its name (`skipped`, or a `…-skipped` stand-in for a matrix job), so a required set sees it;
+  on a quick run neither runs. If branch protection or a ruleset ever names the required checks, it
+  must include `changes` (the gated jobs and their stand-ins wait on it, and without it a failed
+  `changes` leaves both skipped) and `full tier`, and since a quick run never reports the full tier's
+  matrix jobs, such a set could only name what every pull request runs; the board's own rule is what
+  keeps a quick run from landing. A draft pull request (a stack's lower, #1066) runs `changes`
+  alone; marked ready, it runs the quick tier. A manual run (`workflow_dispatch`) runs everything unless
+  `everything` is unticked, then what its files need, still the full tier.
 - On macOS, CI passes `--bundles app` and uploads `Centralu-app.tar.gz`, preserving the app's
   executable bits and signature. It no longer creates or uploads a DMG (#628): intermittent
   `bundle_dmg.sh` failures blocked otherwise valid builds, and no workflow consumes that image.
@@ -118,7 +137,12 @@ script rehearses by default and why nothing publishes automatically.
   them as the `e2e-report` artifact, a folder per engine.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
-  tag (`dry_run`, default on). See below.
+  tag (`dry_run`, default on). See below. A tag push skips `pnpm verify` in its platform jobs
+  and the shim when a rehearsal passed on the same tree (#1042, owner decision 2026-10-18:
+  about 13 minutes): `guard` asks GitHub for a successful `workflow_dispatch` run of
+  `release.yml` on a commit whose tree is the tagged commit's (`scripts/release-rehearsal.mjs`),
+  so a tag pushed by hand skips nothing it has not earned, and anything GitHub does not answer
+  runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -133,7 +157,9 @@ main's checks are pending or absent. The PR must be merged into main from
 squash merge commit, and `git rev-parse <sha>^{tree}` must match for main and the PR head.
 Even a later commit with an unchanged tree invalidates this evidence. Every required
 check on that exact PR head must be reported and green; missing, pending or failed
-checks refuse it. `bump` still requires main's own green CI.
+checks refuse it, and so does a run that did not pass the `full tier` check, when the required
+set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
+skipped job reads as passed. `bump` still requires main's own green CI.
 
 Main's green checks are used directly. A failing main check blocks reuse, including a
 run that was pending at rehearsal and fails before tagging: every call reads CI again.
@@ -149,10 +175,17 @@ commit-to-PR association is required. Release/rehearsal checks with the same job
 cannot replace build checks; check names alone are not evidence of their source.
 
 Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires the tagged commit's **own** CI green, with
-no PR fallback, using only the tagged commit. Unrelated later commits on main do not
-gate platform or shim approval and cannot strand a partially published release. Pending, absent or failed
-CI refuses approval, and tagged `release_status` explains this gate before suggesting
+jobs and the later shim job), `approve` requires CI on the tagged commit, using only the tagged
+commit: its **own** CI green, or, while that is pending or absent, the bump PR's run on the
+same tree (#1042, owner decision 2026-10-18). The PR evidence counts on the rules above (the
+merged bump PR for the tagged version, its squash commit the tagged commit, `git rev-parse
+<sha>^{tree}` identical for both, every required check reported and green on the PR head, the
+`full tier` check passed, the audited workflows): the tagged commit is then exactly the files
+that run tested, and main's push build (about 14 minutes) adds nothing to them. Any other tree
+waits for main's own run, as before. A failed or cancelled own run still refuses: PR evidence
+never overrides a failure. Unrelated later commits on main do not gate platform or shim approval
+and cannot strand a partially published release. Pending or absent CI with no PR evidence, and
+failed CI, refuse approval, and tagged `release_status` explains this gate before suggesting
 approval. Direct approval in GitHub's UI is outside this tool's enforcement.
 
 Generated `chore(release):` bump commits on main use a concurrency group per commit
@@ -171,7 +204,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads one fact of the event, whether a pull request is a draft, after deciding a release bump) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. A draft pull request runs `changes` alone (#1066: a stack's lower pull requests are drafts); a bump PR runs in full even as a draft, since the bump is decided first. | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
@@ -192,7 +225,8 @@ change. A clean inline scan is not proof that called code behaves identically. I
 required called script behaves differently on push-to-main and pull requests, wait
 for main's own green run before invoking `rehearse` or `tag`; the automated fallback
 cannot establish equivalence for that script. Publication still waits for main's
-own CI through the approval gate above.
+own CI through the approval gate above, or for the same bump PR evidence on the tagged commit's
+very tree.
 
 ## One-time setup
 
@@ -310,7 +344,8 @@ The steps by hand:
    for the four platform jobs, which wait together, and again for the shim job after all of
    them have succeeded. That second approval is the last moment anything is reversible.
 
-   The board's `approve` checks its gate each time: the tagged commit's own CI green, and
+   The board's `approve` checks its gate each time: the tagged commit's own CI green (or,
+   while that is pending, the bump PR's run on the very same tree, #1042), and
    before the shim also every other job of the run succeeded and every platform and host-only
    package on the registry at this version, published from the tagged commit (`gitHead`).
    With `wait: true` (and `confirm: true`) it waits for that gate and approves the moment it

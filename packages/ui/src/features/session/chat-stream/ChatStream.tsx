@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
+import { ChatSkeleton } from '../../../components/Skeleton.jsx'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow } from '../chat-rows/ChatRow.jsx'
@@ -16,6 +17,9 @@ import { forgetUnlistedSizes, rowKeys, writeScroll } from '../scroll.js'
  * A session's conversation as a virtual list (#428): the rows, the pinned banner for the turn
  * being read, the cards still waiting on the person, and the activity row at the end.
  */
+
+/** How long a conversation's skeleton waits for its history before the pane is left empty */
+const SKELETON_GIVE_UP_MS = 10_000
 
 /**
  * The conversation stream — virtual scrolling (D-1).
@@ -68,6 +72,21 @@ export function ChatStream({
 }) {
   // File links should open in this pane's project (#182) — not the focused session's
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? null)
+  /*
+   * A conversation that has messages but none read yet (switched to, or the app just opened) shows the shape of one
+   * while its history arrives, instead of an empty pane. A read that keeps failing gives up after a while: the
+   * empty pane is then the truth (nothing could be read), and a skeleton left forever would say otherwise.
+   */
+  const reading = useStore(
+    (s) => chat.length === 0 && !s.history[sessionId] && (s.sessions[sessionId]?.lastSeq ?? 0) > 0,
+  )
+  const [gaveUp, setGaveUp] = useState(false)
+  useEffect(() => {
+    setGaveUp(false)
+    if (!reading) return
+    const t = setTimeout(() => setGaveUp(true), SKELETON_GIVE_UP_MS)
+    return () => clearTimeout(t)
+  }, [reading, sessionId])
   /*
    * "Was I at the bottom" is the session's fact, not this component's (issue #31).
    *
@@ -203,6 +222,7 @@ export function ChatStream({
       <StickyUser sticky={sticky} />
 
       <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
+      {reading && !gaveUp && <ChatSkeleton />}
 
       {/*
         No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll

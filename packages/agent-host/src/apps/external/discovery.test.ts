@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, plantApp } from './test-helpers.js'
-import { SLOW } from '../../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Discovery and trust (M4 A-2).
@@ -25,7 +25,7 @@ let rt: ExternalApps
 const byId = (id: string) => rt.list().find((a) => a.appId === id)
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-disc-')))
+  fixture = tempRoot('cc-apps-disc-')
   dataRoot = join(fixture, 'data')
   projRoot = join(fixture, 'proj')
   mkdirSync(dataRoot)
@@ -34,9 +34,9 @@ beforeEach(() => {
   rt = new ExternalApps({ projects: () => projects, dataRoot, reservedIds: ['control'], watchFlushMs: 40 })
 })
 
-afterEach(() => {
+afterEach(async () => {
   rt.dispose()
-  rmSync(fixture, { recursive: true, force: true })
+  await removeTree(fixture)
 })
 
 describe('discovery', () => {
@@ -141,7 +141,7 @@ describe('discovery', () => {
  */
 describe('folder watching', () => {
   const watcher = () => (rt as unknown as { watchers: { onChange: (key: string, dirs: string[]) => void } }).watchers
-  /** A generous deadline — being slow under load is not a failure */
+  /** A generous deadline (× SLOW, through `eventually`) — being slow under load is not a failure */
   const EVENT_DEADLINE_MS = 20_000
   /** If nothing arrives within this, treat it as missed and reproduce the same change (an event that arrived came within 0.1 seconds) */
   const REDO_MS = 1_000
@@ -149,16 +149,19 @@ describe('folder watching', () => {
   /** Makes a change and waits for that folder's event. `undo` reverses it so the same change can be reproduced */
   async function expectHeard(heard: string[][], dir: string, change: () => void, undo?: () => void): Promise<void> {
     heard.length = 0
-    const got = () => heard.some((dirs) => dirs.includes(dir))
-    const deadline = Date.now() + EVENT_DEADLINE_MS
-    for (;;) {
-      change()
-      const redoAt = Math.min(Date.now() + REDO_MS, deadline)
-      while (!got() && Date.now() < redoAt) await new Promise((r) => setTimeout(r, 25))
-      if (got() || Date.now() >= deadline) break
-      undo?.()
-    }
-    expect(got(), `Within ${EVENT_DEADLINE_MS}ms, no event for '${dir}' arrived — heard: ${JSON.stringify(heard)}`).toBe(true)
+    change()
+    let redoAt = Date.now() + REDO_MS
+    await eventually(() => {
+      if (heard.some((dirs) => dirs.includes(dir))) return true
+      if (Date.now() >= redoAt) {
+        undo?.()
+        change()
+        redoAt = Date.now() + REDO_MS
+      }
+      return false
+    }, EVENT_DEADLINE_MS).catch((e: Error) => {
+      throw new Error(`no event for '${dir}' arrived (${e.message}) — heard: ${JSON.stringify(heard)}`)
+    })
   }
 
   it('watching delivers this project\'s events when an app folder is created, its manifest changes, and the folder is deleted', async () => {

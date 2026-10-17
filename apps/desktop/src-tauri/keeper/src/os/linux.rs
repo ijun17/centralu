@@ -13,6 +13,26 @@ use super::children::{parse_proc_exit, set_cloexec, ExitStatus, Seen, Watch};
 pub const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 
 /// The uid of the process on the other end of a unix socket.
+/// The pid of the process at the other end of a unix socket (`SO_PEERCRED`), as of its `connect`.
+pub fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: cred and len are valid out-pointers of the size SO_PEERCRED writes.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    u32::try_from(cred.pid).ok().filter(|&p| p > 0).ok_or_else(|| io::Error::other("the kernel named no peer process"))
+}
+
 pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -10,6 +10,7 @@ import { STAGING_REL, type HandoverOptions } from './handover.js'
 import { IMPORTS_FILE, ImportBook, reviewKey } from './import-book.js'
 import { until } from './test-helpers.js'
 import { makeZip } from './zip.test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 const fileIds = vi.hoisted(() => new Map<string, bigint>())
 
@@ -96,7 +97,7 @@ const stagingLeft = () => (existsSync(join(dataRoot, STAGING_REL)) ? readdirSync
 const userApps = () => (existsSync(join(dataRoot, 'apps')) ? readdirSync(join(dataRoot, 'apps')) : [])
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-import-')))
+  root = tempRoot('cc-apps-import-')
   dataRoot = join(root, 'data')
   src = join(root, 'src')
   mkdirSync(dataRoot)
@@ -106,7 +107,7 @@ beforeEach(() => {
 afterEach(async () => {
   fileIds.clear()
   await rt?.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('the import book keeps exact folder identities', () => {

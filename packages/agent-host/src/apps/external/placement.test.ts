@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Where an app folder is placed (`placement.ts`) — every door that writes a new app folder goes
@@ -16,7 +16,7 @@ let outside = ''
 let rt: ExternalApps
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-place-')))
+  root = tempRoot('cc-app-place-')
   dataRoot = join(root, 'data')
   outside = join(root, 'outside')
   mkdirSync(dataRoot)
@@ -27,7 +27,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 const server = { command: process.execPath, args: ['server.mjs'] }

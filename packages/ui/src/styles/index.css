@@ -280,6 +280,19 @@
 }
 
 /*
+ * The sidebar's lines, a step toward the ink so they stand apart from its background (dividers between
+ * projects, "Add project", row borders). Mixed from the theme's own tokens rather than set per preset, so
+ * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
+ * swaps this in for --color-line (SIDEBAR_VARS).
+ *
+ * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
+ * holds to it), and this is derived from two of them, never set themselves.
+ */
+:root {
+  --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
+}
+
+/*
  * The conversation's surfaces.
  *
  * Inside the session view `surface-floor` and `surface-raised` are redefined as the reading
@@ -783,6 +796,27 @@
   .breathe {
     animation: none;
     opacity: 0.7;
+  }
+}
+
+/*
+ * A loading placeholder (components/Skeleton.tsx) stays invisible for its first 150ms, then fades in: a read that
+ * answers at once never flashes a skeleton. With reduced motion it still waits, then appears without the fade.
+ */
+@keyframes cc-skeleton-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-skeleton {
+  animation: cc-skeleton-in 200ms ease-out 150ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-skeleton {
+    animation-duration: 0s;
   }
 }
 

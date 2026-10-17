@@ -38,8 +38,8 @@ test('while the delete-confirmation dialog is open, y/n/a do not reach the appro
   await expect(page.getByTestId('confirm-delete')).toBeVisible()
   // A y pressed meaning "confirm the deletion" — it must not allow the command behind the dialog
   for (const k of ['y', 'n', 'a']) await page.keyboard.press(k)
-  await page.waitForTimeout(200)
-  expect(await answers(page)).toEqual([])
+  // Keys are handled in the order they are pressed: had one of these answered, the card would be
+  // gone below and its answer would come before the later y's in the list
 
   // Closing the dialog leaves the card in place, and now y goes through
   await page.keyboard.press('Escape')
@@ -99,11 +99,14 @@ test('an Enter that ends an IME composition in the run dialog does not save the 
   await page.getByTestId('run-add-name').evaluate((el) =>
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })),
   )
-  await page.waitForTimeout(100)
+  // The keydown above was handled before dispatchEvent returned; a save it asked for is drawn within a frame
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   await expect(page.getByTestId('run-command-0')).toHaveCount(0)
   await page.getByTestId('run-add-name').fill('데브 서버')
   await page.getByTestId('run-add-name').press('Enter')
   await expect(page.getByTestId('run-command-0')).toContainText('데브 서버')
+  // ...and the one saved is the only one: the composing Enter added none of its own
+  await expect(page.getByTestId('run-command-1')).toHaveCount(0)
 })
 
 test('even with the overlay open, Esc in the terminal beside it goes to the terminal, and Esc in the settings dialog above it goes to the dialog (#181)', async ({ page }) => {

@@ -197,12 +197,17 @@ the default only after it runs from `<data>/content/<version>/`.
 Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table`.
 Platforms: Linux. *Changed by #458, #459.*
 
-**ST16. Secrets travel in the environment, are read once and removed.**
+**ST16. Secrets travel on a pipe or in the environment, are read once and removed.**
 Happened: `ps` shows every argument; a shell in a project should not hold the key to every RPC (85c5b37b, #390).
-Rule: the token is never an argument. The host reads `CC_KEEPER`, `CC_HOST_SOURCE`, `CC_FRONT_DOOR` and
-`CC_HOST_TOKEN` once and deletes them from `process.env` before any child is spawned; app processes get no `CC_*` and
+Rule: the token is never an argument, and since #538 not in the host's environment either: the keeper and
+`centralu serve` write it as the first line on the host's stdin (an older host under a newer keeper still gets
+`CC_HOST_TOKEN`). The host reads `CC_KEEPER`, `CC_HOST_SOURCE`, `CC_FRONT_DOOR`, `CC_HOST_TOKEN` and
+`CC_HOST_TOKEN_ON_STDIN` once and deletes them from `process.env` before any child is spawned; app processes get no `CC_*` and
 no `CENTRALU_*` except their own id and data folder; a detached remote launcher is given no token.
-Guard: `tooling/launcher-serve.test.ts` "passes the token in the environment, never on the command line";
+Guard: `tooling/launcher-serve.test.ts` "hands the token over on stdin, never in the environment or on the command
+line"; `host/lifecycle/host-process.test.ts` "takes the token from the first line on stdin, and stdin still watches
+the parent after it (#538)"; `keeper/host_proc/tests.rs` `the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed`;
+`keeper/keeper/server/tests.rs` `a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that`;
 `tooling/launcher-serve.test.ts` "carries only the data folder, the host entry and the managed mark to a detached
 launcher, never the token"; `host/lifecycle/host-process.test.ts` "the first child the host spawns sees none of the
 launcher's variables, the token least of all (ST16)" (a real host whose login-shell probe records its environment);
@@ -337,8 +342,9 @@ Platforms: all.
 **PA13. The dev host is started directly, never through a wrapper.**
 Happened: killing the pnpm wrapper left the host orphaned holding its port (M1.5 defect 1, three hosts); on Windows
 `.bin/tsx` is an sh script `CreateProcessW` cannot start.
-Rule: start `node_modules/.bin/tsx` (unix) or Node with tsx's `cli.mjs` (Windows) directly, in a process group of its
-own.
+Rule: start Node with tsx's loader (`--import …/tsx/dist/loader.mjs`, unix: the host is then the one process started,
+which the keeper's child socket checks by pid, #538) or Node with tsx's `cli.mjs` (Windows) directly, in a process
+group of its own.
 Guard: `keeper/host_proc.rs` `the_dev_host_is_started_directly_never_through_a_package_manager`;
 `keeper/host_proc.rs` `a_host_leads_a_process_group_of_its_own`; `scripts/keeper-integration.mjs` check "stop ends the
 host and the keeper even with background mode on". *Changed by step 3.*

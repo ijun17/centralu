@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { setup, newSession, seedLongChat, distanceFromBottom } from './fixtures/control.js'
+import { setup, newSession, seedLongChat, distanceFromBottom, nextFrames } from './fixtures/control.js'
 
 /**
  * The control loop's scenarios on where the conversation is scrolled: following the bottom, keeping the spot being read, windowing. Moved out of control-loop.spec.ts by subject (#845); the
@@ -71,7 +71,13 @@ test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ 
       return (await stream.evaluate((el) => el.scrollTop)) === now
     })
     .toBe(true)
-  const before = await stream.evaluate((el) => el.scrollTop)
+  const before = await stream.evaluate((el) => {
+    // Every position the list takes from here on, so a pull down that is put back still counts
+    const w = window as any
+    w.__scrollTops = []
+    el.addEventListener('scroll', () => w.__scrollTops.push(el.scrollTop))
+    return el.scrollTop
+  })
 
   // A new message arriving does not pull the scroll back down
   await page.evaluate(() => {
@@ -79,7 +85,14 @@ test('Auto-scroll does not interrupt while scrolled up reading (D-1)', async ({ 
     const id = [...m.sessions.keys()][0]
     m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'new line\n' })
   })
-  await page.waitForTimeout(300)
+  /*
+   * The follow is decided when the list's height changes (useChatScroll.ts): it scrolls in the
+   * effect after the render that drew the new text, and once more a frame later. So the window
+   * is over once the text is on screen and two more frames are drawn.
+   */
+  await expect(stream).toContainText('new line')
+  await nextFrames(page)
+  expect((await page.evaluate(() => (window as any).__scrollTops as number[])).filter((top) => top !== before)).toEqual([])
   expect(await stream.evaluate((el) => el.scrollTop)).toBe(before)
 })
 
@@ -164,6 +177,12 @@ test("The new-session window's scroll stays put even while session events keep a
     return Math.round(el.scrollTop)
   })
   expect(bottom).toBeGreaterThan(0) // The test only sees something meaningful once it overflows the collapsed panel
+  // Every position the list takes from here on, so a pull up that is put back still counts
+  await list.evaluate((el) => {
+    const w = window as any
+    w.__listTops = []
+    el.addEventListener('scroll', () => w.__listTops.push(Math.round(el.scrollTop)))
+  })
 
   // The session is working — events keep re-rendering the window
   for (let i = 0; i < 3; i++) {
@@ -178,8 +197,12 @@ test("The new-session window's scroll stays put even while session events keep a
       id,
     )
   }
-  await page.waitForTimeout(300)
-  await expect.poll(async () => list.evaluate((el) => Math.round(el.scrollTop))).toBe(bottom)
+  // The window re-renders with the conversation the events grew; once that text is drawn and two
+  // more frames have passed, any scroll those renders asked for has happened
+  await expect(page.getByTestId('chat-stream')).toContainText('In progress…')
+  await nextFrames(page)
+  expect((await page.evaluate(() => (window as any).__listTops as number[])).filter((top) => top !== bottom)).toEqual([])
+  expect(await list.evaluate((el) => Math.round(el.scrollTop))).toBe(bottom)
 
   // The arrow-selected row still stays in view — the side that must not be lost while fixing this
   await page.getByTestId('past-new').click()

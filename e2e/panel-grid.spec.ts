@@ -303,24 +303,29 @@ test('dropping leaves it exactly as previewed — panels move as the same node (
    * Setting 40 once is not enough: if the pane's landing pass is still running it takes
    * the value straight back (the test died on its own precondition, ~1 in 3 under a full
    * parallel run — same failure on unmodified main). Write until it holds, the same
-   * pattern the fs-watch tests use for slow observers.
+   * pattern the fs-watch tests use for slow observers. Both waits count the page's frames,
+   * not milliseconds: the landing pass and the re-measuring move the scroll only when a frame
+   * is drawn, and on a busy machine 50ms can pass without one, which read an unsettled value
+   * twice and took it as settled.
    */
-  await expect
-    .poll(async () => {
-      await page.evaluate((sid: string) => {
-        document.querySelector<HTMLElement>(
-          `[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`,
-        )!.scrollTop = 40
-      }, a)
-      await page.waitForTimeout(80)
-      return readScroll()
-    })
-    .toBeGreaterThan(0)
-  let scrolled = await readScroll()
-  for (let prev = -1; scrolled !== prev; scrolled = await readScroll()) {
-    prev = scrolled
-    await page.waitForTimeout(50)
-  }
+  const afterFrames = (frames: number, write?: number) =>
+    page.evaluate(
+      async ({ sid, n, top }) => {
+        const el = document.querySelector<HTMLElement>(`[data-testid="grid-panel-${sid}"] [data-testid="chat-stream"]`)!
+        if (top !== undefined) el.scrollTop = top
+        const before = el.scrollTop
+        for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r))
+        return { before, after: el.scrollTop }
+      },
+      { sid: a, n: frames, top: write },
+    )
+  await expect.poll(async () => (await afterFrames(2, 40)).after).toBeGreaterThan(0)
+  // Settled once three frames in a row leave it where it was
+  await expect.poll(async () => {
+    const { before, after } = await afterFrames(3)
+    return before === after
+  }).toBe(true)
+  const scrolled = await readScroll()
   expect(scrolled).toBeGreaterThan(0) // the pane really is scrolled — otherwise the check below proves nothing
 
   await startDrag(page, a)

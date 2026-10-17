@@ -1,11 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type CapabilityQuestion, type RuntimeTiming } from './runtime.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Capability approval (M4 D-4) — the person is asked once, the **first** time an app uses a
@@ -65,7 +66,7 @@ const make = (timing: Partial<RuntimeTiming> = {}) => {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-capabilities-')))
+  root = tempRoot('cc-capabilities-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   asked = []
@@ -74,7 +75,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('asks once on first use, and remembers the answer', () => {
@@ -154,10 +155,14 @@ describe('waiting', () => {
     plant('notes', { agent: true })
     autoAnswer = null
     make({ brokerKeepaliveMs: 100 })
-    // The app's client gives up after 0.5 seconds of silence. The person answers after 1.2 seconds
-    const pending = ask('notes', 'run_agent', { prompt: 'x' }, SESSION, { timeoutMs: 500 })
+    /*
+     * The app's client gives up after a second of silence (half a second before #845, which left a loaded runner's
+     * stalls too little room between beats). The person answers after twice that
+     */
+    const capMs = 1_000 * SLOW
+    const pending = ask('notes', 'run_agent', { prompt: 'x' }, SESSION, { timeoutMs: capMs })
     await until(() => asked.length, (n) => n === 1)
-    await new Promise((r) => setTimeout(r, 1_200))
+    await new Promise((r) => setTimeout(r, 2 * capMs))
     asked[0]!.answer('allow')
     expect(await pending).toMatchObject({ isError: false, text: 'agent ran on claude' })
   })

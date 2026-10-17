@@ -169,13 +169,26 @@ pub struct Plan<'a> {
     pub sup: &'a Supervisor,
     pub door: &'a FrontDoor,
     pub drain_bound: Duration,
-    /// The environment every host the keeper starts gets, for this build.
-    pub env_for: &'a (dyn Fn(&BuildSource) -> Vec<(String, String)> + Sync),
+    /// Readies the launch of this build from its copy: the environment every host the keeper starts
+    /// gets, and the token (`server::host::prepare_host`).
+    pub prepare: &'a (dyn Fn(&BuildSource, &Path, &mut host_proc::HostLaunch) + Sync),
+    /// Told the standby host's pid while it is one (and None after), so the child socket takes it.
+    pub standby: &'a (dyn Fn(Option<u32>) + Sync),
     /// The old host's `{"drained":..}` report, once its stdout has carried one.
     pub drained: &'a (dyn Fn() -> Option<Value> + Sync),
     pub progress: &'a (dyn Fn(Phase) + Sync),
     /// Records the new host as current and hands it to the supervisor.
     pub adopt: &'a (dyn Fn(Adopted, BuildSource) -> Result<(), String> + Sync),
+}
+
+/// Tells the keeper there is no standby any more, however the swap ends: by then it was adopted (the
+/// supervisor names it) or stopped.
+struct StandbyGone<'a>(&'a (dyn Fn(Option<u32>) + Sync));
+
+impl Drop for StandbyGone<'_> {
+    fn drop(&mut self) {
+        (self.0)(None);
+    }
 }
 
 pub fn run(p: &Plan) -> Outcome {
@@ -211,7 +224,7 @@ pub fn run(p: &Plan) -> Outcome {
             return Outcome::NotStarted(m);
         }
     };
-    launch.env.extend((p.env_for)(&next));
+    (p.prepare)(&next, &copy, &mut launch);
     let mut child = match host_proc::spawn_host(&launch) {
         Ok(c) => c,
         Err(e) => {
@@ -224,6 +237,9 @@ pub fn run(p: &Plan) -> Outcome {
         forget_copy(claim);
         return Outcome::NotStarted("could not read the new host's output".into());
     };
+    // The child socket takes this host from here (#538) until the swap is over, adopted or not
+    (p.standby)(Some(child.id()));
+    let _standby = StandbyGone(p.standby);
     // A reader that can be paused, so this host can later be handed to another keeper (step 4)
     let lines = HostOut::new(stdout.into(), Vec::new());
     log(&format!("swap: standby host {} started (pid {}) from {}", next.key(), child.id(), copy.display()));
@@ -454,6 +470,7 @@ pub(crate) mod tests {
                 program: "/bin/sh".into(),
                 args: vec!["-c".into(), r#"trap '' TERM; echo '{"ready":true,"port":1,"token":"t"}'; while :; do sleep 0.05; done"#.into()],
                 env: vec![],
+                token: None,
             })
         })
     }
@@ -501,7 +518,7 @@ pub(crate) mod tests {
         let script = format!(r#"trap '' TERM; echo '{{"ready":true,"port":1,"token":"t"}}'; {hold} & echo $! > "$F"; exit 0"#);
         let file = file.to_string_lossy().to_string();
         std::sync::Arc::new(move || {
-            Ok(host_proc::HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), script.clone()], env: vec![("F".into(), file.clone())] })
+            Ok(host_proc::HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), script.clone()], env: vec![("F".into(), file.clone())], token: None })
         })
     }
 

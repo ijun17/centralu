@@ -4,16 +4,27 @@
  * that ends the host and every session. The start fails; nothing escapes.
  */
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { whichTool } from '../../env-path.js'
 import { AppProcess, AppStartError } from './app-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+
+/** Each test's own folders, removed after it whether it passed or not */
+const made: string[] = []
+const tempDir = (prefix: string): string => {
+  const dir = tempRoot(prefix)
+  made.push(dir)
+  return dir
+}
+afterEach(async () => {
+  await Promise.all(made.splice(0).map(removeTree))
+})
 
 async function expectStartFailsQuietly(command: string, args: string[], timing: { probeTimeoutMs: number; connectTimeoutMs: number; exitWaitMs: number }): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-app-epipe-'))
+  const dir = tempDir('cc-app-epipe-')
   const uncaught: unknown[] = []
   const onUncaught = (e: unknown) => void uncaught.push(e)
   process.on('uncaughtException', onUncaught)
@@ -65,7 +76,7 @@ describe('writing to an app that closed its stdin', () => {
 /** An app's crash reason (#428): its last stderr lines as it wrote them, whatever the pipe's chunks were */
 describe('the stderr lines a failed start carries', () => {
   it('keeps a character split between chunks whole, and drops the carriage return of a CRLF line', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-app-stderr-'))
+    const dir = tempDir('cc-app-stderr-')
     const script = [
       "const b = Buffer.from('실패: 한글\\r\\n')",
       'process.stderr.write(b.subarray(0, 4))',
@@ -96,7 +107,7 @@ describe('the stderr lines a failed start carries', () => {
  */
 describe("a manifest's command as a path in the app folder", () => {
   const appDir = () => {
-    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-app-cmd-')))
+    const dir = tempDir('cc-app-cmd-')
     mkdirSync(join(dir, 'bin'))
     writeFileSync(join(dir, 'server.js'), "process.stderr.write('ran from ' + require('node:path').basename(process.cwd()) + '\\n'); process.exit(3)\n")
     // npm's shim shape on Windows; a script that runs the same file elsewhere
@@ -125,7 +136,6 @@ describe("a manifest's command as a path in the app folder", () => {
     expect(err).toBeInstanceOf(AppStartError)
     expect(err.head).toBe('exited before it was ready (code 3)')
     expect(err.stderr).toEqual([`ran from ${basename(dir)}`])
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }, 30_000 * SLOW)
 
   it.runIf(process.platform === 'win32')('on Windows, starts a relative .cmd shim from the app folder', async () => {
@@ -133,7 +143,6 @@ describe("a manifest's command as a path in the app folder", () => {
     const err = (await start(dir, '.\\bin\\server.cmd').catch((e: unknown) => e)) as AppStartError
     expect(err).toBeInstanceOf(AppStartError)
     expect(err.stderr).toEqual([`ran from ${basename(dir)}`])
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }, 30_000 * SLOW)
 
   it.runIf(process.platform === 'win32')('on Windows, a .cmd that is not a shim fails the start with the reason, and lets go of the log', async () => {
@@ -145,7 +154,6 @@ describe("a manifest's command as a path in the app folder", () => {
     expect(readFileSync(join(dir, 'logs', 'app.log'), 'utf8')).toMatch(/could not run .*run\.cmd/)
     // Windows refuses to delete a file that is still open: the log is closed, with no retries to wait it out
     rmSync(join(dir, 'logs'), { recursive: true })
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }, 30_000 * SLOW)
 })
 
@@ -159,7 +167,7 @@ describe("a Python app's stderr", () => {
   const python = found && !/[\\/]WindowsApps[\\/]/i.test(found) ? found : null
   // Each of these apps exits before it is ready: what is read is the failed start's stderr
   const start = async (command: string, args: string[], env: NodeJS.ProcessEnv): Promise<AppStartError> => {
-    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-app-py-')))
+    const dir = tempDir('cc-app-py-')
     return (await AppProcess.start({
       command,
       args,
@@ -204,7 +212,7 @@ describe("a Python app's stderr", () => {
 // An app's log is its owner's only, like the host's (#978): it was created 0644
 describe.skipIf(process.platform === 'win32')('an app’s log file', () => {
   it('is 0600 and holds what the app wrote to stderr', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-app-logmode-'))
+    const dir = tempDir('cc-app-logmode-')
     const logPath = join(dir, 'app.log')
     const started = AppProcess.start({
       command: process.execPath,

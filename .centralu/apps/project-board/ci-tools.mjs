@@ -170,7 +170,7 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
   let beat = 0
   for (;;) {
     const checks = await evaluate(repo, p.headRefOid, req)
-    const d = decideMerge({ permissions, pr: p, checks })
+    const d = decideMerge({ permissions, pr: p, checks, fullTier: CI.fullTier })
     if (d.action === 'refuse') {
       const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
       return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })

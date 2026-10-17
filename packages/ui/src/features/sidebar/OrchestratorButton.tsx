@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
 import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
-import { useHasPendingProposal, useSelectedSessionId } from '../../store/selectors.js'
+import { useSelectedSessionId } from '../../store/selectors.js'
 import { INDENT, GUIDE, ROW_PAD } from './layout.js'
 import { approvalLine } from './rows/SessionRow.jsx'
 import { ToolMark } from './marks/ToolMark.jsx'
 import { RowMenu } from './menus/RowMenu.jsx'
 import { ActionRow } from './menus/ActionRow.jsx'
 import { ConfirmDelete } from './dialogs/ConfirmDelete.jsx'
-import { StateDot } from '../../components/primitives.jsx'
 import { CrownIcon, DotsIcon } from '../../components/icons.jsx'
 import { SESSION_MIME } from './reorder.js'
 
@@ -44,8 +43,6 @@ export function OrchestratorButton() {
   const open = useStore((s) => s.openOrchestrator)
   const id = useStore((s) => s.orchestratorId)
   const active = view === 'orchestrator'
-  // A proposal card waits in the orchestrator's screen (#703): the row says so like a session waiting on an approval
-  const proposalWaits = useHasPendingProposal()
 
   // pt-2: the lane's top margin. Search used to stand above this row (#529); it moved to the top bar (#727)
   return (
@@ -75,20 +72,12 @@ export function OrchestratorButton() {
         data-testid="orchestrator-button"
         title={
           id
-            ? 'Evolving — one conversation that directs your sessions. Drag it to Grid to watch it beside other sessions.'
-            : 'Evolving — one conversation that directs your sessions, and it keeps gaining new abilities. Expect it to change.'
+            ? 'One conversation that directs your sessions. Drag it to Grid to watch it beside other sessions.'
+            : 'One conversation that directs your sessions.'
         }
       >
         <CrownIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
-        <span className="shrink-0 text-2xs text-ink-faint" data-testid="orchestrator-experimental">
-          Evolving
-        </span>
-        {proposalWaits && (
-          <span className="ml-auto flex shrink-0 items-center" data-testid="orchestrator-proposal-waiting" title="A proposal waits for your answer">
-            <StateDot state="waiting_approval" />
-          </span>
-        )}
       </button>
       <OrchestratorChildren orchestratorId={id} />
     </div>

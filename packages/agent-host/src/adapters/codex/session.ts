@@ -1,7 +1,7 @@
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
-import { whichTool } from '../../env-path.js'
+import { toolCommand } from '../../tool-launch.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { imageEventFromDisk } from '../images.js'
@@ -159,7 +159,7 @@ export class CodexSession implements SessionHandle {
       },
       {
         cwd: opts.cwd,
-        command: whichTool('codex') ?? 'codex',
+        command: toolCommand('codex'),
         // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
         process: opts.processSource
           ? (opts.processSource.adopt?.process ?? spawnInKeeper(opts.processSource, opts.cwd))

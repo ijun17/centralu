@@ -4,7 +4,7 @@ import { commentIdOf } from './answers.mjs'
 import { itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { APP_DIR, config } from './config.mjs'
 import { GitError } from './git.mjs'
-import { createIssue, createPr, editComment, GitHubError, postComment, prsWithHead, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
+import { createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
@@ -140,9 +140,23 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   const squashLength = [...String(title)].length + ' (#9999)'.length
   if (squashLength > conventions.subjectMax) warnings.push(`Merged, the subject "${title} (#N)" will be about ${squashLength} characters, over ${conventions.subjectMax}.`)
   if (problems.length) return refusal('Not opened:', problems, { warnings })
-  if (dryRun) return linesAnswer(`Ready to open "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''} (dry run, nothing sent).`, [['warnings', 'Warnings:', warnings]], { ok: true, body: filled.body })
+  // Stacked on another pull request: that one is a lower now, and a stack's lowers are drafts (#1066)
+  const lower = target === info.defaultBranch ? null : ((await prsWithHead(r, target)).find((p) => p.state === 'OPEN') ?? null)
+  const lowerLine = (done) => `${done ? 'Turned' : 'Would turn'} ${refOf(r, lower.number)}, which this one is stacked on, into a draft: a stack's lower pull requests run no CI, since its top's run and the merge queue's batch prove the stack (CONTRIBUTING.md).`
+  if (dryRun)
+    return linesAnswer(`Ready to open "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''} (dry run, nothing sent).${lower && !lower.isDraft ? ` ${lowerLine(false)}` : ''}`, [['warnings', 'Warnings:', warnings]], { ok: true, body: filled.body })
   const pr = await createPr(r, { title, head, base: target, body: filled.body, draft })
-  return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url })
+  let stacked = ''
+  if (lower && !lower.isDraft) {
+    try {
+      await markDraft(r, lower.number)
+      stacked = ` ${lowerLine(true)}`
+    } catch (e) {
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      warnings.push(`${e.message} Turn it into a draft yourself (gh pr ready ${lower.number} --undo): a lower runs no CI as a draft.`)
+    }
+  }
+  return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}${stacked}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url, ...(stacked ? { drafted: lower.number } : {}) })
 }
 
 async function fileIssue({ title, body, labels, repo, dryRun }) {
@@ -164,7 +178,7 @@ async function restack({ pr, lower, path, push }) {
   try {
     const r = await rebaseStack(
       { repo: want.repo, pr: want.number, lower: below?.number, dir: path ?? APP_DIR, push: push === true },
-      { readPr, prsWithHead, setPrBase },
+      { readPr, prsWithHead, setPrBase, openPrsOnBase },
       (n) => refOf(want.repo, n),
     )
     return linesAnswer(r.summary, [['steps', '', r.lines]], { ok: !r.partial, pushed: r.pushed, head: r.rebased, sameTree: r.sameTree })
@@ -220,7 +234,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening.",
+        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),
@@ -262,7 +276,7 @@ export const tools = {
     config: {
       title: 'Restack a pull request after the one under it was merged',
       description:
-        "Instead of git rebase --onto and git push --force by hand: move a stacked pull request (pr) onto its base after the pull request under it (its base branch's pull request, or lower) was squash-merged. Reads both fresh, replays only pr's own commits (after the lower one's last head) onto the lower one's merge commit in a temporary worktree, and confirms the change is the one CI tested and whether the tree is the tested tree. Refuses when the lower one is not merged, pr was built on an older version of it, the replay conflicts, or the change differs. Without push it only reports; push: true pushes with a lease on the head it read and moves the base.",
+        "Instead of git rebase --onto and git push --force by hand: move a stacked pull request (pr) onto its base after the pull request under it (its base branch's pull request, or lower) was squash-merged. Reads both fresh, replays only pr's own commits (after the lower one's last head) onto the lower one's merge commit in a temporary worktree, and confirms the change is the one CI tested and whether the tree is the tested tree. Refuses when the lower one is not merged, pr was built on an older version of it, the replay conflicts, or the change differs. Without push it only reports; push: true pushes with a lease on the head it read and moves the base. Says when pr is a draft nothing is based on any more, which needs marking ready for CI to run.",
       inputSchema: z.object({
         pr: itemRef.describe(`The upper pull request: ${REF_HELP}`),
         lower: itemRef.optional().describe('The pull request it was stacked on, when GitHub already moved its base'),

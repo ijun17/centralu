@@ -484,7 +484,7 @@ flowchart TD
 ```
 
 - The keeper is an executable of its own beside the window's, launched detached so quitting the app sends it nothing. It
-  starts the host from the per-build copy, with the front door's token in `CC_HOST_TOKEN`, and swaps it blue-green.
+  starts the host from the per-build copy, with the front door's token on its stdin (#538), and swaps it blue-green.
   A host dies with its keeper (`--watch-parent` on the keeper's pipe).
 - Agent CLIs, terminals and command runs are the **keeper's** children, spawned when the host asks over
   `children.sock`; their bytes reach the host through that socket. A host that restarts or is swapped re-attaches to

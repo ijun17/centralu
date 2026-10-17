@@ -70,12 +70,18 @@ jobs:
   guard:
     name: check the tag against the repo
     runs-on: ubuntu-24.04
+    # actions: read for the rehearsal check below (the runs of this workflow); nothing is written
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
       # Strings, not booleans — a job output is always a string. Every consumer below
       # compares against the literal "false"/"true" for that reason.
       dry_run: ${{ steps.plan.outputs.dry_run }}
       also_latest: ${{ steps.plan.outputs.also_latest }}
+      # "true" only on a tag push whose tree a successful rehearsal built and verified (#1042)
+      skip_verify: ${{ steps.rehearsal.outputs.skip_verify }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -156,6 +162,18 @@ jobs:
 
       - name: Check the pinned Node against its signed SHASUMS256.txt
         run: node scripts/node-pin.mjs
+
+      # `pnpm verify` ran in every platform job and the shim of a tagged run, about 13 minutes,
+      # after the rehearsal had verified the same files on the same runners (#1042, owner decision
+      # 2026-10-18). The rehearsal stays where verify runs on macOS, ubuntu-22.04 and arm64; a tag
+      # push skips it only when GitHub lists a successful rehearsal (a workflow_dispatch run of this
+      # workflow) on a commit with the tagged commit's tree. Asked here, through the API, so a tag
+      # pushed by hand skips nothing it has not earned. A rehearsal never skips: only a tag push asks.
+      - name: Find a successful rehearsal on this tree
+        id: rehearsal
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/release-rehearsal.mjs
 
   # One job per platform package, each building on the platform it ships to. A target a hub
   # installs on (one `packaging/remote-runtime.json` pins a Node for) also publishes its host-only
@@ -262,6 +280,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DRY_RUN: ${{ needs.guard.outputs.dry_run }}
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
+          SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
           TARGET: ${{ matrix.target }}
           # The content signing key (docs/plans/thin-shell.md §4), PKCS#8 PEM. An environment
           # secret of `npm-publish`, so it exists only in a publishing run, behind the same
@@ -288,6 +307,8 @@ jobs:
           # A publish that writes a content manifest must sign it with a key in
           # packaging/shell/keys.json, and finds out before anything reaches the registry.
           if [ "$DRY_RUN" = "false" ] && [ "$TARGET" = "darwin-arm64" ]; then args="$args --require-content-key"; fi
+          # Matched against "true": anything else verifies
+          if [ "$SKIP_VERIFY" = "true" ]; then args="$args --skip-verify"; fi
           echo "pnpm release:npm $args"
           pnpm release:npm $args
 
@@ -341,6 +362,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DRY_RUN: ${{ needs.guard.outputs.dry_run }}
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
+          SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
         # In a rehearsal this prints a yellow warning that the platform packages are not on
         # the registry at this version, and carries on. That is the truth: the rehearsal
         # published none of them.
@@ -349,6 +371,7 @@ jobs:
           args="--shim-only"
           if [ "$DRY_RUN" = "false" ]; then args="$args --publish"; fi
           if [ "$ALSO_LATEST" = "true" ]; then args="$args --also-latest"; fi
+          if [ "$SKIP_VERIFY" = "true" ]; then args="$args --skip-verify"; fi
           echo "pnpm release:npm $args"
           pnpm release:npm $args
 
