@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { whichTool } from './env-path.js'
+import { systemTool } from './os.js'
 
 /**
  * How to start a tool `whichTool` found: a program and the arguments that go before the tool's
@@ -186,6 +187,10 @@ function withPathExt(path: string, env: Record<string, string | undefined>, deps
  * beside that `.cmd`, which the lookup has just found is not there: the spawn reports it missing
  * (ENOENT, `gitBranchPr`'s 'unavailable'), and nothing is looked for anywhere else. It is not
  * remembered, so a git installed later is found.
+ *
+ * Nor when nothing is found at all (#838): `notOnPath`. The bare name was the answer then, so on a machine without git,
+ * or without gh, the first status read or pull request look of a project with a `git.exe` or `gh.exe` at its root ran
+ * that program, before the project was trusted.
  */
 export function programPath(
   name: string,
@@ -204,7 +209,30 @@ export function programPath(
     if (!found) return win32.join(win32.dirname(batch), `${name}.exe`)
   }
   if (found) programs.set(name, found)
-  return found ?? name
+  return found ?? notOnPath(name)
+}
+
+/**
+ * What is spawned on Windows for a program that is not on PATH: a path under `%SystemRoot%\System32` that only an
+ * administrator can make, so the spawn reports the program missing (ENOENT, which every caller already reads as "not
+ * installed") and Windows looks for it nowhere else. Given the bare name, Windows process creation looks in the child's
+ * working folder before PATH, and the host runs git, gh and codex in a project's folder: a `git.exe`, `gh.exe` or
+ * `codex.exe` committed there ran whenever the tool itself was not installed (#838, reproduced on Windows 11).
+ */
+export function notOnPath(name: string, env: Record<string, string | undefined> = process.env): string {
+  return systemTool(['centralu-not-on-path', `${name}.exe`], env)
+}
+
+/**
+ * An agent CLI (`claude`, `codex`) to spawn: the path found on PATH; when there is none, the bare name off Windows (the
+ * spawn searches PATH and nothing else there) and `notOnPath` on Windows, never the bare name.
+ */
+export function toolCommand(
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+  find: (name: string) => string | null = (n) => whichTool(n),
+): string {
+  return find(name) ?? (platform === 'win32' ? notOnPath(name) : name)
 }
 
 const programs = new Map<string, string>()

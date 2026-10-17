@@ -1608,7 +1608,12 @@ tests. What differs from macOS and Linux, and what holds it:
   child's working directory before PATH. Every git call runs in the project, so a `git.exe`
   committed at a repository's root would run on the first status read. `git`, `gh` and an app's
   manifest command are spawned by the absolute path found on PATH (`tool-launch.ts` `programPath`,
-  `resolveCommand`; tests in `tool-launch.test.ts`), and PATH lookups skip relative entries
+  `resolveCommand`; tests in `tool-launch.test.ts`). A program not on PATH at all is never spawned by its bare
+  name either: `git`, `gh`, `codex` and `claude` are then a path under `%SystemRoot%\System32` that only an
+  administrator can make (`notOnPath`, `toolCommand`), so the spawn reports the tool missing. The bare name had been
+  the answer there, and on a machine without git, gh or codex a `git.exe`, `gh.exe` or `codex.exe` committed to a
+  project ran on its first status read, pull request look or listing of past Codex conversations, before any trust
+  (#838; `git-exec.test.ts`, `git-pr.test.ts`, `codex/not-installed.test.ts` plant one). PATH lookups skip relative entries
   (`env-path.ts`, and `node`/`code` in the Rust shell). `du`, which sized the copy candidates by
   bare name with the project as its folder, is not run on Windows at all: the sizes are read from
   the file system there (`measuresWithDu`, #849; `git.test.ts` plants a `du.exe`).
@@ -1650,8 +1655,6 @@ tests. What differs from macOS and Linux, and what holds it:
 
 Limits:
 
-- If git is not installed at all, the bare name is used, and a planted `git.exe` in the project
-  folder would run. The same holds for `codex` when it is not installed.
 - The files written `0600` here (`app-secrets.json`, `app-imports.json`) get no mode on Windows,
   which has no mode bits; they are as private as the folder they are in. The default data folder
   is in the user's profile, which only that user (and administrators) can read. A `CC_DATA_DIR`
