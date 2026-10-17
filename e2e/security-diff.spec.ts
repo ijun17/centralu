@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { grantClipboard } from './fixtures/clipboard.js'
 import { GIT_DIFF_MAX_CHARS } from '../packages/agent-host/src/dev-services/git.js'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * The real host's diff cap (`gitDiff`/`gitCommitDetail`) — the exact value the host emits (#134).
@@ -11,32 +12,6 @@ const HOST_DIFF_MAX_CHARS = GIT_DIFF_MAX_CHARS
 const HOSTILE_DIFF_ROWS = Math.floor(HOST_DIFF_MAX_CHARS / 11)
 const HOSTILE_LAST_ROW = `row-${String(HOSTILE_DIFF_ROWS - 1).padStart(5, '0')}`
 const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
-
-async function setup(page: Page): Promise<void> {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    const mock = window.__mock
-    if (!mock) throw new Error('mock platform is required')
-    mock.nextPickedDirectory = '/tmp/security-diff'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-security-diff')).toBeVisible()
-}
-
-async function newSession(page: Page): Promise<void> {
-  await page.getByTestId('project-menu-security-diff').click()
-  await page.getByTestId('new-session-security-diff').click()
-  await page.getByTestId('tool-option-claude').click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await page.getByTestId('prompt-input').fill('inspect diff')
-  await page.getByTestId('prompt-input').press('Enter')
-}
 
 function hostileDiff(): string {
   return Array.from({ length: HOSTILE_DIFF_ROWS }, (_, i) => `+row-${String(i).padStart(5, '0')}`).join('\n')
@@ -49,14 +24,14 @@ test('hostile fixture stays within the audit-input cap the host actually applies
 
 test('newline-dense working diff is virtualized without losing tail rows', async ({ page }) => {
   await grantClipboard(page)
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((diff) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
     mock.gitState.files = [{ path: 'src/bomb.ts', staged: false, status: 'M' }]
     mock.gitState.diffs['src/bomb.ts'] = diff
   }, hostileDiff())
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/bomb.ts').click()
   const diffView = page.getByTestId('diff-view')
@@ -92,14 +67,14 @@ test('sticky current-file band follows the visible file while virtualized', asyn
     'diff --git a/src/second.ts b/src/second.ts',
     second,
   ].join('\n')
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((d) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
     mock.gitState.files = [{ path: 'src/multi.ts', staged: false, status: 'M' }]
     mock.gitState.diffs['src/multi.ts'] = d
   }, diff)
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/multi.ts').click()
   await expect(page.getByTestId('diff-current-file-band')).toContainText('src/first.ts')
@@ -119,14 +94,14 @@ test('sticky current-file band follows the visible file while virtualized', asyn
 
 test('normal working diff renders completely without a truncation notice', async ({ page }) => {
   const diff = 'diff --git a/src/small.ts b/src/small.ts\n@@ -1,2 +1,2 @@\n-old()\n+next()\n unchanged'
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((d) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
     mock.gitState.files = [{ path: 'src/small.ts', staged: false, status: 'M' }]
     mock.gitState.diffs['src/small.ts'] = d
   }, diff)
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/small.ts').click()
   await expect(page.getByTestId('diff-view')).toContainText('next()')
@@ -142,7 +117,7 @@ test('normal working diff renders completely without a truncation notice', async
  * does not appear" case become a real claim.
  */
 test('working diff cut at the host cap says so', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate(() => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
@@ -150,21 +125,21 @@ test('working diff cut at the host cap says so', async ({ page }) => {
     mock.gitState.diffs['src/huge.ts'] = '@@ -1 +1 @@\n-old()\n+next()'
     mock.gitState.truncated = ['src/huge.ts']
   })
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/huge.ts').click()
   await expect(page.getByTestId('diff-truncation')).toHaveText(DIFF_TRUNCATED_MESSAGE)
 })
 
 test('working diff opens IDE through host-resolved absolute handoff and reports resolve failures', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate(() => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
     mock.gitState.files = [{ path: 'src/small.ts', staged: false, status: 'M' }]
     mock.gitState.diffs['src/small.ts'] = '@@ -1 +1 @@\n-old()\n+next()'
   })
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/small.ts').click()
   await page.getByTestId('open-in-ide').click()
@@ -185,7 +160,7 @@ test('working diff opens IDE through host-resolved absolute handoff and reports 
 })
 
 test('newline-dense commit diff is virtualized without a lossy row cap', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((diff) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
@@ -194,7 +169,7 @@ test('newline-dense commit diff is virtualized without a lossy row cap', async (
     ]
     mock.gitState.diffs.deadbee = diff
   }, hostileDiff())
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-deadbee').click()
@@ -211,7 +186,7 @@ test('newline-dense commit diff is virtualized without a lossy row cap', async (
 
 /* commitDetail.truncated was wired up but had not a single passing test exercising it (#121) */
 test('commit diff cut at the host cap says so', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate(() => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
@@ -221,7 +196,7 @@ test('commit diff cut at the host cap says so', async ({ page }) => {
     mock.gitState.diffs.cafebab = '@@ -1 +1 @@\n-old()\n+next()'
     mock.gitState.truncated = ['cafebab']
   })
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-cafebab').click()
@@ -239,14 +214,14 @@ test('commit diff cut at the host cap says so', async ({ page }) => {
  */
 test('pressing ⌘A right after picking a file in the sidebar still copies the whole diff (#118)', async ({ page }) => {
   await grantClipboard(page)
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((diff) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
     mock.gitState.files = [{ path: 'src/bomb.ts', staged: false, status: 'M' }]
     mock.gitState.diffs['src/bomb.ts'] = diff
   }, hostileDiff())
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   // Do not click the pane — picking it from the sidebar is all that happens
   await page.getByTestId('evidence-file-src/bomb.ts').click()
@@ -271,7 +246,7 @@ test('pressing ⌘A right after picking a file in the sidebar still copies the w
 
 /** Gets to a single-file working diff being open. The six lines the tests below used to repeat every time. */
 async function openWorkingDiff(page: Page, path: string, diff: string): Promise<void> {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate(
     ([p, d]) => {
       const mock = window.__mock
@@ -281,7 +256,7 @@ async function openWorkingDiff(page: Page, path: string, diff: string): Promise<
     },
     [path, diff],
   )
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
   await page.getByTestId(`evidence-file-${path}`).click()
   await expect(page.getByTestId('diff-view')).toBeVisible()
 }
@@ -392,7 +367,7 @@ test('the scroll pane is a named region and is reachable by Tab', async ({ page 
 test('copying a truncated diff with ⌘A does not mix the notice into the clipboard', async ({ page }) => {
   await grantClipboard(page)
   const diff = 'diff --git a/src/huge.ts b/src/huge.ts\n@@ -1 +1 @@\n-old()\n+next()'
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((d) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
@@ -400,7 +375,7 @@ test('copying a truncated diff with ⌘A does not mix the notice into the clipbo
     mock.gitState.diffs['src/huge.ts'] = d
     mock.gitState.truncated = ['src/huge.ts']
   }, diff)
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-file-src/huge.ts').click()
   // The notice must still be showing on screen — the fact that it was truncated does not disappear
@@ -466,7 +441,7 @@ test('Open in IDE also opens the file and line currently being viewed in a commi
     '@@ -0,0 +1,80 @@',
     rows('second'),
   ].join('\n')
-  await setup(page)
+  await setup(page, { projects: ['/tmp/security-diff'] })
   await page.evaluate((d) => {
     const mock = window.__mock
     if (!mock) throw new Error('mock platform is required')
@@ -475,7 +450,7 @@ test('Open in IDE also opens the file and line currently being viewed in a commi
     ]
     mock.gitState.diffs.deadbee = d
   }, diff)
-  await newSession(page)
+  await newSession(page, 'security-diff', 'inspect diff', { tool: 'claude' })
 
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-deadbee').click()

@@ -49,15 +49,26 @@ export async function setup(page: Page, opts: { projects?: string[]; trusted?: b
   }
 }
 
-export async function newSession(page: Page, projectName: string, prompt: string) {
+/**
+ * Creates a session in `projectName` and sends `prompt` as its first instruction; resolves to the new session's id.
+ * `tool` picks that tool in the dialog first; without it the dialog's own choice stands.
+ */
+export async function newSession(
+  page: Page,
+  projectName: string,
+  prompt: string,
+  opts: { tool?: 'claude' | 'codex' } = {},
+): Promise<string> {
   // A new session goes through a dialog (FR-7: pick the tool, model and permission)
   await page.getByTestId(`project-menu-${projectName}`).click()
   await page.getByTestId(`new-session-${projectName}`).click()
+  if (opts.tool) await page.getByTestId(`tool-option-${opts.tool}`).click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
+  return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }
 
 /**
