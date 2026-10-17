@@ -67,6 +67,23 @@ impl Message {
 /// Sends one message. The descriptors stay open on our side: `SCM_RIGHTS` gives the receiver its
 /// own copies.
 pub fn send(s: &mut UnixStream, header: &Value, blobs: &[Vec<u8>], fds: &[RawFd]) -> io::Result<()> {
+    send_within(s, header, blobs, fds, FDS_ROOM_LIMIT)
+}
+
+/**
+ * `send`, with every write and every descriptor batch waiting at most `limit` for the receiver
+ * (#840 item 9). The outgoing keeper sends while it is frozen: a receiver alive but not reading
+ * (stopped, stuck) held a blocking `write` of the state, and with it every relay, child and
+ * window, for good. Now the write fails and the handoff rolls back.
+ */
+fn send_within(s: &mut UnixStream, header: &Value, blobs: &[Vec<u8>], fds: &[RawFd], limit: Duration) -> io::Result<()> {
+    if let Err(e) = s.set_write_timeout(Some(limit)) {
+        // macOS refuses socket options (`EINVAL`) once the peer has closed; the write then fails
+        // at once (`EPIPE`) and needs no bound.
+        if e.raw_os_error() != Some(libc::EINVAL) {
+            return Err(e);
+        }
+    }
     let body = serde_json::to_vec(&json!({ "h": header, "blobs": blobs.len(), "fds": fds.len() }))?;
     if body.len() as u64 > MAX_HEADER as u64 {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "handoff header too large"));
@@ -80,7 +97,7 @@ pub fn send(s: &mut UnixStream, header: &Value, blobs: &[Vec<u8>], fds: &[RawFd]
         s.write_all(b)?;
     }
     for batch in fds.chunks(FDS_PER_BATCH) {
-        os::send_fds(s, batch, FDS_ROOM_LIMIT, MAX_ROOM_PAUSE)?;
+        os::send_fds(s, batch, limit, MAX_ROOM_PAUSE)?;
     }
     s.flush()
 }
@@ -292,6 +309,22 @@ mod tests {
             let (sent, got) = send_to_late_reader(prefix, 150, Duration::from_millis(10), Duration::from_millis(2));
             assert_round_trip(prefix, 150, sent, got);
         }
+    }
+
+    /// #840 item 9: a receiver that is alive but never reads ends the send at the bound instead of
+    /// holding the frozen keeper in a blocking write for good.
+    #[test]
+    fn a_receiver_that_never_reads_ends_the_send_at_the_bound() {
+        let (mut a, b) = UnixStream::pair().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let blob = vec![7u8; 8 * 1024 * 1024];
+            let _ = tx.send(send_within(&mut a, &json!({ "op": "state" }), &[blob], &[], Duration::from_millis(300)));
+        });
+        let sent = rx.recv_timeout(Duration::from_secs(20));
+        drop(b);
+        let sent = sent.expect("the send still waits for a receiver that never reads");
+        assert!(sent.is_err(), "a send nobody read reported success");
     }
 
     #[test]
