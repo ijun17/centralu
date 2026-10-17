@@ -673,7 +673,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 1500))
     const slow = call('read_item', { item: 113 })
     // The slow read is under way (its gh call is logged) before the post goes out
-    await expect.poll(() => threadReads().length, { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => threadReads().length, { timeout: 10_000 * SLOW }).toBe(1)
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 0))
     expect((await call('comment', { item: 113, body: 'An answer.' }, agent)).isError).toBe(false)
     const stale = await slow

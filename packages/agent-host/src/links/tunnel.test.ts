@@ -342,7 +342,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       expect(pid).toBeGreaterThan(0)
       await expect(starting).rejects.toThrow(/did not finish within 5 seconds/)
       // The ssh itself is gone, not only the wait for it
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 * SLOW })
     }, 30_000 * SLOW)
 
     it('puts the deadline on asking for the connection line too', async () => {
@@ -484,7 +484,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       // The host is the ssh session's process: it is gone with the link. Windows ends ssh outright,
       // with no SIGTERM for the fake to clean up its marker file on, so the process is what shows it there.
       const pid = hosting[0]!.pid!
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 * SLOW })
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000 * SLOW)
 

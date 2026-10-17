@@ -198,10 +198,10 @@ describe('stopStrays', () => {
     await new Promise((r) => sh.once('exit', r))
     let pid = 0
     try {
-      await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 })
+      await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
       // Not this test's process: the host's descendants are not leftovers
       expect(await stopStrays([pid], [dir], 999_999)).toEqual({ stopped: 1 })
-      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000, interval: 100 })
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
     } finally {
       if (pid && alive(pid)) process.kill(pid, 'SIGKILL')
       rmSync(dir, { recursive: true, force: true })
