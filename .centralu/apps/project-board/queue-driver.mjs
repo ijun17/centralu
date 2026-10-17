@@ -34,7 +34,7 @@ import {
   sameRepo,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, onlySupersededFailures, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
+import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, lowerFailureCounts, normalize, noticeKey, onlySupersededFailures, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { short } from './util.mjs'
@@ -175,7 +175,7 @@ export function latestRuns(runs, pr) {
     const cur = by.get(key)
     if (!cur || better(r, cur)) by.set(key, r)
   }
-  return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null, suite: r.check_suite_id ?? null, url: r.html_url ?? null }))
+  return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null, suite: r.check_suite_id ?? null, url: r.html_url ?? null, createdAt: r.created_at ?? null }))
 }
 
 /** The first failing test line of a failed job, for the attention message; best effort. */
@@ -203,17 +203,18 @@ export function batchable(pr) {
   return !/^chore\(release\)!?:/.test(String(pr.title ?? ''))
 }
 
-/** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
-const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
-
 /**
  * Lands an item that is green and mergeable: checks every open lower is inside the top's head (so
- * the green CI, read on that head, ran on all of them) and that no lower's own latest CI run on its
- * head failed, then squash-merges the top on the head that was read. The top's run is what proves
- * the stack; a lower's red run is a sign it does not (a CI that tests only the top's own diff, a
- * lower pushed again). Answers the outcome; `afterMerge` does the rest.
+ * the green CI, read on that head, ran on all of them) and that no lower's own latest run on its head
+ * failed after the top was proved (`provedAt`: when the run that proved it, its own or its batch's,
+ * was created; `lowerFailureCounts`), then squash-merges the top on the head that was read. Answers
+ * the outcome; `afterMerge` does the rest.
+ *
+ * Every red lower stopped the stack before (#1066): on 2026-10-18 that stopped #1040 and #1026 on an
+ * old failure their tops' newer runs had outlived. But a lower failing after the top's green run is
+ * evidence (#1072 under #1075, a runner-dependent bug the top failed on too), so that one still stops it.
  */
-export async function land(item, pr, ref, renew, defaultBranch) {
+export async function land(item, pr, ref, renew, defaultBranch, { provedAt = null } = {}) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   for (const l of item.lowers ?? []) {
@@ -227,15 +228,15 @@ export async function land(item, pr, ref, renew, defaultBranch) {
           text: `${n} does not contain the head ${short(lp.headRefOid)} of ${ref(repo, l)}, which would be closed as landed. Restack ${n} onto it and push, or queue ${n} again without ${ref(repo, l)}.`,
         },
       }
-    // Cheap: the runs' conclusions only. Cancelled or no run at all is fine (the top's run covers it)
+    // Cheap: the runs' conclusions and times only. Cancelled, older than the top's proof, or no run at all is fine
     const own = latestRuns((await readWorkflowChecks(repo, lp.headRefOid, { workflows: CI.workflows })).runs, lp)
-    const red = own.find((r) => r.status === 'completed' && FAILED_RUN.has(r.conclusion))
+    const red = own.find((r) => lowerFailureCounts(r, provedAt))
     if (red)
       return {
         state: 'attention',
         reason: {
           kind: 'lower-failed',
-          text: `${ref(repo, l)}, under ${n}, has a failed CI run ${red.id} on its head ${short(lp.headRefOid)}, so the stack is not landed on the top's green run alone. Fix ${ref(repo, l)} (or rerun it if it was a flake) and restack ${n}, or queue ${n} again without it.`,
+          text: `${ref(repo, l)}, under ${n}, has a CI run ${red.id} on its head ${short(lp.headRefOid)} that failed after the run that proved ${n}${provedAt ? ` (started ${provedAt.slice(0, 16).replace('T', ' ')} UTC)` : ''}: a failure the top's run may have missed (a flaky or runner-dependent test). Fix ${ref(repo, l)} (or rerun it if it was a flake) and restack ${n}, or queue ${n} again without it.`,
         },
       }
   }
@@ -323,6 +324,8 @@ async function pollItem(item, { now, ref, renew, save }) {
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
 
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
+  // The latest CI run of each workflow on the head, once read: what proved it, if it lands
+  let runs = []
   if (!d) {
     let required = view.required
     if (!required || required.base !== pr.baseRefName || required.head !== pr.headRefOid) {
@@ -333,7 +336,7 @@ async function pollItem(item, { now, ref, renew, save }) {
     // Only the CI workflows' own checks count: a release job of the same name is not CI (#624)
     const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
-    const runs = latestRuns(scoped.runs, pr)
+    runs = latestRuns(scoped.runs, pr)
     const canBatch = QUEUE.batch !== null && batchable(pr)
     // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
     base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
@@ -372,7 +375,9 @@ async function pollItem(item, { now, ref, renew, save }) {
     // GitHub refused this head once, or holds it: asking again changes nothing until the head or the PR does
     d = { state: 'attention', reason: item.reason }
   } else if (d.action?.type === 'merge') {
-    const landed = await land(view, pr, ref, renew, defaultBranch)
+    // The top's own run proved it: the newest of its CI runs on this head
+    const provedAt = runs.map((r) => r.createdAt).filter(Boolean).sort().at(-1) ?? null
+    const landed = await land(view, pr, ref, renew, defaultBranch, { provedAt })
     if (landed.yielded) return { yielded: true }
     d = landed
   }

@@ -176,6 +176,22 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**A stack's lower pull requests are drafts** (#1066). The merge queue lands a stack through its top
+(`queue_merge` with `lowers`), on the top's run and its batch, which test the whole stack; a lower's
+own run only waits in line for runners. A draft runs no CI but the `changes` job. So open every
+pull request of a stack but the top as a draft, bottom first as usual:
+
+```bash
+gh pr create --draft --base main --head part-1        # a lower
+gh pr create --draft --base part-1 --head part-2      # a lower
+gh pr create --base part-2 --head part-3              # the top: CI runs here
+```
+
+Stacking onto a pull request that is open and ready already, turn it into a draft
+(`gh pr ready <n> --undo`); the board's `open_pr` does that by itself. When the top is closed and
+a lower becomes the top, mark it ready (`gh pr ready <n>`): that starts its CI. The board's
+`rebase_stack` says when the pull request it restacked is such a draft.
+
 CI's full tier also runs the keeper's end-to-end scripts on macOS, the parts that need no model and
 no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
 [docs/agent-host.md](docs/agent-host.md) §4.1).

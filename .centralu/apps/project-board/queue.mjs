@@ -320,6 +320,25 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
   return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
 }
 
+/** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
+export const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
+
+/**
+ * Whether a lower's own latest run on its current head stops its stack from landing (#1066): it failed,
+ * and it is at least as new as the run that proved the top (`provedAt`: the top's own green run, or
+ * the batch's, when it was created). Main only moves forward, so a run started later tested at least
+ * as new a main: a lower failing after the top's green run is evidence the top's run missed something,
+ * a flaky or runner-dependent test (#1072 under #1075, 2026-10-18: a Windows 8.3 short-name temp path
+ * that failed the top the same way). A lower that failed before it is not: the top's run tested the
+ * whole tree on a newer main since (#1039 under #1040: a failure from hours before, for a test main
+ * had since fixed). Not knowing when the top was proved, a failure counts.
+ */
+export function lowerFailureCounts(run, provedAt) {
+  if (!run || run.status !== 'completed' || !FAILED_RUN.has(run.conclusion)) return false
+  if (!provedAt || !run.createdAt) return true
+  return Date.parse(run.createdAt) >= Date.parse(provedAt)
+}
+
 /**
  * With two tiers (`fullTier`, the full tier's check name): whether a head's own CI is a finished run
  * that did not run the full tier and passed what it ran. Every run on it completed, its full tier's

@@ -332,7 +332,7 @@ async function runCi(b, ctx) {
   if (d.state === 'green') {
     const run = runs[0] ?? null
     save((fq, fb) => {
-      Object.assign(fb, { state: 'landing', required, run: run ? { id: run.id, url: run.url } : null, greenAt: at, landed: 0, lastError: null, errors: 0, updatedAt: at, nextAt: at })
+      Object.assign(fb, { state: 'landing', required, run: run ? { id: run.id, url: run.url, createdAt: run.createdAt ?? null } : null, greenAt: at, landed: 0, lastError: null, errors: 0, updatedAt: at, nextAt: at })
       batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
     })
     return { state: 'landing' }
@@ -432,7 +432,8 @@ async function landNext(b, ctx) {
     }).catch((e) => {
       if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
     })
-    const r = await land(view, pr, ref, renew, defaultBranch)
+    // The batch's run proved it (an older batch file has no time: a lower's failure then counts)
+    const r = await land(view, pr, ref, renew, defaultBranch, { provedAt: b.run?.createdAt ?? null })
     if (r.yielded) return { yielded: true }
     if (r.state !== 'merged') {
       const rest = prs.slice(k + 1)

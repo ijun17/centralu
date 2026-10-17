@@ -8,6 +8,10 @@
 //   full    everything else: a commit already on main, a manual run (workflow_dispatch: the merge
 //           queue's batches, or a person asking for it on a branch), and a release bump's pull
 //           request. Inside the full tier the files still leave out what they cannot affect.
+//   none    a draft pull request (#1066): `changes` alone. A stack's lower PRs are drafts
+//           (CONTRIBUTING.md): the top's run, and the merge queue's batch, are what prove the
+//           stack, and a lower's own run only queued behind them. Marked ready for review (a lower
+//           that became a top), it runs the quick tier again.
 //
 // Nothing lands on the quick tier alone: the merge queue lands a pull request only from a full run
 // on what lands, a batch built on main (.centralu/apps/project-board/batch.mjs) or a full run on its
@@ -27,7 +31,8 @@
 // Each is `true` or `false` on a full run (`false` runs the job's stand-in, which reports its checks
 // as passed), and `off` on a quick one (neither runs). `full` is `true` on a full run: the jobs every
 // full run has (the WebKit UI scenarios, the Windows lint and types, the `full tier` job), and `off`
-// on a quick one.
+// on a quick one. `quick` is `true` on both: `verify` and the Windows unit tests; `off`, with every
+// other answer, for a draft.
 //
 // Which files: everything a commit adds to main. A commit already on main (a push to main, every
 // commit of a rebase merge) runs everything: per-commit filtering, with newer pushes cancelling
@@ -38,16 +43,17 @@
 // Renames count as a deletion and an addition (--no-renames), so moving a host file into docs/ is a
 // host change.
 //
-// Nothing here reads the event: whether a commit is on main is a fact of the history, and a manual
-// run is the one with the `everything` input set. A release bump changes the file that declares the
-// version, which makes its pull request a full run of every job, as main's is, so the release
-// script's audit still holds (docs/releasing.md, "Workflow event audit"). When main or the
-// merge-base is not in the checkout, everything runs.
+// One fact comes from the event, and only after everything else is decided: whether a pull request is
+// a draft (`pull_request.draft` in $GITHUB_EVENT_PATH). Whether a commit is on main is a fact of the
+// history, and a manual run is the one with the `everything` input set. A release bump changes the
+// file that declares the version, which makes its pull request a full run of every job, as main's
+// is, draft or not, so the release script's audit still holds (docs/releasing.md, "Workflow event
+// audit"). When main or the merge-base is not in the checkout, everything runs.
 //
 // Local check: node .github/scripts/ci-changes.mjs   (prints the answer; GITHUB_OUTPUT unset)
 
 import { execFileSync } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 /** Documents: read by people and by `verify`'s tests, never built into anything */
@@ -99,20 +105,32 @@ export function classify(files) {
 /**
  * The tier of a run (see the header), with why. `onMain`: HEAD is already on main. `dispatch`: a
  * manual run (the workflow_dispatch input `everything` is set, true or false). `files`: what HEAD adds
- * to main, or null when that is not known.
+ * to main, or null when that is not known. `draft`: the run is a draft pull request's, which is
+ * asked last: a release bump runs in full, a draft or not.
  */
-export function tierOf({ files, onMain = false, dispatch = false }) {
+export function tierOf({ files, onMain = false, dispatch = false, draft = false }) {
   if (onMain) return { tier: 'full', why: 'the commit is on main' }
   if (dispatch) return { tier: 'full', why: 'a manual run (workflow_dispatch), as the merge queue starts for a batch' }
   if (files === null) return { tier: 'full', why: 'the changed files are not known' }
   if (files.includes(VERSION_SOURCE)) return { tier: 'full', why: `it changes ${VERSION_SOURCE}, as a release bump does` }
+  if (draft) return { tier: 'none', why: "a draft pull request, as a stack's lower PRs are: nothing runs until it is marked ready for review" }
   return { tier: 'quick', why: 'a pull request: the full tier runs in the merge queue' }
 }
 
 /** The answers build.yml's jobs read, as strings: see the header. */
 export function outputs(tier, needs) {
   const full = tier === 'full'
-  return { full: full ? 'true' : 'off', ...Object.fromEntries(GROUPS.map((g) => [g, full ? String(needs[g]) : 'off'])) }
+  return { quick: tier === 'none' ? 'off' : 'true', full: full ? 'true' : 'off', ...Object.fromEntries(GROUPS.map((g) => [g, full ? String(needs[g]) : 'off'])) }
+}
+
+/** Whether the event that started the run is a draft pull request's ($GITHUB_EVENT_PATH). Unreadable: not a draft. */
+export function draftOf(eventPath) {
+  if (!eventPath) return false
+  try {
+    return JSON.parse(readFileSync(eventPath, 'utf8'))?.pull_request?.draft === true
+  } catch {
+    return false
+  }
 }
 
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
@@ -147,7 +165,7 @@ function main() {
   // A manual run sets the workflow_dispatch input; a push or a pull request leaves it empty
   const dispatch = process.env.EVERYTHING === 'true' || process.env.EVERYTHING === 'false'
   const changed = changedFiles()
-  const { tier, why } = tierOf({ files: changed.files, onMain: changed.onMain === true, dispatch })
+  const { tier, why } = tierOf({ files: changed.files, onMain: changed.onMain === true, dispatch, draft: !dispatch && draftOf(process.env.GITHUB_EVENT_PATH) })
   // A manual run builds everything unless it asks otherwise (`everything` unticked)
   const files = process.env.EVERYTHING === 'true' ? null : changed.files
   const lines = Object.entries(outputs(tier, classify(files))).map(([k, v]) => `${k}=${v}`)

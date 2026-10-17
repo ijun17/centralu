@@ -10,7 +10,10 @@ name: build
 on:
   push:
     branches: [main]
+  # A draft runs `changes` alone (#1066: a stack's lower PRs are drafts). Marked ready, it runs again;
+  # turned into a draft, the run it starts cancels the one going (concurrency below).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
       # A manual run is the full tier (.github/scripts/ci-changes.mjs): the merge queue's batches, or a
@@ -31,6 +34,8 @@ jobs:
   # Which jobs a run needs: its tier, then the files it adds to main (.github/scripts/ci-changes.mjs,
   # 2026-10-17; tiers 2026-10-18, the owner's decision). About 25 jobs run per push and the free plan
   # runs about 20 at once, so every job a run does not need delays the next one.
+  #
+  # A draft pull request (a stack's lower, #1066) runs `changes` alone, and every other job skips.
   #
   # The quick tier, on a pull request: `changes`, `verify` and the Windows unit tests. The full tier,
   # every job: a push to main, a manual run (the merge queue's batches; a person on a branch) and a
@@ -53,6 +58,7 @@ jobs:
     name: changes
     runs-on: ubuntu-24.04
     outputs:
+      quick: ${{ steps.classify.outputs.quick }}
       full: ${{ steps.classify.outputs.full }}
       bundle: ${{ steps.classify.outputs.bundle }}
       host: ${{ steps.classify.outputs.host }}
@@ -304,6 +310,8 @@ jobs:
   # Node 22's EventTarget all failed there first).
   verify:
     name: verify
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -397,6 +405,8 @@ jobs:
   # `pnpm test` on Windows, the rest of the job above, halved by `vitest --shard` (#1035). In the quick tier.
   windows-tests-unit:
     name: windows tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
     runs-on: windows-2022
     strategy:
       fail-fast: false

@@ -194,8 +194,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
   of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
   (compare: the green run, read on that head, ran on all of them) and no lower's own latest CI run on
-  its head may have failed (cancelled or none is fine; a red one means the top's run may not cover it,
-  → attention `lower-failed`), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
+  its head may have failed at or after the run that proved the top was created, its own or its batch's
+  (`lowerFailureCounts`, → attention `lower-failed`). A later failure is evidence the top's run
+  missed (#1072 under #1075: a runner-dependent Windows bug); an earlier one is outlived by the top's
+  run on a newer main (#1039 under #1040: a test main had since fixed). Then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
   attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head). A stack lands only when the top merged into the default branch, here or found merged
@@ -363,6 +365,9 @@ and refuses with every reason at once, sending nothing.
   heading whose guidance says "keep the heading" (Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
+  With a `base` that is another open pull request's branch, it turns that one into a draft
+  (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
+  build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
 - **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,
   a type from the conventions' table, lowercase scope and description, no trailing period, the
   subject's length in characters), a blank second line, and the public text rules. Body lines past
@@ -382,7 +387,9 @@ and refuses with every reason at once, sending nothing.
   it pushes with `--force-with-lease` on the head it read and moves the base. The person's checkout
   never changes: the worktree and the app's temporary refs are removed whatever happens. `lower`
   names the lower pull request when GitHub already moved `pr`'s base to main after deleting the
-  merged branch. `path` defaults to the checkout this app is in.
+  merged branch. `path` defaults to the checkout this app is in. When `pr` is a draft and no open
+  pull request is based on its branch, it says to mark it ready: it is its stack's top now, and a
+  draft runs no CI (#1066). It does not mark it itself: a draft may also be work in progress.
 - Tests: `tooling/project-board-contribute.test.ts`, with a fake `gh` and real git repositories
   (a bare one standing for GitHub's).
 

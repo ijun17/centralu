@@ -171,8 +171,16 @@ if (args[0] === 'pr' && args[1] === 'view') {
   json(pr)
 }
 if (args[0] === 'pr' && args[1] === 'list') {
+  if (args.includes('--base')) json(Object.values(st.prs).filter((p) => p.baseRefName === args[args.indexOf('--base') + 1] && p.state === 'OPEN'))
   const head = args[args.indexOf('--head') + 1]
   json(Object.values(st.prs).filter((p) => p.headRefName === head))
+}
+if (args[0] === 'pr' && args[1] === 'ready') {
+  const p = st.prs[args[2]]
+  if (!p) fail('GraphQL: Could not resolve to a PullRequest with the number of ' + args[2] + '.\n')
+  p.isDraft = args.includes('--undo')
+  save()
+  process.exit(0)
 }
 if (args[0] === 'api' && args[1] === '-X') {
   const [method, path] = [args[2], args[3]]
@@ -410,6 +418,31 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
   })
 
+  // #1066: a stack's lower pull requests are drafts, and build.yml runs no CI for a draft
+  it('turns the pull request a new one is stacked on into a draft, and leaves one on main alone', async () => {
+    patchState((s) => {
+      s.prs['5'] = pr(5, { headRefName: 'feat/low' })
+      s.prs['6'] = pr(6, { headRefName: 'feat/lower-draft', isDraft: true })
+    })
+    runtime()
+    const dry = await call('open_pr', { ...PR, base: 'feat/low', dryRun: true })
+    expect(dry.text).toContain("Would turn #5, which this one is stacked on, into a draft: a stack's lower pull requests run no CI")
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toEqual([])
+    const r = await call('open_pr', { ...PR, base: 'feat/low' })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain("Turned #5, which this one is stacked on, into a draft: a stack's lower pull requests run no CI")
+    expect(r.data.drafted).toBe(5)
+    expect(ghCalls().filter((c) => c.args[1] === 'ready').map((c) => c.args)).toEqual([['pr', 'ready', '5', '--undo', '-R', 'ijun17/centralu']])
+    // The new one is the top: not a draft
+    expect(JSON.parse(writes()[0]!.stdin!).draft).toBe(false)
+    // Already a draft, or opened on main: nothing to turn
+    for (const base of ['feat/lower-draft', 'main']) {
+      const again = await call('open_pr', { ...PR, base })
+      expect(again.text).not.toContain('into a draft')
+    }
+    expect(ghCalls().filter((c) => c.args[1] === 'ready')).toHaveLength(1)
+  })
+
   it('refuses a pull request with an empty Not exercised, a bad title or a heading the template lacks, sending nothing', async () => {
     runtime()
     const empty = await call('open_pr', { ...PR, notExercised: '  ' })
@@ -594,6 +627,27 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(writes()).toEqual([{ args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/pulls/2', '--input', '-'], stdin: '{"base":"main"}' }])
     expect(checkout(s.work)).toEqual(before)
     expect(leftovers(s.work)).toEqual({ worktrees: 1, refs: '' })
+  })
+
+  // #1066: a stack's lowers are drafts; restacked onto main with nothing based on it, a draft is its stack's top now
+  it('says when the pull request it restacked is a draft nothing is based on any more, so CI runs once it is marked ready', async () => {
+    const s = stack()
+    patchState((st) => (st.prs['2']!.isDraft = true))
+    runtime()
+    const r = await call('rebase_stack', { pr: 2, path: s.work, push: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.steps.at(-1)).toBe("#2 is a draft, and no open pull request is based on up: if it is its stack's top now, mark it ready for review (mark_ready, or gh pr ready 2) so CI runs on it.")
+  })
+
+  it('says nothing of a draft it restacked that is still a lower of another', async () => {
+    const t = stack()
+    runtime()
+    patchState((st) => {
+      st.prs['2']!.isDraft = true
+      st.prs['3'] = pr(3, { headRefName: 'top', baseRefName: 'up' })
+    })
+    const again = await call('rebase_stack', { pr: 2, path: t.work, push: true })
+    expect(again.data.steps.join(' ')).not.toContain('is a draft')
   })
 
   it('says when the tree differs from the tested one, and that the difference is only what main had', async () => {

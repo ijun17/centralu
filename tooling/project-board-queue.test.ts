@@ -8,7 +8,7 @@ import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agen
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize, onlySupersededFailures, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -197,6 +197,26 @@ describe('what the merge queue decides for one poll', () => {
     expect(latestRuns([push, pull], pr).map((r: { id: number }) => r.id)).toEqual([2])
     expect(latestRuns([push], pr).map((r: { id: number }) => r.id)).toEqual([1])
     expect(normalize({ items: [{ repo: R, pr: 1, state: 'ci' }] }).items[0]).toMatchObject({ lowers: [], reruns: {} })
+  })
+
+  /*
+   * A lower's failed run against the run that proved its top (#1066): #1072 failed under #1075 on a real Windows bug, after
+   * anything that proved the top; #1039's failure under #1040 came hours before #1040's green run on a newer main.
+   */
+  it("stops a stack on a lower's failure only when it is at least as new as the run that proved the top", () => {
+    const lowerRun = (conclusion: string | null, createdAt: string | null) => ({ status: conclusion ? 'completed' : 'in_progress', conclusion, createdAt })
+    const proved = '2026-10-17T15:00:00Z'
+    // #1072: failed after the top's proof (or at the same time)
+    expect(lowerFailureCounts(lowerRun('failure', '2026-10-17T18:12:16Z'), proved)).toBe(true)
+    expect(lowerFailureCounts(lowerRun('failure', proved), proved)).toBe(true)
+    expect(lowerFailureCounts(lowerRun('timed_out', '2026-10-17T18:00:00Z'), proved)).toBe(true)
+    // #1039: failed before it, on an older main the top's run has outlived
+    expect(lowerFailureCounts(lowerRun('failure', '2026-10-17T11:58:33Z'), proved)).toBe(false)
+    // Not a failure, or not finished
+    for (const c of ['success', 'cancelled', 'skipped', null]) expect(lowerFailureCounts(lowerRun(c, '2026-10-17T18:00:00Z'), proved)).toBe(false)
+    // Not knowing either time, a failure counts
+    expect(lowerFailureCounts(lowerRun('failure', '2026-10-17T11:58:33Z'), null)).toBe(true)
+    expect(lowerFailureCounts(lowerRun('failure', null), proved)).toBe(true)
   })
 
   it('lets one driver hold the queue at a time, until it lets go or goes quiet', () => {
@@ -772,21 +792,49 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(notices().at(-1)!.text).toContain('Closed #76 as landed in it.')
   })
 
-  it("lands no stack whose lower's own latest CI run on its head failed, and lands it once that run is no failure", async () => {
+  /*
+   * #1066, seen twice on 2026-10-18: the queue stopped #1040 and #1026 with `lower-failed`, because their lowers #1039 and
+   * #1023 still carried a failed run from hours before, against an older main, for a test main had since fixed. Each top
+   * had a green run on a head containing its lowers' heads: CI tests the whole tree, so that run is the evidence.
+   */
+  it("lands a stack on its top's green run over a lower's old failed run, the lower a draft that runs no CI", async () => {
     runtime(
       ghState({
-        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77, { baseRefName: 'main' }) },
-        runs: { [SHA]: [ghRun('success')], [SHA2]: [ghRun('failure', 1, SHA2, { id: 990, head_branch: 'feat/low' })] },
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2, isDraft: true }), '77': ghPr(77, { baseRefName: 'main' }) },
+        runs: {
+          [SHA]: [ghRun('success')],
+          // The lower's latest run: failed hours before the top's green one
+          [SHA2]: [ghRun('failure', 1, SHA2, { id: 990, head_branch: 'feat/low', created_at: '2026-10-17T02:00:00Z' })],
+        },
+        compare: { [`${SHA2}...${SHA}`]: 'ahead' },
+      }),
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the stack to land')
+    expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  // #1072 under #1075, 2026-10-18: a real bug (a Windows 8.3 short-name temp path) the lower failed on after the top's run
+  it("lands no stack whose lower failed after the run that proved the top, and lands it once that lower passes", async () => {
+    runtime(
+      ghState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2, isDraft: true }), '77': ghPr(77, { baseRefName: 'main' }) },
+        runs: {
+          // The top's green run, then the lower's failed one an hour later
+          [SHA]: [ghRun('success', 1, SHA, { created_at: '2026-10-17T08:00:00Z' })],
+          [SHA2]: [ghRun('failure', 1, SHA2, { id: 990, head_branch: 'feat/low', created_at: '2026-10-17T09:00:00Z' })],
+        },
         compare: { [`${SHA2}...${SHA}`]: 'ahead' },
       }),
     )
     await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
     const q = await until((x) => stateOf(x) === 'attention', 'attention')
     expect(q.queue[0].reason.kind).toBe('lower-failed')
-    expect(notices().at(-1)!.text).toContain('#76, under #77, has a failed CI run 990 on its head beef000')
+    expect(notices().at(-1)!.text).toContain('#76, under #77, has a CI run 990 on its head beef000 that failed after the run that proved #77 (started 2026-10-17 08:00 UTC)')
     expect(writes()).toEqual([])
-    // Rerun and cancelled (a newer push superseded it): no failure, so the top's green run lands the stack
-    patchGh((s) => (s.runs[SHA2] = [ghRun('cancelled', 2, SHA2, { id: 990, head_branch: 'feat/low' })]))
+    // Fixed and rerun: no failure, so the top's green run lands the stack
+    patchGh((s) => (s.runs[SHA2] = [ghRun('success', 2, SHA2, { id: 990, head_branch: 'feat/low', created_at: '2026-10-17T09:00:00Z' })]))
     await until((x) => stateOf(x) === 'merged', 'the stack to land')
     expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
   })
@@ -1341,6 +1389,29 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'rerun-failed 950', 'delete queue/batch-1'])
     // Not batched again on this head, batch after batch
     expect(batchesOnDisk()).toHaveLength(1)
+  })
+
+  // A batch's run proves the top as its own run would: a lower that failed before it is outlived, one after it is evidence
+  it.each([
+    ['before', '2026-10-17T07:00:00Z', 'merged'],
+    ['after', '2026-10-17T09:00:00Z', 'attention'],
+  ])("lands a stack's top from its batch over a lower that failed %s the batch's run, or stops for it", async (_when, failedAt, state) => {
+    runtime(
+      tieredState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2, isDraft: true }), '77': ghPr(77) },
+        runs: { [SHA]: [ghRun('success')], [SHA2]: [ghRun('failure', 1, SHA2, { id: 990, head_branch: 'feat/low', created_at: failedAt })] },
+        compare: { [`${SHA2}...${SHA}`]: 'ahead' },
+        on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000) } } },
+      }),
+      TIERS,
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    const q = await until((x) => stateOf(x) === state, state, BATCH_WAIT_MS)
+    if (state === 'merged') expect(writes().map(short2)).toContain('close 76')
+    else {
+      expect(q.queue[0].reason.kind).toBe('lower-failed')
+      expect(writes().map(short2)).not.toContain('merge 77')
+    }
   })
 
   it('lands nothing from a batch whose run did not run the full tier', async () => {
