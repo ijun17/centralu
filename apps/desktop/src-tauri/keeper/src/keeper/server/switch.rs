@@ -349,8 +349,8 @@ pub(in crate::keeper) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_messa
                     st.source = Some(prev);
                 }
             }
-            show(SwapView { message: Some(message), rolled_back: true, cut, ..view(Phase::Failed) });
-            k.sup.restart(sink(&k), launcher(&k));
+            show(SwapView { message: Some(message.clone()), rolled_back: true, cut, ..view(Phase::Failed) });
+            start_again_after_failed_swap(&k, message);
         }
     }
     if let Ok(mut st) = k.state.lock() {
@@ -359,3 +359,22 @@ pub(in crate::keeper) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_messa
     }
     k.write_state_file();
 }
+
+/**
+ * After a swap that failed once the old host had drained: starts the previous build again. Refused
+ * while the old host's watcher still runs (a host that would not stop, #840 item 1): that watcher
+ * starts it once the host ends. Until then nothing serves, and the front door already points
+ * nowhere, so the windows are told the host failed instead of keeping the old host's Ready.
+ */
+pub(super) fn start_again_after_failed_swap(k: &Arc<Keeper>, message: String) {
+    if !k.sup.restart(sink(k), launcher(k)) {
+        log("the previous build is not started again yet: the old host's watcher still runs");
+        // Retry asks for the same restart and is refused the same way while that host runs, so the
+        // person is told the one thing that ends it
+        sink(k).status(&HostStatus::Failed { message: format!("{message}\n{STUCK_HOST}") });
+    }
+}
+
+/// What a window shows when the old host of a failed swap would not stop (#840 item 1).
+pub(super) const STUCK_HOST: &str =
+    "The previous host is still running and would not stop, so Retry cannot start it again until it ends. \"Restart completely\" ends it and everything it ran.";

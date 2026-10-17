@@ -44,6 +44,11 @@ pub fn kill_group(pid: u32) {
     let _ = taskkill_tree(pid).status();
 }
 
+/// Windows: `kill_group` is already forcible.
+pub fn kill_group_now(pid: u32) {
+    kill_group(pid);
+}
+
 fn taskkill_tree(pid: u32) -> Command {
     let mut cmd = Command::new(windows_system_tool("taskkill.exe"));
     cmd.args(["/PID", &pid.to_string(), "/T", "/F"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());

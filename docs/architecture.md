@@ -186,7 +186,10 @@ Codex orchestrator bridge connect there.
 2. No report within 60 s, or B exits: B is stopped and its copy removed. A was never touched.
 3. The front door holds new connections; A is told to **drain**: it refuses new RPCs and tool calls, gives the
    running ones up to 10 s, cuts the rest with an error the model can retry, detaches, flushes and closes the store,
-   lets go of the #278 lock and exits.
+   lets go of the #278 lock and exits. An A that has not exited 15 s past the bound is sent TERM (then its group,
+   after a grace), and one that ignores that is killed with its group (#840 item 1). An A still running after
+   that holds the lock B needs: B is stopped, A's watcher starts A's build again once A ends, and until then the
+   windows are told the host failed.
 4. B is told to activate: it takes the lock, runs only expand migrations (heavy and breaking steps run after it is
    ready, [agent-host.md](agent-host.md) §5.1), starts, listens and reports ready.
 5. The front door points at B and closes what was still relayed to A; clients reconnect to the same address and

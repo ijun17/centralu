@@ -179,3 +179,26 @@ fn a_closed_window_is_waited_for_with_background_mode_off() {
     drop(window);
     let _ = fs::remove_dir_all(&data);
 }
+
+/**
+ * #840 item 1: a swap that failed while the old host would not stop could not start the previous
+ * build again (its watcher still ran), and published nothing: the windows kept the old host's Ready
+ * while the front door pointed nowhere. They are told the host failed now.
+ */
+#[test]
+fn a_rollback_refused_while_the_old_host_runs_is_shown_as_failed() {
+    use super::super::swap::tests::{deaf_host, until};
+    let data = PathBuf::from(format!("/tmp/cck-rollback-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = test_keeper(&data);
+    assert!(k.sup.start(sink(&k), deaf_host(Default::default())));
+    let ready = || matches!(k.state.lock().unwrap().status, HostStatus::Ready(_));
+    assert!(until(Duration::from_secs(10), ready), "the host never said it was ready");
+    start_again_after_failed_swap(&k, "the new build failed while taking over".into());
+    let status = k.state.lock().unwrap().status.clone();
+    k.sup.shutdown();
+    let _ = fs::remove_dir_all(&data);
+    let HostStatus::Failed { message } = status else { panic!("the windows still see {status:?}") };
+    assert!(message.contains("Restart completely"), "the way out is not named: {message}");
+}

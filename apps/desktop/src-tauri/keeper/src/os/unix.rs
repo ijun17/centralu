@@ -248,13 +248,24 @@ pub fn signal_target(pid: u32) -> Option<i32> {
  * which is why only Linux ever saw it (docs/spikes/2026-10-linux-keeper.md).
  */
 pub fn kill_group(pid: u32) {
+    signal_group(pid, libc::SIGTERM);
+}
+
+/// SIGKILL to the process group `pid` leads, under `kill_group`'s rules: for a host that ignored
+/// TERM and its grace (#840 item 1). Only while the host is still held unreaped, so its number is
+/// still its group's.
+pub fn kill_group_now(pid: u32) {
+    signal_group(pid, libc::SIGKILL);
+}
+
+fn signal_group(pid: u32, signal: libc::c_int) {
     let Some(pgid) = signal_target(pid) else { return };
     // SAFETY: getpgrp takes no arguments.
     if pgid == unsafe { libc::getpgrp() } {
         return;
     }
     // SAFETY: a plain syscall; a negative pid is the group, and `signal_target` ruled out 0 and 1.
-    unsafe { libc::kill(-pgid, libc::SIGTERM) };
+    unsafe { libc::kill(-pgid, signal) };
 }
 
 /// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise

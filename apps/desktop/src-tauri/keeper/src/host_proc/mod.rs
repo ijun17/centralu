@@ -48,7 +48,7 @@ use handover as hand;
 #[cfg(windows)]
 use no_handover as hand;
 
-pub use crate::os::{hide_console, kill_group, kill_pid};
+pub use crate::os::{hide_console, kill_group, kill_group_now, kill_pid};
 use crate::os;
 pub use hand::Gate;
 #[cfg(unix)]
@@ -315,6 +315,38 @@ impl Supervisor {
         let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
         stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
         true
+    }
+
+    /**
+     * Kills the running host and its group outright (SIGKILL; Windows `taskkill /F /T`): for a
+     * host that ignored TERM and its grace (#840 item 1). While the host runs it is held and not
+     * reaped, so its pid and its group's number are still its own. A host that has already exited
+     * may leave members behind that ignored TERM and still hold its stdout, so its watcher runs on:
+     * their group is killed too, under the rule `stop_pid_gracefully` keeps for an ended host
+     * (`os::group_signal_after_exit_is_safe`). Returns false when no host is running.
+     */
+    pub fn kill_current(&self) -> bool {
+        let Ok(mut inner) = self.inner.lock() else { return false };
+        let Some(child) = inner.child.as_mut() else { return false };
+        let pid = child.id();
+        if !child.has_exited() {
+            kill_group_now(pid);
+            child.kill();
+        } else if os::group_signal_after_exit_is_safe(pid) {
+            kill_group_now(pid);
+        }
+        true
+    }
+
+    /**
+     * Undoes `hand_over`: the host was not replaced after all (a swap gave up while it still ran),
+     * so its exit is handled like any other, a restart by the usual rules (#840 item 1). Left set,
+     * the watcher would end quietly once that host exits, and nothing would start another.
+     */
+    pub fn cancel_hand_over(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.handing_over = false;
+        }
     }
 
     /// Whether a watcher thread is running: a host is up, starting, or between restarts.

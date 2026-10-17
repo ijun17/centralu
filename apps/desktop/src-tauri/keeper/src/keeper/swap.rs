@@ -238,25 +238,22 @@ pub fn run(p: &Plan) -> Outcome {
         if let Err(e) = p.sup.send_line(&json!({ "op": "drain", "timeoutMs": bound_ms }).to_string()) {
             log(&format!("swap: could not ask the old host to drain ({e}); stopping it"));
         }
-        let deadline = Instant::now() + p.drain_bound + DRAIN_GRACE;
-        while p.sup.is_running() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(50));
-        }
-        if p.sup.is_running() {
-            log("swap: the old host did not finish draining in time; stopping it");
-            p.sup.stop_current();
-            let deadline = Instant::now() + host_proc::STOP_GRACE + Duration::from_secs(2);
-            while p.sup.is_running() && Instant::now() < deadline {
-                thread::sleep(Duration::from_millis(50));
-            }
-        }
     }
+    let gone = old.is_none() || retire_old(p.sup, p.drain_bound + DRAIN_GRACE, host_proc::STOP_GRACE + Duration::from_secs(2));
     let cut: Vec<String> = (p.drained)()
         .and_then(|v| v.get("cut").cloned())
         .and_then(|c| serde_json::from_value(c).ok())
         .unwrap_or_default();
     // Anything still relayed to the old host: its clients reconnect and wait for the new one
     p.door.close_all();
+    if !gone {
+        // It still holds the store's lock, so the new host could only fail to take it. Its watcher
+        // restarts the old build by the usual rules once it does end (#840 item 1).
+        p.sup.cancel_hand_over();
+        host_proc::stop_child(&mut child);
+        forget_copy(claim);
+        return Outcome::FailedAfterDrain { message: "the old host did not stop, even when killed with its group; the new build was not started".into(), cut };
+    }
 
     // 4. Activate
     (p.progress)(Phase::Activating);
@@ -288,6 +285,42 @@ pub fn run(p: &Plan) -> Outcome {
         return Outcome::FailedAfterDrain { message: e, cut };
     }
     Outcome::Done { cut }
+}
+
+/**
+ * Waits up to `drain_wait` for the old host, asked to drain, to exit; stops it (TERM, its grace,
+ * TERM to its group) when it has not, and kills it and its group outright when it ignored that too
+ * (#840 item 1). Each step waits up to `stop_wait` for its watcher to end. True once the watcher
+ * has ended: the host is gone and its store lock with it.
+ *
+ * Before the kill, a host that ignored TERM was still running when the new host was activated: the
+ * new one could not take the lock and exited, the old build could not be started again while the
+ * old watcher ran, and when the old host did end its watcher, still marked as handing over, started
+ * nothing. The keeper was left with no host and the windows with a stale Ready.
+ */
+fn retire_old(sup: &Supervisor, drain_wait: Duration, stop_wait: Duration) -> bool {
+    let ended_within = |limit: Duration| {
+        let deadline = Instant::now() + limit;
+        while sup.is_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        !sup.is_running()
+    };
+    if ended_within(drain_wait) {
+        return true;
+    }
+    log("swap: the old host did not finish draining in time; stopping it");
+    sup.stop_current();
+    if ended_within(stop_wait) {
+        return true;
+    }
+    log("swap: the old host ignored TERM; killing it and its group");
+    sup.kill_current();
+    if ended_within(stop_wait) {
+        return true;
+    }
+    log("swap: the old host is still running after it was killed");
+    false
 }
 
 fn log(msg: &str) {
@@ -344,7 +377,7 @@ fn last_words(said: &[String], fallback: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::cell::RefCell;
 
@@ -402,6 +435,140 @@ mod tests {
         if std::env::var("CC_KEEPER_DRAIN_MS").is_err() {
             assert_eq!(drain_bound(), Duration::from_secs(10));
         }
+    }
+
+    /// A host that says it is ready and then ignores TERM, as does everything it starts (an ignored
+    /// signal stays ignored across exec), counting each launch in `launches`.
+    #[cfg(unix)]
+    pub(crate) fn deaf_host(launches: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> host_proc::Launcher {
+        std::sync::Arc::new(move || {
+            launches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(host_proc::HostLaunch {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), r#"trap '' TERM; echo '{"ready":true,"port":1,"token":"t"}'; while :; do sleep 0.05; done"#.into()],
+                env: vec![],
+            })
+        })
+    }
+
+    #[cfg(unix)]
+    pub(crate) struct Quiet;
+
+    #[cfg(unix)]
+    impl host_proc::StatusSink for Quiet {
+        fn status(&self, _: &host_proc::HostStatus) {}
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn until(limit: Duration, what: impl Fn() -> bool) -> bool {
+        let end = Instant::now() + limit;
+        while !what() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        what()
+    }
+
+    /// #840 item 1: an old host that ignores the drain and TERM is killed with its group, so the new
+    /// host can take the store's lock. Before, it was only sent TERM and was still running when the
+    /// new host was activated.
+    #[cfg(unix)]
+    #[test]
+    fn an_old_host_that_ignores_term_is_killed_before_the_new_one_starts() {
+        let sup = Supervisor::new();
+        assert!(sup.start(std::sync::Arc::new(Quiet), deaf_host(Default::default())));
+        assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
+        let pid = sup.hand_over().expect("a host runs");
+        let gone = retire_old(&sup, Duration::from_millis(100), Duration::from_secs(5));
+        if !gone {
+            sup.kill_current();
+            sup.shutdown();
+        }
+        assert!(gone, "the old host {pid} still runs, holding the lock the new host needs");
+        assert!(!crate::os::pid_alive(pid));
+    }
+
+    /// A host that says it is ready, then leaves `hold`'s process behind holding its stdout and
+    /// exits. The test reads the leftover's pid from `$F`.
+    #[cfg(unix)]
+    fn host_leaving(hold: &str, file: &std::path::Path) -> host_proc::Launcher {
+        let script = format!(r#"trap '' TERM; echo '{{"ready":true,"port":1,"token":"t"}}'; {hold} & echo $! > "$F"; exit 0"#);
+        let file = file.to_string_lossy().to_string();
+        std::sync::Arc::new(move || {
+            Ok(host_proc::HostLaunch { program: "/bin/sh".into(), args: vec!["-c".into(), script.clone()], env: vec![("F".into(), file.clone())] })
+        })
+    }
+
+    #[cfg(unix)]
+    fn leftover(file: &std::path::Path) -> u32 {
+        assert!(until(Duration::from_secs(10), || std::fs::read_to_string(file).is_ok_and(|s| s.trim().parse::<u32>().is_ok())));
+        std::fs::read_to_string(file).unwrap().trim().parse().unwrap()
+    }
+
+    /// #840 item 1, review: a host whose leader has exited but whose group still has a member that
+    /// ignores TERM and holds its stdout keeps its watcher running. The kill skipped the group once
+    /// the leader was gone, so that member got no SIGKILL and the swap gave up.
+    #[cfg(unix)]
+    #[test]
+    fn the_group_of_an_old_host_whose_leader_exited_is_killed_too() {
+        let file = std::env::temp_dir().join(format!("cc-swap-member-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let sup = Supervisor::new();
+        assert!(sup.start(std::sync::Arc::new(Quiet), host_leaving("while :; do sleep 0.05; done", &file)));
+        let member = leftover(&file);
+        assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
+        sup.hand_over();
+        let gone = retire_old(&sup, Duration::from_millis(100), Duration::from_secs(5));
+        let member_alive = crate::os::pid_alive(member);
+        if member_alive {
+            // SAFETY: a plain syscall to the test's own leftover.
+            unsafe { libc::kill(member as i32, libc::SIGKILL) };
+        }
+        let _ = std::fs::remove_file(&file);
+        assert!(gone && !member_alive, "the member that ignored TERM outlived the kill (retired: {gone})");
+    }
+
+    /// #840 item 1, review: the give-up path. A process outside the host's group (a session of its
+    /// own) holds its stdout, so no signal to the host or its group ends the watcher: `retire_old`
+    /// says so instead of letting the new host be activated against the lock.
+    #[cfg(unix)]
+    #[test]
+    fn retiring_gives_up_on_a_host_whose_output_outlives_every_signal() {
+        let file = std::env::temp_dir().join(format!("cc-swap-escaped-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let escaped = r#"perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' /bin/sh -c 'while :; do sleep 0.05; done'"#;
+        let sup = Supervisor::new();
+        assert!(sup.start(std::sync::Arc::new(Quiet), host_leaving(escaped, &file)));
+        let escaped_pid = leftover(&file);
+        assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
+        sup.hand_over();
+        let gone = retire_old(&sup, Duration::from_millis(100), Duration::from_millis(500));
+        // SAFETY: a plain syscall to the test's own escaped process; its end closes the host's
+        // stdout and ends the watcher.
+        unsafe { libc::kill(escaped_pid as i32, libc::SIGKILL) };
+        let _ = std::fs::remove_file(&file);
+        assert!(!gone, "retiring reported a host gone whose watcher still ran");
+        assert!(until(Duration::from_secs(10), || !sup.is_running()), "the watcher did not end with the output");
+    }
+
+    /// #840 item 1: when a swap gives up on a host that still runs, its exit is a crash again and its
+    /// watcher starts the next one. Left marked as handing over, the watcher ended quietly and
+    /// nothing started a host.
+    #[cfg(unix)]
+    #[test]
+    fn a_host_no_longer_handed_over_is_restarted_when_it_ends() {
+        let launches: std::sync::Arc<std::sync::atomic::AtomicUsize> = Default::default();
+        let sup = Supervisor::new();
+        assert!(sup.start(std::sync::Arc::new(Quiet), deaf_host(launches.clone())));
+        assert!(until(Duration::from_secs(10), || sup.info().is_some()), "the host never said it was ready");
+        sup.hand_over().expect("a host runs");
+        sup.cancel_hand_over();
+        sup.kill_current();
+        let again = until(Duration::from_secs(10), || launches.load(std::sync::atomic::Ordering::SeqCst) >= 2);
+        let running = sup.is_running();
+        // Shut down only once the new host runs: one still starting would outlive the shutdown
+        until(Duration::from_secs(10), || sup.info().is_some());
+        sup.shutdown();
+        assert!(again, "no host was started after the old one ended (watcher running: {running})");
     }
 
     #[test]
