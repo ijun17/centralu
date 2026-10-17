@@ -547,6 +547,31 @@ either alone says what is meant. A worktree child hangs under the session that s
 as a same-folder child does: the sidebar groups by who started a session (`askedBy`, `orderAsTree` in
 `ui/features/sidebar/tree.ts`), and `parentSessionId` still places a former worktree manager's sessions.
 
+**On a linked machine** (#1038, `sessions/remote-agents.ts`). `machine` (a linked machine's id or name) starts the
+child on that machine, in its project that is a checkout of the caller's repository: the same `origin` remote on both
+sides (`projects.origin`, compared by `gitRemoteKey`, so `git@github.com:me/app.git` and `https://github.com/me/app` are
+one repository). No such checkout is refused with that machine's projects and their origins; two checkouts are
+refused unless one has the caller's project's name; a machine that cannot be reached is refused as unreachable. The
+caller's gates are the same (an ordinary session of a trusted project, above the agent depth) and are read again after
+the card. The card is `agent_start` with `machine`: it names the computer, and offers no "always", as ask_project's
+card for another machine's project (#700); it is bounded like a local start's setup (`START_AGENT_SETUP_MS`). The
+child is made over the link (`agents.createSession` there) under the caller's preset, with the model, effort and
+worktree branch asked for (the machine's own rules apply: a worktree needs a project trusted there), and kept one
+level below the caller in the agent depth on that machine (`agentDepth`). Its task goes in `remoteAgentFrame`, sent as
+from the caller ("… on <hub>"). The hub records it (`remote_agents`, an app setting) and arms a linked report for the
+caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
+local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
+`agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
+works on it through the link: `status` and `wait` (the machine's state and last words), `send` (refused while it is in
+a turn: no note crosses machines yet), `stop` (`agents.interrupt` there; nothing more is owed), `delete` (to that
+machine's trash, its worktree left there), and `list` names its machine. `answer` does not reach another machine yet:
+its cards are answered there or in the session's own window. When the link drops, a waiting call returns with that
+said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
+is back, a child whose turn ended meanwhile is reported then. The paths its answer names are that machine's, and none
+is made readable here. Not yet: the child is not counted under this host's per-project ceiling (it runs on the other
+computer), and a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
+stored) but no longer owes its report.
+
 **Creator and worktree ancestry** (#637). `askedBy` records who started an agent, regardless of its folder.
 `parentSessionId` records worktree ancestry (including former manager children); `start_agent` sets it only
 when creating a worktree. Same-folder children keep `parentSessionId: null`. The sidebar uses a present

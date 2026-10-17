@@ -75,4 +75,10 @@ export type DelegationHost = {
   uiPreferences: () => UiPreferences
   untilCard: (sessionId: string, callerId: string) => { asked: Promise<"asked">; done(): void; }
   withdrawHostAsk: (requestId: string) => void
+  /** A project's `origin` remote (#1038); null with no repository or no origin */
+  projectOrigin: (projectId: string) => Promise<string | null>
+  /** A linked machine's session's own background work running there, as the hub last heard it (`LinkedReports`, #723) */
+  linkedTasksRunning: (sessionId: string) => BackgroundTask[]
+  /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
+  settleLinkedTurn: (sessionId: string) => void
 }

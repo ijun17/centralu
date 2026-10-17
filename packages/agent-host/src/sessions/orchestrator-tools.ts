@@ -156,6 +156,7 @@ const HANDLERS: ToolHandlers = {
     const { difficulty } = args
     const branch = filled(args.branch)
     const name = filled(args.name)
+    const machine = filled(args.machine)
     return agentCallsFor(caller, agentRunText(
       await tools.startAgent(
         {
@@ -169,6 +170,7 @@ const HANDLERS: ToolHandlers = {
           ...(branch ? { branch } : {}),
           ...(typeof args.lsp === 'boolean' ? { lsp: args.lsp } : {}),
           ...(name ? { name } : {}),
+          ...(machine ? { machine } : {}),
         },
         signal,
       ),

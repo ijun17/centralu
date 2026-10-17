@@ -236,9 +236,10 @@ describe('the reader set', () => {
     }
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
     // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only); 2,350 until #729's
-    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585
+    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585;
+    // #1038's `machine` 2,612
     const claude = residentCost('reader', DEFERRED_SERVER)
-    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2600)
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2625)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {

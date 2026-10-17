@@ -17,6 +17,7 @@ import { AgentStartGates } from './agent-start-gates.js'
 import { AgentConsents } from './agent-consents.js'
 import { AgentChoices } from './agent-choices.js'
 import { AgentStartRequests } from './agent-start-requests.js'
+import type { RemoteAgents } from './remote-agents.js'
 import {
   ASK_THE_PERSON,
   ORCHESTRATOR_PLACE,
@@ -67,6 +68,8 @@ export type StartAgentDelegations = {
   agentWorking(d: Delegation, arm?: boolean, observing?: boolean): ChildRunResult
   awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing?: boolean, boundMs?: number): Promise<ChildRunResult>
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined
+  /** start_agent on a linked machine (#1038) */
+  readonly remote: Pick<RemoteAgents, 'startAgent'>
 }
 
 /**
@@ -116,6 +119,9 @@ export class AgentStartFlow {
    *      "working" and the caller is told when the turn ends (the reportBack path); agent_session waits again.
    */
   async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    // A child on a linked machine (#1038) is made over the link, behind its own card that names the machine
+    const machine = opts.machine?.trim()
+    if (machine) return this.flow.remote.startAgent(callerId, { ...opts, machine }, signal)
     /*
      * **The setup has a bound of its own (#660).** Before the child exists the call can wait on the person's card, a
      * model list and the tool's own start, none of which `wait: false` shortens; the Codex bridge cuts the call at 280

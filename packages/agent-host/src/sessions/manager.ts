@@ -850,6 +850,8 @@ export class SessionManager {
       const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
       if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
     }
+    // Before the reports: a call waiting on a child there reads its turn's end, which is then not reported too (#1038)
+    this.delegationFlow.remote.observe(e)
     this.linkedReports.observe(e)
   }
 
@@ -2130,6 +2132,7 @@ export class SessionManager {
       get linkedReader() {
         return self.linkedReader
       },
+      linkedTasksRunning: (...a) => self.linkedReports.ownTasksRunning(...a),
       listCommands: (...a) => self.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
@@ -2162,6 +2165,7 @@ export class SessionManager {
         return self.merges.prCheckedAt
       },
       projectInfo: (...a) => self.projectInfo(...a),
+      projectOrigin: (...a) => self.projectOrigin(...a),
       projectRow: (...a) => self.projectRow(...a),
       projectTrusted: (...a) => self.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
@@ -2212,6 +2216,7 @@ export class SessionManager {
       sessionOf: (...a) => self.sessionOf(...a),
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
+      settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

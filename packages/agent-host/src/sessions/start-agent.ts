@@ -72,6 +72,20 @@ export function agentChoice(
   return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
 }
 
+/**
+ * The task of a child started on a linked machine (#1038): as `agentFrame`, said as from a session of the same
+ * repository on another computer, whose name the link already gives as "<name> on <hub>"
+ */
+export function remoteAgentFrame(parentName: string, task: string): string {
+  return [
+    `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
+      "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
+      'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
+    '',
+    task,
+  ].join('\n')
+}
+
 /** A follow-up carries the parent's words without replacing the task or promising an independent answer. */
 export function agentNoteFrame(parentName: string, text: string): string {
   return `[A note from the parent session "${frameField(parentName)}" through Centralu's agent_session. These are the parent's words about your ongoing work.]\n\n${text}`

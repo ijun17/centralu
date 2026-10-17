@@ -8,6 +8,7 @@ import { DelegationWaits } from './delegation-waits.js'
 import { DelegationForks } from './delegation-forks.js'
 import { ObservedTurns } from './observed-turns.js'
 import { AgentSessionActions } from './agent-session-actions.js'
+import { RemoteAgents } from './remote-agents.js'
 
 // Moved with start_agent (#850); still importable from here
 export type { DelegationHost } from './delegation-host.js'
@@ -41,6 +42,8 @@ export class DelegationFlow {
   private readonly observed: ObservedTurns
   /** agent_session's actions (agent-session-actions.ts) */
   private readonly actions: AgentSessionActions
+  /** The children start_agent starts on linked machines, and agent_session on them (remote-agents.ts, #1038) */
+  readonly remote: RemoteAgents
 
   constructor(private readonly host: DelegationHost) {
     this.starts = new AgentStartFlow(host, this)
@@ -49,6 +52,7 @@ export class DelegationFlow {
     this.forks = new DelegationForks(host, this)
     this.observed = new ObservedTurns(host, this)
     this.actions = new AgentSessionActions(host, this)
+    this.remote = new RemoteAgents(host)
   }
 
   /**

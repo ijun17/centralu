@@ -283,6 +283,8 @@ export type StartAgentOpts = {
   lsp?: boolean
   /** A short name for the new session (#861), shown in the sidebar; a new worktree's branch is made from it */
   name?: string
+  /** A linked machine to start it on (#1038), by its id or name: in that machine's checkout of the caller's repository */
+  machine?: string
 }
 
 /**
@@ -299,6 +301,8 @@ export type AgentListRow = {
   asleep: boolean
   lastActive?: string
   worktree?: { branch: string; unmerged: boolean }
+  /** The linked machine it runs on (#1038), by name; absent: this computer */
+  machine?: string
 }
 
 /** agent_session's arguments (#561) */

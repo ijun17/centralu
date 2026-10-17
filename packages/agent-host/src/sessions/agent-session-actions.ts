@@ -8,6 +8,7 @@ import type { DelegationForks } from './delegation-forks.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
+import type { RemoteAgents } from './remote-agents.js'
 import { agentState, ownAgents } from './own-agents.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
@@ -22,7 +23,7 @@ export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking'
   Pick<DelegationWaits, 'agentAsking' | 'agentAtRest' | 'handedOverReply' | 'untilHandedOver'> &
   Pick<ObservedTurns, 'observeTurn' | 'readObserverNote' | 'tellNoteRefused'> &
   Pick<BackgroundStops, 'restingWork' | 'stopOwnWork' | 'stopPausedWork'> &
-  Pick<DelegationForks, 'forkFor'> & { readonly starts: AgentStartFlow }
+  Pick<DelegationForks, 'forkFor'> & { readonly starts: AgentStartFlow; readonly remote: RemoteAgents }
 
 
 /**
@@ -43,7 +44,7 @@ export class AgentSessionActions {
    * other actions take them; a session another started is not its to delete.
    */
   listAgents(callerId: string): AgentListRow[] {
-    return ownAgents(this.host, callerId).map((s) => {
+    const here = ownAgents(this.host, callerId).map((s) => {
       const lastActive = lastActiveOf(this.host.store.messages, s.id)
       return {
         sessionId: s.id,
@@ -55,6 +56,8 @@ export class AgentSessionActions {
         ...(s.worktree ? { worktree: { branch: s.worktree.branch, unmerged: !s.worktreeMerged } } : {}),
       }
     })
+    // And those it started on linked machines (#1038), each with its machine
+    return [...here, ...this.flow.remote.rows(callerId)]
   }
 
   /**
@@ -71,6 +74,10 @@ export class AgentSessionActions {
     if (opts.sessionId === callerId && opts.action !== 'status') {
       return { ok: false, error: 'agent_session cannot wait on, stop, delete or send to its own calling session.' }
     }
+    // A child start_agent started on a linked machine (#1038): followed through the link. Its id is a linked machine's,
+    // `<machine>.<id>`, which no session of this host has
+    const remote = opts.sessionId.includes('.') ? this.flow.remote.of(opts.sessionId) : undefined
+    if (remote) return this.flow.remote.agentSession(callerId, remote, opts, signal)
     // Work a handoff gave away (#693): the original that stayed is told where it went
     const gone = this.flow.handedOverAnswer(callerId, opts.sessionId)
     if (gone) return gone

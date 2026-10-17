@@ -668,6 +668,12 @@ agent set 1,333 → 1,358 (`AGENT_BUDGET_CHARS` 1,350 → 1,375); every ordinary
 name and branch skip the leading words its task shares with a sibling's name (`distinguishingText`), which costs no
 schema.
 
+**#1038: `machine` (2026-10-18).** `start_agent` gained `machine`, a bare optional string with no description: a linked
+machine to start the child on, in its checkout of the caller's repository. The answer that refuses one names what is
+missing (no such machine, no checkout there, unreachable), so no words ride in the schema. Characters: the agent set
+grows by the argument's name and type, as `name`'s did (`AGENT_BUDGET_CHARS` 1,375 → 1,400; the reader resident
+ceiling 2,600 → 2,625). Not measured live.
+
 ## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
 
 The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person
