@@ -70,7 +70,7 @@ bundle leaves out is refused even through the Codex bridge.
 | `orchestrator` | the one orchestrator | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started (auto: any session in that project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
+| `reader` | every other session in a project (#320), a former worktree manager included | reads every project's sessions here and on linked machines but the orchestrator's and coordinators' (#984); acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -176,7 +176,7 @@ starts with a preamble saying so (`orchestratorRole`; it names `centralu_command
 measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no regression and no gain that held, and on
 by default since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
 (`READER_INSTRUCTIONS`): one sentence naming which tool answers which need (`READER_FIRST`: `recall` for earlier
-conversations, `read_session` for this project's other sessions, `ask_project` for another project's work,
+conversations, `read_session` for other sessions, `ask_project` for another project's work,
 `find_apps` for another project's apps, and `start_agent`, not the CLI's own Agent tool, for long work, another CLI
 or a worktree, or work the person will follow; the CLI's own subagents stay the way to hand off short helper work
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states

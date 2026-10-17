@@ -304,14 +304,18 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
   settings/updates) — compiled in, not read from `docs/` at runtime, because runtime doc reads are an AGENTS.md-style
   injection surface one level sideways.
-- **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): their
-  own project's other sessions and conversations (`read_session`, which lists them when called without an id), a
-  search of that project's past conversations (`recall`) and the app guide (`app_guide`). Another project's sessions
-  are out of reach, sending, creating and proposing stay with the orchestrator, and no role goes with it; since
+- **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): other
+  sessions and their conversations (`read_session`, which lists them when called without an id), a search of past
+  conversations (`recall`) and the app guide (`app_guide`). Until #984 (owner decision 2026-10-17) this covered only
+  its own project; it now covers every project on this computer and on the linked machines, so a session can find
+  the one to talk to later, with each row naming its project and machine and its text framed as someone else's. The
+  orchestrator's and coordinators' conversations stay out, as they do from a hub (remote-hub.md §3.4). Sending,
+  creating and proposing stay with the orchestrator, acting on another project goes through `ask_project` and its
+  consent, and no role goes with it; since
   #564 (2026-10-12) one short instruction does, the rule of §1.2 worded as which tool answers which need. It
   rides in every session on every turn, so it was measured and cut: the four candidates in the orchestrator's
   words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
-  §1.1). Settings → Orchestrator → "Let sessions look at their own project" turns it off.
+  §1.1). Settings → Orchestrator → "Let sessions look at other sessions" turns it off.
 - **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
   `ask_project({ project, session?, task })` gives the task to an **existing ordinary session** in that project (the
   one named, or the project's only one) and never creates one there (#614, owner decision 2026-10-13); creating a

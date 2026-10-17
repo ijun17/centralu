@@ -239,7 +239,7 @@ export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
 export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly OrchestratorToolName[]
 
 /**
- * The light set every ordinary session gets (#320) — read-only, and only its own project.
+ * The light set every ordinary session gets (#320) — read-only; since #984 it reads every project and linked machine.
  *
  * **Its own definitions, not the orchestrator's text.** The names and the execution are shared
  * (runOrchestratorTool), but the orchestrator's descriptions talk about managing, reportBack and
@@ -281,12 +281,12 @@ export const READER_TOOLS = [
   },
   {
     name: 'read_session',
-    description: "Reads one of this project's other Centralu sessions. No sessionId: lists them.",
+    description: 'Reads another Centralu session, any project or machine. No sessionId: lists them.',
     schema: z.object({ sessionId: z.string().optional(), around: z.number().optional() }),
   },
   {
     name: 'recall',
-    description: "Searches this project's past conversations. One word works best.",
+    description: 'Searches past conversations of every project and machine. One word works best.',
     schema: z.object({ query: z.string() }),
   },
   {
@@ -457,7 +457,7 @@ export const APP_ACCESS_BUDGET_CHARS = 900
  */
 export const READER_FIRST: readonly string[] = [
   'recall for earlier conversations',
-  "read_session for this project's other sessions",
+  'read_session for other sessions',
   "find_apps to use another project's app",
   'update_centralu to update Centralu',
   'ask_project to have another project do work',

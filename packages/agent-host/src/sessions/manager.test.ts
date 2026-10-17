@@ -2594,8 +2594,8 @@ describe("the orchestrator's tools see only this app's sessions", () => {
  * The light, read-only set every ordinary session gets (#320).
  *
  * Owner decision 2026-10-05: on by default, no role-changing instructions, sending and creating stay
- * with the orchestrator. The boundary that matters is the project: a session reads its own project's
- * sessions and nothing else — not another project's, not the orchestrator's.
+ * with the orchestrator. Since #984 (owner decision 2026-10-17) it reads every project's sessions, on this computer
+ * and the linked machines, but never the orchestrator's; acting stays inside its project and behind consent.
  */
 describe("an ordinary session's reader set (#320)", () => {
   const dirs: string[] = []
@@ -2642,29 +2642,31 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
   })
 
-  it('lists, reads and recalls only its own project — another project\'s session cannot be reached', async () => {
+  it("lists, reads and recalls every project's sessions, its own project's first, but never the orchestrator (#984)", async () => {
     const { a1, a2, b, orc } = await setup()
     const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
-    expect(listed).toEqual([a2.id])
-    expect(listed).not.toContain(b.id)
+    expect(listed).toEqual([a2.id, b.id])
     expect(listed).not.toContain(orc.id)
 
     expect((await a1.tools.readSession(a2.id)).ok).toBe(true)
-    expect(await a1.tools.readSession(b.id)).toEqual({ ok: false, error: `Not a session in this project: ${b.id}` })
-    expect((await a1.tools.readSession(orc.id)).ok).toBe(false)
+    const other = await a1.tools.readSession(b.id)
+    expect(other.ok && other.lines?.join('\n')).toContain('zanzibar')
+    expect(await a1.tools.readSession(orc.id)).toEqual({ ok: false, error: `Not a session you can read: ${orc.id}` })
 
     expect((await a1.tools.recall('pgdump')).hits.map((h) => h.sessionId)).toEqual([a2.id])
-    expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
+    expect((await a1.tools.recall('zanzibar')).hits.map((h) => h.sessionId)).toEqual([b.id])
 
-    // The same boundary through the bridge's door, by name — what a Codex session would call
+    // The same through the bridge's door, by name — what a Codex session would call — each row naming its project
     const viaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', { sessionId: b.id })
-    expect(viaBridge.isError).toBe(true)
-    expect(viaBridge.text).not.toContain('zanzibar')
+    expect(viaBridge.isError).toBeFalsy()
+    expect(viaBridge.text).toContain('zanzibar')
     const listedViaBridge = await mgr.runOrchestratorTool(a1.id, 'read_session', {})
     expect(listedViaBridge.text).toContain(a2.id)
-    expect(listedViaBridge.text).not.toContain(b.id)
+    expect(listedViaBridge.text).toContain(b.id)
+    expect(listedViaBridge.text).not.toContain(orc.id)
     const recalled = await mgr.runOrchestratorTool(a1.id, 'recall', { query: 'zanzibar' })
-    expect(recalled.text).not.toContain(b.id)
+    expect(recalled.text).toContain(`read_session(sessionId="${b.id}"`)
+    expect(recalled.text).toMatch(/- \[[^\]]+\] other-project/)
   })
 
   it('cannot act: no send, create or settings tool by name, and the object it holds refuses them too', async () => {

@@ -14,7 +14,7 @@ export function trustedJsonText(value: string): string {
 export async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): Promise<ToolOutput> {
   const list = await tools.listSessions()
   if (list.length === 0) {
-    return { text: caller.profile === 'reader' ? 'There are no other sessions in this project.' : 'There are no sessions under management.' }
+    return { text: caller.profile === 'reader' ? 'There are no other sessions.' : 'There are no sessions under management.' }
   }
   return {
     text: list

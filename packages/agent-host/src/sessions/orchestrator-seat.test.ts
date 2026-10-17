@@ -77,12 +77,33 @@ describe('the scope of a seat', () => {
     expect(await tools.sendToSession('a', 'hi')).toEqual({ ok: false, error: 'Not a member of this coordinating session: a' })
   })
 
-  it("a project's reader view is its own project; a session with no project sees nothing", async () => {
-    expect((await orchestratorToolsFor(host, 'a', undefined, true).listSessions()).map((s) => s.sessionId)).toEqual([])
+  it("a reader reads every project's sessions here and on the linked machines, but never an orchestrator or a coordinator (#984)", async () => {
+    meta.set('coord', session('coord', { kind: 'coordinator' }))
     meta.set('a2', session('a2'))
-    expect((await orchestratorToolsFor(host, 'a', undefined, true).listSessions()).map((s) => s.sessionId)).toEqual(['a2'])
-    meta.set('loose', session('loose', { projectId: null }))
-    expect(await orchestratorToolsFor(host, 'orch', undefined, true).listSessions()).toEqual([])
+    const read = vi.fn(async () => ({ ok: true as const, state: 'idle' as const, lines: ['{"role":"user","text":"over there"}'] }))
+    linked = {
+      machineOf: (id: string) => (id.startsWith('m1.') ? 'm1' : null),
+      list: async () => [{ sessionId: 'm1.x', name: 'far one', project: 'site', machine: 'Far', state: 'idle', tool: 'claude' }],
+      read,
+      recall: async () => ({ hits: [[{ sessionId: 'm1.x', session: 'far one', project: 'site', machine: 'Far', snippet: 'the far plan', seq: 3 }]], notSearched: [] }),
+    } as unknown as LinkedSessions
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    // Its own project's sessions first, then the other projects', then the linked machines'
+    expect((await reader.listSessions()).map((s) => [s.sessionId, s.project, s.machine])).toEqual([
+      ['a2', '(project no longer exists)', undefined],
+      ['b', '(project no longer exists)', undefined],
+      ['m1.x', 'site', 'Far'],
+    ])
+    expect(await reader.readSession('m1.x', 40, { around: 3 })).toMatchObject({ ok: true, lines: ['{"role":"user","text":"over there"}'] })
+    expect(read).toHaveBeenCalledWith('m1.x', 40, { around: 3 })
+    expect(await reader.readSession('b')).toMatchObject({ ok: true })
+    expect(await reader.readSession('orch')).toEqual({ ok: false, error: 'Not a session you can read: orch' })
+    expect(await reader.readSession('coord')).toEqual({ ok: false, error: 'Not a session you can read: coord' })
+    expect((await reader.recall('plan')).hits.map((h) => [h.sessionId, h.machine])).toEqual([['m1.x', 'Far']])
+    // Acting stays inside its own project: another project's session, or a machine's, is out of reach
+    expect(await reader.sendToSession('b', 'do it')).toEqual({ ok: false, error: 'Not a session in this project: b' })
+    expect(await reader.sendToSession('m1.x', 'do it')).toEqual({ ok: false, error: 'Not a session in this project: m1.x' })
+    expect(host.send).not.toHaveBeenCalled()
   })
 
   it('only the central orchestrator reaches a handoff, of a session on this computer in its view (#694)', async () => {
@@ -171,14 +192,18 @@ describe('a session recalls its own conversation from before its compaction (#97
     expect((await ownHits(reader, 'a')).map((h) => h.seq)).toEqual([1])
   })
 
-  it("the project scope stays: a reader never finds another project's session", async () => {
+  it("only its own hits carry the label; another session's, in any project, read as that session's (#984)", async () => {
     put('a', compacted)
     put('b', compacted)
-    meta.set('a2', session('a2'))
-    put('a2', [['user', 'zebracorn in the same project']])
-    const ids = (await orchestratorToolsFor(host, 'a', undefined, true).recall('zebracorn')).hits.map((h) => h.sessionId)
-    expect(ids).toContain('a2')
-    expect(ids).not.toContain('b')
+    const hits = (await orchestratorToolsFor(host, 'a', undefined, true).recall('zebracorn')).hits
+    expect(hits.map((h) => [h.sessionId, h.session])).toEqual(
+      expect.arrayContaining([
+        ['a', 'a (this session, before compaction)'],
+        ['b', 'b'],
+      ]),
+    )
+    // The other session's words from after its compaction are not this session's echo, so they come too
+    expect(hits.some((h) => h.sessionId === 'b' && h.seq === 19)).toBe(true)
   })
 
   it('read_session reads itself only around a hit from before the cut, and only up to the cut', async () => {

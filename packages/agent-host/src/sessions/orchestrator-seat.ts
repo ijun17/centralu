@@ -136,6 +136,17 @@ export function orchestratorToolsFor(
     // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
     : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
     : true
+  /*
+   * What a seat may read (#984, owner decision 2026-10-17): an ordinary session's reader view is every session of every
+   * project, on this computer and on the linked machines, so it can find the session to talk to later. What it shows
+   * is what a hub's window shows (remote-hub.md §3.4): never the orchestrator or a coordinator, whose conversations
+   * direct others. Acting stays inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
+   */
+  const shared = (s: SessionInfo) => s.kind !== 'orchestrator' && s.kind !== 'coordinator'
+  const readable = (s: SessionInfo) => (ownProject ? shared(s) : inScope(s))
+  /** The links a read reaches: the central orchestrator's and the reader's (#984); acting reaches them from the centre only */
+  const readLinks = () => (central || ownProject ? host.linkedReader() : null)
+  const readError = (id: string) => (ownProject ? `Not a session you can read: ${id}` : scopeError(id))
   const scopeError = (id: string) =>
     scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
     : ownProject ? `Not a session in this project: ${id}`
@@ -146,9 +157,13 @@ export function orchestratorToolsFor(
     updateCentralu: async (action, signal) => host.updateCentraluAsked(orchestratorId, action, signal),
     listSessions: async () => {
       const byId = projects()
-      const mine: OrchestratedSession[] = [...host.meta.values()]
+      // Its own project's sessions first: the ones it most likely means (#984)
+      const own = ownProject ? ownProjectId() : undefined
+      const all = [...host.meta.values()]
+      const ordered = own ? [...all.filter((s) => s.projectId === own), ...all.filter((s) => s.projectId !== own)] : all
+      const mine: OrchestratedSession[] = ordered
         // Excludes itself — instructing itself would create a loop
-        .filter((s) => s.id !== orchestratorId && inScope(s))
+        .filter((s) => s.id !== orchestratorId && readable(s))
         .map((s) => ({
           sessionId: s.id,
           name: labelOf(host.store, s),
@@ -164,7 +179,7 @@ export function orchestratorToolsFor(
           lastActive: lastActiveOf(host.store, s.id),
           ...(s.interruption ? { interruption: s.interruption } : {}),
         }))
-      const reader = linked()
+      const reader = readLinks()
       return reader ? [...mine, ...(await reader.list())] : mine
     },
 
@@ -269,11 +284,11 @@ export function orchestratorToolsFor(
         // our record did not. After it, or with no compaction, they are still in context and finding them is an echo
         if (h.sessionId === orchestratorId) return cut !== null && h.seq < cut
         const s = host.meta.get(h.sessionId)
-        return s && inScope(s)
+        return s && readable(s)
       })
       const out: RecallHit[] = []
       // Asked at once, while this host's own search runs: each machine is a round trip
-      const remote = linked()?.recall(query, limit)
+      const remote = readLinks()?.recall(query, limit)
       for (const h of dedupeNearbyHits(mine)) {
         const s = host.meta.get(h.sessionId)!
         out.push({
@@ -313,11 +328,10 @@ export function orchestratorToolsFor(
         }
       }
       // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
-      const reader = linked()
+      const reader = readLinks()
       if (!self && reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
-      // The scope check follows the same rule as sendToSession — only a session within its own scope
       const target = host.meta.get(sessionId)
-      if (!target || (!self && !inScope(target))) return { ok: false, error: scopeError(sessionId) }
+      if (!target || (!self && !readable(target))) return { ok: false, error: readError(sessionId) }
 
       /*
        * If `around` is given, reads near that point — the seq recall gave can just be passed
