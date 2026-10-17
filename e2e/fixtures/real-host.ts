@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { sessionLiveDefaults, type SessionInfo, type StoredMessage } from '@cc/protocol'
+import { PROTOCOL_VERSION, sessionLiveDefaults, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
 
 /**
@@ -208,15 +208,15 @@ async function gone(mark: string, timeoutMs = 15_000): Promise<void> {
   }
 }
 
-/** One call over the host's own protocol, straight to the host (not through the relay) */
-export async function hostCall(port: number, method: string, params: unknown): Promise<{ result: unknown; currentSeq: number }> {
+/** One call over the host's own protocol, straight to the host (not through the relay), with `token` */
+export async function hostCall(port: number, method: string, params: unknown, token = RECOVERY_TOKEN): Promise<{ result: unknown; currentSeq: number }> {
   const socket = new WebSocket(`ws://127.0.0.1:${port}`)
   try {
     return await new Promise((resolve, reject) => {
       let currentSeq = 0
       const timer = setTimeout(() => reject(new Error(`${method} timed out`)), 10_000)
       socket.onerror = () => reject(new Error('socket error'))
-      socket.onopen = () => socket.send(JSON.stringify({ kind: 'hello', token: RECOVERY_TOKEN, protocolVersion: 1 }))
+      socket.onopen = () => socket.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
       socket.onmessage = (m) => {
         const f = JSON.parse(String(m.data)) as { kind: string; id?: string; ok?: boolean; result?: unknown; currentSeq?: number; error?: { message: string } }
         if (f.kind === 'hello_ok') {
