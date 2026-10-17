@@ -1542,7 +1542,10 @@ handed a descriptor past 1,024. When an `accept` still fails for want of one, ea
 `children.sock`, the front door) is left alone for 100 ms and the failure is logged once every 10 s with a count,
 instead of the loop coming straight back to the waiting connection (one core and thousands of log lines a second on
 Linux; macOS drops the connection instead), and a thread the OS refuses for a connection closes that connection
-rather than aborting the keeper (`keeper/accept.rs`, #840 item 3).
+rather than aborting the keeper (`keeper/accept.rs`, #840 item 3). A front-door relay holds one descriptor per
+socket (its table shares the relay's sockets instead of duplicating them, which made four per relay), and the door
+relays at most 1,024 connections at once: one past that is closed as it is accepted, logged once per run, so a
+client connecting in a loop cannot run the keeper out of descriptors (`front_door.rs`, `MAX_RELAYS`).
 
 **When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. During an announced
 relaunch's grace (§4.5), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the

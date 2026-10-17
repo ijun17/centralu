@@ -1010,6 +1010,16 @@ Rule: a 30 s write limit on both relay sockets.
 Guard: `keeper/keeper/front_door.rs` `a_client_that_stops_reading_is_let_go`.
 Platforms: macOS, Linux.
 
+**SW3a. The front door relays at most 1,024 connections, one descriptor per socket.**
+Happened: #840 item 3: each relay held four descriptors (its sockets and a copy of each in the door's table), and any
+local process could open relays without bound until the keeper, and everything it holds, ran out of descriptors.
+Rule: the table shares the relay's sockets, and a connection past `MAX_RELAYS` (1,024) is closed as it is accepted,
+logged once per run. A local process can still hold all 1,024 and lock new clients out of the door until it lets go:
+a contained lockout of the door alone, instead of descriptor exhaustion for the whole keeper.
+Guard: `keeper/keeper/front_door.rs` `a_relay_holds_one_descriptor_per_socket`,
+`connections_past_the_cap_are_closed_until_one_ends`.
+Platforms: macOS, Linux.
+
 **SW4. The next host checks itself before the running one drains.**
 Rule: a `--standby` host opens the store read-only, refuses a store it cannot read before anything stops, takes no lock,
 migrates nothing, attaches nothing, and exits untouched if the keeper abandons the swap.

@@ -69,11 +69,23 @@ const STALL_LIMIT: Duration = Duration::from_secs(30);
 #[cfg(test)]
 const STALL_LIMIT: Duration = Duration::from_millis(300);
 
+/// The most connections the door relays at once; one past it is closed as it is accepted (#840
+/// item 3). Each relay holds two descriptors and a thread, and anyone on this machine can connect to
+/// the door: without a bound, a client opening connections in a loop ran the keeper out of
+/// descriptors, and with them every agent, terminal and window it serves. A window, its app views and
+/// every Codex bridge together use a few dozen.
+#[cfg(not(test))]
+const MAX_RELAYS: usize = 1024;
+#[cfg(test)]
+const MAX_RELAYS: usize = 16;
+
 /// One relayed connection's sockets, kept so a swap can close them and a handoff can copy them.
+/// Shared with the relay's thread rather than duplicated (#840 item 3): a duplicate held a second
+/// descriptor per socket, four per relay.
 struct Relay {
-    client: TcpStream,
+    client: Arc<TcpStream>,
     /// None while the relay is still waiting for a host.
-    upstream: Option<TcpStream>,
+    upstream: Option<Arc<TcpStream>>,
 }
 
 #[derive(Default)]
@@ -174,6 +186,7 @@ impl FrontDoor {
 
     fn accept_loop(&self) {
         let mut errors = AcceptErrors::new(log);
+        let mut refused = 0u64;
         loop {
             if self.shared.frozen.load(Ordering::SeqCst) {
                 self.park_accept();
@@ -186,6 +199,19 @@ impl FrontDoor {
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     errors.accepted();
+                    if self.relays() >= MAX_RELAYS {
+                        // Logged once per run of refusals, not once per connection
+                        if refused == 0 {
+                            log(&format!("is relaying {MAX_RELAYS} connections, the most it takes; closing new ones until one ends"));
+                        }
+                        refused += 1;
+                        let _ = stream.shutdown(Shutdown::Both);
+                        continue;
+                    }
+                    if refused > 0 {
+                        log(&format!("takes connections again after closing {refused}"));
+                        refused = 0;
+                    }
                     // The listener is non-blocking for the poll; the relay wants blocking writes.
                     let _ = stream.set_nonblocking(false);
                     self.start_relay(stream, None);
@@ -199,6 +225,8 @@ impl FrontDoor {
     /// Starts the thread that relays one connection. One the OS refuses is closed and forgotten,
     /// never a panic (`accept::spawn`).
     fn start_relay(&self, client: TcpStream, upstream: Option<TcpStream>) {
+        let client = Arc::new(client);
+        let upstream = upstream.map(Arc::new);
         let id = self.register(&client, upstream.as_ref());
         let me = self.clone();
         // Refused: the sockets go with the closure, and their copies with `forget`.
@@ -209,15 +237,18 @@ impl FrontDoor {
     }
 
     /// Counts a relay thread before it starts, so a freeze waits for it too.
-    fn register(&self, client: &TcpStream, upstream: Option<&TcpStream>) -> u64 {
+    fn register(&self, client: &Arc<TcpStream>, upstream: Option<&Arc<TcpStream>>) -> u64 {
         let Ok(mut d) = self.shared.door.lock() else { return 0 };
         let id = d.next_id;
         d.next_id += 1;
         d.active += 1;
-        if let Ok(c) = client.try_clone() {
-            d.conns.insert(id, Relay { client: c, upstream: upstream.and_then(|u| u.try_clone().ok()) });
-        }
+        d.conns.insert(id, Relay { client: client.clone(), upstream: upstream.cloned() });
         id
+    }
+
+    /// Relay threads alive, connected to a host or still waiting for one.
+    fn relays(&self) -> usize {
+        self.shared.door.lock().map(|d| d.active).unwrap_or(0)
     }
 
     /// Stops the accept loop while the door is frozen.
@@ -337,7 +368,7 @@ impl FrontDoor {
     }
 
     /// Waits for a host, connects to it, then copies bytes both ways until either side closes.
-    fn relay(&self, id: u64, client: TcpStream, upstream: Option<TcpStream>) {
+    fn relay(&self, id: u64, client: Arc<TcpStream>, upstream: Option<Arc<TcpStream>>) {
         let upstream = match upstream {
             Some(u) => Some(u),
             None => self.connect_upstream(id, &client),
@@ -348,7 +379,7 @@ impl FrontDoor {
         self.forget(id);
     }
 
-    fn connect_upstream(&self, id: u64, client: &TcpStream) -> Option<TcpStream> {
+    fn connect_upstream(&self, id: u64, client: &TcpStream) -> Option<Arc<TcpStream>> {
         let deadline = Instant::now() + PARK_LIMIT;
         loop {
             let Some((port, generation)) = self.wait_for_target(deadline) else {
@@ -356,7 +387,7 @@ impl FrontDoor {
                 return None;
             };
             let upstream = match TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], port)), CONNECT_TIMEOUT) {
-                Ok(s) => s,
+                Ok(s) => Arc::new(s),
                 Err(_) => {
                     // A host on its way out: wait for the door to move on, unless time is up
                     if Instant::now() >= deadline {
@@ -375,7 +406,7 @@ impl FrontDoor {
                 continue;
             }
             match d.conns.get_mut(&id) {
-                Some(r) => r.upstream = upstream.try_clone().ok(),
+                Some(r) => r.upstream = Some(upstream.clone()),
                 // Closed by a swap while connecting
                 None => {
                     let _ = upstream.shutdown(Shutdown::Both);
@@ -471,7 +502,7 @@ pub fn new_token() -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Read, Write};
 
     /// A one-line echo server standing in for a host: answers every line with `<name>:<line>`.
     fn fake_host(name: &'static str) -> (u16, TcpListener) {
@@ -506,6 +537,85 @@ mod tests {
         let s = TcpStream::connect(("127.0.0.1", door.port())).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         s
+    }
+
+    /// An echo host that holds one descriptor per connection (no reader clone), so a test can count
+    /// what the door itself holds.
+    fn lean_host() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                thread::spawn(move || {
+                    let mut b = [0u8; 256];
+                    while let Ok(n) = (&s).read(&mut b) {
+                        if n == 0 || (&s).write_all(&b[..n]).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    /// Descriptors this process has open.
+    fn open_descriptors() -> usize {
+        std::fs::read_dir("/dev/fd").map(|d| d.count()).unwrap_or(0)
+    }
+
+    /// A connection relayed and answered: its relay is up with both sockets.
+    fn relayed(door: &FrontDoor) -> TcpStream {
+        let mut c = connect(door);
+        c.write_all(b"x").unwrap();
+        let mut b = [0u8; 1];
+        c.read_exact(&mut b).unwrap();
+        c
+    }
+
+    /// #840 item 3: a relay holds one descriptor per socket. Each socket was also duplicated for the
+    /// door's table, four per relay, so far fewer clients ran the keeper out of descriptors. Counted
+    /// in a process of its own, where no other test opens anything meanwhile.
+    #[test]
+    fn a_relay_holds_one_descriptor_per_socket() {
+        if crate::keeper::accept::few_descriptors::rerun("keeper::front_door::tests::a_relay_holds_one_descriptor_per_socket").is_some() {
+            return;
+        }
+        let host = lean_host();
+        let door = FrontDoor::open(0, "t".into()).unwrap();
+        door.point_at(Some(host));
+        let warm = relayed(&door);
+        let before = open_descriptors();
+        let n = 10;
+        let clients: Vec<TcpStream> = (0..n).map(|_| relayed(&door)).collect();
+        let per_relay = (open_descriptors() - before) as f64 / n as f64;
+        drop(clients);
+        drop(warm);
+        // The test's client, the door's two sockets, the host's end
+        assert!(per_relay <= 4.0, "{per_relay} descriptors per relayed connection");
+    }
+
+    /// #840 item 3: past `MAX_RELAYS` a new connection is closed as it comes, and once one ends the
+    /// door takes them again.
+    #[test]
+    fn connections_past_the_cap_are_closed_until_one_ends() {
+        let host = lean_host();
+        let door = FrontDoor::open(0, "t".into()).unwrap();
+        door.point_at(Some(host));
+        let mut held: Vec<TcpStream> = (0..MAX_RELAYS).map(|_| relayed(&door)).collect();
+        let mut over = connect(&door);
+        let _ = over.write_all(b"x");
+        let mut b = [0u8; 1];
+        assert!(matches!(over.read(&mut b), Ok(0) | Err(_)), "a connection past the cap was relayed");
+        held.pop();
+        let end = Instant::now() + Duration::from_secs(5);
+        while door.relays() >= MAX_RELAYS && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let mut again = connect(&door);
+        again.write_all(b"y").unwrap();
+        again.read_exact(&mut b).unwrap();
+        assert_eq!(&b, b"y");
     }
 
     #[test]
