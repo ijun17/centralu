@@ -193,3 +193,45 @@ export async function seedLongChat(page: Page, sessionId: string) {
 export function distanceFromBottom(stream: Locator): Promise<number> {
   return stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
 }
+
+/**
+ * Resolves once the page has drawn `n` more frames. A render the app scheduled in reaction to something (a store
+ * update, a resize observer, an effect that sets state) lands within a frame or two, so this is how long "the
+ * screen caught up" takes, counted in the page's own frames rather than in milliseconds a loaded machine may not
+ * draw any frame in.
+ */
+export function nextFrames(page: Page, n = 2): Promise<void> {
+  return page.evaluate(async (count) => {
+    for (let i = 0; i < count; i++) await new Promise((r) => requestAnimationFrame(r))
+  }, n)
+}
+
+/**
+ * Starts recording whether an element with `testId` is in the page at any moment from now on, and returns the
+ * question to ask afterwards.
+ *
+ * A negative ("it never showed") cannot be polled: `toHaveCount(0)` passes once a flash is over, and a poll that
+ * comes late misses it. An observer installed before the cause records every insertion, however brief. Call the
+ * returned check only after waiting for something the same cause did draw (its positive half); the check then lets
+ * two more frames pass, so a render that cause scheduled has landed, before it answers.
+ */
+export async function watchAppearance(page: Page, testId: string): Promise<() => Promise<boolean>> {
+  const key = `__appeared_${testId}`
+  await page.evaluate(
+    ({ id, k }) => {
+      const w = window as any
+      const there = () => document.querySelector(`[data-testid="${id}"]`) !== null
+      w[`${k}_watch`]?.disconnect()
+      w[k] = there()
+      w[`${k}_watch`] = new MutationObserver(() => {
+        if (there()) w[k] = true
+      })
+      w[`${k}_watch`].observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-testid'] })
+    },
+    { id: testId, k: key },
+  )
+  return async () => {
+    await nextFrames(page)
+    return page.evaluate((k) => (window as any)[k] as boolean, key)
+  }
+}

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession, pickSetting } from './fixtures/control.js'
+import { columnsThrough } from './fixtures/columns.js'
 
 /**
  * The control loop's scenarios on settings and the session settings menu: send key, models, effort, presets and their tabs. Moved out of control-loop.spec.ts by subject (#845); the
@@ -269,10 +270,19 @@ test("Settings: changing the text size does not change the grid's column count",
   await page.getByTestId('palette-input').fill('settings')
   await page.getByTestId('palette-item-action').click()
   await page.getByTestId('settings-tab-appearance').click()
-  await page.getByTestId('settings-scale-4').click()
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(200)
+  /*
+   * Every column count the grid stands in while the scale changes (columnsThrough), so a collapse
+   * that a later measurement undoes still counts. The change is over once the root carries the new
+   * zoom (scale 4 is 1.25); columnsThrough then waits the two frames the grid's resize observer and
+   * the render it asks for take.
+   */
+  const counts = await columnsThrough(page, '[data-testid="grid"] div.grid', async () => {
+    await page.getByTestId('settings-scale-4').click()
+    await page.keyboard.press('Escape')
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--text-zoom'))).toBe('1.25')
+  })
 
+  expect(counts).toEqual([2])
   expect(await colsOf()).toBe(2)
 })
 

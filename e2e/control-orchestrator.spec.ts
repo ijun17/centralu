@@ -539,7 +539,11 @@ test("Turning on ⌘Enter to send also keeps the orchestrator's first composer f
   })
   await page.getByTestId('orchestrator-input').fill('not yet')
   await page.getByTestId('orchestrator-input').press('Enter')
-  await page.waitForTimeout(200)
+  /*
+   * The key was taken as a newline: a send stops the key's default and empties the box, so the
+   * newline landing is the proof the Enter was handled, and handled as not a send.
+   */
+  await expect(page.getByTestId('orchestrator-input')).toHaveValue('not yet\n')
   await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
 })
