@@ -15,6 +15,8 @@ import {
   ORCHESTRATOR_TOOLS,
   READER_BUDGET_CHARS,
   READER_FIRST,
+  READER_INSTRUCTIONS_WITH_APPS,
+  REPO_WORK_FIRST,
   READER_INSTRUCTIONS,
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
@@ -210,6 +212,23 @@ describe('the reader set', () => {
     expect(text).not.toMatch(/send_to_session|create_session|orchestrat/)
   })
 
+  /*
+   * #957 follow-up (owner decision 2026-10-17): repository work goes through an attached app's own guide first. The line
+   * names no app and depends on nothing a session has: these instructions are the prompt's cached prefix (#512).
+   */
+  it('sends repository work to an attached app\'s help first, only where an app is attached at the start', () => {
+    expect(instructionsFor('reader', undefined, true)).toBe(READER_INSTRUCTIONS_WITH_APPS)
+    expect(READER_INSTRUCTIONS_WITH_APPS).toContain(REPO_WORK_FIRST)
+    expect(codexToolInstructionsFor('reader', undefined, true)).toContain(REPO_WORK_FIRST)
+    // No app, no help to read: the line does not ride in that session's every request
+    expect(instructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
+    expect(codexToolInstructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
+    // The orchestrator does no repository work itself
+    for (const apps of [false, true]) expect(instructionsFor('orchestrator', undefined, apps)).not.toContain(REPO_WORK_FIRST)
+    // The same words whichever apps they are
+    expect(REPO_WORK_FIRST).not.toMatch(/board|project-board|\bapp-[a-z]/)
+  })
+
   it('defers the rare guide and update definitions on Claude and offers both on Codex', () => {
     for (const name of ['app_guide', 'update_centralu']) {
       expect(servedDefinitions('reader', DEFERRED_SERVER).find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(false)
@@ -217,7 +236,7 @@ describe('the reader set', () => {
     }
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
     // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only); 2,350 until #729's
-    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live)
+    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585
     const claude = residentCost('reader', DEFERRED_SERVER)
     expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2600)
   })

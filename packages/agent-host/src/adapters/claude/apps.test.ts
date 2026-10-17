@@ -6,6 +6,7 @@ import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
 import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
+import { REPO_WORK_FIRST } from '../../sessions/orchestrator-tools.js'
 
 /**
  * An external app attached to a Claude session (M4 A-5) — one in-process proxy server per app.
@@ -222,6 +223,23 @@ describe('the conversation-view card id — Claude', () => {
     await new Promise((r) => setTimeout(r, 20))
     await request('tools/call', { name: 'poke', arguments: { to: 2 } })
     expect(await ids[0]).toBe('toolu_ok')
+  })
+})
+
+// #957, #992 review: the line on repository work rides only where an app is attached as the session starts
+describe("Centralu's instructions name an app's help only with an app attached", () => {
+  const instructions = () => (servers()['centralu'] as unknown as { instance: { server: { _instructions?: string } } }).instance.server._instructions ?? ''
+  it('an ordinary session that starts with apps gets the line; one that starts with none does not', async () => {
+    const reader = { orchestratorTools: {} as OrchestratorTools, toolProfile: 'reader' as const }
+    await start(WORKER, reader)
+    expect(instructions()).toContain(REPO_WORK_FIRST)
+    await handle?.dispose()
+    // An untrusted project's apps do not attach (decision 4): this session starts with none
+    w.trust.p1 = false
+    w.rt.refresh()
+    await start(WORKER, reader)
+    expect(Object.keys(servers())).toEqual(['centralu'])
+    expect(instructions()).not.toContain(REPO_WORK_FIRST)
   })
 })
 

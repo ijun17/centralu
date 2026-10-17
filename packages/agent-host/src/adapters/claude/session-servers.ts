@@ -45,7 +45,7 @@ export class ClaudeServers {
     this.appProxies.set(a.server, { proxy: appProxy(this.host.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
   }
   if (this.host.opts.orchestratorTools) {
-    this.orchestratorServer = orchestratorMcp(this.host.opts.orchestratorTools, this.host.opts.toolProfile, this.host.opts.sessionId)
+    this.orchestratorServer = orchestratorMcp(this.host.opts.orchestratorTools, this.host.opts.toolProfile, this.host.opts.sessionId, this.appProxies.size > 0)
   }
   }
 

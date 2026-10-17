@@ -454,6 +454,19 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 export const APP_ACCESS_BUDGET_CHARS = 900
 
 /**
+ * Repository work by hand (#957 follow-up, owner decision 2026-10-17): an attached app such as the project board serves
+ * its task-to-tool table on demand from its own guide (its `help` tool), never in these instructions, which sit in
+ * the prompt's cached prefix and must not change when an app is added or changed (#512). This one line, the same
+ * whichever apps they are, sends an agent to that guide before it reaches for `gh` or `git` by hand.
+ *
+ * Only in an ordinary session that has an app attached when it starts (#992 review): without one there is no help to
+ * read, and the 88 characters would ride in every request for nothing. Decided once, at the start, so the session's
+ * prefix never changes under it; an app attached later is found through its tools. Not the orchestrator's: it does
+ * no repository work itself ("You have no hands").
+ */
+export const REPO_WORK_FIRST = "an attached app's help tool before repository work by hand (PRs, CI, merges, releases)"
+
+/**
  * What an ordinary session reaches for first, one need per entry (#564). A tool that joins the reader seat and
  * answers a need the person states in words adds its line here. Every entry rides in every ordinary session's
  * every request, on Claude as the server's instructions and on Codex in the thread's developer instructions
@@ -479,6 +492,9 @@ export const READER_FIRST: readonly string[] = [
  */
 export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${READER_FIRST.join('; ')}.`
 
+/** The same with REPO_WORK_FIRST, for an ordinary session that starts with an app attached (#957, #992 review) */
+export const READER_INSTRUCTIONS_WITH_APPS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${[...READER_FIRST, REPO_WORK_FIRST].join('; ')}.`
+
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
  * description and JSON schema, plus the instructions, including the deferred guide and update
@@ -487,7 +503,8 @@ export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the 
  * The ceiling rises from 1,400 to 1,750 for that addition. On Claude the update definition is
  * deferred: only the pointer rides in every request. The tokens measured for the earlier
  * instructions remain in docs/tool-cost.md §11; these new figures count characters, not tokens.
- * Raising it is a decision about every session's context: a line added to READER_FIRST counts here.
+ * Raising it is a decision about every session's context: a line added to READER_FIRST counts here. #957's
+ * REPO_WORK_FIRST is not counted: it rides only where an app is attached, whose own tools cost more than it.
  */
 export const READER_BUDGET_CHARS = 1750
 

@@ -12,6 +12,7 @@ import {
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   READER_INSTRUCTIONS,
+  READER_INSTRUCTIONS_WITH_APPS,
   READER_TOOLS,
   SCOPED_INSTRUCTIONS,
   SCOPED_TOOL_NAMES,
@@ -181,11 +182,12 @@ export function toolDefsFor(
  * The server instructions for a profile, or undefined for none. In one place so the size test
  * measures the exact text the adapter sends.
  */
-export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier): string | undefined {
+export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false): string | undefined {
   switch (profile) {
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
-    case 'reader': return readerInstructions ? READER_INSTRUCTIONS : undefined
+    // With an app attached at the start, the line on repository work (#957, #992 review)
+    case 'reader': return readerInstructions ? (appsAttached ? READER_INSTRUCTIONS_WITH_APPS : READER_INSTRUCTIONS) : undefined
     default: return commandsFor(profile, tier).length ? `${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}` : ORCHESTRATOR_INSTRUCTIONS
   }
 }
@@ -201,8 +203,8 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier)
  * thread's developer instructions. The header says whose they are: Codex shows these tools to the model as
  * `mcp__centralu__<tool>`, and the text names them bare, as Claude Code's section heading (the server's name) does.
  */
-export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier): string | undefined {
-  const text = instructionsFor(profile, tier)
+export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false): string | undefined {
+  const text = instructionsFor(profile, tier, appsAttached)
   return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
