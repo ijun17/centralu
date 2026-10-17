@@ -284,7 +284,6 @@ pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5)
 /// `probe_login_shell` with the shell and the bound given, so a test can hand it a shell that hangs
 /// or stops itself.
 pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> {
-    use std::io::Read;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Stdio;
@@ -313,28 +312,57 @@ pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> 
     let mut child = cmd.spawn().ok()?;
     let pid = child.id();
     let stdout = child.stdout.take()?;
+    let deadline = std::time::Instant::now() + timeout;
 
     // **Getting stuck here would fail the whole app's launch.** Shell configurations really do
     // sometimes wait forever (waiting on prompt input, for example), so this cuts it off on a
     // timer and kills the whole group.
+    //
+    // The answer is the marked line, not the end of the output (#840 item 12): something the
+    // configuration started in the background (an agent, a version manager's daemon) inherits
+    // stdout and keeps it open after the shell has exited, and waiting for the end then sat out the
+    // whole bound and fell back to the fixed paths with the answer already read. A reader still
+    // blocked on such a pipe ends when that process lets go of it.
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = BufReader::new(stdout).read_to_string(&mut buf);
-        let _ = tx.send(buf);
-    });
-    let out = match rx.recv_timeout(timeout) {
-        Ok(out) => out,
-        Err(_) => {
-            kill_group(pid);
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
+        use std::io::BufRead;
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
         }
-    };
+    });
+    let mut found = None;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(line) => {
+                found = super::parse_probe_output(&line);
+                if found.is_some() {
+                    break;
+                }
+            }
+            // The output ended: the shell said all it will
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                kill_group(pid);
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    // The shell exits right after the line it was asked for; one that does not is ended at the bound
+    while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+        thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if matches!(child.try_wait(), Ok(None)) {
+        kill_group(pid);
+        let _ = child.kill();
+    }
     let _ = child.wait();
-
-    super::parse_probe_output(&out)
+    found
 }
 
 
@@ -405,6 +433,18 @@ mod tests {
         let node = fake_shell("node", "exit 0");
         let shell = fake_shell("knows-node", &format!("echo 'noise from a .zshrc'\necho \"__CC_NODE__:{node}\""));
         assert_eq!(probe_shell(&shell, PROBE_TIMEOUT), Some(node));
+    }
+
+    /// #840 item 12: the answer is the marked line, not the end of the output. A process the
+    /// configuration left in the background holds stdout open after the shell has exited; waiting
+    /// for the end sat out the bound and fell back to the fixed paths with the answer already read.
+    #[test]
+    fn the_answer_does_not_wait_for_a_background_process_holding_the_output() {
+        let node = fake_shell("node-bg", "exit 0");
+        let shell = fake_shell("leaves-a-job", &format!("echo \"__CC_NODE__:{node}\"\nsleep 4 &"));
+        let began = std::time::Instant::now();
+        assert_eq!(probe_shell(&shell, std::time::Duration::from_secs(2)), Some(node));
+        assert!(began.elapsed() < std::time::Duration::from_secs(1), "{:?}", began.elapsed());
     }
 
     /// PA2: a shell that never answers is cut off at the bound, and its group with it.
