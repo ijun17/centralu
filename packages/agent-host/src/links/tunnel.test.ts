@@ -20,9 +20,10 @@ import {
   type RemoteSpec,
   type SshTunnelOptions,
 } from './tunnel.js'
-import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
+import { fakeExe } from '../fake-exe.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -145,6 +146,13 @@ const logged = (): unknown[] =>
     .filter(Boolean)
     .map((l) => JSON.parse(l))
 
+/**
+ * Waits for every fake ssh that said it hangs to be gone. A deadline ends the ssh without waiting for it, so a test that
+ * stops at the rejection would leave its cleanup removing a folder the ssh is still being ended in.
+ */
+const hungGone = () =>
+  eventually(() => logged().every((l) => !(typeof l === 'object' && l !== null && 'hanging' in l) || !isAlive((l as { hanging: number }).hanging)), 10_000)
+
 const freePort = () =>
   new Promise<number>((resolve) => {
     const s = createServer()
@@ -184,7 +192,9 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   afterEach(async () => {
     await Promise.all(tunnels.splice(0).map((t) => t.close()))
     await new Promise<void>((r) => remote.close(() => r()))
-    rmFakeDir(dir)
+    // Without blocking: a sync rmSync's retries hold the event loop while a just-stopped fake ssh lets go of the
+    // folder, and on a loaded Windows machine that once held the worker for 128 s (#845)
+    await removeTree(dir)
   })
 
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
@@ -352,11 +362,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     it('puts the deadline on asking for the connection line too', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1', FAKE_SSH_LINE: line({ port: await freePort() }) }, undefined, { commandTimeoutMs: 300 })
       await expect(t.open()).rejects.toThrow(/did not finish within/)
+      await hungGone()
     })
 
     it('stops an exec step that does not finish, at the step deadline', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { execTimeoutMs: 300 })
       await expect(t.exec('true')).rejects.toThrow(/did not finish within/)
+      await hungGone()
     })
 
     it('gives an installer step far longer than a short question: a slow download is not cut short', async () => {
