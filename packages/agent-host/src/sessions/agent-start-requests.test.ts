@@ -9,6 +9,7 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionH
 import { Store } from '../dev-services/store.js'
 import { SessionManager, START_AGENT_SETUP_MS, type AgentProcessHost } from './manager.js'
 import { MemoryGate } from './memory-gate.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A start_agent card the person has not answered outlives the call and the host (#673): the leaving host keeps the
@@ -102,14 +103,6 @@ function host(kept: ReadonlySet<string> = new Set()) {
   return { mgr, claude }
 }
 
-const until = async (ok: () => boolean, ms = 2000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 const card = (mgr: SessionManager, id: string) => {
   const p = mgr.listSessions().find((s) => s.id === id)?.pendingApproval
   return p?.detail.kind === 'agent_start' ? p : undefined
@@ -122,7 +115,7 @@ async function asking(h: ReturnType<typeof host>) {
   h.mgr.setProjectTrusted(project.id, true)
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
   const call = h.mgr.startAgent(parent, { task: 'long work', wait: false })
-  await until(() => !!card(h.mgr, parent))
+  await eventually(() => !!card(h.mgr, parent))
   return { parent, call, requestId: card(h.mgr, parent)!.requestId }
 }
 
@@ -153,9 +146,9 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(raised.map((e) => (e as { seq?: number }).seq != null)).toEqual([true, false])
     expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending' })
     b.mgr.respondApproval(parent, requestId, 'allow')
-    await until(() => children(b.mgr, parent).length === 1)
+    await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await until(() => store.listReportMarks().length === 1)
+    await eventually(() => store.listReportMarks().length === 1)
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(store.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
@@ -167,7 +160,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     await a.mgr.detachAll()
     const b = host()
     b.mgr.respondApproval(parent, requestId, 'deny')
-    await until(() => !!b.claude.handles.get(parent)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
+    await eventually(() => !!b.claude.handles.get(parent)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
     expect(children(b.mgr, parent)).toEqual([])
     expect(store.listAgentStartRequests()).toEqual([])
   })
@@ -201,10 +194,10 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     h.send('next step')
     expect(card(a.mgr, parent)).toBeUndefined()
     h.answer('carried on alone for now')
-    await until(() => card(a.mgr, parent)?.requestId === requestId)
+    await eventually(() => card(a.mgr, parent)?.requestId === requestId)
     expect(a.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('waiting_approval')
     a.mgr.respondApproval(parent, requestId, 'allow')
-    await until(() => children(a.mgr, parent).length === 1)
+    await eventually(() => children(a.mgr, parent).length === 1)
     // No call waits on that card: the session goes back to where its turn left it, not to a "working" nothing ends
     expect(a.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('waiting_input')
     expect(events.filter((e) => e.type === 'state_change' && e.sessionId === parent).at(-1)).toMatchObject({ state: 'waiting_input' })
@@ -246,9 +239,9 @@ describe('a start allowed but waiting for memory (#686)', () => {
     expect(children(b.mgr, parent)).toEqual([])
     expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
     free = 4 * 1024 ** 3
-    await until(() => children(b.mgr, parent).length === 1)
+    await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await until(() => store.listReportMarks().length === 1)
+    await eventually(() => store.listReportMarks().length === 1)
     expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(store.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')

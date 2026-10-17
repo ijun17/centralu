@@ -19,6 +19,7 @@ import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
 import { withDragRelay } from './views/drag-relay.js'
 import { SLOW } from '../../../tooling/test-timing.js'
+import { alive } from './process.test-helpers.js'
 
 /**
  * The seam between app views and the external app runtime (M4 B-3 ↔ A) — the exact
@@ -48,14 +49,6 @@ const appsDir = () => join(projRoot, ...PROJECT_APPS)
 const plant = (id: string, over: Record<string, unknown> = {}) =>
   plantApp(appsDir(), id, { server: { command: process.execPath, args: [FIXTURE, '--mode', 'view'] }, ...over })
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 
 async function start(timing: Partial<RuntimeTiming> = {}) {
   rt = new ExternalApps({

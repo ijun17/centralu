@@ -9,6 +9,7 @@ import {
   listenForQuit,
   onHostStatus,
   quitAndStopAgents,
+  quitApp,
   restartHost,
   restartKeeper,
   switchHostBuild,
@@ -17,7 +18,6 @@ import {
   type TauriPlatform,
   watchHostBuild,
 } from '@cc/platform/tauri'
-import { invoke } from '@tauri-apps/api/core'
 import { BuildBarView, RestartKeeperDialog, SwitchBuildDialog } from './build-bar.js'
 import { QuitDialog } from './quit-dialog.js'
 import '../../../packages/ui/src/styles/index.css'
@@ -118,7 +118,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
         await quitAndStopAgents().catch((e: Error) => setQuitError(e.message))
         return
       }
-      await invoke('quit_app')
+      await quitApp().catch((e: Error) => setQuitError(e.message))
     },
     [alsoStop, strays, platform],
   )

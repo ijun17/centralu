@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { Relay } from './real-host.js'
+import { hostCall, Relay } from './real-host.js'
 import { LINKED_RELAY_PORT, LINKED_TOKEN, MACHINE, startPair, type LinkedPair } from './linked-hosts.js'
 
 /**
@@ -10,25 +10,7 @@ import { LINKED_RELAY_PORT, LINKED_TOKEN, MACHINE, startPair, type LinkedPair } 
 
 /** One call over the hub's own protocol, straight to the hub (not through the relay) */
 export async function hubCall(port: number, method: string, params: unknown): Promise<unknown> {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}`)
-  try {
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${method} timed out`)), 10_000)
-      socket.onerror = () => reject(new Error('socket error'))
-      socket.onopen = () => socket.send(JSON.stringify({ kind: 'hello', token: LINKED_TOKEN, protocolVersion: 1 }))
-      socket.onmessage = (m) => {
-        const f = JSON.parse(String(m.data)) as { kind: string; id?: string; ok?: boolean; result?: unknown; error?: { message: string } }
-        if (f.kind === 'hello_ok') socket.send(JSON.stringify({ kind: 'rpc', id: 'call', method, params }))
-        if (f.kind === 'res' && f.id === 'call') {
-          clearTimeout(timer)
-          if (f.ok) resolve(f.result)
-          else reject(new Error(f.error?.message ?? 'host error'))
-        }
-      }
-    })
-  } finally {
-    socket.close()
-  }
+  return (await hostCall(port, method, params, LINKED_TOKEN)).result
 }
 
 async function connected(pair: LinkedPair): Promise<void> {

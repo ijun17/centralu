@@ -22,6 +22,7 @@ import {
 } from './tunnel.js'
 import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { alive as isAlive } from '../process.test-helpers.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -406,14 +407,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(pid).toBeGreaterThan(0)
     await t.close()
     await expect(opening).rejects.toThrow(/was closed/)
-    const alive = () => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
+    const alive = () => isAlive(pid)
     for (let i = 0; i < 250 && alive(); i++) await new Promise((r) => setTimeout(r, 20))
     expect(alive()).toBe(false)
     expect((logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))).toEqual([])

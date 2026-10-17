@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import type { AgentProcess } from '../contract.js'
 import { CodexAdapter } from './index.js'
+import { eventually } from '../../../../../tooling/test-timing.js'
 
 /**
  * Codex under the keeper (#280 step 2): a new host adopts an app-server another host was talking
@@ -96,16 +97,11 @@ async function adopt(mode: 'paginated' | 'legacy' = 'legacy') {
   return { server, handle, events }
 }
 
-const until = async (ok: () => boolean) => {
-  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5))
-  expect(ok()).toBe(true)
-}
-
 describe('codex under the keeper', () => {
   it('adopts a running app-server: the second initialize is shrugged off and the pending approval comes back', async () => {
     const { handle, events, server } = await adopt()
     expect(handle.externalId).toBe("thread-1")
-    await until(() => events.some((e) => e.type === 'approval_request'))
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
     // No new thread: the running one is resumed
     expect(server.received.map((m) => m.method)).toContain('thread/resume')
     expect(server.received.map((m) => m.method)).not.toContain('thread/start')
@@ -114,9 +110,9 @@ describe('codex under the keeper', () => {
   /** Stop needs the running turn's id, which an adopting host never saw start */
   it('can stop the turn that was already running when it adopted the app-server', async () => {
     const { handle, server } = await adopt()
-    await until(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
     handle.interrupt()
-    await until(() => server.received.some((m) => m.method === 'turn/interrupt'))
+    await eventually(() => server.received.some((m) => m.method === 'turn/interrupt'))
     expect(server.received.find((m) => m.method === 'turn/interrupt')!.params).toEqual({ threadId: 'thread-1', turnId: 'turn-9' })
   })
 
@@ -128,7 +124,7 @@ describe('codex under the keeper', () => {
    */
   it('resumes without the history and still stops the running turn, which it asks for on its own (#342)', async () => {
     const { handle, events, server } = await adopt('paginated')
-    await until(() => events.some((e) => e.type === 'approval_request'))
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
     expect(server.received.find((m) => m.method === 'thread/resume')!.params).toMatchObject({ excludeTurns: true })
     handle.interrupt()
     // Waits for the interrupt without failing here, so a missing turn id reads as what was sent, not as a timeout
@@ -144,10 +140,10 @@ describe('codex under the keeper', () => {
 
   it('an older Codex answers the resume with its turns: the running one is read from there, nothing more is asked', async () => {
     const { handle, server } = await adopt('legacy')
-    await until(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
     expect(server.received.some((m) => m.method === 'thread/turns/list')).toBe(false)
     handle.interrupt()
-    await until(() => server.received.some((m) => m.method === 'turn/interrupt'))
+    await eventually(() => server.received.some((m) => m.method === 'turn/interrupt'))
     expect(server.received.find((m) => m.method === 'turn/interrupt')!.params).toEqual({ threadId: 'thread-1', turnId: 'turn-9' })
   })
 
@@ -163,14 +159,14 @@ describe('codex under the keeper', () => {
       },
       () => {},
     )
-    await until(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
     expect(server.received.find((m) => m.method === 'thread/resume')!.params).toMatchObject({ threadId: 'thread-1', excludeTurns: true })
     expect(server.received.some((m) => m.method === 'thread/turns/list')).toBe(false)
   })
 
   it('detaching sends no EOF and no signal, and denies nothing', async () => {
     const { handle, events, server } = await adopt()
-    await until(() => events.some((e) => e.type === 'approval_request'))
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
     await handle.detach!()
     await new Promise((r) => setTimeout(r, 20))
     expect(server.detached).toBe(true)
@@ -183,11 +179,11 @@ describe('codex under the keeper', () => {
   /** "codex app-server exited (code 1)" said nothing a person could act on: its stderr was never kept (#428) */
   it('an app-server that dies says why, from the end of its stderr', async () => {
     const { events, server } = await adopt()
-    await until(() => events.some((e) => e.type === 'approval_request'))
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
     Object.assign(server, { stderrTail: () => 'Error: thread already has an active writer\n' })
     server.exitCode = 1
     server.emit('exit', 1, null)
-    await until(() => events.some((e) => e.type === 'error'))
+    await eventually(() => events.some((e) => e.type === 'error'))
     expect((events.find((e) => e.type === 'error') as unknown as { error: unknown }).error).toMatchObject({
       code: 'adapter_crashed',
       message: 'codex app-server exited (code 1). stderr: Error: thread already has an active writer',

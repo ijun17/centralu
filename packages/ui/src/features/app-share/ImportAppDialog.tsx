@@ -87,8 +87,13 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
   }, [platform])
 
   const pick = async (kind: 'folder' | 'zip') => {
-    const picked = kind === 'folder' ? await platform.system.pickDirectory() : await platform.system.pickFile({ title: 'Choose an app .zip', extensions: ['zip'] })
-    if (picked) setSource(picked)
+    try {
+      const picked = kind === 'folder' ? await platform.system.pickDirectory() : await platform.system.pickFile({ title: 'Choose an app .zip', extensions: ['zip'] })
+      if (picked) setSource(picked)
+    } catch (e) {
+      // A picker the shell refused is said where the person is looking, not dropped as an unhandled rejection (#972)
+      setError((e as Error).message)
+    }
   }
 
   const https = /^https:/i.test(source.trim())

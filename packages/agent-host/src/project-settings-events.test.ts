@@ -8,6 +8,7 @@ import { SessionManager } from './sessions/manager.js'
 import { scriptedAdapters } from './links/scripted-agent.test-helpers.js'
 import { createRpcHandler } from './rpc.js'
 import { HostServer } from './transport/server.js'
+import { eventually } from '../../../tooling/test-timing.js'
 
 /**
  * A per-project setting written through RPC reaches every other client (#719): two real clients on one host, one
@@ -68,14 +69,6 @@ async function client(port: number) {
   return { call, changes }
 }
 
-const until = async (pred: () => boolean, ms = 5000) => {
-  const t0 = Date.now()
-  while (!pred()) {
-    if (Date.now() - t0 > ms) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
-
 const read = async (c: Awaited<ReturnType<typeof client>>, id: string) =>
   ((await c.call('projects.list')) as ProjectInfo[]).find((p) => p.id === id)!
 
@@ -85,11 +78,11 @@ describe('a project setting another client wrote is announced (#719)', () => {
     const [a, b] = [await client(port), await client(port)]
     expect((await read(b, project.id)).trusted).toBe(false)
     await a.call('projects.setTrusted', { projectId: project.id, trusted: true })
-    await until(() => b.changes() >= 1)
+    await eventually(() => b.changes() >= 1)
     expect((await read(b, project.id)).trusted).toBe(true)
     const before = b.changes()
     await a.call('projects.setTrusted', { projectId: project.id, trusted: false })
-    await until(() => b.changes() > before)
+    await eventually(() => b.changes() > before)
     expect((await read(b, project.id)).trusted).toBe(false)
   })
 
@@ -97,7 +90,7 @@ describe('a project setting another client wrote is announced (#719)', () => {
     const { port, project } = await host()
     const [a, b] = [await client(port), await client(port)]
     await a.call('projects.setCommands', { projectId: project.id, commands: [{ command: 'pnpm dev', label: 'Dev' }] })
-    await until(() => b.changes() >= 1)
+    await eventually(() => b.changes() >= 1)
     expect((await read(b, project.id)).commands).toEqual([{ command: 'pnpm dev', label: 'Dev' }])
   })
 
@@ -105,7 +98,7 @@ describe('a project setting another client wrote is announced (#719)', () => {
     const { port, project } = await host()
     const [a, b] = [await client(port), await client(port)]
     await a.call('projects.setWorktreeSetup', { projectId: project.id, setup: { command: 'pnpm i', copyFiles: ['.env'] } })
-    await until(() => b.changes() >= 1)
+    await eventually(() => b.changes() >= 1)
     expect((await read(b, project.id)).worktreeSetup).toEqual({ command: 'pnpm i', copyFiles: ['.env'] })
   })
 
@@ -113,11 +106,11 @@ describe('a project setting another client wrote is announced (#719)', () => {
     const { port, project } = await host()
     const [a, b] = [await client(port), await client(port)]
     const made = await a.call('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'codex' })
-    await until(() => b.changes() >= 1)
+    await eventually(() => b.changes() >= 1)
     expect((await read(b, project.id)).defaultTool).toBe('codex')
     const heard = b.changes()
     await a.call('agents.updateSettings', { sessionId: made.id, model: 'a-model', effort: 'high' })
-    await until(() => b.changes() > heard)
+    await eventually(() => b.changes() > heard)
     expect((await read(b, project.id)).defaultModels.codex).toEqual({ model: 'a-model', effort: 'high' })
     // The same choice again changes nothing, so it says nothing
     const settled = b.changes()
@@ -132,7 +125,7 @@ describe('a project setting another client wrote is announced (#719)', () => {
     await a.call('projects.setTrusted', { projectId: project.id, trusted: true })
     await a.call('projects.setCommands', { projectId: project.id, commands: [{ command: 'pnpm dev' }] })
     await a.call('projects.setWorktreeSetup', { projectId: project.id, setup: { command: 'pnpm i', copyFiles: [] } })
-    await until(() => b.changes() >= 3)
+    await eventually(() => b.changes() >= 3)
     const settled = b.changes()
     await a.call('projects.setTrusted', { projectId: project.id, trusted: true })
     await a.call('projects.setCommands', { projectId: project.id, commands: [{ command: ' pnpm dev ' }] })

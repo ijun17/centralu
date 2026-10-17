@@ -668,16 +668,15 @@ test('My own sent message does not render twice', async ({ page }) => {
 
   await page.getByTestId('prompt-input').fill('the same words')
   await page.getByTestId('send').click()
-  // The host reports "that message was added" — since it is already drawn, this must only
-  // confirm it
-  await emitEvent(page, 0, { type: 'user_message', seq: 992, text: 'the same words' })
-
-  const count = await page.evaluate(() => {
-    const st = (window as any).__store.getState()
-    const id = st.focusedSessionId
-    return st.chat[id].filter((i: any) => i.kind === 'user' && i.text === 'the same words').length
-  })
-  expect(count).toBe(1)
+  // The host reports "that message was added" (the mock does too, #999) — since it is already drawn,
+  // this must only confirm it: the bubble takes the stored number, and there is still one
+  const mine = () =>
+    page.evaluate(() => {
+      const st = (window as any).__store.getState()
+      const id = st.focusedSessionId
+      return st.chat[id].filter((i: any) => i.kind === 'user' && i.text === 'the same words').map((i: any) => typeof i.storedSeq)
+    })
+  await expect.poll(mine).toEqual(['number'])
 })
 
 /** An image attachment shows as a real thumbnail, and clicking opens the same zoom as an agent image */

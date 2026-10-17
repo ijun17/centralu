@@ -1,8 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
 import { gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreeRemove } from './git-worktree.js'
 
@@ -18,15 +17,15 @@ let repo = ''
 let root = ''
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'cc-wt-'))
+  root = tempRoot('cc-wt-')
   repo = join(root, 'repo')
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
+  fixtureGit(root, ['init', '-q', '-b', 'main', repo])
   writeFileSync(join(repo, 'a.txt'), 'hello\n')
-  execFileSync('git', ['add', '.'], { cwd: repo })
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: repo })
+  fixtureGit(repo, ['add', '.'])
+  fixtureGit(repo, ['commit', '-qm', 'init'])
 })
 
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(() => removeTree(root))
 
 describe('worktrees', () => {
   it('creates one outside the repository, with a branch different from the original', async () => {

@@ -28,6 +28,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryEvent, HistoryM
 import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -654,7 +655,7 @@ describe('projects', () => {
       await rpc('projects.gitStatus', { projectId })
       expect(planted.ran()).toContain('fsmonitor')
     } finally {
-      rmSync(planted.root, { recursive: true, force: true, maxRetries: 5 })
+      await removeTree(planted.root)
     }
     /*
      * Its own limit, because the work is the point: a planted repository and every door that reads it, each a real

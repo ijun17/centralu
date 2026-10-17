@@ -29,6 +29,12 @@ export class RulesMock {
     },
   }
 
+  /** Saves a permission rule as the host's store does (`addApprovalRule`), with the next id and the time it was made */
+  addRule(rule: { scope: string; matcher: string; decision: string; projectId?: string | null; sessionId?: string | null }): void {
+    const id = this.rulesList.reduce((max, r) => Math.max(max, r.id), 0) + 1
+    this.rulesList.push({ id, createdAt: Date.now(), ...rule })
+  }
+
   readonly rules = {
     list: async () => [...this.rulesList],
     remove: async (id: number) => {

@@ -29,14 +29,10 @@ export interface Platform {
 }
 
 export interface PlatformCapabilities {
-  osNotifications: boolean      // web: Notification API, limited / tauri: true
-  dockBadge: boolean            // web: false / tauri: true
-  globalShortcuts: boolean      // web: only within window focus / tauri: true
-  processSupervision: boolean   // web: false (the user starts the host) / tauri: true
-  openInIde: boolean            // web: false / tauri: true
-  // Not every capability is a yes/no. These two are facts about the machine that the UI
-  // needs in order to draw, asked for as a measurement and as labels rather than as an OS
-  // name — so that ui still never learns which OS it is on.
+  // UI가 읽는 것만 둔다 (#972): 아무것도 막지 않는 yes/no는 지웠다. 플랫폼이 못 하는 포트
+  // 메서드(브라우저에서 IDE 열기)는 대신 이유와 함께 reject한다.
+  // 그림을 그리려면 UI가 알아야 하는 기계의 사실들이다. OS 이름 대신 치수와 레이블로 묻는다 —
+  // 그래서 ui는 자기가 어느 OS 위에 있는지 끝내 모른다.
   windowControlsInset: number   // px the OS window controls take from our top bar (macOS: 86)
   shortcutKeys: ShortcutKeys    // { mod, alt, join } — '⌘'/'⌥'/'' here, 'Ctrl'/'Alt'/'+' elsewhere
 }

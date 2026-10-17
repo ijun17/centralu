@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream'
+import { alive } from '../process.test-helpers.js'
 
 /**
  * A stand-in for an agent CLI that starts a helper of its own, the way Claude Code's LSP tool starts
@@ -50,14 +51,7 @@ export function helperPid(stdout: Readable): Promise<number> {
   })
 }
 
-export function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
+export { alive }
 
 /** Waits for the process to be gone, up to `ms`. Returns whether it is */
 export async function goneWithin(pid: number, ms: number): Promise<boolean> {

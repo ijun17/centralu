@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { hasPs } from '../os.js'
 import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { alive } from '../process.test-helpers.js'
 
 /**
  * Choosing a leftover process (user request, 2026-09-07).
@@ -195,14 +196,6 @@ describe('stopStrays', () => {
     // `detached`: a session of its own, so the leftover has no controlling terminal even when the tests run in one
     const sh = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} </dev/null >/dev/null 2>&1 &`], { cwd: dir, detached: true, stdio: 'ignore' })
     await new Promise((r) => sh.once('exit', r))
-    const alive = (pid: number) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
     let pid = 0
     try {
       await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 })

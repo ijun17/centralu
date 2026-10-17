@@ -4,24 +4,9 @@ import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
+import { alive } from '../process.test-helpers.js'
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-const until = async (ok: () => boolean, ms: number) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 20))
-  }
-}
 
 /**
  * A gh that runs the script `pr` in its working directory with Node. On Windows it is Node itself under gh's name (an
@@ -92,7 +77,7 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await until(() => existsSync(join(project, 'pids')), 10_000)
+    await eventually(() => existsSync(join(project, 'pids')), 10_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(alive(child)).toBe(true)
@@ -101,7 +86,7 @@ describe('gh stopped by an abort (#368)', () => {
     expect(alive(ghPid)).toBe(false)
     // No retries: Windows refuses (EBUSY) while gh still works in it
     rmSync(project, { recursive: true })
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
   // macOS and Linux: the tree kill does not reach a child that left gh's group, and one holding gh's output kept
@@ -128,15 +113,15 @@ describe('gh stopped by an abort (#368)', () => {
 
     const stop = new AbortController()
     const answer = gitBranchPr(project, 'feat/x', stop.signal)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     stop.abort()
     const started = Date.now()
     expect(await answer).toBeNull()
-    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(Date.now() - started).toBeLessThan(5_000 * SLOW)
     expect(alive(ghPid)).toBe(false)
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
   // #982: the bound was execFile's own, which ends gh alone; a child holding gh's output then held the answer as well
@@ -161,13 +146,13 @@ describe('gh stopped by an abort (#368)', () => {
     const bound = 3_000 * SLOW
     const started = Date.now()
     const answer = gitBranchPr(project, 'feat/x', undefined, bound)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(await answer).toBeNull()
     expect(Date.now() - started).toBeLessThan(bound + 5_000 * SLOW)
     expect(alive(ghPid)).toBe(false)
-    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+    if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
   // #982 review: in the host's process group the tree kill spared what gh started (git, reading the remotes); gh now
@@ -192,12 +177,12 @@ describe('gh stopped by an abort (#368)', () => {
     __forgetPrograms()
 
     const answer = gitBranchPr(project, 'feat/x', undefined, 3_000 * SLOW)
-    await until(() => existsSync(join(project, 'pids')), 20_000)
+    await eventually(() => existsSync(join(project, 'pids')), 20_000)
     const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
     childPid = child
     expect(await answer).toBeNull()
     expect(alive(ghPid)).toBe(false)
-    await until(() => !alive(child), 5_000 * SLOW)
+    await eventually(() => !alive(child), 5_000)
   })
 })
 

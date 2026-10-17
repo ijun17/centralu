@@ -168,6 +168,18 @@ function review(over: Record<string, unknown> = {}) {
 const mockList = <T,>(page: Page, name: string) => page.evaluate((n) => (window as any).__mock[n] as T, name)
 
 test.describe('import (E-3)', () => {
+  test('a picker the shell refuses says why in the dialog, for a folder and a .zip alike (#972)', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => ((window as any).__mock.pickFails = 'dialog.open not allowed'))
+    await page.getByTestId('user-apps-import').click()
+    const dialog = page.getByTestId('import-app-dialog')
+    await dialog.getByTestId('import-pick-folder').click()
+    await expect(dialog.getByTestId('import-error')).toHaveText('dialog.open not allowed')
+    await page.evaluate(() => ((window as any).__mock.pickFails = 'zip picker refused'))
+    await dialog.getByTestId('import-pick-zip').click()
+    await expect(dialog.getByTestId('import-error')).toHaveText('zip picker refused')
+  })
+
   test('picking a source and clicking Review shows what it runs, what it uses, its secrets, and its files, and "Import and enable" brings it in, enables it, and opens the app', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())

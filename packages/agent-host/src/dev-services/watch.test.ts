@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DirWatchers, MAX_WATCHED_DIRS } from './watch.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Checked against the real filesystem — this module's contract is not "when the OS gives an
@@ -23,14 +24,6 @@ function makeWatcher(onChange: (projectId: string, dirs: string[]) => void, flus
   const w = new DirWatchers(onChange, flushMs)
   watchers.push(w)
   return w
-}
-
-const until = async (cond: () => boolean, ms = 3000) => {
-  const t0 = Date.now()
-  while (!cond()) {
-    if (Date.now() - t0 > ms) return
-    await new Promise((r) => setTimeout(r, 20))
-  }
 }
 
 afterEach(() => {
@@ -77,7 +70,7 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
     await new Promise((r) => setTimeout(r, 300))
 
     for (let i = 0; i < 100; i++) writeFileSync(join(root, `f${i}.txt`), 'x')
-    await until(() => got.length > 0)
+    await eventually(() => got.length > 0)
     // counted only after giving time for any remaining flush to arrive
     await new Promise((r) => setTimeout(r, 300))
     expect(got.length).toBeLessThanOrEqual(4)
@@ -106,7 +99,7 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
     await new Promise((r) => setTimeout(r, 300))
 
     rmSync(join(root, 'doomed'), { recursive: true })
-    await until(() => got.flat().includes('doomed'))
+    await eventually(() => got.flat().includes('doomed'))
     expect(got.flat()).toContain('doomed')
   })
 
@@ -116,7 +109,7 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
     const w = makeWatcher((_p, d) => got.push(d))
     w.setWatched('p1', root, ['never-existed'])
 
-    await until(() => got.length > 0)
+    await eventually(() => got.length > 0)
     expect(got.flat()).toContain('never-existed')
   })
 
@@ -159,7 +152,7 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
     await new Promise((r) => setTimeout(r, 300))
 
     renameSync(join(root, 'src'), join(root, 'lib'))
-    await until(() => got.flat().includes(''))
+    await eventually(() => got.flat().includes(''))
     expect(got.flat()).toContain('')
 
     // Expanded again where it is now, it is watched as before
