@@ -49,15 +49,20 @@ const SIZE_BATCH = 256
 const MAX_SIZED_ENTRIES = 1_000_000
 
 /**
- * The bytes under `path`, or null past `deadline` or past `maxEntries` entries. The files of one folder are measured
- * SIZE_BATCH at a time, with the deadline checked between batches: one folder of a million files used to queue a
- * million lstat calls at once (#849 review). A link counts as nothing and is not asked about: `lstat` follows one
- * whose target libuv cannot read, and following it could reach anywhere.
+ * The bytes in regular files under `path` (or `path` itself, a file), null when there is nothing at `path`, past
+ * `deadline` or past `maxEntries` entries. The files of one folder are measured SIZE_BATCH at a time, with the
+ * deadline checked between batches: one folder of a million files used to queue a million lstat calls at once (#849
+ * review). A link counts as nothing and is not asked about, `path` itself included: `lstat` follows one whose target
+ * libuv cannot read, and following it could reach anywhere. An entry that cannot be read, or is gone by the time it
+ * is, counts as nothing too.
+ *
+ * The host's own data folders are sized with it too (`dataBytes`, with no deadline and no cap).
  */
 export async function treeBytes(path: string, deadline: number, maxEntries: number = MAX_SIZED_ENTRIES): Promise<number | null> {
   const top = await lstat(path).catch(() => null)
   if (!top) return null
-  if (!top.isDirectory()) return top.size
+  if (top.isFile()) return top.size
+  if (!top.isDirectory()) return 0
   let total = 0
   let seen = 0
   const folders = [path]
@@ -71,11 +76,11 @@ export async function treeBytes(path: string, deadline: number, maxEntries: numb
     for (const entry of entries) {
       // A junction or symlink is neither: it is not walked into
       if (entry.isDirectory()) folders.push(join(folder, entry.name))
-      else if (!entry.isSymbolicLink()) files.push(join(folder, entry.name))
+      else if (entry.isFile()) files.push(join(folder, entry.name))
     }
     for (let i = 0; i < files.length; i += SIZE_BATCH) {
       if (Date.now() > deadline) return null
-      const each = await Promise.all(files.slice(i, i + SIZE_BATCH).map((file) => lstat(file).then((s) => s.size, () => 0)))
+      const each = await Promise.all(files.slice(i, i + SIZE_BATCH).map((file) => lstat(file).then((s) => (s.isFile() ? s.size : 0), () => 0)))
       for (const bytes of each) total += bytes
     }
   }
