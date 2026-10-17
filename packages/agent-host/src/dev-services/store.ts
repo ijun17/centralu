@@ -75,7 +75,7 @@ export class Store extends MigrationRunner {
   private readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
   private readonly children: ChildOwnershipRecords
-  private readonly machines: LinkedMachineRecords
+  readonly machines: LinkedMachineRecords
 
   constructor(
     protected readonly dbPath = ':memory:',
@@ -541,44 +541,6 @@ export class Store extends MigrationRunner {
 
   moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean }): void {
     return this.children.moveChildren(from, to, move)
-  }
-
-  // ── LinkedMachineRecords (store/linked-machines.ts) ──
-
-  listLinkedMachines(): LinkedMachineRow[] {
-    return this.machines.listLinkedMachines()
-  }
-
-  addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
-    return this.machines.addLinkedMachine(m)
-  }
-
-  removeLinkedMachine(id: string): void {
-    return this.machines.removeLinkedMachine(id)
-  }
-
-  setLinkedMachineAcceptedVersions(id: string, key: string | null): void {
-    return this.machines.setLinkedMachineAcceptedVersions(id, key)
-  }
-
-  machineHeaders(machineId: string, kind: 'session' | 'project'): unknown[] | null {
-    return this.machines.machineHeaders(machineId, kind)
-  }
-
-  replaceMachineHeaders(machineId: string, kind: 'session' | 'project', items: readonly { id: string }[]): void {
-    return this.machines.replaceMachineHeaders(machineId, kind, items)
-  }
-
-  upsertMachineSession(machineId: string, item: { id: string }): void {
-    return this.machines.upsertMachineSession(machineId, item)
-  }
-
-  patchMachineSession(machineId: string, sessionId: string, patch: Record<string, unknown>): void {
-    return this.machines.patchMachineSession(machineId, sessionId, patch)
-  }
-
-  removeMachineSession(machineId: string, sessionId: string): void {
-    return this.machines.removeMachineSession(machineId, sessionId)
   }
 }
 

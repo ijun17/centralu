@@ -67,14 +67,14 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
 
   it("a linked machine's mirrored list skips the one header that is not JSON", () => {
     const s = seeded()
-    s.addLinkedMachine({ id: 'm1', name: 'm', sshTarget: 'h', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
-    s.replaceMachineHeaders('m1', 'session', [{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+    s.machines.addLinkedMachine({ id: 'm1', name: 'm', sshTarget: 'h', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    s.machines.replaceMachineHeaders('m1', 'session', [{ id: 'a' }, { id: 'b' }, { id: 'c' }])
     dbOf(s).prepare(`UPDATE machine_headers SET info = '{"id":' WHERE item_id = 'b'`).run()
-    expect(s.machineHeaders('m1', 'session')).toEqual([{ id: 'a' }, { id: 'c' }])
+    expect(s.machines.machineHeaders('m1', 'session')).toEqual([{ id: 'a' }, { id: 'c' }])
     // Patching the unreadable one leaves it for the next full mirror rather than throwing
-    expect(() => s.patchMachineSession('m1', 'b', { state: 'idle' })).not.toThrow()
-    s.patchMachineSession('m1', 'a', { state: 'idle' })
-    expect(s.machineHeaders('m1', 'session')).toEqual([{ id: 'a', state: 'idle' }, { id: 'c' }])
+    expect(() => s.machines.patchMachineSession('m1', 'b', { state: 'idle' })).not.toThrow()
+    s.machines.patchMachineSession('m1', 'a', { state: 'idle' })
+    expect(s.machines.machineHeaders('m1', 'session')).toEqual([{ id: 'a', state: 'idle' }, { id: 'c' }])
   })
 
   it('the trash keeps listing when a record is JSON but not an object', async () => {

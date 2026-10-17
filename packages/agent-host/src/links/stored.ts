@@ -13,10 +13,10 @@ import { readJsonList } from '../dev-services/store/json.js'
 
 export function storeRegistry(store: Store): MachineRegistry {
   return {
-    list: () => store.listLinkedMachines(),
-    add: (record: Omit<MachineRecord, 'slot'>) => store.addLinkedMachine(record),
-    remove: (id) => store.removeLinkedMachine(id),
-    setAcceptedVersions: (id, key) => store.setLinkedMachineAcceptedVersions(id, key),
+    list: () => store.machines.listLinkedMachines(),
+    add: (record: Omit<MachineRecord, 'slot'>) => store.machines.addLinkedMachine(record),
+    remove: (id) => store.machines.removeLinkedMachine(id),
+    setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
   }
 }
 
@@ -28,13 +28,13 @@ const withIds = (list: unknown[]) =>
 
 export function storeMirror(store: Store): HeadersMirror {
   return {
-    read: (machine, kind) => store.machineHeaders(machine, kindOf(kind)),
-    replace: (machine, kind, list) => store.replaceMachineHeaders(machine, kindOf(kind), withIds(list)),
+    read: (machine, kind) => store.machines.machineHeaders(machine, kindOf(kind)),
+    replace: (machine, kind, list) => store.machines.replaceMachineHeaders(machine, kindOf(kind), withIds(list)),
     upsertSession: (machine, session) => {
-      if (typeof session.id === 'string') store.upsertMachineSession(machine, session as { id: string })
+      if (typeof session.id === 'string') store.machines.upsertMachineSession(machine, session as { id: string })
     },
-    patchSession: (machine, sessionId, patch) => store.patchMachineSession(machine, sessionId, patch),
-    removeSession: (machine, sessionId) => store.removeMachineSession(machine, sessionId),
+    patchSession: (machine, sessionId, patch) => store.machines.patchMachineSession(machine, sessionId, patch),
+    removeSession: (machine, sessionId) => store.machines.removeMachineSession(machine, sessionId),
     // The registry's removal takes the headers with the machine (store.removeLinkedMachine)
     forget: () => {},
   }
