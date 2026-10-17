@@ -29,7 +29,11 @@ describe('an agent CLI started without a keeper (Windows)', () => {
     let orphan = 0
     const os = {
       platform: 'win32' as const,
-      taskkill: (pid: number) => void killed.push(pid),
+      taskkill: (pid: number) => {
+        killed.push(pid)
+        // Ends what it names, as taskkill does: a taskkill that succeeded is not followed by a kill of our own (#857)
+        if (pid === p.pid) process.kill(pid)
+      },
       listProcesses: async (): Promise<WinProcRow[]> => [{ pid: orphan, ppid: p.pid!, created: clock.spawnAt }],
     }
     let t = 1_000_000
