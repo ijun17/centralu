@@ -139,3 +139,46 @@ export function describeBuild(b: ShellHostBuild['host']): string {
   const from = b.bundlePath ? ` from ${b.bundlePath}` : ''
   return `build ${b.commit}${version}${from}`
 }
+
+/**
+ * The question before switching the host to this window's build, asked only when the switch can lose something
+ * (`plan.confirm`). Presentational like the rest of this file, so the browser harness draws exactly this.
+ */
+export function SwitchBuildDialog({
+  loses,
+  keepsAgents,
+  onCancel,
+  onConfirm,
+}: {
+  /** What the switch stops (`plan.loses`) */
+  loses: string
+  /** Whether the switch keeps the agents running; unknown is treated as not */
+  keepsAgents?: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <DesktopDialog onCancel={onCancel} testId="confirm-switch-build" label="Switch the agent host to this build?">
+      <p className="text-md text-ink">Switch the agent host to this window's build?</p>
+      <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-switch-build-loses">
+        {loses}
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className={
+            keepsAgents
+              ? 'rounded-md border border-line px-3 py-1 text-sm text-ink hover:border-line-strong'
+              : 'rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70'
+          }
+          data-testid="confirm-switch-build-yes"
+          onClick={onConfirm}
+        >
+          Switch
+        </button>
+      </div>
+    </DesktopDialog>
+  )
+}

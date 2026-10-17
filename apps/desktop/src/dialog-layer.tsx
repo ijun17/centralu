@@ -5,7 +5,7 @@ import { useOpenLayer } from '@cc/ui'
  * What every dialog the desktop draws itself needs, written once: it counts as an open layer (so a
  * global shortcut — y/n/a on an approval card, the inbox keys — never answers what lies behind it),
  * it takes the keyboard when it opens and gives it back when it closes (useOpenLayer), Esc cancels,
- * and Tab stays inside it. The quit dialog keeps its own Enter/Esc handling and only needs the layer.
+ * and Tab stays inside it. The quit dialog keeps its own Enter/Esc handling and counts its layer itself.
  */
 export function useDialogLayer(box: RefObject<HTMLElement | null>, onCancel?: () => void): void {
   useOpenLayer()
@@ -65,10 +65,4 @@ export function DesktopDialog({
       </div>
     </div>
   )
-}
-
-/** Only counts a layer: for a dialog that keeps its own keyboard handling (the quit dialog) */
-export function OpenLayer(): null {
-  useOpenLayer()
-  return null
 }
