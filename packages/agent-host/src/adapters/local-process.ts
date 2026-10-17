@@ -65,7 +65,15 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Always read: a CLI whose stderr nobody drains blocks once the pipe is full
     child.stderr?.on('data', (d: Buffer) => this.tail.push(d))
     child.stdin?.on('error', () => {})
-    child.on('error', (e) => this.emit('error', e))
+    child.on('error', (e) => {
+      this.emit('error', e)
+      /*
+       * A CLI that never started (no pid: not there, or refused outright, `notStarted`) also ends, after its 'error',
+       * so whoever waits for 'exit' is not left waiting. Node itself sends a never-started process 'error' and 'close'
+       * only, never 'exit' (measured: ENOENT on Windows and Linux).
+       */
+      if (child.pid === undefined) this.onExit()
+    })
     child.once('exit', () => this.onExit())
   }
 

@@ -7,6 +7,7 @@ import { KILL_GRACE_MS, type WinProcRow } from '../dev-services/kill-tree.js'
 import { CodexClient } from './codex/client.js'
 import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers } from './fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent } from './local-process.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * An agent CLI this host starts itself, without a keeper (Windows, dev, e2e, a debug app): stopping
@@ -236,6 +237,24 @@ describe('an agent CLI that cannot be started at all', () => {
     expect(p.pid).toBeUndefined()
     expect(p.kill('SIGTERM')).toBe(false)
     expect(() => p.stdin.write('{}\n')).not.toThrow()
+  })
+
+  /*
+   * And it ends: 'exit' after the 'error', so whoever waits for the exit is not left waiting (a review of #964). Node
+   * sends a never-started process 'error' and 'close' only, so a CLI that is not there needed this as much.
+   */
+  it.each([
+    ['refused outright (a NUL in the name)', 'no\u0000such-cli'],
+    ['not there (ENOENT)', 'cc-no-such-agent-cli'],
+  ])('%s, reports its error, then its exit', async (_what, command) => {
+    const p = spawnLocalAgent({ command, args: [], env: process.env })
+    const seen: string[] = []
+    const exited = new Promise<void>((resolve) => p.once('exit', () => resolve()))
+    p.on('error', () => seen.push('error'))
+    p.on('exit', () => seen.push('exit'))
+    // Bounded, so a missing exit fails here with what was seen rather than at the test's own limit
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000 * SLOW))])
+    expect(seen).toEqual(['error', 'exit'])
   })
 })
 
