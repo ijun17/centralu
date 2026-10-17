@@ -344,7 +344,7 @@ export class SessionTrash {
         } else {
           throw rpcError(`Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`)
         }
-      } else if (t.session.kind === 'orchestrator' && this.host.store.orchestratorId()) {
+      } else if (t.session.kind === 'orchestrator' && this.host.store.sessions.orchestratorId()) {
         // Two central orchestrators would answer the same questions; the app has one (FR-11)
         throw rpcError('Another orchestrator is in place — the app runs one at a time')
       }
@@ -357,7 +357,7 @@ export class SessionTrash {
       if (!back) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
-      if (fixed !== back || recovered) this.host.store.upsertSession(fixed)
+      if (fixed !== back || recovered) this.host.store.sessions.upsertSession(fixed)
       this.host.meta.set(sessionId, fixed)
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
@@ -384,7 +384,7 @@ export class SessionTrash {
       const t = this.host.store.trashedSession(sessionId)
       if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { session: s, record } = t
-      const cwd = this.host.store.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
+      const cwd = this.host.store.sessions.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
       const externalId = s.externalId ?? s.importedFrom
       if (record.removeExternal && externalId) {
         const held = [...this.host.meta.values()].some(

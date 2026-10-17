@@ -130,7 +130,7 @@ export class LaunchRecords {
   async refreshLaunchSettings(projectId?: string, trustChange = false): Promise<void> {
     for (const session of [...this.host.meta.values()]) {
       if (projectId !== undefined && session.projectId !== projectId) continue
-      const cwd = this.host.store.sessionCwd(session.id)
+      const cwd = this.host.store.sessions.sessionCwd(session.id)
       if (!cwd) continue
       // Earlier builds did not record launch settings: a kept process's policy is unknown.
       // A safety change too, so the same rule as the definitions above

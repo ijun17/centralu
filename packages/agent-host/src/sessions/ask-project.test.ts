@@ -353,7 +353,7 @@ describe('asking another project', () => {
     const original = w.mgr.listSessions().find((s) => s.id === targetSession)!
     await w.mgr.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
     handleOf(targetSession)!.answer('old history')
-    w.store.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
+    w.store.sessions.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
     if (ownerState !== 'live') await w.mgr.trashSession(caller)
     if (ownerState === 'purged') await w.mgr.purgeSession(caller)
     await w.mgr.disposeAll()
@@ -367,7 +367,7 @@ describe('asking another project', () => {
     expect(restored.askedBy).toBeNull()
     expect(restored.name).toBe('Asked by consumer · 10:00')
     expect(w.store.loadMessages(targetSession, 10)).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ text: 'old history' }) }))
-    expect(w.store.listSessions().find((s) => s.id === targetSession)?.askedBy).toBeNull()
+    expect(w.store.sessions.listSessions().find((s) => s.id === targetSession)?.askedBy).toBeNull()
   })
 
   it('refuses every cross-project child creation even under auto', async () => {

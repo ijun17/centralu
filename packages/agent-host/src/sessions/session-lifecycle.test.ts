@@ -357,7 +357,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
     await mgr.disposeAll()
     return id
   }
-  const listed = () => store.listSessions().map((x) => x.id)
+  const listed = () => store.sessions.listSessions().map((x) => x.id)
 
   it('a session deleted while waking does not come back to life, and the process that just came up is closed', async () => {
     const id = await sleeping()
@@ -451,7 +451,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
 
     await rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
     expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('idle')
-    expect(store.listSessions().find((x) => x.id === id)!.state).toBe('idle')
+    expect(store.sessions.listSessions().find((x) => x.id === id)!.state).toBe('idle')
   })
 
   it('a worktree session deleted while checking its PR does not leave behind a row with no id', async () => {

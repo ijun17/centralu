@@ -217,12 +217,12 @@ describe('a turn the network stopped (#698)', () => {
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.ownTurnFails(ECONNREFUSED)
-    expect(store.listSessions().find((x) => x.id === s.id)?.interruption).toMatchObject({ reason: 'network' })
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.interruption).toMatchObject({ reason: 'network' })
 
     await a.mgr.send(s.id, 'Continue where you stopped.')
     expect(info(a, s.id).interruption).toBeNull()
     expect(interruptions(s.id).at(-1)).toMatchObject({ interruption: null })
-    expect(store.listSessions().find((x) => x.id === s.id)?.interruption).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.interruption).toBeNull()
   })
 
   it('an error the network did not cause leaves no interruption, and nobody unasked is told', async () => {
@@ -331,7 +331,7 @@ describe('a turn a quit stopped (#698)', () => {
     const project = await a.mgr.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'a long job')
-    expect(store.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
 
     // "Quit completely": the process is gone, and the next start finds the row still working
     const b = host()
@@ -459,7 +459,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     vi.advanceTimersByTime(2000)
     expect(info(a, id)).toMatchObject({ state: 'working', interruption: { reason: 'reconnecting' } })
     // Live only: not stored
-    expect(store.listSessions().find((x) => x.id === id)?.interruption).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === id)?.interruption).toBeNull()
 
     // Other events of the same episode keep the flag and when it began
     h.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })

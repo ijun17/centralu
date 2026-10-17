@@ -269,7 +269,7 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
   const { method, params } = state.codex.filter((r) => r.method === 'thread/start' || r.method === 'thread/resume').at(-1)!
   const config = params.config as { project_doc_max_bytes?: number; projects?: Record<string, { trust_level?: string }> }
   const doc = config.project_doc_max_bytes
-  const cwdTrust = config.projects?.[store.sessionCwd(sessionId)!]?.trust_level
+  const cwdTrust = config.projects?.[store.sessions.sessionCwd(sessionId)!]?.trust_level
   const files =
     doc === 0 && cwdTrust === 'untrusted' ? 'repo-off'
     : doc === undefined && config.projects === undefined ? 'all'

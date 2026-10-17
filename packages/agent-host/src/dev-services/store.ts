@@ -66,7 +66,7 @@ const SCHEMA_PATH = resolveSchemaPath()
 export class Store extends MigrationRunner {
   protected db: Database.Database
   readonly projects: ProjectRecords
-  private readonly sessions: SessionRecords
+  readonly sessions: SessionRecords
   readonly grid: GridRecords
   private readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
@@ -211,44 +211,8 @@ export class Store extends MigrationRunner {
     return this.sessions.upsertSession(s)
   }
 
-  setSessionOrder(orderedIds: readonly string[]): void {
-    return this.sessions.setSessionOrder(orderedIds)
-  }
-
-  orchestratorId(): string | null {
-    return this.sessions.orchestratorId()
-  }
-
-  listSessions(): SessionInfo[] {
-    return this.sessions.listSessions()
-  }
-
   sessionCwd(sessionId: string): string | null {
     return this.sessions.sessionCwd(sessionId)
-  }
-
-  setSessionCwd(sessionId: string, cwd: string): void {
-    return this.sessions.setSessionCwd(sessionId, cwd)
-  }
-
-  setTouchedPaths(sessionId: string, paths: string[]): void {
-    return this.sessions.setTouchedPaths(sessionId, paths)
-  }
-
-  getTouchedPaths(sessionId: string): string[] {
-    return this.sessions.getTouchedPaths(sessionId)
-  }
-
-  recordCommit(projectId: string, sha: string, sessionId: string): void {
-    return this.sessions.recordCommit(projectId, sha, sessionId)
-  }
-
-  commitSessions(projectId: string): { sha: string; sessionId: string }[] {
-    return this.sessions.commitSessions(projectId)
-  }
-
-  markRead(sessionId: string, seq: number): void {
-    return this.sessions.markRead(sessionId, seq)
   }
 
   // ── MessageRecords (store/messages.ts) ──

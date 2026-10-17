@@ -331,7 +331,7 @@ export class ExternalConversations {
     this.host.store.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
     info.lastSeq = base + fresh.length - 1
     // This is a message that happened outside — since it was never read here, it stays marked unread
-    this.host.store.upsertSession(info)
+    this.host.store.sessions.upsertSession(info)
     mark()
     return fresh.length
   }
@@ -383,7 +383,7 @@ export class ExternalConversations {
       const firstUser = history.find((h) => h.role === 'user')
       if (firstUser && firstUser.role === 'user') info.name = truncate(firstUser.text)
     }
-    this.host.store.upsertSession(info)
+    this.host.store.sessions.upsertSession(info)
     this.host.emit({ type: 'session_title', sessionId: info.id, title: info.name, auto: true })
   }
 

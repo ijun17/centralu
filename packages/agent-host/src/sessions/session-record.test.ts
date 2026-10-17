@@ -21,7 +21,7 @@ const m = { id: 's', lastSeq: 0 } as SessionInfo
 function open(file?: string) {
   store = new Store(file)
   store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  store.upsertSession({
+  store.sessions.upsertSession({
     id: 's', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 's', autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,

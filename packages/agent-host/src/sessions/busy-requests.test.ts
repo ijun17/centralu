@@ -669,7 +669,7 @@ describe('a queued request across a host swap (#677)', () => {
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
       await w.mgr.detachAll()
       // Lowered where no settings change ran on a host that held the queue (as when it was lowered mid-delivery)
-      w.store.upsertSession({ ...w.store.listSessions().find((x) => x.id === asker)!, permissionPreset: 'normal' })
+      w.store.sessions.upsertSession({ ...w.store.sessions.listSessions().find((x) => x.id === asker)!, permissionPreset: 'normal' })
       if (row === 'written by an older build') {
         ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare('UPDATE queued_requests SET opened_by_auto = NULL').run()
       }

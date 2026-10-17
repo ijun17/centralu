@@ -22,7 +22,7 @@ function session(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
 function seeded(): Store {
   const s = new Store()
   s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  s.upsertSession(session('s1'))
+  s.sessions.upsertSession(session('s1'))
   return s
 }
 
@@ -57,9 +57,9 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
 
   it('the session list keeps every session when one scope list is not JSON', () => {
     const s = seeded()
-    s.upsertSession(session('c1', { kind: 'coordinator', scopeSessionIds: ['s1'] }))
+    s.sessions.upsertSession(session('c1', { kind: 'coordinator', scopeSessionIds: ['s1'] }))
     dbOf(s).prepare(`UPDATE sessions SET scope_session_ids = '["s1"' WHERE id = 'c1'`).run()
-    const listed = s.listSessions()
+    const listed = s.sessions.listSessions()
     expect(listed.map((x) => x.id).sort()).toEqual(['c1', 's1'])
     // Still a coordinator, now one that sees no session: an unreadable list grants nothing
     expect(listed.find((x) => x.id === 'c1')).toMatchObject({ kind: 'coordinator', scopeSessionIds: [] })
@@ -79,7 +79,7 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
 
   it('the trash keeps listing when a record is JSON but not an object', async () => {
     const s = seeded()
-    s.upsertSession(session('s2'))
+    s.sessions.upsertSession(session('s2'))
     const keep = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', removeExternal: false, removeWorktree: false }
     await s.trashSession('s1', keep)
     await s.trashSession('s2', keep)

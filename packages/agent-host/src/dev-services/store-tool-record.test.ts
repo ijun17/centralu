@@ -14,7 +14,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 const session = (s: Store, id: string) =>
-  s.upsertSession({
+  s.sessions.upsertSession({
     id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,

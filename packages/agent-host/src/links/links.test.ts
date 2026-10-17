@@ -163,7 +163,7 @@ function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boo
 }
 
 function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
-  store.upsertSession({
+  store.sessions.upsertSession({
     id,
     projectId,
     kind,
@@ -1096,7 +1096,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     talk(remoteStore, 'coord', [['lead', 'zebracrossing from a coordinator']])
     // A child under w1 makes it a worktree manager there: a seat that directs, whose input the injection gate guards (#120)
     if (o.worktreeChild) seedSession(remoteStore, 'p-remote', 'kid', 'worker')
-    if (o.worktreeChild) remoteStore.upsertSession({ ...remoteStore.listSessions().find((s) => s.id === 'kid')!, parentSessionId: 'w1' })
+    if (o.worktreeChild) remoteStore.sessions.upsertSession({ ...remoteStore.sessions.listSessions().find((s) => s.id === 'kid')!, parentSessionId: 'w1' })
     const remote = await remoteHost(0, remoteStore)
 
     const hubStore = new Store()

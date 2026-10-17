@@ -304,7 +304,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
   /** A hub with its orchestrator, and links that accept every send and say the session finished with "all done" */
   async function hub() {
     const store = new Store()
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
       state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,

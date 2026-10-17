@@ -158,7 +158,7 @@ export class SessionRecord {
       changed = true
     }
     if (!changed) return
-    this.host.store.upsertSession(m)
+    this.host.store.sessions.upsertSession(m)
     this.host.emit({
       type: 'settings_changed',
       sessionId: m.id,

@@ -136,7 +136,7 @@ describe('a session at rest stays at rest (#428)', () => {
     a.h.turn()
     a.h.backgroundCall = 'toolu_bg'
     await a.mgr.disposeAll()
-    expect(store.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
+    expect(store.sessions.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
 
     const b = host()
     const after = b.mgr.listSessions().find((x) => x.id === a.s.id)!

@@ -50,7 +50,7 @@ export function withStore(db: string, fn: (store: Store) => void): void {
 }
 
 export function seedSession(store: Store, projectId: string, id: string, name: string): void {
-  store.upsertSession({
+  store.sessions.upsertSession({
     id,
     projectId,
     kind: 'worker',

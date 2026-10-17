@@ -156,7 +156,7 @@ export class QueuedRequests {
     }
     const from = { sessionId: caller.id, name: labelOf(this.host.store, caller) }
     const project = this.host.projectRow(m.projectId)
-    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
+    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
     let d: Delegation | undefined
     try {
       if (r.via === 'send_to_session') {

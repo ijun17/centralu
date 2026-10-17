@@ -168,7 +168,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
     await a.mgr.detachAll()
-    expect(store.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
+    expect(store.sessions.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])

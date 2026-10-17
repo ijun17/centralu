@@ -14,7 +14,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 const session = (s: Store, id: string) =>
-  s.upsertSession({
+  s.sessions.upsertSession({
     id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -88,7 +88,7 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     steps(s)
     expect(s.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
     expect(s.loadMessagesFrom('s1', 0, 200, { full: true })).toEqual(conversation)
-    expect(s.listSessions().find((x) => x.id === 's1')?.lastSeq).toBe(2)
+    expect(s.sessions.listSessions().find((x) => x.id === 's1')?.lastSeq).toBe(2)
     expect(s.nextSeq('s1')).toBe(3)
     // Not indexed, its words included: the parent's own report is what is searchable
     expect(s.searchMessages('zebracorn').map((h) => h.seq)).toEqual([1])

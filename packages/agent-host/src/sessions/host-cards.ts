@@ -212,7 +212,7 @@ export class HostCards {
       return
     }
     this.host.applyStateHint(e, m)
-    this.host.store.upsertSession(m)
+    this.host.store.sessions.upsertSession(m)
     this.host.emit(e)
   }
 

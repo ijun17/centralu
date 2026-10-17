@@ -629,7 +629,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
           ...sessionLiveDefaults(),
         })
       // The row goes in first: a subagent's steps refer to their session
-      store.upsertSession(info(0, 0))
+      store.sessions.upsertSession(info(0, 0))
       const s = seedSession(store, g, m, {
         id,
         projectId: project.id,
@@ -651,7 +651,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
       images += s.images
       imageBytes += s.imageBytes
       // Most are read; every fourth has a few unread rows, as a morning's sidebar does
-      store.upsertSession(info(s.lastSeq, si % 4 === 1 ? Math.max(0, s.lastSeq - g.int(3, 40)) : s.lastSeq))
+      store.sessions.upsertSession(info(s.lastSeq, si % 4 === 1 ? Math.max(0, s.lastSeq - g.int(3, 40)) : s.lastSeq))
       sessions.push({ id, name, projectId: project.id, tool, rows: s.rows, lastSeq: s.lastSeq })
     })
 

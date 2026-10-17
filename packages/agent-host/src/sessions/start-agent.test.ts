@@ -1289,8 +1289,8 @@ describe('starting another agent in the same project', () => {
       const s = await session()
       const c = await startRunning(s)
       await w.mgr.detachAll()
-      const row = w.store.listSessions().find((child) => child.id === c)!
-      w.store.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
+      const row = w.store.sessions.listSessions().find((child) => child.id === c)!
+      w.store.sessions.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
       const next = new SessionManager(w.store, w.adapters, (e) => w.events.push(e))
       try {
         expect(await next.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', sessionId: c })

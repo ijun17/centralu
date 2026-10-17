@@ -413,7 +413,7 @@ describe('codex /goal — runs as a function', () => {
   it("the confirmation is a row of its own, never glued onto the model's open reply", async () => {
     const store = new Store()
     store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 's1', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
       verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,

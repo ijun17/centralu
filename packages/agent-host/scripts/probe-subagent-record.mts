@@ -101,7 +101,7 @@ const inConversation = rows.filter((r) => stepCalls.includes((r.payload as { cal
 console.log(`subagent calls among the conversation's rows: ${inConversation.length}`)
 console.log(`search hits that are not conversation rows: ${store.searchMessages('sub-probe-ok').filter((h) => !rows.some((r) => r.seq === h.seq)).length}`)
 
-const externalId = store.listSessions().find((s) => s.id === session.id)?.externalId
+const externalId = store.sessions.listSessions().find((s) => s.id === session.id)?.externalId
 await mgr.disposeAll()
 // The tool's own copy of this throwaway conversation goes too (Codex: the parent's delete takes its children's rollouts)
 if (externalId) await adapters.get(tool)?.deleteExternalConversation?.(externalId, cwd).catch(() => {})

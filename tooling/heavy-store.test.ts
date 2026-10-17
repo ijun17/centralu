@@ -85,7 +85,7 @@ describe('heavy-store fixture', () => {
     try {
       expect(
         store
-          .listSessions()
+          .sessions.listSessions()
           .map((s) => s.id)
           .sort(),
       ).toEqual(a.sessions.map((s) => s.id).sort())

@@ -33,7 +33,7 @@ describe('session creation failure', () => {
     ).rejects.toThrow('Could not start')
 
     expect(mgr.listSessions()).toHaveLength(0)
-    expect(store.listSessions()).toHaveLength(0)
+    expect(store.sessions.listSessions()).toHaveLength(0)
     store.close()
   })
 

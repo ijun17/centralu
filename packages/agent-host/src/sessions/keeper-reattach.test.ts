@@ -174,7 +174,7 @@ describe('a host restart under the keeper', () => {
     await a.mgr.detachAll()
     expect(a.claude.last.detached).toBe(true)
     expect(a.claude.last.disposed).toBe(false)
-    expect(store.listSessions().find((s) => s.id === id)!.state).toBe('working')
+    expect(store.sessions.listSessions().find((s) => s.id === id)!.state).toBe('working')
     const texts = store.loadMessages(id, 50).map((r) => JSON.stringify(r.payload))
     expect(texts.some((t) => t.includes('last words before the restart'))).toBe(true)
   })

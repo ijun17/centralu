@@ -394,7 +394,7 @@ export class SessionManager {
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
     const stoppedByQuit: SessionInfo[] = []
-    for (const s of store.listSessions()) {
+    for (const s of store.sessions.listSessions()) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
@@ -408,7 +408,7 @@ export class SessionManager {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.interruptions.markStoppedByQuit(fixed, false)
-        store.upsertSession(fixed)
+        store.sessions.upsertSession(fixed)
         stoppedByQuit.push(fixed)
       }
     }
@@ -481,7 +481,7 @@ export class SessionManager {
       if (!s.worktree || !s.autoNamed || s.name !== 'New session') continue
       const renamed = { ...s, name: s.worktree.branch }
       this.meta.set(s.id, renamed)
-      this.store.upsertSession(renamed)
+      this.store.sessions.upsertSession(renamed)
     }
   }
 
@@ -776,7 +776,7 @@ export class SessionManager {
     const replacement = [...orderedIds.filter((id) => mine.has(id)), ...rest]
     let k = 0
     const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
-    this.store.setSessionOrder(globalOrder)
+    this.store.sessions.setSessionOrder(globalOrder)
     // Reorder the in-memory copy too — saving alone leaves it out of sync with the screen until the next
     // launch
     const rank = new Map(globalOrder.map((id, i) => [id, i]))
@@ -1187,11 +1187,11 @@ export class SessionManager {
     }
 
     this.meta.set(id, info)
-    this.store.upsertSession(info)
+    this.store.sessions.upsertSession(info)
     if (noCodeIntelligence) this.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
     this.launches.rememberToolPrefix(id)
     this.launches.rememberLaunchSettings(info, cwd)
-    this.store.setSessionCwd(id, cwd)
+    this.store.sessions.setSessionCwd(id, cwd)
     /*
      * Lets the UI learn about this session **through an event too** (#69).
      *
@@ -1265,7 +1265,7 @@ export class SessionManager {
     // that if the host died before the first response, the session could never be resumed again (FR-10).
     if (handle.externalId) {
       info.externalId = handle.externalId
-      this.store.upsertSession(info)
+      this.store.sessions.upsertSession(info)
     }
 
     // Fetches skills ahead of time while the session is still alive.
@@ -1331,7 +1331,7 @@ export class SessionManager {
       ])
       info.lastSeq = seq
       info.lastReadSeq = seq // Something we sent counts as read
-      this.store.upsertSession(info)
+      this.store.sessions.upsertSession(info)
       this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       this.cardRests.turnAsked(id)
       handle.send(params.initialPrompt)
@@ -1543,7 +1543,7 @@ export class SessionManager {
             const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
             this.applyStateHint(change, m)
             this.interruptions.markStoppedByQuit(m, true)
-            this.store.upsertSession(m)
+            this.store.sessions.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
             if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
@@ -1794,7 +1794,7 @@ export class SessionManager {
          * running, and a waiting approval has been, or is about to be, re-delivered by the tool —
          * which sets the state itself. Forcing `idle` here would tear down that fresh card.
          */
-        this.store.upsertSession(m)
+        this.store.sessions.upsertSession(m)
         this.emit({ type: 'state_change', sessionId, state: m.state, reason: 'reattached' })
         /*
          * And it keeps its background work (#648): the shells the previous host saw running still run in it, and the
@@ -1900,7 +1900,7 @@ export class SessionManager {
       // Deleted or switched while the tool forked (#839): the copy read before is not written back
       if (this.meta.get(sessionId) !== m || m.tool !== tool) return { session: m, resumed: false, reason: 'The session was deleted or switched tools while its conversation was forked' }
       m.externalId = forked
-      this.store.upsertSession(m)
+      this.store.sessions.upsertSession(m)
     } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
     }
@@ -1969,7 +1969,7 @@ export class SessionManager {
     if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
     const wasAuto = m.permissionPreset === 'auto'
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     if (wasAuto && m.permissionPreset !== 'auto') this.queue.dropOpenedByAuto(sessionId)
     /*
      * The model and effort chosen most recently become this project's default (#69, item 5). The
@@ -2181,7 +2181,7 @@ export class SessionManager {
         if (e.type === 'message_image') void this.record.persistImage(e, m)
         // Commit attribution (#50) — caught in passing whenever a git commit tool call goes by
         if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
-        this.store.upsertSession(m)
+        this.store.sessions.upsertSession(m)
       }
       /*
        * **A dead process's handle is removed right on the spot.**
@@ -2300,7 +2300,7 @@ export class SessionManager {
     // The host has said what the state is: no card rest or asked-for turn of before stands over it
     this.cardRests.forget(m.id)
     this.applyStateHint(change, m)
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     this.emit(change)
     // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
     if (!inTurn(m.state) && this.children.queued.has(m.id)) this.queue.scheduleDrain(m.id)
@@ -2386,11 +2386,11 @@ export class SessionManager {
     if (!e.ok || !projectId) return
     const sha = parseCommitSha(e.summary)
     if (sha) {
-      this.store.recordCommit(projectId, sha, sid)
+      this.store.sessions.recordCommit(projectId, sha, sid)
       return
     }
     void gitHeadSha(this.cwdOf(projectId))
-      .then((head) => head && this.store.recordCommit(projectId, head, sid))
+      .then((head) => head && this.store.sessions.recordCommit(projectId, head, sid))
       .catch(() => {})
   }
 
@@ -2496,7 +2496,7 @@ export class SessionManager {
       m.name = truncate(text)
       this.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     /*
      * **Announces that a message was added.**
      *
@@ -2791,10 +2791,10 @@ export class SessionManager {
    * theirs once, here, and write it down; from then on the next rename cannot move them either.
    */
   private cwdFor(m: SessionInfo): string {
-    const stored = this.store.sessionCwd(m.id)
+    const stored = this.store.sessions.sessionCwd(m.id)
     if (stored) return stored
     const derived = m.worktree?.path ?? this.cwdOf(m.projectId)
-    this.store.setSessionCwd(m.id, derived)
+    this.store.sessions.setSessionCwd(m.id, derived)
     return derived
   }
 
@@ -2895,7 +2895,7 @@ export class SessionManager {
     // Tags which session created each commit (#50) — passes through untouched wherever there is no record
     // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
     const trashed = this.store.trashedIds()
-    return attachCommitSessions(commits, this.store.commitSessions(projectId), (sid) =>
+    return attachCommitSessions(commits, this.store.sessions.commitSessions(projectId), (sid) =>
       this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
     )
   }
@@ -3590,7 +3590,7 @@ export class SessionManager {
     const folder = canonicalPath(root)
     return [...this.meta.values()].filter((s) => {
       if (s.id === target.id) return false
-      const cwd = this.store.sessionCwd(s.id) ?? s.worktree?.path
+      const cwd = this.store.sessions.sessionCwd(s.id) ?? s.worktree?.path
       return !!cwd && isInside(folder, canonicalPath(cwd))
     })
   }
@@ -3827,7 +3827,7 @@ export class SessionManager {
    * tool process on behalf of someone who never even asked for it.
    */
   orchestratorPeek(): SessionInfo | null {
-    const known = this.store.orchestratorId()
+    const known = this.store.sessions.orchestratorId()
     return known ? (this.meta.get(known) ?? null) : null
   }
 
@@ -3864,7 +3864,7 @@ export class SessionManager {
   private orchestratorCreating: Promise<SessionInfo> | null = null
 
   async orchestrator(): Promise<SessionInfo> {
-    const known = this.store.orchestratorId()
+    const known = this.store.sessions.orchestratorId()
     if (known) {
       const m = this.meta.get(known)
       if (m) return m
@@ -3922,7 +3922,7 @@ export class SessionManager {
     if (!next) throw rpcError('Session name cannot be empty')
     m.name = next
     m.autoNamed = false
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     // auto:false — the receiving side needs to know "the person set this" in order to block the next
     // auto-name
     this.emit({ type: 'session_title', sessionId, title: next, auto: false })
@@ -3932,7 +3932,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) return
     m.lastReadSeq = Math.max(m.lastReadSeq, seq)
-    this.store.markRead(sessionId, seq)
+    this.store.sessions.markRead(sessionId, seq)
   }
 
   /** `SessionRecord.messageImage` (session-record.ts), kept on the manager for its callers */

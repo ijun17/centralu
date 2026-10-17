@@ -158,7 +158,7 @@ export class DelegationFlow {
       ? this.answerReader(child.id)
       : () => turnAnswer(this.host.store.loadMessages(child.id, 50)))
     const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
-    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(child.id) ?? project?.path ?? '' }
+    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(child.id) ?? project?.path ?? '' }
     if (!shared && subscribe) {
       const readers = this.host.turnObservers.get(child.id) ?? new Set<AgentRunWait>()
       readers.add(wait)
@@ -422,7 +422,7 @@ export class DelegationFlow {
           const full = this.starts.agentCeilingError(callerId, child.projectId ?? '')
           if (full) return { ok: false, error: full }
           const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
-          const cwd = this.host.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
+          const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
           const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
           try {
             await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)

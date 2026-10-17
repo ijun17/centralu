@@ -198,7 +198,7 @@ describe('a session recalls its own conversation from before its compaction (#97
   const put = (sessionId: string, rows: Row[]) => {
     const s = meta.get(sessionId)!
     if (s.projectId && !store.projects.listProjects().some((p) => p.id === s.projectId)) store.projects.addProject({ id: s.projectId, path: join(tmpdir(), s.projectId), name: s.projectId, trusted: s.projectId === 'p1' })
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: sessionId, projectId: s.projectId, kind: s.kind, tool: 'claude', externalId: null, name: s.name, autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
@@ -470,7 +470,7 @@ describe('a session the orchestrator creates', () => {
 describe('what read_session says of who wrote a line', () => {
   it('a line another session or an app sent carries its name; the person’s carries none', async () => {
     store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'a', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,

@@ -39,7 +39,7 @@ function newestStore(file: string): Store {
 function seeded() {
   const s = new Store()
   s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  s.upsertSession({
+  s.sessions.upsertSession({
     id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -53,7 +53,7 @@ const sp = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
 
 /** A plain worker session in `projectId`, for the grid's tests */
 function gridSession(s: Store, id: string, projectId: string) {
-  s.upsertSession({
+  s.sessions.upsertSession({
     id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -112,18 +112,18 @@ describe('v10 migration — allows a session with no project', () => {
 
     const store = new Store(file)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
-    expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
+    expect(store.sessions.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
+    expect(store.sessions.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
     expect(store.loadMessages('s1').length).toBe(1)
 
     // And now a session with no project is inserted
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
-    expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
     // Closed before the folder goes: Windows cannot delete a file that is still open
     store.close()
     rmSync(dir, { recursive: true, force: true })
@@ -177,10 +177,10 @@ describe('Store (dev sqlite)', () => {
 
   it('session upsert and listing', () => {
     const s = seeded()
-    const before = s.listSessions()[0]!
+    const before = s.sessions.listSessions()[0]!
     expect(before.autoNamed).toBe(true)
-    s.upsertSession({ ...before, name: 'auth refactor', autoNamed: false, state: 'working' })
-    const after = s.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'auth refactor', autoNamed: false, state: 'working' })
+    const after = s.sessions.listSessions()[0]!
     expect(after.name).toBe('auth refactor')
     expect(after.autoNamed).toBe(false)
     expect(after.state).toBe('working')
@@ -194,9 +194,9 @@ describe('Store (dev sqlite)', () => {
    */
   it('a tool switch is saved — it is still codex after restart', () => {
     const s = seeded()
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
-    const after = s.listSessions()[0]!
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
+    const after = s.sessions.listSessions()[0]!
     expect(after.tool).toBe('codex')
     expect(after.externalId).toBeNull()
   })
@@ -212,7 +212,7 @@ describe('Store (dev sqlite)', () => {
     const msgs = s.loadMessages('s1')
     expect(msgs.map((m) => m.seq)).toEqual([1, 2])
     expect(msgs[0]!.payload).toEqual({ text: 'hello' })
-    expect(s.listSessions()[0]!.lastSeq).toBe(2)
+    expect(s.sessions.listSessions()[0]!.lastSeq).toBe(2)
   })
 
   it('pagination: only what comes before beforeSeq', () => {
@@ -227,9 +227,9 @@ describe('Store (dev sqlite)', () => {
 
   it('the read position never moves backward', () => {
     const s = seeded()
-    s.markRead('s1', 5)
-    s.markRead('s1', 3)
-    expect(s.listSessions()[0]!.lastReadSeq).toBe(5)
+    s.sessions.markRead('s1', 5)
+    s.sessions.markRead('s1', 3)
+    expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(5)
   })
 
   it('saves and lists approval rules', () => {
@@ -269,11 +269,11 @@ describe('migrations (E-0)', () => {
     expect(hits[0]!.sessionId).toBe('s1')
 
     // The new column is usable too
-    store.setTouchedPaths('s1', ['src/a.ts'])
-    expect(store.getTouchedPaths('s1')).toEqual(['src/a.ts'])
+    store.sessions.setTouchedPaths('s1', ['src/a.ts'])
+    expect(store.sessions.getTouchedPaths('s1')).toEqual(['src/a.ts'])
 
     // v4: model and permission are also attached to an existing session (with default values)
-    const migrated = store.listSessions().find((s) => s.id === 's1')
+    const migrated = store.sessions.listSessions().find((s) => s.id === 's1')
     expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null })
 
     store.close()
@@ -376,7 +376,7 @@ describe('migrations (E-0)', () => {
     expect(seen.length).toBeGreaterThanOrEqual(5)
     for (const at of seen) expect(at.hits).toBe(at.messages)
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
-    expect(s.listSessions().map((x) => x.id)).not.toContain('s1')
+    expect(s.sessions.listSessions().map((x) => x.id)).not.toContain('s1')
     expect(s.listTrash()).toEqual([])
     expect(s.loadMessages('s1')).toEqual([])
     expect(fts()).toBe(0)
@@ -406,8 +406,8 @@ describe('migration v5 — the original conversation an import inherited', () =>
       model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     }
-    store.upsertSession(base)
-    const back = store.listSessions().find((s) => s.id === 's-import')!
+    store.sessions.upsertSession(base)
+    const back = store.sessions.listSessions().find((s) => s.id === 's-import')!
     // Even when resume issues a new identifier, which conversation it came from must survive
     expect(back.importedFrom).toBe('ext-old')
     expect(back.externalId).toBe('ext-new')
@@ -431,8 +431,8 @@ describe('migration v7 — reasoning effort', () => {
 
   it('the effort column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
-    const back = store.listSessions().find((r) => r.id === 's-effort')
+    store.sessions.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
+    const back = store.sessions.listSessions().find((r) => r.id === 's-effort')
     expect(back?.effort).toBe('xhigh')
     expect(back?.model).toBe('fable')
     store.close()
@@ -440,8 +440,8 @@ describe('migration v7 — reasoning effort', () => {
 
   it('a session with no effort chosen stays null — distinct from an empty string', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-none' }))
-    expect(store.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
     store.close()
   })
 })
@@ -464,28 +464,28 @@ describe('migration v18 — response length', () => {
 
   it('the verbosity column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
     // An update persists too — missing it from the UPDATE clause would save it only the first time and never after
-    store.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
     store.close()
   })
 
   it('a session with none chosen is null — distinct from the tool default', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-verb-none' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-verb-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
     store.close()
   })
 
   /** Response speed (v20) is the same kind of property — the same round-trip contract */
   it('the service_tier column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
-    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
-    store.upsertSession(row({ id: 's-tier', serviceTier: null }))
-    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: null }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
     store.close()
   })
 })
@@ -500,7 +500,7 @@ describe('migration v8 — sidebar order', () => {
   it('saves session order and reads it back in that order', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
-      s.upsertSession({
+      s.sessions.upsertSession({
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
@@ -508,17 +508,17 @@ describe('migration v8 — sidebar order', () => {
         ...sessionLiveDefaults(),
       })
     }
-    s.setSessionOrder(['s3', 's1', 's2'])
-    expect(s.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
+    s.sessions.setSessionOrder(['s3', 's1', 's2'])
+    expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
     s.close()
   })
 
   it('saving a session again does not disturb the order', () => {
     const s = seeded()
-    s.setSessionOrder(['s1'])
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listSessions().map((x) => x.name)).toEqual(['renamed'])
+    s.sessions.setSessionOrder(['s1'])
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
+    expect(s.sessions.listSessions().map((x) => x.name)).toEqual(['renamed'])
     s.close()
   })
 
@@ -540,7 +540,7 @@ describe('migration v9 — the grid layout', () => {
   it('comes back in the order it was placed', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
-      s.upsertSession({
+      s.sessions.upsertSession({
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
@@ -564,8 +564,8 @@ describe('migration v9 — the grid layout', () => {
   it('the layout stays put even after resaving a session', () => {
     const s = seeded()
     s.grid.setGridView([sp('s1')])
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, name: 'renamed' })
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
     expect(s.grid.listGridView()).toEqual([sp('s1')])
     s.close()
   })
@@ -793,7 +793,7 @@ describe('remembered consents between projects across builds (#384)', () => {
  */
 describe('the orchestrator marker (kind)', () => {
   const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
-    s.upsertSession({
+    s.sessions.upsertSession({
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
@@ -801,17 +801,17 @@ describe('the orchestrator marker (kind)', () => {
     })
 
   it('the central orchestrator is null when there is no marker', () => {
-    expect(seeded().orchestratorId()).toBeNull()
+    expect(seeded().sessions.orchestratorId()).toBeNull()
   })
 
   it('kind round-trips through upsert — there is one write path', () => {
     const s = seeded()
     mk(s, 'orc', null, 'orchestrator')
-    expect(s.orchestratorId()).toBe('orc')
-    expect(s.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
+    expect(s.sessions.orchestratorId()).toBe('orc')
+    expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
     // A demotion persists through the same path
     mk(s, 'orc', null, 'worker')
-    expect(s.orchestratorId()).toBeNull()
+    expect(s.sessions.orchestratorId()).toBeNull()
     s.close()
   })
 
@@ -840,9 +840,9 @@ describe('the orchestrator marker (kind)', () => {
     const after = new Store(file)
     expect(after.schemaVersion).toBe(LATEST_SCHEMA)
     // The marker with a project disappears — the conversation is untouched
-    expect(after.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
+    expect(after.sessions.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
     // The central one is untouched — the app's only orchestrator
-    expect(after.orchestratorId()).toBe('central')
+    expect(after.sessions.orchestratorId()).toBe('central')
     after.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -953,9 +953,9 @@ describe('v14 migration — remembers the directory a session was created in', (
     const store = new Store(file)
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.sessionCwd('plain')).toBe('/tmp/p1')
+    expect(store.sessions.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
-    expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
+    expect(store.sessions.sessionCwd('wt')).toBe('/tmp/wt/feature')
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -974,7 +974,7 @@ describe('v14 migration — remembers the directory a session was created in', (
 
     const store = new Store(file)
 
-    expect(store.sessionCwd('orc')).toBeNull()
+    expect(store.sessions.sessionCwd('orc')).toBeNull()
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -990,11 +990,11 @@ describe('v14 migration — remembers the directory a session was created in', (
     v13Db(file)
 
     const first = new Store(file)
-    first.setSessionCwd('plain', '/tmp/where-it-really-started')
+    first.sessions.setSessionCwd('plain', '/tmp/where-it-really-started')
     first.close()
 
     const second = new Store(file)
-    expect(second.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
+    expect(second.sessions.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1191,20 +1191,20 @@ describe('v17 migration — context usage survives a restart', () => {
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // A session that has never reported one is null — the `—` on screen is exactly this fact
-    expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
-    first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
+    expect(first.sessions.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
+    first.sessions.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
     first.close()
 
     // The host restarted — an empty reading here would be exactly the bug this issue describes
     const second = new Store(file)
-    expect(second.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
+    expect(second.sessions.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
       used: 168_000, window: 200_000, exactness: 'exact',
     })
     // A session that has not had a single turn yet is still unknown — this must read as unknown, not 0%
-    expect(second.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
+    expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the column and wipe the value
-    expect(second.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
+    expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1216,9 +1216,9 @@ describe('v17 migration — context usage survives a restart', () => {
    */
   it('a later report overwrites an earlier one', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
-    store.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
-    expect(store.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
+    store.sessions.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
+    store.sessions.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
+    expect(store.sessions.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
     store.close()
   })
 })
@@ -1226,15 +1226,15 @@ describe('v17 migration — context usage survives a restart', () => {
 describe('commit attribution (#50) — kept in our own database, not the repository', () => {
   it('records and looks up per project (the same hash: the last record wins)', () => {
     const s = new Store()
-    s.recordCommit('p1', '4ce6fc7', 's-auth')
-    s.recordCommit('p1', 'abc1234', 's-docs')
-    s.recordCommit('p2', '4ce6fc7', 's-other') // the same hash in a different project is a separate fact
-    s.recordCommit('p1', '4ce6fc7', 's-auth2') // recorded again — overwrites
-    const rows = s.commitSessions('p1')
+    s.sessions.recordCommit('p1', '4ce6fc7', 's-auth')
+    s.sessions.recordCommit('p1', 'abc1234', 's-docs')
+    s.sessions.recordCommit('p2', '4ce6fc7', 's-other') // the same hash in a different project is a separate fact
+    s.sessions.recordCommit('p1', '4ce6fc7', 's-auth2') // recorded again — overwrites
+    const rows = s.sessions.commitSessions('p1')
     expect(rows).toHaveLength(2)
     expect(rows.find((r) => r.sha === '4ce6fc7')?.sessionId).toBe('s-auth2')
-    expect(s.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
-    expect(s.commitSessions('p-none')).toEqual([])
+    expect(s.sessions.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
+    expect(s.sessions.commitSessions('p-none')).toEqual([])
   })
 })
 
@@ -1249,7 +1249,7 @@ describe('WAL checkpoint', () => {
     const path = join(dir, 'store.db')
     const s = new Store(path)
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.upsertSession({
+    s.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -1339,7 +1339,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     const file = join(dir, 'store.db')
     const s = newestStore(file)
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.upsertSession({
+    s.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
@@ -1358,7 +1358,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       { sessionId: 's1', seq: 8, role: 'assistant', kind: 'reasoning', payload: { text: '생각 ' }, ts: 8 },
       { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
     ])
-    s.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
+    s.sessions.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
     const beforeRead = s.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
     s.close()
     return { file, beforeRead }
@@ -1403,7 +1403,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     const merged = s.loadMessages('s1', 50)
     expect(merged[1]!.seq).toBe(2) // the spot where 2, 3, 4 merged is numbered 2
     // The read position (3) is unchanged, and since the first chunk (2) survives, a reply already read never comes back as unread
-    expect(s.listSessions()[0]!.lastReadSeq).toBe(3)
+    expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(3)
     s.close()
   })
 
@@ -1451,7 +1451,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     const file = join(dir, 'store.db')
     const s0 = newestStore(file)
     s0.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s0.upsertSession({
+    s0.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
@@ -1481,12 +1481,12 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
 describe('parent_session_id round-trip (#69)', () => {
   it('a parent link is saved and read back', () => {
     const s = seeded()
-    const before = s.listSessions().find((x) => x.id === 's1')!
+    const before = s.sessions.listSessions().find((x) => x.id === 's1')!
     expect(before.parentSessionId).toBeNull()
 
-    s.upsertSession({ ...before, parentSessionId: 'mgr-1' })
+    s.sessions.upsertSession({ ...before, parentSessionId: 'mgr-1' })
 
-    expect(s.listSessions().find((x) => x.id === 's1')?.parentSessionId).toBe('mgr-1')
+    expect(s.sessions.listSessions().find((x) => x.id === 's1')?.parentSessionId).toBe('mgr-1')
   })
 })
 
@@ -1821,7 +1821,7 @@ describe('the trash (#204)', () => {
       sessionId, seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `galaxy ${i}` }, ts: i,
     }))
   const session = (s: Store, id: string, projectId: string | null, over: Partial<SessionInfo> = {}) =>
-    s.upsertSession({
+    s.sessions.upsertSession({
       id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
       verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -1834,13 +1834,13 @@ describe('the trash (#204)', () => {
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
-    expect(s.orchestratorId()).toBe('orch')
+    expect(s.sessions.orchestratorId()).toBe('orch')
 
     expect(await s.trashSession('s1', KEEP_ALL)).toBe(true)
     await s.trashSession('orch', { ...KEEP_ALL, projectId: null })
 
-    expect(s.listSessions()).toEqual([])
-    expect(s.orchestratorId()).toBeNull()
+    expect(s.sessions.listSessions()).toEqual([])
+    expect(s.sessions.orchestratorId()).toBeNull()
     expect(s.grid.listGridView()).toEqual([])
     expect(s.searchMessages('galaxy')).toEqual([])
     expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
@@ -1890,12 +1890,12 @@ describe('the trash (#204)', () => {
     s.appendMessages(galaxy('s1', 5))
     s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    const before = s.listSessions()[0]!
+    const before = s.sessions.listSessions()[0]!
     await s.trashSession('s1', KEEP_ALL)
 
     const back = await s.restoreSession('s1', 'p1')
     expect(back).toEqual(before)
-    expect(s.listSessions()).toEqual([before])
+    expect(s.sessions.listSessions()).toEqual([before])
     expect(s.listTrash()).toEqual([])
     expect(s.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
@@ -1915,7 +1915,7 @@ describe('the trash (#204)', () => {
       seen.push({
         messages: s.loadMessages('s1', n).length,
         hits: s.searchMessages('galaxy', n).length,
-        listed: s.listSessions().length,
+        listed: s.sessions.listSessions().length,
       })
       setImmediate(look)
     }
@@ -1944,7 +1944,7 @@ describe('the trash (#204)', () => {
     for (const id of ['s1', 's2']) {
       s.appendMessages(galaxy(id, 3))
       s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
-      s.recordCommit('p1', `sha-${id}`, id)
+      s.sessions.recordCommit('p1', `sha-${id}`, id)
       const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
         status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
       s.appRuns.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
@@ -1984,8 +1984,8 @@ describe('the trash (#204)', () => {
     await s.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
-    s.recordCommit('p1', 'sha-s1', 's1')
-    s.recordCommit('p1', 'sha-gone', 'purged-long-ago')
+    s.sessions.recordCommit('p1', 'sha-s1', 's1')
+    s.sessions.recordCommit('p1', 'sha-gone', 'purged-long-ago')
     const run = { projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: 'view', parentRunId: null,
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
     s.appRuns.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
@@ -1994,7 +1994,7 @@ describe('the trash (#204)', () => {
     s.deleteProject('p1')
 
     expect(s.projects.listProjects()).toEqual([])
-    expect(s.listSessions()).toEqual([])
+    expect(s.sessions.listSessions()).toEqual([])
     const trash = s.listTrash()
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
     // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
@@ -2027,7 +2027,7 @@ describe('the trash (#204)', () => {
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
       expect(s.migrationsRun).toBe(LATEST_SCHEMA - 38)
-      expect(s.listSessions().map((x) => x.id)).toEqual(['old'])
+      expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['old'])
       expect(s.listTrash()).toEqual([])
       s.close()
     } finally {
@@ -2075,10 +2075,10 @@ describe('migration v44 — consent from one project to another', () => {
 describe('migration v45 — a delegated session remembers who asked', () => {
   it('round-trips askedBy, and a session nobody asked for reads it as null', () => {
     const s = seeded()
-    const [plain] = s.listSessions()
+    const [plain] = s.sessions.listSessions()
     expect(plain!.askedBy).toBeNull()
-    s.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
-    expect(s.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
+    s.sessions.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
+    expect(s.sessions.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
     s.close()
   })
 })
@@ -2091,13 +2091,13 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
     try {
       const fresh = newestStore(file)
       fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-      const base = { ...seeded().listSessions()[0]!, projectId: 'p1' }
+      const base = { ...seeded().sessions.listSessions()[0]!, projectId: 'p1' }
       const wt = (branch: string) => ({ path: `/tmp/wt/${branch}`, branch, base: 'abc' })
-      fresh.upsertSession({ ...base, id: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'kid', worktree: wt('a'), parentSessionId: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'asked', worktree: wt('b'), parentSessionId: 'mgr', askedBy: 'other' })
-      fresh.upsertSession({ ...base, id: 'plain-child', parentSessionId: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'lone', worktree: wt('c') })
+      fresh.sessions.upsertSession({ ...base, id: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'kid', worktree: wt('a'), parentSessionId: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'asked', worktree: wt('b'), parentSessionId: 'mgr', askedBy: 'other' })
+      fresh.sessions.upsertSession({ ...base, id: 'plain-child', parentSessionId: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'lone', worktree: wt('c') })
       fresh.close()
       const raw = new Database(file)
       raw.exec(`UPDATE sessions SET asked_by_session_id = NULL WHERE id = 'kid'`)
@@ -2106,9 +2106,9 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      const by = Object.fromEntries(s.listSessions().map((x) => [x.id, x.askedBy ?? null]))
+      const by = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.askedBy ?? null]))
       expect(by).toEqual({ mgr: null, kid: 'mgr', asked: 'other', 'plain-child': null, lone: null })
-      expect(s.listSessions().find((x) => x.id === 'kid')!.parentSessionId).toBe('mgr')
+      expect(s.sessions.listSessions().find((x) => x.id === 'kid')!.parentSessionId).toBe('mgr')
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
