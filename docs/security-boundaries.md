@@ -848,9 +848,10 @@ A host started with `centralu serve` on another machine is reached by the app th
 - **The token** is 32 random bytes in `<data folder>/serve.json`, created with mode 0600 (never written wider and
   narrowed later) and set back to 0600 whenever `serve` finds it wider. It is printed only by
   `centralu serve --connection`, which the client runs over SSH; the host's ready line, which also carries it, is read
-  by the launcher and passed on to nothing. It reaches the host in the environment (`CC_HOST_TOKEN`, readable only by
-  the owner), not on the command line, which every user on the machine can read with `ps`. It does not change across
-  restarts until `--rotate-token`.
+  by the launcher and passed on to nothing. It reaches the host as the first line on the host's stdin, a pipe to the
+  launcher (`CC_HOST_TOKEN_ON_STDIN=1`, #538): not on the command line, which every user on the machine can read with
+  `ps`, and not in the environment, which every process of the user can read for as long as the host runs (measured
+  below, "The front door"). It does not change across restarts until `--rotate-token`.
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
@@ -908,7 +909,11 @@ Limits:
   boundary between processes of the same user, and is not meant to be one.
 - `relaunching` (#352) keeps a keeper with no window running for at most 300 s, whatever background mode says. It
   grants nothing `set_background` does not already, and only for a bounded time.
-- The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written).
+- `children` (#538) lists what the keeper holds (each child's id, pid, kind, tag and state), read-only: the child
+  socket that used to answer it now answers only the keeper's hosts.
+- The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written). On Windows the
+  host is the window's or `centralu serve`'s child, and gets its token on stdin from `centralu serve` as above; the
+  window's host makes its own and says it on its ready line.
 
 ### The front door
 
@@ -920,9 +925,13 @@ host. It changes where a client connects, not what it must prove:
   its own and checks nothing: every byte goes to the host, which still requires the token in `hello` and still
   applies the `Origin` rule to the browser's own header (the relay passes the upgrade request through unchanged).
 - **The token is the keeper's**, 16 random bytes from `/dev/urandom`, one per keeper lifetime. It reaches clients
-  only through the user-only control socket, and hosts only through their environment (`CC_HOST_TOKEN`). The host
-  deletes it from its environment once read, so terminals, agents, commands and app processes do not inherit it;
-  app processes never received `CC_*` variables anyway. It is never written to `keeper.json`, `keeper.log` or
+  only through the user-only control socket, and hosts as the first line on their stdin (#538, owner decision
+  2026-10-18): `{"token":…}`, with `CC_HOST_TOKEN_ON_STDIN=1` telling the host to read it there
+  (`lifecycle/handed-token.ts`) before the control lines that follow. Not in their environment (below). The one
+  exception is a host from before #538, whose `bundle-info.json` does not say `tokenOnStdin`: it reads only
+  `CC_HOST_TOKEN`, so the keeper still hands it the token there and says so in `keeper.log`
+  (`server/host.rs`, `prepare_host`); that happens only when the keeper starts an older build than its own (a
+  rollback, or a switch to an older window's build). It is never written to `keeper.json`, `keeper.log` or
   `host.log`.
 - **Deleting it hides it from children only, not from other processes of the same user.** Measured on macOS 27.0.1
   (build 26A434, 2026-10-11): a node process started with `CC_PROBE_SECRET=<marker>` deleted it from `process.env`
@@ -931,9 +940,12 @@ host. It changes where a client connects, not what it must prove:
   bytes back) all printed `CC_PROBE_SECRET=<marker>`; the variable set after start appeared in none of them. The
   same `sysctl` for pid 1, a root process, failed with `EINVAL`. So what a process is started with stays readable
   to every process of its user for as long as it runs; on Linux `/proc/<pid>/environ` is the same initial block
-  (not measured here). The host's own initial environment holds the token, and the control socket's `status` hands
-  it out, both to this user only: the token is not a boundary between processes of the same user, and does not try
-  to be one.
+  (not measured here). That is why the keeper and `centralu serve` stopped putting the token there (#538): a pipe's
+  bytes are read once, by the one process holding its end. What is left: the control socket's `status` and `attach`
+  hand the token to any process of this user, since every window needs it and no window is the keeper's child
+  (the owner kept that path when deciding #538; "The keeper's child socket" below is the one limited to the
+  keeper's own children). So the token is still not a boundary between processes of the same user, and does not
+  try to be one; it is no longer in any process's start environment for one to read.
 - **The Codex bridge gets a credential of its own, not the token** (#382, owner question 4, decided 2026-10-11).
   Codex starts the bridge with the front door's address and `CC_BRIDGE_TOKEN`, an HMAC of the bridge's session id
   keyed by the token (`transport/bridge-token.ts`, `bridgeAddress`). Before this the bridge held the token itself,
@@ -961,24 +973,36 @@ host. It changes where a client connects, not what it must prove:
 The keeper also holds the host's agents, terminals and commands (#280 step 2) and serves them on a second socket,
 `<data>/children.sock`. Through it a process can start a program with the arguments, folder and environment of its
 choosing, read and write an agent's stdin and stdout (its whole conversation, approvals included) or a terminal, and
-signal any child the keeper holds. The rule is the keeper socket's: **only this user's processes get in.**
+signal any child the keeper holds. The rule (#538, owner decision 2026-10-18): **only the hosts this keeper holds
+get in**, not every process of this user.
 
 - Created under `umask 077`, so it is born `0600`; every connection's peer uid is read from the kernel and the
   connection is dropped unless it is the keeper's own uid.
+- Then its peer pid, also from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS), recorded when the
+  peer connected: the connection is dropped, with a line in `keeper.log`, unless that pid is the current host's
+  (the supervisor's, its own or one handed over by the previous keeper) or a swap's standby while it is one, or the
+  pid's process group is one of theirs (a host run from source is tsx's child, in the group `spawn_host` makes the
+  host lead). Agents, terminals and commands start in sessions of their own, so they are not in a host's group.
+  Nothing is answered before the keeper names its host (`Children::answer_hosts`).
+- What the keeper holds can still be listed, read-only, through `keeper.sock` (`{"op":"children"}`), for this user's
+  tools and the integration scripts.
 - A control line is capped at 16 MiB (a spawn carries a whole environment); a host's input to a child is queued up
   to 8 MiB before the keeper stops reading it; a control connection that stops reading its events is dropped past
   8 MiB.
 - `signal` takes only TERM, KILL, INT, HUP, QUIT, USR1, USR2 and WINCH, never pid 1 or below, and is a no-op for a
   child that has exited, whose pid may already belong to someone else.
 - Children start in their own session, with the environment the host passed. The host takes `CC_KEEPER`,
-  `CC_HOST_SOURCE`, `CC_HOST_TOKEN` and `CC_FRONT_DOOR` out of its own environment before it spawns anything, so no
-  child inherits the front door's token.
+  `CC_HOST_SOURCE`, `CC_HOST_TOKEN`, `CC_HOST_TOKEN_ON_STDIN` and `CC_FRONT_DOOR` out of its own environment before
+  it spawns anything; the token is not there to begin with unless an older keeper started it.
 - The keeper stores each child's tag and parses nothing in it, and parses nothing a child says.
 
-Limits: as with `switch`, spawning lets any process of this user run a program — which it could do by itself — and
-reading a held agent's stream lets it read what that agent says, which the same user could also read from the
-agent's own transcript. It is not a boundary between processes of the same user. It is local only; Windows has no
-keeper.
+Limits: the check names processes, not code. A process that can act as the host (attach a debugger to it, or
+replace its files before it starts) gets in, and this user can do both. It closes the path where any process of this
+user, a command an agent ran included, simply connects. A pid is the kernel's record of who connected; it is not
+reused while the keeper holds that host. A host run from source and handed over by the previous keeper is in that
+keeper's session, where macOS does not tell another session the group of a process: there only the host's own pid
+is let in (a debug build's path). It is local only. Windows has no keeper; when it gets one, its child channel would
+be a named pipe whose DACL names this user, with `GetNamedPipeClientProcessId` for the same check by pid.
 
 ### The keeper handoff channel
 

@@ -197,12 +197,17 @@ the default only after it runs from `<data>/content/<version>/`.
 Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table`.
 Platforms: Linux. *Changed by #458, #459.*
 
-**ST16. Secrets travel in the environment, are read once and removed.**
+**ST16. Secrets travel on a pipe or in the environment, are read once and removed.**
 Happened: `ps` shows every argument; a shell in a project should not hold the key to every RPC (85c5b37b, #390).
-Rule: the token is never an argument. The host reads `CC_KEEPER`, `CC_HOST_SOURCE`, `CC_FRONT_DOOR` and
-`CC_HOST_TOKEN` once and deletes them from `process.env` before any child is spawned; app processes get no `CC_*` and
+Rule: the token is never an argument, and since #538 not in the host's environment either: the keeper and
+`centralu serve` write it as the first line on the host's stdin (an older host under a newer keeper still gets
+`CC_HOST_TOKEN`). The host reads `CC_KEEPER`, `CC_HOST_SOURCE`, `CC_FRONT_DOOR`, `CC_HOST_TOKEN` and
+`CC_HOST_TOKEN_ON_STDIN` once and deletes them from `process.env` before any child is spawned; app processes get no `CC_*` and
 no `CENTRALU_*` except their own id and data folder; a detached remote launcher is given no token.
-Guard: `tooling/launcher-serve.test.ts` "passes the token in the environment, never on the command line";
+Guard: `tooling/launcher-serve.test.ts` "hands the token over on stdin, never in the environment or on the command
+line"; `host/lifecycle/host-process.test.ts` "takes the token from the first line on stdin, and stdin still watches
+the parent after it (#538)"; `keeper/host_proc/tests.rs` `the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed`;
+`keeper/keeper/server/tests.rs` `a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that`;
 `tooling/launcher-serve.test.ts` "carries only the data folder, the host entry and the managed mark to a detached
 launcher, never the token"; `host/lifecycle/host-process.test.ts` "the first child the host spawns sees none of the
 launcher's variables, the token least of all (ST16)" (a real host whose login-shell probe records its environment);
