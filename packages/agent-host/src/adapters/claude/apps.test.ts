@@ -23,6 +23,8 @@ type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<stri
 const captured = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
   setCalls: [] as Record<string, unknown>[],
+  /** What the next setMcpServers answers as failed, or throws when it is an Error */
+  setFails: null as Record<string, string> | Error | null,
   /** Messages the CLI would emit — the stream yields them once the test pushes them in (conversation-view matching, B-1). */
   feed: [] as unknown[],
   wake: null as (() => void) | null,
@@ -50,7 +52,9 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
       getContextUsage: async () => undefined,
       setMcpServers: async (servers: Record<string, unknown>) => {
         captured.setCalls.push(servers)
-        return { added: [], removed: [], errors: {} }
+        const fails = captured.setFails
+        if (fails instanceof Error) throw fails
+        return { added: [], removed: [], errors: fails ?? {} }
       },
     }
   },
@@ -67,14 +71,18 @@ const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { t
 
 /** Approval cards the last session raised for the person */
 let cards = 0
+/** Notices the last session raised */
+let notices: string[] = []
 
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
   cards = 0
+  notices = []
   handle = await new ClaudeAdapter().createSession(
     // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
     (e) => {
       if (e.type === 'approval_request') cards++
+      if (e.type === 'notice') notices.push(e.text)
     },
   )
   return handle
@@ -111,6 +119,7 @@ async function connect(server: string) {
 beforeEach(() => {
   captured.options = null
   captured.setCalls = []
+  captured.setFails = null
   captured.feed = []
   captured.wake = null
   w = attachWorld(kit)
@@ -229,6 +238,27 @@ describe('an attached app changing is followed without a restart', () => {
     expect(Object.keys(last()!).sort()).toEqual(['app-fresh', 'app-notes', 'app-tasks'])
     // The object has to stay the same for the SDK to keep the connection as-is — a new object either gets ignored (same name) or drops and reattaches.
     expect(last()!['app-notes']).toBe(notes)
+  })
+
+  // #841 item 8: logged only, an app that never attached looked like an app with no tools
+  it('says in the session when Claude Code could not attach an app, or could not change the set', async () => {
+    await start(WORKER)
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      captured.setFails = { 'app-fresh': 'connection refused\nat …' }
+      w.plant('p1', 'fresh')
+      w.rt.refresh()
+      await kit.until(() => notices.length, (n) => n === 1)
+      expect(notices[0]).toContain('could not attach app-fresh (connection refused)')
+
+      captured.setFails = new Error('query closed')
+      rmSync(join(w.roots.p1, '.centralu', 'apps', 'fresh'), { recursive: true, force: true })
+      w.rt.refresh()
+      await kit.until(() => notices.length, (n) => n === 2)
+      expect(notices[1]).toContain("could not update this session's apps (query closed)")
+    } finally {
+      quiet.mockRestore()
+    }
   })
 
   it('calls with the server excluded from the set when an app disappears', async () => {

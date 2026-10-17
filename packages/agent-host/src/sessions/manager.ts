@@ -3719,6 +3719,19 @@ export class SessionManager {
     })
   }
 
+  noteAgentMoveFailed(sessionId: string, to: string, why: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m) return
+    this.onEvent({
+      type: 'notice',
+      sessionId,
+      level: 'warning',
+      from: 'Centralu',
+      label: 'agent update',
+      text: `${this.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
+    })
+  }
+
   /** `SessionAppWiring.useExternalApps` (session-app-wiring.ts), kept on the manager for its callers */
   useExternalApps(...a: Parameters<SessionAppWiring['useExternalApps']>): ReturnType<SessionAppWiring['useExternalApps']> {
     return this.apps.useExternalApps(...a)

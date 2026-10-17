@@ -405,7 +405,21 @@ export class SessionTrash {
          * changes" and answered delete anyway. Without force, git would refuse and nothing would ever
          * get removed at all.
          */
-        await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
+        /*
+         * A removal that fails stops the purge, and the entry stays to be tried again (#841 item 6): swallowed, the
+         * record went and the folder stayed, with nothing left in Centralu that knew of it. A folder already gone is
+         * what was asked for.
+         */
+        const path = s.worktree.path
+        const repo = record.projectPath
+        await gitWorktreeRemove(repo, path, true).catch((e: Error) => {
+          if (!existsSync(path)) return
+          // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
+          if (!existsSync(repo)) {
+            throw rpcError(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
+          }
+          throw rpcError(`Could not remove the worktree at ${path}: ${e.message.trim()}. It stays in the trash; remove the folder or fix the cause, then delete it again.`)
+        })
       }
       /*
        * The recovery files go only once the rows are gone (#647): cleared first, a failed database step would leave

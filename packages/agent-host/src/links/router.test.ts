@@ -578,6 +578,20 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(await router.handle('projects.list', {})).toEqual([expect.objectContaining({ id: 'm1.p1', unreachable: true })])
     })
 
+    // #841 item 4: a machine left out made "the trash is empty" true of the hub alone
+    it('names each machine it could not empty the trash of among what failed', async () => {
+      const { router, localAnswers, m1, m2 } = rig()
+      localAnswers['trash.empty'] = { purged: 1, failed: [] }
+      m1.reachable = false
+      m2.answers['trash.empty'] = new Error('dropped')
+      const r = (await router.handle('trash.empty', {})) as { purged: number; failed: { sessionId: string; name: string; error: string }[] }
+      expect(r.purged).toBe(1)
+      expect(r.failed).toEqual([
+        { sessionId: 'm1', name: 'Machine m1', error: expect.stringContaining('could not be reached') },
+        { sessionId: 'm2', name: 'Machine m2', error: expect.stringContaining('could not be reached') },
+      ])
+    })
+
     it('folds each machine’s approval rule ids apart, and deletes by the folded id on the right machine', async () => {
       const { router, local, localAnswers, m1, m2 } = rig()
       const rule = (id: number) => ({ id, scope: 'project', matcher: 'echo *', decision: 'allow', createdAt: 1, projectId: 'p1', sessionId: null })

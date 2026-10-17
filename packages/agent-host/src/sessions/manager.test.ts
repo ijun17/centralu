@@ -4596,6 +4596,50 @@ describe('worktree sessions', () => {
     expect(existsSync(path)).toBe(false)
   })
 
+  // #841 item 6: a removal that failed was swallowed, and the record went while the folder stayed
+  it('a worktree that cannot be removed keeps its trash entry, named in what failed, and goes on a later try', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+    await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+    // A locked worktree is refused by a single --force
+    execFileSync('git', ['worktree', 'lock', path], { cwd: repo })
+
+    const r = (await wtRpc('trash.empty', {})) as { purged: number; failed: { sessionId: string; error: string }[] }
+    expect(r.purged).toBe(0)
+    expect(r.failed).toEqual([{ sessionId: s.id, name: expect.any(String), error: expect.stringContaining(`Could not remove the worktree at ${path}`) }])
+    expect(existsSync(path)).toBe(true)
+    expect(store.trashedSession(s.id)).not.toBeNull()
+
+    execFileSync('git', ['worktree', 'unlock', path], { cwd: repo })
+    await wtRpc('trash.purge', { sessionId: s.id })
+    expect(existsSync(path)).toBe(false)
+    expect(store.trashedSession(s.id)).toBeNull()
+  })
+
+  it('a worktree whose project folder moved says to delete it by hand, and goes once that is done', async () => {
+    const s = await create(true)
+    const path = s.worktree!.path
+    await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+    const moved = `${repo}-moved`
+    renameSync(repo, moved)
+    try {
+      await expect(wtRpc('trash.purge', { sessionId: s.id })).rejects.toThrow(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
+      rmSync(path, { recursive: true, force: true })
+      await wtRpc('trash.purge', { sessionId: s.id })
+      expect(store.trashedSession(s.id)).toBeNull()
+    } finally {
+      renameSync(moved, repo)
+    }
+  })
+
+  it('a worktree folder already gone does not hold the purge', async () => {
+    const s = await create(true)
+    await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
+    rmSync(s.worktree!.path, { recursive: true, force: true })
+    await wtRpc('trash.purge', { sessionId: s.id })
+    expect(store.trashedSession(s.id)).toBeNull()
+  })
+
   it('a restored worktree session finds its worktree, and the uncommitted work in it, where it was', async () => {
     const s = await create(true)
     const path = s.worktree!.path
