@@ -133,6 +133,11 @@ export async function restartHost(): Promise<boolean> {
   return invoke<boolean>('restart_host').catch(rethrowAsError)
 }
 
+/** Quits the app (`quit_app`), rejecting with an Error that names the shell's reason */
+export async function quitApp(): Promise<void> {
+  await invoke('quit_app').catch(rethrowAsError)
+}
+
 /**
  * The receiver for a quit request (`quit-requested`) (#184). Wired up once, **before the
  * first render**.
@@ -151,7 +156,7 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   let ask: (() => void) | null = null
   void listen('quit-requested', () => {
     if (ask) ask()
-    else void invoke('quit_app')
+    else void quitApp().catch((e: Error) => console.error('Could not quit:', e.message))
   })
   return (next) => {
     ask = next
