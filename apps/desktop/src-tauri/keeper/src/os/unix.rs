@@ -293,6 +293,14 @@ pub fn kill_group_now(pid: u32) {
     let _ = signal_group(pid, libc::SIGKILL);
 }
 
+/// `N` bytes from the system's random source (`/dev/urandom`).
+pub fn random_bytes<const N: usize>() -> io::Result<[u8; N]> {
+    use std::io::Read;
+    let mut bytes = [0u8; N];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise
 /// initialization to run.
 ///

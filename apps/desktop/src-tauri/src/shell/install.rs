@@ -21,10 +21,11 @@
 //! step leaves the installed shell as it was.
 
 use std::fs::{self, DirBuilder};
-use std::io::{self, Read};
+use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use crate::keeper::{hex, sha256_file};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -143,17 +144,7 @@ pub fn tree_hash(app: &Path) -> io::Result<String> {
     files.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut all = Sha256::new();
     for (rel, path, exec) in files {
-        let mut h = Sha256::new();
-        let mut f = fs::File::open(&path)?;
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            h.update(&buf[..n]);
-        }
-        all.update(format!("{} {} {rel}\n", if exec { 'x' } else { '-' }, hex(&h.finalize())).as_bytes());
+        all.update(format!("{} {} {rel}\n", if exec { 'x' } else { '-' }, sha256_file(&path)?).as_bytes());
     }
     Ok(hex(&all.finalize()))
 }
@@ -180,10 +171,6 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf, bool)>) -> io:
 
 fn bad(msg: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The steps of `install`, so a test can make any one of them fail.

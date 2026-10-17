@@ -90,7 +90,7 @@ impl Start {
 
     /// `keeper.log` in the data folder: the keeper's stdout and stderr, and the host's stderr.
     pub fn log_path(&self) -> PathBuf {
-        self.data_dir.join("keeper.log")
+        super::log_path(&self.data_dir)
     }
 
     /// Starts `exe` as the keeper, detached into a session of its own (`client::spawn_detached`).

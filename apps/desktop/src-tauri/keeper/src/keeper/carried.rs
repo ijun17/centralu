@@ -22,15 +22,14 @@
 //! touched. `content::Origin` marks a keeper from such a folder `signed: false`.
 
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use content_verify::version::Version;
-use content_verify::{discard, MANIFEST_NAME};
+use content_verify::{discard, sha256_file, MANIFEST_NAME};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::content::{content_root, version_dir, Refusal, HOST_DIR};
 use super::exe::KEEPER_EXE;
@@ -86,7 +85,7 @@ pub fn place(data: &Path, c: &Carried, replace: bool, log: &dyn Fn(&str)) -> Res
     if inside(c.keeper) || inside(c.host) {
         return Err(Refusal::new("content", format!("{} is already inside the folder it would be copied into", c.host.display())));
     }
-    let read = |p: &Path| hash_file(p).map_err(|e| Refusal::new("content", format!("cannot read {}: {e}", p.display())));
+    let read = |p: &Path| sha256_file(p).map_err(|e| Refusal::new("content", format!("cannot read {}: {e}", p.display())));
     let want = (read(c.keeper)?, read(&c.host.join("bundle-info.json"))?);
 
     fs::DirBuilder::new()
@@ -179,7 +178,7 @@ fn intact(dest: &Path, want: &(String, String)) -> Result<(), String> {
             Ok(meta) if meta.is_file() && meta.len() == e.size => {}
             _ => return Err(format!("does not hold {} as it was copied", e.path)),
         }
-        if hash_file(&path).map_err(|err| format!("cannot read {} ({err})", e.path))? != e.sha256 {
+        if sha256_file(&path).map_err(|err| format!("cannot read {} ({err})", e.path))? != e.sha256 {
             return Err(format!("holds a changed {}", e.path));
         }
     }
@@ -202,7 +201,7 @@ fn list(top: &Path, dir: &Path, out: &mut Vec<Entry>) -> io::Result<()> {
             out.push(Entry {
                 path: rel.to_string_lossy().replace('\\', "/"),
                 size: meta.len(),
-                sha256: hash_file(&path)?,
+                sha256: sha256_file(&path)?,
                 executable: meta.permissions().mode() & 0o111 != 0,
             });
         }
@@ -226,20 +225,6 @@ fn read_only(dir: &Path, this: bool) -> io::Result<()> {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o555))?;
     }
     Ok(())
-}
-
-fn hash_file(path: &Path) -> io::Result<String> {
-    let mut f = fs::File::open(path)?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-    }
-    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 #[cfg(test)]

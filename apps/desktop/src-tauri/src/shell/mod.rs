@@ -176,7 +176,7 @@ pub fn start_keeper(
 /// A `[window]` line in `<data>/keeper.log`, where the shell, the keeper and the host write too.
 pub fn log(data: &Path, msg: &str) {
     eprintln!("[window] {msg}");
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(data.join("keeper.log")) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(crate::keeper::log_path(data)) {
         let _ = writeln!(f, "[window] {msg}");
     }
 }

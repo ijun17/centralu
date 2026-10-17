@@ -77,7 +77,7 @@ impl Started {
 
 /// Appends one line to `<data>/keeper.log`, where the keeper and the host write too.
 pub fn log(data: &Path, msg: &str) {
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(data.join("keeper.log")) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).mode(0o600).open(keeper::log_path(data)) {
         let _ = writeln!(f, "[shell] {msg}");
     }
 }

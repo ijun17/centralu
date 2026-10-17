@@ -31,6 +31,7 @@
 //! a listed path may be a symlink, and the file itself must be a regular file.
 
 mod error;
+mod hash;
 mod keys;
 mod manifest;
 pub mod version;
@@ -41,6 +42,7 @@ mod copy;
 mod place;
 
 pub use error::{Error, Fault, IoStep};
+pub use hash::{hex, sha256_file};
 pub use keys::{embedded_keys, key_id, TrustedKey};
 pub use manifest::{
     current_platform, verify_manifest, Expect, FileEntry, Manifest, MANIFEST_FORMAT,

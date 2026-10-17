@@ -149,14 +149,12 @@ fn from_status(s: &Value) -> Outcome {
 
 /// 32 hex characters from the system's random source; the shell accepts letters, digits and dashes.
 pub fn nonce() -> String {
-    use std::io::Read;
-    let mut b = [0u8; 16];
-    if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).is_err() {
+    let b = centralu_keeper_core::os::random_bytes::<16>().unwrap_or_else(|_| {
         // Only matches the report to this start; uniqueness is what matters, not secrecy.
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        b = (t ^ ((std::process::id() as u128) << 64)).to_le_bytes();
-    }
-    b.iter().map(|x| format!("{x:02x}")).collect()
+        (t ^ ((std::process::id() as u128) << 64)).to_le_bytes()
+    });
+    crate::keeper::hex(&b)
 }
 
 #[cfg(test)]
