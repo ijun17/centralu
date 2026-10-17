@@ -109,6 +109,21 @@ export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): s
 }
 
 /**
+ * The one sentence a machine's row says when its host runs with administrator rights (#702): on Windows an account in
+ * the Administrators group linked over ssh gets a full token, with no UAC split, so every agent there runs as an
+ * administrator. Not a refusal: the person may want it. The way out is a standard account with its own ssh key. Null
+ * when the host did not say so.
+ */
+export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>): { title: string; fix: string } | null {
+  if (m.elevated !== true) return null
+  const windows = m.shell === 'powershell' || m.shell === 'wsl'
+  return {
+    title: `Agents on ${m.name} run with administrator rights: ${windows ? 'Windows gives an administrator who signs in over ssh a full, elevated token' : 'its host runs as root'}.`,
+    fix: `To run them as an ordinary user, link ${m.name} through a standard account with its own ssh key.`,
+  }
+}
+
+/**
  * What the version prompt offers for a link held at `versions_differ` (plan §4): bring the older
  * side up to the newer one, or connect anyway when the protocols match. Across protocols nothing
  * connects, and the prompt says which side to update.

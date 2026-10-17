@@ -61,6 +61,7 @@ export class MachinesMock {
         install: null,
         operation: null,
         autostart: { on: false, how: spec.shell === 'posix' ? 'systemd' : 'task', linger: null },
+        elevated: null,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })

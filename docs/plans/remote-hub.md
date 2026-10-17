@@ -585,6 +585,18 @@ check waited for a hello on the link and the link does not open to a host older 
 met by the version the connection line read from the running host. WSL still does not start through WMI there
 either (the link-bound fallback ran).
 
+### 10.9c An administrator's ssh on a Windows machine (#702)
+
+During the #14 real-use check a remote terminal's title read `Administrator: …powershell.exe`: Windows OpenSSH gives
+an account in the Administrators group a full, elevated token for a network logon, with no UAC split, so the host the
+hub started, every agent and every tool call there ran as an administrator. On Windows that is the default for most
+single-user machines. The host now asks once at startup (`whoami /groups`: an integrity level of High or System; root
+elsewhere, `elevation.ts`) and says so in every `hello_ok` (`elevated`, additive); the hub keeps it on the row
+(`MachineInfo.elevated`) and Settings → Machines says one sentence: agents there run with administrator rights, and
+linking through a standard account with its own ssh key avoids it. Not a refusal. **Before linking a Windows machine**:
+link it through a standard (non-administrator) account if its agents should not run elevated; the account needs its
+own key in its `~/.ssh/authorized_keys` (an administrator's key goes in `administrators_authorized_keys` instead).
+
 ### 10.10 Work, in pull requests
 
 | Step | What | Estimate (agent work) |

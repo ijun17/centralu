@@ -56,6 +56,7 @@ import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
+import { detectElevation } from './elevation.js'
 
 /**
  * Agent Host entry point.
@@ -530,6 +531,12 @@ const router: Router = new Router({
   machines: () => links.all(),
   order: storeProjectOrder(store),
 })
+// Whether this host runs with administrator rights (#702): asked once, in the background; a hello before the answer says nothing
+let elevated: boolean | null = null
+void detectElevation().then((e) => {
+  elevated = e
+  if (e) console.error('[agent-host] this host runs with administrator rights (an elevated token, or root): so does every agent it starts')
+})
 const server = new HostServer({
   port: Number(values.port),
   ...(launch.startedByServe ? { servedBy: 'serve' as const } : {}),
@@ -546,6 +553,8 @@ const server = new HostServer({
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
   build: hostBuild(BUILD, launch.keeperSource),
+  // Whether it runs with administrator rights, for a hub linked to it (#702); asked once below
+  elevated: () => elevated,
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })

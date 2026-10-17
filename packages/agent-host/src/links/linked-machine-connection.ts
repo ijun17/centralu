@@ -77,6 +77,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected switchTried = false
   /** Why the install that was tried failed, kept so the retries keep saying it */
   protected switchFailure: string | null = null
+  /** Whether the remote host said in its last hello that it runs with administrator rights (#702); null: it did not say */
+  private elevated: boolean | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
 
@@ -118,6 +120,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       install: this.installed,
       operation: this.operation,
       autostart: this.bootStart,
+      elevated: this.elevated,
     }
   }
 
@@ -381,6 +384,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.client !== client) return
     this.attempt = 0
     this.refusedOnce = false
+    // Said by every hello: a host restarted unelevated (through a standard account) clears it
+    this.elevated = h.elevated ?? null
+    if (h.elevated) this.deps.log?.(`[links] ${this.name}: its host runs with administrator rights, and so does every agent it starts`)
     this.switched = null
     this.switchTried = false
     this.switchFailure = null
