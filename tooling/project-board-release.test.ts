@@ -11,10 +11,10 @@ import {
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import {
@@ -28,6 +28,7 @@ import {
   versionLines,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/versions.mjs'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -177,13 +178,8 @@ describe('the version rules', () => {
 
 // --- The app, against a fake gh and real git ---------------------------------------------------------
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const json = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0) }
 const R = 'repos/ijun17/centralu'
@@ -317,13 +313,13 @@ function registryServer() {
       registryAsked?.()
       await registryHold
     }
-    const st = JSON.parse(readFileSync(statePath, 'utf8')) as State
+    const st = gh.state<State>()
     const m = /^\/(.+)\/([^/]+)$/.exec(req.url ?? '')
     const name = m ? decodeURIComponent(m[1]!) : ''
     const hidden = st.registryHidden?.[name] ?? 0
     if (hidden > 0) {
       st.registryHidden![name] = hidden - 1
-      writeFileSync(statePath, JSON.stringify(st))
+      gh.setState(st)
     }
     if (!m || hidden > 0 || !st.registry || !(name in st.registry)) return void res.writeHead(404).end('{}')
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ name, version: m[2], ...(st.registry[name] ? { gitHead: st.registry[name] } : {}) }))
@@ -340,8 +336,7 @@ let root = ''
 /** Where git is, when the PATH has to be told (gitWrapper) */
 let gitDirs: string[] = []
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 let registry: { url: string; close: () => Promise<void> } | null = null
 /** While set, the registry answers only once it settles; `registryAsked` is called on each request */
 let registryHold: Promise<void> | null = null
@@ -349,12 +344,9 @@ let registryAsked: (() => void) | null = null
 
 beforeEach(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  gitDirs = gitWrapper(join(root, 'bin'))
-  statePath = join(root, 'state.json')
-  logPath = join(root, 'gh.log')
+  mkdirSync(join(root, 'data'))
+  gh = fakeGh(root, FAKE_GH)
+  gitDirs = gitWrapper(gh.bin)
   const state: State = {
     permissions: { admin: true, maintain: true, push: true },
     ci: 'green',
@@ -364,8 +356,7 @@ beforeEach(async () => {
     jobs: {},
     pending: {},
   }
-  writeFileSync(statePath, JSON.stringify(state))
-  writeFileSync(logPath, '')
+  gh.setState(state)
   registry = await registryServer()
 })
 
@@ -393,7 +384,7 @@ function runtime(ignore?: string[]) {
     projects: () => [{ id: 'p1', path: projectPath, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10', PROJECT_BOARD_CI_POLL_MS: '10', PROJECT_BOARD_NPM_REGISTRY: registry!.url },
+    env: gh.env({ GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10', PROJECT_BOARD_CI_POLL_MS: '10', PROJECT_BOARD_NPM_REGISTRY: registry!.url }, gitDirs),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -406,18 +397,8 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const ghWrites = () =>
-  readFileSync(logPath, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string | null })
-    .filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
-const patchState = (fn: (s: State) => void) => {
-  const s = JSON.parse(readFileSync(statePath, 'utf8')) as State
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+const ghWrites = () => gh.calls().filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
+const patchState = (fn: (s: State) => void) => gh.patchState<State>(fn)
 
 const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root } }).trim()
 function commitAll(cwd: string, message: string) {
@@ -1394,7 +1375,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(plan.data.summary).toContain('Ready to cancel duplicate run 62')
     const cancelled = await call('release', { step: 'cancel_duplicate', run: 62, path: s.work, confirm: true })
     expect(cancelled.data.summary).toContain('Cancelled duplicate run 62')
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
+    expect(gh.state<State>().cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
   })
 
   /** A tagged NEXT whose release run 61 waits on npm-publish with `jobs` */
@@ -1430,7 +1411,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.data.lines).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: green.`)
     expect(approvals()).toHaveLength(1)
     // Every pending answer was read before the one approval
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).seq![`ci:${s.tip}`]).toEqual(['green'])
+    expect(gh.state<State>().seq![`ci:${s.tip}`]).toEqual(['green'])
   })
 
   it('without wait, the same pending CI still refuses at once', async () => {
@@ -1476,7 +1457,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.data.lines).toContain('This is the shim: the last moment anything is reversible (docs/releasing.md).')
     expect(r.data.lines.join(' ')).toContain(`the ${REGISTRY_NAMES.length} packages it needs are on the registry at ${NEXT} from ${s.tip.slice(0, 7)}`)
     expect(approvals()).toHaveLength(1)
-    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).registryHidden).toEqual({ [REGISTRY_NAMES[0]!]: 0 })
+    expect(gh.state<State>().registryHidden).toEqual({ [REGISTRY_NAMES[0]!]: 0 })
   })
 
   it('refuses the shim while a package is not on the registry, from another commit, or a platform job failed', async () => {

@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
+import { fakeGh } from './fake-gh.test-helpers.js'
 // @ts-expect-error — plain JavaScript policy runs in Actions without installing dependencies
 import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readAppVersion, validateLocalManifest } from '../scripts/local-manifest.mjs'
 
@@ -222,32 +223,25 @@ describe('the data-only manifest boundary', () => {
   // requestSignature is only reached after `pnpm local-update` has checked for darwin-arm64, so Windows never runs it
   it.skipIf(process.platform === 'win32')('dispatches only manifest data, watches the matching run and downloads only its signature using fake gh', async () => {
     const root = temp()
-    const bin = join(root, 'bin'); mkdirSync(bin)
-    const gh = join(bin, process.platform === 'win32' ? 'gh.cmd' : 'gh')
-    const fake = join(bin, 'fake-gh.mjs')
-    writeFileSync(fake, `import { readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
-const root = process.env.CC_LOCAL_FAKE_GH;
-const args = process.argv.slice(2);
-appendFileSync(root + '/calls', JSON.stringify(args) + '\\n');
-if (args[0] === 'workflow') writeFileSync(root + '/input', readFileSync(0));
-if (args[1] === 'list') { const m = JSON.parse(readFileSync(root + '/input')).manifest; const j = JSON.parse(m); console.log(JSON.stringify([{ databaseId: 610, displayTitle: 'local-sign ' + j.appVersion + ' ' + j.local.requestId, url: 'https://example.test/run/610' }])); }
-if (args[1] === 'download') { const dest = args[args.indexOf('--dir') + 1]; mkdirSync(dest, {recursive:true}); writeFileSync(dest + '/content-manifest.json.sig', 'signature-data'); }
+    // `gh workflow run --json` reads the inputs on stdin, without `--input`
+    const gh = fakeGh(root, String.raw`
+if (args[0] === 'workflow') { st.input = fs.readFileSync(0, 'utf8'); save() }
+if (args[1] === 'list') { const j = JSON.parse(JSON.parse(st.input).manifest); console.log(JSON.stringify([{ databaseId: 610, displayTitle: 'local-sign ' + j.appVersion + ' ' + j.local.requestId, url: 'https://example.test/run/610' }])) }
+if (args[1] === 'download') { const dest = args[args.indexOf('--dir') + 1]; fs.mkdirSync(dest, { recursive: true }); fs.writeFileSync(dest + '/content-manifest.json.sig', 'signature-data') }
 `)
-    writeFileSync(gh, process.platform === 'win32' ? `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n` : `#!/bin/sh\nexec '${process.execPath}' '${fake}' "$@"\n`)
-    chmodSync(gh, 0o755)
-    const oldPath = process.env.PATH
-    process.env.PATH = bin + (process.platform === 'win32' ? ';' : ':') + oldPath
-    process.env.CC_LOCAL_FAKE_GH = root
-    try {
-      const original = bytes(fixture())
-      const signature = await requestSignature(original, root)
-      expect(readFileSync(signature, 'utf8')).toBe('signature-data')
-      expect(JSON.parse(readFileSync(join(root, 'input'), 'utf8'))).toEqual({ manifest: original.toString('utf8'), dry_run: 'false' })
-      const calls = readFileSync(join(root, 'calls'), 'utf8')
-      expect(calls).toContain('"--ref","main"')
-      expect(calls).toContain('"watch","610","--exit-status"')
-      expect(calls).toContain('local-content-signature')
-      expect(calls).not.toContain('api')
-    } finally { process.env.PATH = oldPath; delete process.env.CC_LOCAL_FAKE_GH }
+    // requestSignature runs gh with this process's environment: the fake goes first on its PATH
+    const env = gh.env()
+    vi.stubEnv('PATH', [gh.bin, process.env.PATH].join(delimiter))
+    vi.stubEnv('FAKE_GH_STATE', env.FAKE_GH_STATE)
+    vi.stubEnv('FAKE_GH_LOG', env.FAKE_GH_LOG)
+    const original = bytes(fixture())
+    const signature = await requestSignature(original, root)
+    expect(readFileSync(signature, 'utf8')).toBe('signature-data')
+    expect(JSON.parse(gh.state().input)).toEqual({ manifest: original.toString('utf8'), dry_run: 'false' })
+    const calls = JSON.stringify(gh.calls().map((c) => c.args))
+    expect(calls).toContain('"--ref","main"')
+    expect(calls).toContain('"watch","610","--exit-status"')
+    expect(calls).toContain('local-content-signature')
+    expect(calls).not.toContain('api')
   })
 })

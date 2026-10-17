@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   commitProblems,
@@ -20,6 +20,7 @@ import {
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { topLevel } from '../.centralu/apps/project-board/git.mjs'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -154,13 +155,8 @@ describe('the rules for public text', () => {
 
 // --- The app, against a fake gh ---------------------------------------------------------------------
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const json = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0) }
 if (st.mode === 'offline') fail('error connecting to api.github.com\n')
@@ -216,8 +212,7 @@ let root = ''
 /** Where git is, when the PATH has to be told (gitWrapper) */
 let gitDirs: string[] = []
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string }
 type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean }
@@ -246,19 +241,15 @@ const pr = (number: number, extra: Partial<Pr>): Pr => ({
 beforeEach(() => {
   // The long form of the folder, which is what git answers: a runner's temp folder is named with 8.3 (RUNNER~1)
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-contribute-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  gitDirs = gitWrapper(join(root, 'bin'))
-  statePath = join(root, 'state.json')
-  logPath = join(root, 'gh.log')
+  mkdirSync(join(root, 'data'))
+  gh = fakeGh(root, FAKE_GH)
+  gitDirs = gitWrapper(gh.bin)
   const state: State = {
     mode: 'ok',
     files: { '.github/PULL_REQUEST_TEMPLATE.md': TEMPLATE, 'docs/commit-conventions.md': CONVENTIONS_DOC },
     prs: {},
   }
-  writeFileSync(statePath, JSON.stringify(state))
-  writeFileSync(logPath, '')
+  gh.setState(state)
 })
 
 afterEach(async () => {
@@ -272,7 +263,7 @@ function runtime() {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1' },
+    env: gh.env({ GIT_CONFIG_NOSYSTEM: '1' }, gitDirs),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -284,18 +275,9 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const ghCalls = () =>
-  readFileSync(logPath, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string | null })
+const ghCalls = () => gh.calls()
 const writes = () => ghCalls().filter((c) => c.args[0] === 'api' && c.args[1] === '-X')
-const patchState = (fn: (s: State) => void) => {
-  const s = JSON.parse(readFileSync(statePath, 'utf8')) as State
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+const patchState = (fn: (s: State) => void) => gh.patchState<State>(fn)
 function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }

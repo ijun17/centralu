@@ -1,11 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { decideBefore, decideCi, emptyQueue, enqueue, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, watchState } from '../.centralu/apps/project-board/queue.mjs'
@@ -501,11 +502,6 @@ function deadPid(): number {
  * the way GitHub would.
  */
 const FAKE_GH = String.raw`
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
 const out = (v) => process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v))
 const fail = (msg) => { process.stderr.write('gh: ' + msg + '\n'); process.exit(1) }
 const R = 'repos/ijun17/centralu'
@@ -537,25 +533,25 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
   out({ sha: m.sha, commit: { tree: { sha: m.tree } } })
 } else if (path === R + '/git/refs' && args.includes('POST')) {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  const body = JSON.parse(stdin)
   if ((st.refs ?? []).includes(body.ref)) fail('Reference already exists (HTTP 422)')
   write(['branch', body.ref.replace('refs/heads/', ''), body.sha])
   out({ ref: body.ref })
 } else if (path === R + '/merges') {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  const body = JSON.parse(stdin)
   write(['merge-into', body.head, body.base])
   if ((st.conflicts ?? []).includes(body.head)) fail('Merge conflict (HTTP 409)')
   if ((st.mergeErrors ?? []).includes(body.head)) fail('Not Found (HTTP 404)')
   out({ sha: 'batch-' + body.head, commit: { tree: { sha: 'tree-' + body.head } } })
 } else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  const body = JSON.parse(stdin)
   if (st.dispatchError) fail(st.dispatchError)
   write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
 } else if (path && path.includes('/statuses/')) {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  const body = JSON.parse(stdin)
   write(['status', path.split('/statuses/')[1], body.state, body.context, body.description])
   out({ id: 1, state: body.state })
 } else if (path === R) {
@@ -582,7 +578,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && path.includes('/compare/')) {
   out({ status: (st.compare ?? {})[path.split('/compare/')[1]] ?? 'ahead' })
 } else if (path && args.includes('PATCH') && /\/pulls\/\d+$/.test(path)) {
-  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  const body = JSON.parse(stdin)
   write(['base', path.split('/')[4], body.base])
   st.prs[path.split('/')[4]].baseRefName = body.base
   save()
@@ -647,17 +643,12 @@ const appRef: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
 let root = ''
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let fake: FakeGh
 
 beforeEach(() => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-queue-')))
-  for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  statePath = join(root, 'gh-state.json')
-  logPath = join(root, 'gh.log')
-  writeFileSync(logPath, '')
+  mkdirSync(join(root, 'data'))
+  fake = fakeGh(root, FAKE_GH)
 })
 
 afterEach(async () => {
@@ -666,7 +657,6 @@ afterEach(async () => {
   rmFakeDir(root)
 })
 
-const PATH = () => `${join(root, 'bin')}${delimiter}${join(root, 'node')}`
 const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
 /**
  * Without two tiers of CI unless a test asks for them (TIERS): the queue as a repository without them runs it, every
@@ -676,12 +666,12 @@ const NO_TIERS = { PROJECT_BOARD_CI_FULL_TIER: '' }
 const TIERS = { PROJECT_BOARD_CI_FULL_TIER: 'full tier' }
 
 function runtime(state?: Gh, env: Record<string, string> = {}) {
-  if (state) writeFileSync(statePath, JSON.stringify(state))
+  if (state) fake.setState(state)
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: PATH(), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, ...FAST, ...NO_TIERS, ...env },
+    env: fake.env({ ...FAST, ...NO_TIERS, ...env }),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -693,37 +683,11 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-/**
- * The fake gh's state. A fake gh process may be rewriting the file as it is read (writeFileSync is not
- * atomic, and Windows writes slower), so a read that finds it half written tries again.
- */
-function gh(): Gh {
-  for (let i = 0; ; i++) {
-    try {
-      return JSON.parse(readFileSync(statePath, 'utf8'))
-    } catch (e) {
-      if (i >= 50) throw e
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
-    }
-  }
-}
-const patchGh = (fn: (s: Gh) => void) => {
-  const s = gh()
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+/** The fake gh's state (written whole by both sides, so never read half written) */
+const gh = (): Gh => fake.state<Gh>()
+const patchGh = (fn: (s: Gh) => void) => fake.patchState<Gh>(fn)
 const writes = (): any[][] => gh().writes ?? []
-// A line a fake gh is still appending is not a call yet
-const ghCalls = () =>
-  readFileSync(logPath, 'utf8')
-    .split('\n')
-    .flatMap((l) => {
-      try {
-        return l.trim() ? [JSON.parse(l) as string[]] : []
-      } catch {
-        return []
-      }
-    })
+const ghCalls = () => fake.calls().map((c) => c.args)
 function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }
@@ -1482,7 +1446,7 @@ describe('agents find the board tool for the gh command they would type', { time
 function watch(args: string[]): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [WATCH, ...args], {
-      env: { PATH: PATH(), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, ...FAST, ...NO_TIERS },
+      env: fake.env({ ...FAST, ...NO_TIERS }),
     })
     let out = ''
     let err = ''
