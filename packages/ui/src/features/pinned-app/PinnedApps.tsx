@@ -367,8 +367,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {missing ? `Secrets · ${missing} missing` : 'Secrets'}
             </button>
           )}
-          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is */}
-          {app?.projectId && (
+          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is. A root app has none: its project's trust decides (#1141) */}
+          {app?.projectId && !app.info.root && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${

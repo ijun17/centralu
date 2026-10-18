@@ -6,7 +6,7 @@ import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
-import { TextField } from '../../components/TextField.jsx'
+import { TextField, TextInput } from '../../components/TextField.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
@@ -66,7 +66,10 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const untrusted = !!project && !project.trusted
   // Without a project: where its folder goes. Null is ~/Centralu; a typed parent is sent as typed, the host judges it
   const [parent, setParent] = useState<string | null>(null)
-  const [where, setWhere] = useState<{ parent: string; path: string | null; error: string | null } | null>(null)
+  const [where, setWhere] = useState<{ parent: string; path: string | null; error: string | null; asked: string } | null>(null)
+  // What the preview was asked for: an answer for older input does not count, so Enter in the pause before it lands waits
+  const asked = `${problem === null ? id : ''}
+${parent?.trim() ?? ''}`
   useEffect(() => {
     if (projectId) return
     let live = true
@@ -74,15 +77,15 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
     const t = setTimeout(() => {
       platform.projects
         .createPreview(problem === null ? id : '', parent?.trim() || undefined, null)
-        .then((p) => live && setWhere(p))
-        .catch((e: Error) => live && setWhere({ parent: parent ?? '', path: null, error: e.message }))
+        .then((p) => live && setWhere({ ...p, asked }))
+        .catch((e: Error) => live && setWhere({ parent: parent ?? '', path: null, error: e.message, asked }))
     }, 150)
     return () => {
       live = false
       clearTimeout(t)
     }
-  }, [platform, projectId, id, problem, parent])
-  const placed = projectId !== null || (!!where?.path && !where.error)
+  }, [platform, projectId, id, problem, parent, asked])
+  const placed = projectId !== null || (where?.asked === asked && !!where.path && !where.error)
 
   const canCreate = !busy && name.trim() !== '' && problem === null && !blocked && !untrusted && tool !== '' && placed
 
@@ -198,20 +201,23 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
                     className="shrink-0 text-ink-faint underline-offset-2 hover:text-ink hover:underline"
                     onClick={() => setParent(where?.parent ?? '')}
                     data-testid="new-app-change-parent"
+                    aria-label="Change the folder its folder goes in"
                   >
                     Change
                   </button>
                 </p>
               ) : (
                 <div className="flex items-center gap-2">
-                  <input
+                  <TextInput
                     value={parent}
                     onChange={(e) => setParent(e.target.value)}
                     placeholder="The full path of a folder"
+                    aria-label="The folder its folder goes in"
+                    font="mono"
                     spellCheck={false}
                     autoComplete="off"
                     data-testid="new-app-parent"
-                    className={`font-mono ${inputClass}`}
+                    className="min-w-0 flex-1"
                   />
                   <button
                     type="button"
@@ -240,7 +246,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
                 </p>
               )}
               {where?.error && problem === null && id !== '' && (
-                <p className="mt-1 text-danger" data-testid="new-app-location-error">
+                <p className="mt-1 text-danger" role="alert" data-testid="new-app-location-error">
                   {where.error}
                 </p>
               )}

@@ -802,6 +802,8 @@ export class ExternalApps {
       // A user-folder app is available to every project already, so only a project app carries the mark (#371)
       ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
+      // What it declares it will ask for, for the project's trust card (#1141)
+      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length) ? { uses: m.uses } : {}),
     }
   }
 

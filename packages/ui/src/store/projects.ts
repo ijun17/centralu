@@ -125,6 +125,7 @@ type ProjectActions = Pick<
   | 'createProject'
   | 'refreshProjects'
   | 'answerTrustAsk'
+  | 'askTrust'
   | 'setProjectTrusted'
   | 'deleteProject'
   | 'refreshProjectGit'
@@ -196,6 +197,10 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     })()
     projectsReading = mine
     return mine.done
+  },
+
+  askTrust(projectId) {
+    if (get().projects[projectId]) set({ trustAsk: projectId })
   },
 
   async answerTrustAsk(trust) {

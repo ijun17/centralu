@@ -24,6 +24,8 @@ type AppInfo = {
   error: string | null
   warnings: string[]
   root?: boolean
+  uses?: { agent?: boolean | string[]; apps?: string[]; host?: string[] }
+  shared?: boolean
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -801,5 +803,63 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await setApps(page, [])
     await expect(page.getByTestId('project-app-mark-board')).toHaveCount(0)
     await expect(page.getByTestId('project-board')).toBeVisible()
+  })
+
+  /*
+   * Trust follows the project, with no switch per app (owner, 2026-10-18, #1141): the trust card lists what trusting
+   * covers, each app with its name, description and what its manifest says it may ask for.
+   */
+  test("the trust card lists the project's apps, root and inner alike, with what each may ask for; the menu's trust row opens it again", async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [
+      app('board', pid, { name: 'Board', description: 'The team board\nwith more lines', dir: '/tmp/board', root: true, status: 'untrusted', trusted: false, uses: { agent: true, apps: ['notes'], host: ['sessions.list'] } }),
+      app('notes', pid, { name: 'Notes', description: 'Plain notes', status: 'untrusted', trusted: false }),
+    ])
+    const card = page.getByTestId('trust-ask-board')
+    await expect(card.getByTestId('trust-ask-apps-title-board')).toHaveText('Its 2 apps:')
+    const board = card.getByTestId(`trust-ask-app-${pid}/board`)
+    await expect(board).toContainText('Board')
+    await expect(board).toContainText('The team board')
+    await expect(board).not.toContainText('with more lines')
+    await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the orchestrator and your other projects can use it.')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: run your default agent in a new session')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: call other apps: notes')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText("the names and states of its project's sessions (sessions.list)")
+    const notes = card.getByTestId(`trust-ask-app-${pid}/notes`)
+    await expect(notes.getByTestId('trust-ask-app-uses')).toHaveText('Asks for nothing beyond its own tools.')
+    await expect(notes.getByTestId('trust-ask-app-reach')).toHaveCount(0)
+
+    // Not now, then the menu's row says it lists them, and opens the card again instead of trusting at once
+    await card.getByTestId('trust-ask-no-board').click()
+    await expect(card).toHaveCount(0)
+    await page.getByTestId('project-menu-board').click()
+    await expect(page.getByTestId('toggle-trust-board')).toHaveText('Trust this project…')
+    await page.getByTestId('toggle-trust-board').click()
+    await expect(page.getByTestId('trust-ask-board')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([])
+    await page.getByTestId('trust-ask-yes-board').click()
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([{ projectId: pid, trusted: true }])
+  })
+
+  test('a long list of apps scrolls inside the trust card', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/many')
+    await setApps(page, Array.from({ length: 12 }, (_, i) => app(`a${i}`, pid, { name: `App ${i}`, description: 'Does one thing', status: 'untrusted', trusted: false })))
+    const list = page.getByTestId('trust-ask-apps-many')
+    await expect(list.locator(':scope > li')).toHaveCount(12)
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    // The card's buttons stay in reach under it
+    await expect(page.getByTestId('trust-ask-yes-many')).toBeInViewport()
+  })
+
+  test("a root app has no share switch, in Settings or on its screen: its project's trust decides", async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('timer', pid, { name: 'Board', dir: '/tmp/board', root: true }), app('notes', pid, { name: 'Notes' })])
+    await page.getByTestId('project-app-board').click()
+    await expect(page.getByTestId(`pinned-app-${pid}/timer`)).toBeVisible()
+    await expect(page.getByTestId('pinned-share-toggle')).toHaveCount(0)
+    await openAppsSettings(page)
+    await expect(page.getByTestId(`external-app-${pid}/timer`).getByTestId('external-app-share')).toHaveCount(0)
+    // An app inside the project keeps its switch
+    await expect(page.getByTestId(`external-app-${pid}/notes`).getByTestId('external-app-share')).toBeVisible()
   })
 })

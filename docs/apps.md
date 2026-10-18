@@ -158,7 +158,12 @@ either to act.
   folder (below, #655), and the sidebar asks once with a card
   (*Trust this project? Trusting lets this project's apps run and its settings apply.*), not a modal
   dialog. It can be changed later from the project menu, or with "Trust this project" on an
-  untrusted app.
+  untrusted app. Trust follows the project, with no switch per app (owner, #1141), so the card lists
+  what trusting covers: each of the project's apps (its root app and those in `.centralu/apps`) with
+  its name, the first line of its description and what its manifest's `uses` declares, in plain words
+  (`uses` is on the app list for this, a protocol addition), and says that the project's own root
+  app then reaches the orchestrator and other projects. A long list scrolls inside the card. When
+  the project has apps, the menu's "Trust this project…" opens that card instead of trusting at once.
 - **Migration**: the `trusted` column arrived untrusted by default (store v33); then v35 marked
   **every project that existed at that moment** as trusted, once. Those were folders the person had
   chosen and worked in for weeks, and an update must not silently start ignoring their `.claude/`
@@ -330,7 +335,8 @@ ext-apps examples here, from their published npm packages, with a minimal manife
 Apps stand in the sidebar under their project. A **root app** is its project (#1141): it has no row of
 its own; the project's line carries an app mark (dimmed, with the reason in its label, when the app
 cannot run; lit while its screen shows or its view asks something), and the mark and "Open as app" in
-the project's menu open it. Its sessions (its builder, its agents) are the project's sessions. The
+the project's menu open it. The project's line is dragged onto the grid or its project screen as an
+app row is. Its sessions (its builder, its agents) are the project's sessions. The
 "Your apps" section is gone, which also settles #732's crowded bottom; a user-folder app still listed
 (a linked machine on a build from before #1141, or one this host could not move into a project)
 stands in "Other apps" above the bottom row, which is drawn only while there is one. Opening one

@@ -92,7 +92,8 @@ export function Sidebar() {
           <p className="cc-fade px-4 py-6 text-sm leading-body text-ink-faint">
             No projects yet.
             <br />
-            Start with <span className="text-ink-muted">Add project</span> below.
+            Start with <span className="text-ink-muted">Add project</span>, <span className="text-ink-muted">New folder</span> or the
+            app button below.
           </p>
         ) : (
           <div className="cc-fade">

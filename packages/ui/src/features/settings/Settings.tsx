@@ -616,11 +616,12 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
  * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
  * project app is that project's own. When on, a session in another project can find it and attach it
  * to itself for as long as it needs the tools, after the person allows that pair of projects once.
- * A user-folder app has no switch: it is the person's own and available to every project already.
+ * A user-folder app has no switch: it is the person's own and available to every project already. Nor has a root app
+ * (#1141): it follows its project's trust, which already lets it reach the person's other projects (owner, 2026-10-18).
  */
 function ShareLine({ app }: { app: ExternalCatalogApp }) {
   const setShared = useStore((s) => s.setAppShared)
-  if (app.projectId === null) return null
+  if (app.projectId === null || app.info.root) return null
   const shared = app.info.shared === true
   return (
     <label

@@ -231,6 +231,21 @@ test.describe('C-1: new app', () => {
     expect(await createdApps(page)).toEqual([{ projectId: null, id: 'daily-log', name: 'Daily log', tool: 'claude' }])
   })
 
+  test('Enter before the folder preview has caught up with a changed id does not create: it waits for the answer for that id', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => (window as any).__mock.takenPaths.add('/Users/you/Centralu/notes-2'))
+    await page.getByTestId('create-app').click()
+    const dialog = page.getByTestId('new-app-dialog')
+    await dialog.getByTestId('new-app-name').fill('Notes')
+    await expect(dialog.getByTestId('new-app-path')).toHaveText('/Users/you/Centralu/notes')
+    // The id changes to one whose folder is taken, and Enter comes at once, before the preview for it lands
+    await dialog.getByTestId('new-app-id').fill('notes-2')
+    await dialog.getByTestId('new-app-id').press('Enter')
+    await expect(dialog.getByTestId('new-app-location-error')).toHaveText('Something named "notes-2" is already in /Users/you/Centralu — choose another name.')
+    expect(await createdApps(page)).toEqual([])
+    await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+  })
+
   test('New app without a project goes in the parent the person chooses, and a name already there is refused before anything is made', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate(() => (window as any).__mock.takenPaths.add('/Users/you/code/notes'))

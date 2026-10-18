@@ -9,7 +9,7 @@ import { AppIcon, ChevronIcon, DotsIcon } from '../../../components/icons.jsx'
 import type { ExternalCatalogApp } from '../../../store/app-catalog.js'
 import { MachineBadge } from '../../machines/MachineTag.jsx'
 import { useRemoteIde } from '../../machines/remoteIde.js'
-import { PROJECT_MIME } from '../reorder.js'
+import { APP_MIME, PROJECT_MIME, projectItemMime } from '../reorder.js'
 import { foldSummary } from '../fold.js'
 import { GUTTER_WIDTH, DISCLOSURE_BUTTON, DISCLOSURE_ICON } from '../layout.js'
 import { ProjectDetail } from './ProjectDetail.jsx'
@@ -23,6 +23,7 @@ export function ProjectHeader({
   folded,
   sessions,
   rootApp,
+  appCount,
   setNewAppOpen,
   setDeleting,
 }: {
@@ -32,6 +33,8 @@ export function ProjectHeader({
   sessions: SessionSummary[]
   /** The app this project is (#1141): its manifest stands at the project's root */
   rootApp?: ExternalCatalogApp
+  /** How many apps the project holds (its root app and those in `.centralu/apps`): trusting it opens the card that lists them */
+  appCount: number
   setNewAppOpen: (open: boolean) => void
   setDeleting: (deleting: boolean) => void
 }) {
@@ -49,6 +52,7 @@ export function ProjectHeader({
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const toggleFold = useStore((s) => s.toggleProjectFold)
   const openApp = useStore((s) => s.openApp)
+  const askTrust = useStore((s) => s.askTrust)
   // The app's own screen is the one showing: the mark is lit, as an open app row's mark is
   const appShown = useStore(
     (s) =>
@@ -84,6 +88,14 @@ export function ProjectHeader({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(PROJECT_MIME, projectId)
+        /*
+         * A project that is an app (#1141) is dragged onto the grid or its project screen the way an app row was: its
+         * line is the app's row now. The project list still reads it as a project being reordered
+         */
+        if (rootApp) {
+          e.dataTransfer.setData(APP_MIME, rootApp.key)
+          e.dataTransfer.setData(projectItemMime(projectId), projectId)
+        }
         e.dataTransfer.effectAllowed = 'move'
       }}
     >
@@ -206,7 +218,9 @@ export function ProjectHeader({
           onOpenApp={openRootApp}
           // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
           onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
-          onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
+          // Trusting a project with apps opens the card that lists them (#1141); stopping is the safe way and needs no list
+          onToggleTrust={() => (!project.trusted && appCount > 0 ? askTrust(projectId) : void setProjectTrusted(projectId, !project.trusted))}
+          trustListsApps={!project.trusted && appCount > 0}
           onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}
           onDelete={() => setDeleting(true)}
         />

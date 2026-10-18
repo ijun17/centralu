@@ -151,7 +151,13 @@ export function usesLines(uses: AppUses): string[] {
   if (uses.agent === true) out.push('Run your default agent in a new session')
   else if (Array.isArray(uses.agent) && uses.agent.length) out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
   if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
-  if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.join(', ')}`)
+  if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
   return out
+}
+
+/** The host data names an app may declare (`HOST_CAPABILITIES`), in plain words; an unknown one is shown as it is */
+const HOST_DATA_WORDS: Record<string, string> = {
+  'sessions.list': "the names and states of its project's sessions (sessions.list)",
+  'git.status': "its project's branch and changed files (git.status)",
 }
 

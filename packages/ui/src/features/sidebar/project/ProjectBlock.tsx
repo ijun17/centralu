@@ -98,6 +98,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         folded={folded}
         sessions={sessions}
         rootApp={rootApp}
+        appCount={apps.length}
         setNewAppOpen={setNewAppOpen}
         setDeleting={setDeleting}
       />

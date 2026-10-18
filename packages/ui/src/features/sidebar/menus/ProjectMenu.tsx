@@ -23,6 +23,7 @@ export function ProjectMenu({
   onOpenApp,
   onNewApp,
   onToggleTrust,
+  trustListsApps,
   onOpenInVsCode,
   onDelete,
 }: {
@@ -35,6 +36,8 @@ export function ProjectMenu({
   onOpenApp?: () => void
   onNewApp?: () => void
   onToggleTrust: () => void
+  /** Trusting opens the card listing the project's apps (#1141), so the row ends in an ellipsis */
+  trustListsApps?: boolean
   /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
   onOpenInVsCode?: () => void
   onDelete: () => void
@@ -77,7 +80,7 @@ export function ProjectMenu({
         the menu, reading the label and pressing it.
       */}
       <ActionRow
-        label={project.trusted ? 'Stop trusting this project' : 'Trust this project'}
+        label={project.trusted ? 'Stop trusting this project' : trustListsApps ? 'Trust this project…' : 'Trust this project'}
         onClick={pick(onToggleTrust)}
         testId={`toggle-trust-${project.name}`}
       />
