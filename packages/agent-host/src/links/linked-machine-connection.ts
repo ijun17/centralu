@@ -3,6 +3,7 @@ import { rpcError } from '../rpc-error.js'
 import {
   isInTurn,
   transition,
+  type HostLogon,
   type MachineConnect,
   type MachineInfo,
   type MachineOperation,
@@ -120,6 +121,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private holdSaid = false
   /** Whether the remote host said in its last hello that it runs with administrator rights (#702); null: it did not say */
   private elevated: boolean | null = null
+  /** Which Windows logon the remote host said in its last hello it runs in (#1224); null: it did not say */
+  private logon: HostLogon | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
   /**
@@ -205,6 +208,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       autostart: this.bootStart,
       elevated: this.elevated,
       asks: { on: this.record.asks === true, note: this.record.asks === true ? this.asksNote : null },
+      logon: this.logon,
       connect: this.connectMode,
     }
   }
@@ -703,6 +707,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const elevated = h.elevated ?? null
     if (elevated && !this.elevated) this.deps.log?.(`[links] ${this.name}: its host runs with administrator rights, and so does every agent it starts`)
     this.elevated = elevated
+    // Said by every hello too: a host that moved into the person's sign-in clears it (#1224)
+    const logon = h.logon ?? null
+    if (logon === 'network' && this.logon !== 'network') {
+      this.deps.log?.(`[links] ${this.name}: its host runs in a network logon (started over ssh), so Git there cannot use a sign-in saved in Windows`)
+    }
+    this.logon = logon
     this.switched = null
     this.switchTried = false
     this.switchFailure = null

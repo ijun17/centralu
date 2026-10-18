@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { NormalizedEvent } from './events.js'
 import { ProtocolError } from './entities.js'
+import { HostLogon } from './host-logon.js'
 
 /** Transport envelope (docs/protocol.md §1). One WS text frame equals one value of this type. */
 
@@ -53,6 +54,13 @@ export const HelloServer = z.object({
    * administrator's network logon, or root elsewhere. Absent when the host could not tell yet, or predates it. Additive
    */
   elevated: z.boolean().optional(),
+  /**
+   * Which Windows logon the host runs in (#1224): `interactive` is the person's own sign-in (or a task that runs in it),
+   * `network` what Windows OpenSSH gives a key login, which cannot open the user's Credential Manager vault, so Git
+   * there cannot use a sign-in saved in Windows. Absent off Windows, when the host could not tell, or predates it; a
+   * value this build does not know reads as absent. Additive
+   */
+  logon: HostLogon.optional().catch(undefined),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { HostLogon } from './host-logon.js'
 
 /**
  * Linked machines (remote mode as linked hosts, #82; docs/plans/remote-hub.md).
@@ -211,6 +212,12 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
+  /**
+   * Which Windows logon the machine's host said in its hello it runs in (#1224, `HelloServer.logon`): `network` is the
+   * one Windows OpenSSH gives a key login, where Git cannot use a sign-in saved in Windows Credential Manager. Null when
+   * the host has not said (not connected yet, not Windows, or a build that predates it). Additive
+   */
+  logon: HostLogon.nullable().catch(null).default(null),
   /** When the hub opens the link (`MachineConnect`, #1134). Additive: an older hub sends nothing, which is `at_start` */
   connect: MachineConnect.catch('at_start').default('at_start'),
 })

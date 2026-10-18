@@ -12,7 +12,7 @@
 
 import { homedir } from 'node:os'
 import { posix, win32, type PlatformPath } from 'node:path'
-import { APP_NAME, APP_SLUG } from '@cc/protocol'
+import { APP_NAME, APP_SLUG, type HostLogon } from '@cc/protocol'
 
 export type Platform = NodeJS.Platform
 
@@ -237,4 +237,24 @@ export function elevatedFromGroups(stdout: string): boolean | null {
   const levels = [...stdout.matchAll(/S-1-16-(\d+)/g)].map((m) => Number(m[1]))
   if (levels.length === 0) return null
   return levels.some((l) => l >= 12288)
+}
+
+/**
+ * Which kind of Windows logon a process runs in (#1224, the protocol's `HostLogon`), from the well-known group its token carries: `interactive`
+ * (S-1-5-4: the person's own sign-in, or a scheduled task that runs in it), `network` (S-1-5-2: what Windows OpenSSH
+ * gives a key login), `batch` (S-1-5-3: a task that runs whether or not anyone is signed in) or `service` (S-1-5-6).
+ *
+ * It matters for what the person saved: only a logon that holds the sign-in's secret can open the user's
+ * Credential Manager vault. A key login over ssh has no password, so DPAPI cannot unlock the user's master key there.
+ * Measured on a linked Windows 11 PC (2026-10-19): `cmdkey /list` printed `* NONE *` from the host's children while
+ * `%LOCALAPPDATA%\Microsoft\Credentials` held 46 credential files, and Git Credential Manager could neither read nor
+ * save a sign-in. The SIDs read the same in every language.
+ */
+export function logonFromGroups(stdout: string): HostLogon | null {
+  const sids = new Set([...stdout.matchAll(/"(S-1-5-[2346])"/g)].map((m) => m[1]))
+  if (sids.has('S-1-5-4')) return 'interactive'
+  if (sids.has('S-1-5-2')) return 'network'
+  if (sids.has('S-1-5-3')) return 'batch'
+  if (sids.has('S-1-5-6')) return 'service'
+  return null
 }

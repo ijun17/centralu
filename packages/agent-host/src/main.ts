@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -62,7 +62,7 @@ import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
 import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
-import { detectElevation } from './elevation.js'
+import { detectToken } from './elevation.js'
 
 /**
  * Agent Host entry point.
@@ -604,9 +604,17 @@ const router: Router = new Router({
  * a hub gets already says it. A hello carries nothing only if `whoami` did not answer within the bound
  */
 let elevated: boolean | null = null
-const elevation = detectElevation().then((e) => {
-  elevated = e
-  if (e) console.error('[agent-host] this host runs with administrator rights (an elevated token, or root): so does every agent it starts')
+// And on Windows which logon it runs in (#1224): one `whoami` answers both
+let logon: HostLogon | null = null
+const elevation = detectToken().then((t) => {
+  elevated = t.elevated
+  logon = t.logon
+  if (t.elevated) console.error('[agent-host] this host runs with administrator rights (an elevated token, or root): so does every agent it starts')
+  if (t.logon === 'network') {
+    console.error(
+      '[agent-host] this host runs in a network logon (started over ssh), not in the Windows sign-in: Git here cannot use a sign-in saved in Windows Credential Manager',
+    )
+  }
 })
 const server = new HostServer({
   port: Number(values.port),
@@ -630,6 +638,8 @@ const server = new HostServer({
   build: hostBuild(BUILD, launch.keeperSource),
   // Whether it runs with administrator rights, for a hub linked to it (#702); asked once below
   elevated: () => elevated,
+  // Which Windows logon it runs in, for a hub linked to it (#1224); asked with the elevation
+  logon: () => logon,
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })

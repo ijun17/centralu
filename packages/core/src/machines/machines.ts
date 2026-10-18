@@ -143,6 +143,21 @@ export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>
 }
 
 /**
+ * The one sentence a machine's row says when its host runs in a network logon (#1224): the logon Windows OpenSSH gives
+ * a key login carries no password, so the user's Credential Manager vault stays locked there and Git cannot use a
+ * sign-in saved in Windows (nor save one). The way out is the person's own sign-in on that computer, where Centralu
+ * starts its host when someone is signed in (`centralu serve --detach`, through the sign-in task). An SSH remote needs
+ * no saved sign-in. Null when the host did not say so.
+ */
+export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'>): { title: string; fix: string } | null {
+  if (m.logon !== 'network') return null
+  return {
+    title: `Centralu runs on ${m.name} without your Windows sign-in, so Git there cannot use the credentials saved in Windows.`,
+    fix: `Sign in on ${m.name}: Centralu moves into your sign-in once its agents are idle. A repository with an SSH remote works either way.`,
+  }
+}
+
+/**
  * What the version prompt offers for a link held at `versions_differ` (plan §4): bring the older
  * side up to the newer one, or connect anyway when the protocols match. Across protocols nothing
  * connects, and the prompt says which side to update.

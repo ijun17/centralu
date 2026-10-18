@@ -12,6 +12,12 @@
   integrity level `whoami /groups` lists is High or System), root elsewhere. A hub shows it on that machine's row
   (`MachineInfo.elevated`). Absent while the host has not found out (it asks once, in the background, at startup) and
   from a host that predates it.
+- `hello_ok.logon` (#1224, additive) says which Windows logon the host runs in, from the same `whoami /groups`:
+  `interactive` (S-1-5-4: the person's sign-in, or a task that runs in it), `network` (S-1-5-2: what Windows OpenSSH
+  gives a key login), `batch` or `service`. A `network` host cannot open the user's Credential Manager vault (no
+  password, so DPAPI cannot unlock it), so Git there cannot use a sign-in saved in Windows; a hub shows that on the
+  machine's row (`MachineInfo.logon`). Absent off Windows, while the host has not found out, and from a host that
+  predates it; a value a build does not know reads as absent.
 - **The front door** (#280 step 3). Under the keeper a client never connects to a host's own port: it connects to the keeper's front door, `ws://127.0.0.1:<door>`, which relays the bytes to whichever host is current, and the token is the keeper's, handed to every host it starts (on the host's stdin, #538). Nothing in the frames changes: `hello`, the token check and the `Origin` rule are the host's as before. When the host is swapped, the connection through the door closes; reconnecting to the same address with the same token reaches the new host, whose `hello_ok` carries a new `streamEpoch`, so the client resyncs. A connection opened while no host is ready waits at the door (up to 45 s) rather than failing.
 - **A Codex bridge's credential** (#382). `hello.token` may instead be one session's bridge credential (`ccb1:<sessionId>:<mac>`, an HMAC of the session id keyed by the token; `transport/bridge-token.ts`), which is what the Codex bridge is started with, since its environment is readable by any process of the same user ([security-boundaries.md](security-boundaries.md), "The front door"). That socket gets `hello_ok` and no replay, no events and no terminal frames after it. An RPC other than `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools` and `apps.sessionCall`, or one whose `sessionId` is not the credential's session, is answered `ok: false` (`internal`) without running. Under the keeper the key is the front door's token, so the credential works with every host behind the door.
 - **A host draining for a swap** (#280 step 3) refuses new RPCs, and answers RPCs still running at its bound (10 s), with `internal` and `retryable: true`: a refused call never ran, and a cut one is stated in the message as possibly done, so the caller checks before it repeats. The code stays `internal` because a client drops a frame whose code it does not know.
@@ -476,6 +482,7 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   `link_bound` runs in the link's own ssh session because the machine blocks starting a process
   through WMI, and `note` says so. Additive. `elevated` (#702, additive) is what the machine's host said in its last
   hello (`hello_ok.elevated`): true when its agents run with administrator rights, null when it has not said.
+  `logon` (#1224, additive) is the same hello's `logon`, null when it has not said.
   `install` is `{ managed, current, previous }`, each version `{ version, node, source? }`; `source` (#1036, additive)
   is `{ kind: 'dev', commit, dirty }` for a dev build made there from a commit (`pnpm remote-dev`), absent for a release.
   `connect` (#1134, additive) is `at_start` (the default, and what an older hub's rows read as) or `when_needed`: such

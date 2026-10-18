@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame } from '@cc/protocol'
+import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostLogon } from '@cc/protocol'
 import { proofNonce, provesToken } from '../transport/host-proof.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -44,6 +44,8 @@ export type RemoteHello = {
   build?: HostBuild
   /** The remote host runs with administrator rights (#702); absent when it did not say */
   elevated?: boolean
+  /** Which Windows logon the remote host runs in (#1224); absent when it did not say */
+  logon?: HostLogon
 }
 
 /** `proving`: refused the `prove` itself (#838), as a host from before the proof, still running, does */
@@ -296,7 +298,7 @@ export class RemoteClient {
       this.cursorValid = true
       this.ready = true
       this.attempt = 0
-      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}) })
+      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}) })
       return
     }
     if (frame.kind === 'res') {
