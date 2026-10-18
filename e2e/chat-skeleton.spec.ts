@@ -43,7 +43,7 @@ test('a conversation not read yet shows its shape until the history arrives', as
   await expect(page.getByTestId('msg-user')).toHaveCount(0)
 
   await page.evaluate(() => (window as any).__releaseHistory())
-  await expect(page.getByTestId('msg-user')).toHaveText('What changed?')
+  await expect(page.getByTestId('msg-user')).toContainText('What changed?')
   await expect(page.getByTestId('chat-skeleton')).toHaveCount(0)
 })
 

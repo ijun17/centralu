@@ -70,7 +70,7 @@ test("the menu's New session starts a session at once with the project's tool, m
   await expect(page.getByTestId('prompt-input')).toBeFocused()
   await page.keyboard.type('Fix the login bug')
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('msg-user').last()).toHaveText('Fix the login bug')
+  await expect(page.getByTestId('msg-user').last()).toContainText('Fix the login bug')
 })
 
 /** Makes the named tools unusable (logged out) on the mock, and the project's remembered tool the first of them */

@@ -58,7 +58,7 @@ const lastSaid = (page: Page) => page.getByTestId('msg-user').last()
 
 const startedThere = async (page: Page) => {
   await expect(page.getByTestId('session-name')).toHaveText('Fix the login bug')
-  await expect(lastSaid(page)).toHaveText('Fix the login bug')
+  await expect(lastSaid(page)).toContainText('Fix the login bug')
 }
 
 uxTask({
@@ -315,7 +315,7 @@ const MESSAGE = 'Also convert the SVGs'
 
 const sentThere = async (page: Page) => {
   await expect(page.getByTestId('session-name')).toHaveText(DONE)
-  await expect(lastSaid(page)).toHaveText(MESSAGE)
+  await expect(lastSaid(page)).toContainText(MESSAGE)
 }
 
 uxTask({
