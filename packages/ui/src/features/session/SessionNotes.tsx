@@ -2,6 +2,7 @@ import type { Interruption } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { CONTINUE_TEXT, interruptionLabel } from '../../components/primitives.jsx'
+import { Button } from '../../components/Button.jsx'
 
 /*
  * The lines a session pane shows above its composer when the session will not simply hear the
@@ -46,14 +47,16 @@ export function InterruptedNote({
       <span className="min-w-0 flex-1 break-words">
         <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
       </span>
-      <button
-        className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+      <Button
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
         onClick={() => void send(sessionId, CONTINUE_TEXT)}
         title={`Sends "${CONTINUE_TEXT}"`}
         data-testid="interrupted-continue"
       >
         Continue
-      </button>
+      </Button>
     </p>
   )
 }
@@ -93,22 +96,26 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
          * untouched has to be spelled out too, or pressing it feels risky.
          */}
         {locked && (
-          <button
-            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0"
             onClick={() => void fork(sessionId)}
             title="Continue in a copy of this conversation. The original stays untouched."
             data-testid="dormant-fork"
           >
             Continue in a fork
-          </button>
+          </Button>
         )}
-        <button
-          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="shrink-0"
           onClick={() => void wake(sessionId)}
           data-testid="dormant-retry"
         >
           Retry
-        </button>
+        </Button>
       </p>
     )
   }
