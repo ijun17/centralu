@@ -44,6 +44,7 @@ export function ChatStream({
   activity,
   bottomPeek = false,
   bottomPad,
+  yieldSpace = false,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
@@ -58,6 +59,11 @@ export function ChatStream({
    * never permanently hidden under it
    */
   bottomPeek?: boolean
+  /**
+   * The conversation is empty and the new session's start screen takes the space (owner, 2026-10-18: centred in it):
+   * the list stays mounted (its scroller and measurements are kept) but takes no height.
+   */
+  yieldSpace?: boolean
   /**
    * The height (px) of the raised input card. When set, the margin below grows by **exactly
    * that card's height**.
@@ -222,7 +228,9 @@ export function ChatStream({
 
   return (
     /* The box the overlay scrollbar is placed in: the scroller's own size, so the thumb floats over its right edge */
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div
+      className={`relative flex min-h-0 flex-col ${yieldSpace ? 'h-0 flex-none overflow-hidden' : 'flex-1'}`}
+    >
       <div
         ref={scrollRef}
         onScroll={onScroll}

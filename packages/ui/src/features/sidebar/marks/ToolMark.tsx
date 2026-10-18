@@ -19,13 +19,13 @@ import { lookOf } from '../../session/look.js'
  */
 /*
  * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
- * restart. Said only in the tooltip: the mark is drawn exactly as the same session awake in the same state, because
- * sleep is nothing the person has to act on (using the session wakes it) and a fade would be mistaken for a stalled
- * session (#670). So a finished turn still looks finished and idle still looks idle.
+ * restart. Not shown at all, not even in the tooltip (owner, 2026-10-18): sleep is the app working as it should,
+ * nothing the person has to act on (using the session wakes it), and a fade would be mistaken for a stalled session
+ * (#670). So a finished turn still looks finished and idle still looks idle. `data-asleep` stays for tests.
  */
 export function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0 }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number }) {
   const meta = useToolMeta(tool)
-  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}${asleep ? ' · asleep' : ''}`
+  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
   const look = lookOf({ state, interruption, openQuestions })
 
   return (
@@ -37,7 +37,7 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
         data-testid={`tool-mark-${tool}`}
         data-state={state}
         data-interruption={interruption?.reason}
-        data-asleep={asleep || undefined} // a hook for tests and the tooltip's wording; it changes no style
+        data-asleep={asleep || undefined} // a hook for tests; it changes nothing shown
       >
         <span
           /*
