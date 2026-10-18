@@ -176,6 +176,12 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**A red run in the queue**: the queue reruns only what failed for the infrastructure's sake (a run
+cancelled with no failed job, a job that hit its timeout, a lost runner, a job on the board app's
+`queue.flakyJobs`). A test or build failure, also in a full run CI cancelled after `verify` failed
+(fail fast), comes back to the queuing session at once, naming the job and its first failure line:
+fix it and push; the queue takes the new head.
+
 **A conflict with main in the queue** (#1182): the queue merges main into your branch itself. When
 only files a command regenerates conflict (the lockfile, the schema doc, the migration goldens,
 Tauri's generated permissions: `queue.conflicts` in the board app's `project.json`), it regenerates

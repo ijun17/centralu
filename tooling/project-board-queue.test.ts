@@ -19,6 +19,8 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
+import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, decideLanding, endBatch, formBatch, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
@@ -91,18 +93,69 @@ describe('what the merge queue decides for one poll', () => {
     expect(again.action).toBeUndefined()
   })
 
-  it('reruns failed jobs once per head; failing again needs attention, naming the job; a new head starts over', () => {
+  it('reruns failed jobs once per head only for an infrastructure failure; failing again needs attention, naming the job; a new head starts over', () => {
     const failing = checksOf([check('verify', 'success'), check('windows tests', 'failure', { jobId: '12' })])
-    const first = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], defaultBranch: 'main', now: NOW, ref })
+    const timedOut = (attempt = 1, id = 900) => ({ [id]: { real: false, cause: 'timeout', job: { name: 'windows tests', id: '12' }, attempt } })
+    const first = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], failures: timedOut(), defaultBranch: 'main', now: NOW, ref })
     expect(first).toMatchObject({ action: { type: 'rerun', failedOnly: true } })
+    expect(first.event).toContain('a job that hit its timeout')
     const after = fresh({ reruns: first.patch.reruns })
     // Still running its rerun
     expect(decideCi({ item: after, pr: openPr(), checks: failing, runs: [run(null, 2)], defaultBranch: 'main', now: NOW, ref })).toEqual({ state: 'ci' })
-    const twice = decideCi({ item: after, pr: openPr(), checks: failing, runs: [run('failure', 2)], defaultBranch: 'main', now: NOW, ref })
+    const twice = decideCi({ item: after, pr: openPr(), checks: failing, runs: [run('failure', 2)], failures: timedOut(2), defaultBranch: 'main', now: NOW, ref })
     expect(twice).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'windows tests', id: '12' } } })
     expect(twice.reason.text).toContain('"windows tests" (job 12) failed twice')
     // Pushed again: the reruns belong to the old head, so the new head gets its own
-    expect(decideCi({ item: after, pr: openPr({ headRefOid: SHA2 }), checks: failing, runs: [run('failure', 1, 901)], defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', runId: 901 } })
+    expect(decideCi({ item: after, pr: openPr({ headRefOid: SHA2 }), checks: failing, runs: [run('failure', 1, 901)], failures: timedOut(1, 901), defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', runId: 901 } })
+  })
+
+  // The owner, 2026-10-19: 19 reruns on the queue's first day, most of them a test failing the same way again
+  it('never reruns a test or build failure, also in a run CI cancelled because of it (fail fast): attention at once, naming the job', () => {
+    const real = { 900: { real: true, cause: 'test', step: 'pnpm test', job: { name: 'verify', id: '11' }, attempt: 1 } }
+    const failing = checksOf([check('verify', 'failure', { jobId: '11' }), check('windows tests', 'success')])
+    const d = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], failures: real, defaultBranch: 'main', now: NOW, ref })
+    expect(d).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'verify', id: '11' } } })
+    expect(d.action).toBeUndefined()
+    expect(d.reason.text).toContain('"verify" (job 11) failed at c0ffee0 with a test or build failure (step "pnpm test")')
+    // Fail fast: verify failed, CI cancelled the rest, and the run's conclusion is cancelled
+    const failFast = checksOf([check('verify', 'failure', { jobId: '11' }), check('windows tests', 'cancelled')])
+    const ff = decideCi({ item: fresh(), pr: openPr(), checks: failFast, runs: [run('cancelled')], failures: real, defaultBranch: 'main', now: NOW, ref })
+    expect(ff).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'verify' } } })
+    expect(ff.reason.text).toContain('CI cancelled the rest of run 900 (fail fast)')
+    // Not read from its jobs for this attempt: the checks say a job failed, so no rerun either
+    expect(decideCi({ item: fresh(), pr: openPr(), checks: failFast, runs: [run('cancelled', 2)], failures: real, defaultBranch: 'main', now: NOW, ref })).toMatchObject({ state: 'attention', reason: { kind: 'failed' } })
+    // A run cancelled with no failed job is rerun, as before
+    const cancelled = checksOf([check('verify', 'cancelled'), check('windows tests', 'cancelled')])
+    expect(decideCi({ item: fresh(), pr: openPr(), checks: cancelled, runs: [run('cancelled')], defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', failedOnly: false } })
+  })
+
+  it("tells a real failure from an infrastructure one by the run's jobs, their steps and what GitHub wrote on them", () => {
+    const job = (name: string, conclusion: string | null, extra: Record<string, unknown> = {}) => ({ id: name.length, name, conclusion, steps: [], notes: [], ...extra })
+    const failedStep = { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }] }
+    const cancelledRun = { id: 1, attempt: 1, conclusion: 'cancelled' }
+    const failedRun = { id: 1, attempt: 1, conclusion: 'failure' }
+    // Fail fast: verify failed in a step, the rest cancelled → real, naming verify
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled'), job('verify', 'failure', failedStep), job('changes', 'success')])).toMatchObject({ real: true, cause: 'test', step: 'pnpm test', job: { name: 'verify' } })
+    // Cancelled with no failed job → infrastructure
+    expect(classifyRun(cancelledRun, [job('verify', 'cancelled'), job('e2e (webkit 1/5)', 'cancelled')])).toMatchObject({ real: false, cause: 'cancelled' })
+    // A job that hit its timeout: by its conclusion, or by GitHub's note on a cancelled or failed job
+    expect(classifyRun(failedRun, [job('e2e (webkit 2/5)', 'timed_out')])).toMatchObject({ real: false, cause: 'timeout' })
+    const timeoutNote = ['The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.']
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 2/5)', 'cancelled', { notes: timeoutNote })])).toMatchObject({ real: false, cause: 'timeout', job: { name: 'e2e (webkit 2/5)' } })
+    expect(classifyRun(failedRun, [job('e2e (webkit 2/5)', 'failure', { ...failedStep, notes: ["The action 'pnpm e2e' has timed out after 25 minutes."] })])).toMatchObject({ real: false, cause: 'timeout' })
+    // A test's own timeout is a test failure
+    expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
+    // A lost runner
+    const lost = ['The hosted runner: GitHub Actions 12 lost communication with the server. Anything in your workflow that terminates the runner process can cause this error.']
+    expect(classifyRun(failedRun, [job('windows tests', 'failure', { notes: lost })])).toMatchObject({ real: false, cause: 'runner' })
+    // On the known-flaky list (a pattern); a real failure beside an infrastructure one is real
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'failure', failedStep)], { flaky: ['e2e (webkit *)'] })).toMatchObject({ real: false, cause: 'flaky' })
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'failure', failedStep), job('verify', 'failure', failedStep)], { flaky: ['e2e (webkit *)'] })).toMatchObject({ real: true, job: { name: 'verify' } })
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'timed_out'), job('verify', 'failure', failedStep)])).toMatchObject({ real: true, job: { name: 'verify' } })
+    // Failed outside any step it reports, with nothing that names the runner: the session's to look at
+    expect(classifyRun(failedRun, [job('verify', 'failure')])).toMatchObject({ real: true, cause: 'no-step' })
+    expect(onFlakyList('e2e (webkit 3/5)', ['e2e (chromium *)', 'keeper e2e'])).toBe(false)
+    expect(onFlakyList('keeper e2e', ['keeper e2e'])).toBe(true)
   })
 
   it('lands a stack through its top: retargets it from a lower branch, refuses another base, and keeps the subject within 72', () => {
@@ -460,7 +513,9 @@ describe('what the merge queue decides with two tiers of CI', () => {
 
   it('reruns a quick run that failed, and waits while one still runs', () => {
     const failed = tiered([check(TIER, 'skipped'), check('verify', 'failure', { jobId: '5' }), check('windows tests', 'success')])
-    expect(ci({ checks: failed, runs: [run('failure')] })).toMatchObject({ state: 'ci', action: { type: 'rerun', failedOnly: true } })
+    expect(ci({ checks: failed, runs: [run('failure')], failures: { 900: { real: false, cause: 'runner', job: { name: 'verify', id: '5' }, attempt: 1 } } })).toMatchObject({ state: 'ci', action: { type: 'rerun', failedOnly: true } })
+    // A test that failed in it is not rerun
+    expect(ci({ checks: failed, runs: [run('failure')] })).toMatchObject({ state: 'attention', reason: { kind: 'failed' } })
     const going = tiered([check(TIER, 'skipped'), check('verify', 'success'), check('windows tests', null)])
     expect(ci({ checks: going, runs: [run(null)] })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
   })
@@ -679,6 +734,18 @@ if (args[0] === 'pr' && args[1] === 'view') {
   fail(st.rerunError)
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path)) {
   write([path.endsWith('failed-jobs') ? 'rerun-failed' : 'rerun', path.split('/')[5]])
+} else if (path && /\/actions\/runs\/\d+\/jobs\?/.test(path)) {
+  // A run's jobs and steps: as the test gives them, else its checks, a failed one failing in a step (a real failure)
+  const id = Number(path.split('/')[5])
+  if ((st.jobs ?? {})[id]) out({ jobs: st.jobs[id] })
+  else {
+    const runs = Object.values(st.runs ?? {}).flat().filter((r) => r.id === id)
+    const run = runs.sort((a, b) => (b.run_attempt ?? 1) - (a.run_attempt ?? 1))[0]
+    const checks = run ? ((st.checks ?? {})[run.head_sha] ?? []).filter((c) => (c.check_suite ?? {}).id === run.check_suite_id) : []
+    out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }] : [] })) })
+  }
+} else if (path && /\/check-runs\/\d+\/annotations/.test(path)) {
+  out((st.annotations ?? {})[path.split('/')[4]] ?? [])
 } else if (path && /\/actions\/jobs\/\d+\/logs$/.test(path)) {
   out((st.logs ?? {})[path.split('/')[5]] ?? '')
 } else if (path && path.includes('/compare/')) {
@@ -941,16 +1008,18 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().map((w) => w[0])).toEqual(['rerun'])
     const n = notices()
     expect(n).toHaveLength(1)
-    expect(n[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. #77: CI run 900 was cancelled again after one rerun at c0ffee0\./)
+    expect(n[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. #77: CI run 900 was cancelled again after one rerun at c0ffee0 \(cancelled, with no failed job\)\./)
   })
 
-  it('reruns failed jobs once; failing again names the job and its first failure, once; a new head starts over and lands', async () => {
+  it('reruns the failed jobs of a job that hit its timeout once; a test failing after it names the job and its first failure, once; a new head starts over and lands', async () => {
     const failing = [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)]
     runtime(
       ghState({
         checks: { [SHA]: failing },
         runs: { [SHA]: [ghRun('failure')] },
-        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] } } },
+        annotations: { '12': [{ message: 'The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.' }] },
+        // Its rerun fails in a test, which is not rerun
+        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] }, annotations: { '12': [] } } },
       }),
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -959,7 +1028,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await morePolls()
     expect(writes().map((w) => w[0])).toEqual(['rerun-failed'])
     expect(notices()).toHaveLength(1)
-    expect(notices()[0]!.text).toContain('required check "windows tests" (job 12) failed twice at c0ffee0')
+    expect(notices()[0]!.text).toContain('"windows tests" (job 12) failed at c0ffee0 with a test or build failure (step "pnpm test")')
     expect(notices()[0]!.text).toContain('First failure: FAIL unit packages/x.test.ts > adds numbers')
     // The session fixes it and pushes: the queue takes the new head and lands it
     patchGh((s) => {
@@ -969,6 +1038,44 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     })
     await until((x) => stateOf(x) === 'merged', 'the new head to land')
     expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA2]))
+  })
+
+  // The contract with CI: in a full run, a failed verify cancels the rest (fail fast), and the run's conclusion is cancelled
+  it.each([
+    ['failed', 'failure', 'success'],
+    ['cancelled by fail fast', 'cancelled', 'cancelled'],
+  ])('reruns nothing when verify fails in a test (run %s): attention at once, naming the job and its first failure', async (_what, conclusion, other) => {
+    runtime(
+      ghState({
+        checks: { [SHA]: [ghCheck('verify', 'failure', 12), ghCheck('windows tests', other, 13)] },
+        runs: { [SHA]: [ghRun(conclusion)] },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason).toMatchObject({ kind: 'failed', job: { name: 'verify', id: '12' } })
+    await morePolls()
+    expect(writes()).toEqual([])
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('"verify" (job 12) failed at c0ffee0 with a test or build failure (step "pnpm test")')
+    expect(notices()[0]!.text).toContain('First failure: FAIL unit packages/x.test.ts > adds numbers')
+    // Its jobs are read once for the run, not again every poll while it waits for the session
+    expect(ghCalls().filter((a) => a.some((x) => /\/actions\/runs\/900\/jobs/.test(x)))).toHaveLength(1)
+  })
+
+  it('reruns once a job whose runner was lost, and lands it when the rerun passes', async () => {
+    runtime(
+      ghState({
+        checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
+        runs: { [SHA]: [ghRun('failure')] },
+        jobs: { 900: [{ id: 11, name: 'verify', conclusion: 'success', steps: [] }, { id: 12, name: 'windows tests', conclusion: 'failure', steps: [{ name: 'pnpm test', conclusion: null }] }] },
+        annotations: { '12': [{ message: 'The hosted runner: GitHub Actions 12 lost communication with the server.' }] },
+        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
   })
 
   it('tells the session once when a pull request goes DIRTY and the queue has no checkout to merge it in, and never merges it', async () => {
@@ -1068,6 +1175,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
       ghState({
         checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
         runs: { [SHA]: [ghRun('failure')] },
+        annotations: { '12': [{ message: 'The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.' }] },
         rerunError: 'Unable to retry this workflow run because it was created over a month ago (HTTP 403)',
       }),
     )
@@ -1656,7 +1764,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
   })
 
-  it('splits a red batch: two go back to their own CI, whose cancelled runs are rerun, and land from there', async () => {
+  it('splits a red batch at once, without rerunning a test failure: two go back to their own CI, whose cancelled runs are rerun, and land from there', async () => {
     const landsAlone = (pr: number, head: string, id: number, suite: number) => ({
       runs: { [head]: [ownRun(pr, head, id, suite, 'success', 2)] },
       checks: { [head]: ownChecks(suite, 'success') },
@@ -1668,7 +1776,6 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
         on: {
           ...base.on,
           'dispatch:queue/batch-1': { runs: { [BATCH_HEAD]: [batchRun('failure')] }, checks: { [BATCH_HEAD]: batchChecks('failure') } },
-          'rerun-failed:950': { runs: { [BATCH_HEAD]: [batchRun('failure', 2)] } },
           'rerun:901': landsAlone(77, A, 901, 5001),
           'rerun:902': landsAlone(78, B, 902, 5002),
         },
@@ -1678,13 +1785,14 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     await call('queue_merge', { pr: 78, owner: 'tester' })
     await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land on their own', BATCH_WAIT_MS)
     const order = writes().map(short2)
-    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902', 'rerun-failed 950'])
+    expect(order.slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
+    expect(order).not.toContain('rerun-failed 950')
     expect(order).toContain('delete queue/batch-1')
     expect(order.filter((w) => w.startsWith('rerun ')).sort()).toEqual(['rerun 901', 'rerun 902'])
     // Never landed from the red batch: no batch status on either head
     expect(order.filter((w) => w.startsWith('status'))).toEqual([])
     expect(batchesOnDisk().map((b) => b.state)).toEqual(['failed'])
-    expect(batchEvents().some((t) => t.includes('failed twice') && t.includes('Split'))).toBe(true)
+    expect(batchEvents().some((t) => t.includes('"windows tests" (job 62) failed at batch-b') && t.includes('test or build failure') && t.includes('Split'))).toBe(true)
     // Not batched again on the same heads
     expect(batchesOnDisk()).toHaveLength(1)
   })
@@ -1875,7 +1983,6 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       tieredState({
         on: {
           'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure') } },
-          'rerun-failed:950': { runs: { [ONE]: [oneRun('failure', 2)] } },
         },
       }),
       TIERS,
@@ -1885,8 +1992,8 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await morePolls(4)
     const q = await call('merge_queue', { all: true })
     expect(q.data.queue[0].reason.kind).toBe('full-tier')
-    expect(notices().at(-1)!.text).toContain('its batch of one ended without landing it: Batch queue/batch-1: required check "windows tests" (job 60002) failed twice')
-    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'rerun-failed 950', 'delete queue/batch-1'])
+    expect(notices().at(-1)!.text).toContain('its batch of one ended without landing it: Batch queue/batch-1: "windows tests" (job 60002) failed at batch-c')
+    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'delete queue/batch-1'])
     // Not batched again on this head, batch after batch
     expect(batchesOnDisk()).toHaveLength(1)
   })

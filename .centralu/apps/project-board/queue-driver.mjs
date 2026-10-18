@@ -31,6 +31,8 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
+  runJobSteps,
+  checkRunNotes,
   sameRepo,
   setPrBase,
 } from './github.mjs'
@@ -56,6 +58,7 @@ import {
   resetFor,
 } from './queue.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
+import { classifyRun } from './run-failure.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { listSome, short, span } from './util.mjs'
@@ -199,8 +202,33 @@ export function latestRuns(runs, pr) {
   return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null, suite: r.check_suite_id ?? null, url: r.html_url ?? null, createdAt: r.created_at ?? null }))
 }
 
+const OK_RUN = new Set(['success', 'neutral', 'skipped'])
+
+/**
+ * Why each finished run of `runs` that did not pass failed (run-failure.mjs classifyRun), by run id:
+ * its jobs and their steps, and the notes GitHub wrote on each job that did not pass (a timeout, a
+ * lost runner). `known` holds what an earlier poll read, kept for a run until its attempt moves, so
+ * an item waiting in attention does not read the same jobs every poll. Only once every run finished:
+ * before that, nothing is rerun or decided.
+ */
+export async function runFailures(repo, runs, known = {}) {
+  const out = {}
+  if (!runs.length || runs.some((r) => r.status !== 'completed')) return out
+  for (const run of runs.filter((r) => !OK_RUN.has(r.conclusion))) {
+    const had = known?.[run.id]
+    if (had && (had.attempt ?? 1) === (run.attempt ?? 1)) {
+      out[run.id] = had
+      continue
+    }
+    const jobs = await runJobSteps(repo, run.id)
+    for (const j of jobs) j.notes = j.conclusion && !OK_RUN.has(j.conclusion) && j.id != null ? await checkRunNotes(repo, j.id) : []
+    out[run.id] = classifyRun(run, jobs, { flaky: QUEUE.flakyJobs })
+  }
+  return out
+}
+
 /** The first failing test line of a failed job, for the attention message; best effort. */
-async function failingLine(repo, job) {
+export async function failingLine(repo, job) {
   if (!job?.id) return ''
   try {
     const f = firstFailure(await readJobLog(repo, job.id))
@@ -448,6 +476,9 @@ async function pollItem(item, { now, ref, renew, save }) {
     const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
     runs = latestRuns(scoped.runs, pr)
+    // Why a finished run failed (its jobs and steps): only an infrastructure failure is rerun
+    const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, view.failures) : {}
+    base.failures = failures
     const canBatch = QUEUE.batch !== null && batchable(pr)
     // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
     base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
@@ -457,7 +488,7 @@ async function pollItem(item, { now, ref, renew, save }) {
     // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
     let supersededOnly = false
     if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
-    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
+    d = decideCi({ item: view, pr, checks, runs, failures, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
     // Its quick tier passed: what a batch takes (two tiers, queue.mjs)
     if (d.quick) base.ci.verdict = 'quick'
   }

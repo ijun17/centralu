@@ -14,6 +14,7 @@
 // branch). An item whose quick tier passed waits for a batch; one that cannot be batched, or whose
 // batch of one ended without landing it, needs its session.
 import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
+import { CAUSE_TEXT } from './run-failure.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -251,28 +252,38 @@ export function handoffReason({ item, pr, files = [], why, ref }) {
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */
 export function resetFor(item, head) {
   if (item.head === head) return {}
-  return { head, reruns: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null }
+  return { head, reruns: {}, failures: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null }
 }
 
 /**
  * What CI says about one commit, for an item's head or a batch's (`subject`: anything with `head`,
  * `reruns`, `noCiSince` and `missingSince`). `checks` is evaluateChecks' answer for `head`; `runs`
- * the latest run of each CI workflow on it. Answers `{ state: 'green' }`, or a decision as decideCi's
- * (`ci` with a rerun to ask for, or attention); `n` names the subject in the texts.
+ * the latest run of each CI workflow on it; `failures` why each finished run that did not pass
+ * failed, by run id (run-failure.mjs classifyRun, which the driver reads from the run's jobs and
+ * steps). Answers `{ state: 'green' }`, or a decision as decideCi's (`ci` with a rerun to ask for,
+ * or attention); `n` names the subject in the texts.
+ *
+ * The rerun policy (the owner, 2026-10-19): a real failure (a job failed in a step: a test or a
+ * build) is never rerun and needs attention at once, also in a run CI cancelled because of it (fail
+ * fast). Only an infrastructure failure is rerun, once per head: a run cancelled with no failed job,
+ * a job that hit its timeout, a lost runner, a job on project.json's known-flaky list.
  */
-export function decideRun({ subject, head, checks, runs = [], now, n }) {
+export function decideRun({ subject, head, checks, runs = [], failures = {}, now, n }) {
   const at = new Date(now).toISOString()
   const reruns = subject.head === head ? (subject.reruns ?? {}) : {}
   const verdict = checks.verdict
   const failedJobs = checks.rows.filter((r) => r.state === 'failed')
-  const job = failedJobs[0] ? { name: failedJobs[0].name, id: failedJobs[0].check?.jobId ?? null } : null
+  const firstJob = failedJobs[0] ? { name: failedJobs[0].name, id: failedJobs[0].check?.jobId ?? null } : null
   const jobText = (j) => (j ? `"${j.name}"${j.id ? ` (job ${j.id})` : ''}` : 'a required check')
 
   if (verdict === 'failing') {
     if (runs.some((r) => r.status !== 'completed')) return { state: 'ci' } // a rerun starts only on a finished run
     const bad = runs.find((r) => !OK_CONCLUSIONS.has(r.conclusion))
     if (!bad)
-      return attention('failing', `${n}: required check ${jobText(job)} failed at ${short(head)}, outside a run the queue can rerun. Look with ci_status; fix and push, and the queue takes the new head.`, { job })
+      return attention('failing', `${n}: required check ${jobText(firstJob)} failed at ${short(head)}, outside a run the queue can rerun. Look with ci_status; fix and push, and the queue takes the new head.`, { job: firstJob })
+    const why = runFailure(bad, failures, failedJobs)
+    const job = why.job ?? firstJob
+    const cause = CAUSE_TEXT[why.cause] ?? why.cause
     const kind = bad.conclusion === 'cancelled' ? 'cancelled' : 'failed'
     const done = reruns[kind]
     // GitHub refused the rerun (a run too old, a permission): asking again would only fail again
@@ -282,20 +293,27 @@ export function decideRun({ subject, head, checks, runs = [], now, n }) {
       if (now - Date.parse(done.at) > RERUN_STUCK_MS) return attention('rerun-stuck', `${n}: the rerun of run ${bad.id} asked for at ${done.at.slice(11, 16)} UTC has not started. Look at the run on GitHub, or push again.`)
       return { state: 'ci' }
     }
+    // A test or a build that failed fails again: no rerun, the session hears at once
+    if (why.real)
+      return attention(
+        'failed',
+        `${n}: ${jobText(job)} failed at ${short(head)} with ${cause}${why.step ? ` (step "${why.step}")` : ''}${kind === 'cancelled' ? `, and CI cancelled the rest of run ${bad.id} (fail fast)` : ''}. The queue reruns only infrastructure failures. Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
+        { job },
+      )
     if (!done) {
       const failedOnly = kind === 'failed'
       return {
         state: 'ci',
         action: { type: 'rerun', runId: bad.id, failedOnly, kind },
         patch: { reruns: { ...reruns, [kind]: { run: bad.id, attempt: bad.attempt, at } } },
-        event: `${n}: run ${bad.id} ${kind === 'cancelled' ? 'was cancelled; rerunning it' : `failed (${jobText(job)}); rerunning its failed jobs`} once for ${short(head)}.`,
+        event: `${n}: run ${bad.id} ${kind === 'cancelled' ? `was cancelled (${cause}${why.job ? `: ${jobText(why.job)}` : ''}); rerunning it` : `failed (${jobText(job)}: ${cause}); rerunning its failed jobs`} once for ${short(head)}.`,
       }
     }
     if (kind === 'cancelled')
-      return attention('cancelled', `${n}: CI run ${bad.id} was cancelled again after one rerun at ${short(head)}. Look at why on GitHub (a newer run, a timeout), then push again or rerun it yourself.`)
+      return attention('cancelled', `${n}: CI run ${bad.id} was cancelled again after one rerun at ${short(head)} (${cause}). Look at why on GitHub (a newer run, a timeout), then push again or rerun it yourself.`)
     return attention(
       'failed',
-      `${n}: required check ${jobText(job)} failed twice at ${short(head)} (once more after rerunning the failed jobs). Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
+      `${n}: required check ${jobText(job)} failed twice at ${short(head)} (once more after rerunning the failed jobs; this time ${cause}). Read it with read_failed_job${job?.id ? ` (job ${job.id})` : ''} or ci_status; fix and push, and the queue takes the new head.`,
       { job },
     )
   }
@@ -325,6 +343,20 @@ export function decideRun({ subject, head, checks, runs = [], now, n }) {
 }
 
 /**
+ * Why `run` failed: the driver's reading of its jobs (`failures[run.id]`, for this attempt), else what
+ * the checks show: a cancelled run with a job that failed is a real failure (fail fast), one without
+ * is cancelled, and any other is real (the queue reruns nothing it cannot name as infrastructure).
+ */
+function runFailure(run, failures, failedJobs) {
+  const f = failures?.[run.id]
+  if (f && (f.attempt ?? 1) === (run.attempt ?? 1)) return f
+  const job = (r) => (r ? { name: r.name, id: r.check?.jobId ?? null } : null)
+  const failed = failedJobs.find((r) => r.check?.conclusion === 'failure')
+  if (run.conclusion === 'cancelled') return failed ? { real: true, cause: 'test', job: job(failed) } : { real: false, cause: 'cancelled', job: null }
+  return { real: true, cause: 'test', job: job(failed ?? failedJobs[0]) }
+}
+
+/**
  * The decision once CI is read. `checks` is evaluateChecks' answer for the head; `runs` the latest
  * run of each CI workflow on it (only read when the checks failed or none are reported);
  * `lowerBranches` the head branches of the item's lowers (a stack's top is based on one of them);
@@ -332,7 +364,7 @@ export function decideRun({ subject, head, checks, runs = [], now, n }) {
  * (onlySupersededFailures). Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
  * `retarget` (onto the default branch) or `merge`.
  */
-export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], supersededOnly = false, now, ref, fullTier = null, canBatch = false }) {
+export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBranch, lowerBranches = [], supersededOnly = false, now, ref, fullTier = null, canBatch = false }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -347,7 +379,7 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     // Waits for a batch (batch.mjs batchCandidates), which runs the full tier on it
     return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
   }
-  const run = decideRun({ subject: item, head, checks, runs, now, n })
+  const run = decideRun({ subject: item, head, checks, runs, failures, now, n })
   if (run.state !== 'green') return run
   // Green on a required set that does not name the full tier's check, while its run goes on: not proven full yet
   if (ranTier(checks, fullTier) !== 'full') return { state: 'ci', patch: { noCiSince: null, missingSince: null } }

@@ -39,7 +39,7 @@ import {
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, pushEvent, SUBJECT_MAX } from './queue.mjs'
-import { afterMerge, batchable, land, latestRuns, permissionsOf, pollMs, takeLease, updateQueue } from './queue-driver.mjs'
+import { afterMerge, batchable, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
@@ -304,10 +304,12 @@ async function runCi(b, ctx) {
   const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
   const runs = latestRuns(scoped.runs, { headRefName: b.branch })
   const n = `Batch ${b.branch}`
-  const d = decideRun({ subject: b, head: b.head, checks, runs, now, n })
+  // Why a finished run failed: a real failure is split at once, only an infrastructure one rerun
+  const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, b.failures) : {}
+  const d = decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
-    save((fq, fb) => Object.assign(fb, { required, reruns: d.patch.reruns }))
+    save((fq, fb) => Object.assign(fb, { required, failures, reruns: d.patch.reruns }))
     try {
       await rerunRun(repo, d.action.runId, { failedOnly: d.action.failedOnly })
     } catch (e) {

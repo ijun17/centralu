@@ -53,7 +53,12 @@ const batchMin = Number(process.env.PROJECT_BOARD_QUEUE_BATCH_MIN) || Number(bat
 // checkout: none, so a conflict is handed off without a merge)
 const conflicts = process.env.PROJECT_BOARD_QUEUE_CONFLICTS ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_CONFLICTS) : (config.queue?.conflicts ?? {})
 const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
+// The merge queue's rerun policy (2026-10-19, run-failure.mjs): it reruns only infrastructure failures,
+// and a failed job named here (exact names, `*` for any characters) counts as one: a known-flaky job.
+// PROJECT_BOARD_QUEUE_FLAKY (the list as JSON): for the tests only
+const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
+  flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
   batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
   conflicts: {
     mechanical: Array.isArray(conflicts.mechanical) ? conflicts.mechanical.filter((e) => Array.isArray(e?.files) && Array.isArray(e?.run) && e.run.every((a) => Array.isArray(a) && a.length > 0)) : [],

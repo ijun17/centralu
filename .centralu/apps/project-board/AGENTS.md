@@ -186,10 +186,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
   check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
-  pull_request run when a push run shares the commit (`latestRuns`). A cancelled run is rerun once per
-  head and failed jobs once per head (`gh api …/rerun`, `…/rerun-failed-jobs`), written down before
-  asking and counted as done only once its attempt number moves; GitHub refusing the rerun, failing
-  again or cancelled again → attention, naming the job and its first failing line. No run on a head
+  pull_request run when a push run shares the commit (`latestRuns`). **Only an infrastructure failure
+  is rerun** (below, "Reruns"): a cancelled run once per head and failed jobs once per head (`gh api
+  …/rerun`, `…/rerun-failed-jobs`), written down before asking and counted as done only once its
+  attempt number moves; a test or build failure, GitHub refusing the rerun, failing again or cancelled
+  again → attention, naming the job and its first failing line. No run on a head
   for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
   job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
   clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
@@ -238,6 +239,38 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - `PROJECT_BOARD_QUEUE_TICK_MS` and `PROJECT_BOARD_QUEUE_POLL_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
+
+### Reruns (2026-10-19)
+
+On the queue's first day 19 runs were rerun, most of them a test failing the same way again, each a CI
+run the next batch waited behind. The owner's rule: **the queue reruns only infrastructure failures**.
+`run-failure.mjs` holds it (pure); the driver reads, for each finished run that did not pass, its jobs
+and their steps (`runJobSteps`, `/actions/runs/{id}/jobs`) and what GitHub wrote on each job that did
+not pass (`checkRunNotes`, `/check-runs/{id}/annotations`), once per run attempt (kept on the item or
+the batch as `failures`), and `decideRun` decides from it, for an item's head and a batch's alike.
+
+- **Real** (no rerun, attention at once): a job that failed in a step (a test, a build), or failed
+  with nothing naming the runner; also when the run's conclusion is `cancelled` because CI cancelled
+  the rest after it. The attention text names the job, the step, and (as before) its first failure
+  line from the job's log; for a cancelled run it says CI cancelled the rest (fail fast).
+- **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
+  its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
+  minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
+  test failure); a lost runner ("lost communication with the server", "received a shutdown signal");
+  a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
+  failure beside any of these makes the run real.
+- **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
+  `verify` job fails, CI cancels the rest of that run at once (fail fast). The queue therefore never
+  reads a run's conclusion alone: a `cancelled` run with a failed job is a failure.
+- A batch reads its run the same way: a real failure is split at once (no rerun first), an
+  infrastructure one rerun once.
+- Without a reading of the run's jobs for its attempt (`decideRun` called without `failures`), the
+  checks decide: a cancelled run with a job that failed is real, one without is cancelled (rerun), any
+  other failure is real.
+- `PROJECT_BOARD_QUEUE_FLAKY` (the list as JSON) sets the list for tests only. Tests:
+  `tooling/project-board-queue.test.ts` (the classification, the decision, and the app against the
+  fake `gh`: a verify failure not rerun, in a failed and in a fail-fast cancelled run; a timeout rerun
+  once; a lost runner rerun and landed).
 
 ### Conflicts (#1182)
 
@@ -354,9 +387,10 @@ has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of 
   Then the members' own runs that have not started are cancelled, each written down before it is
   cancelled (`cancelled`, which a batch split or re-formed from this one keeps for its members).
 - **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
-  required set from the default branch plus jobs the batch adds, a cancelled run rerun once, failed
-  jobs once. A member that changes meanwhile (pushed, closed, a draft, taken out, queued again) ends
-  the run; the rest are tried again without it. **Red** (failed twice): split in halves, a half of
+  required set from the default branch plus jobs the batch adds, and only an infrastructure failure
+  rerun, once (Reruns, above). A member that changes meanwhile (pushed, closed, a draft, taken out,
+  queued again) ends the run; the rest are tried again without it. **Red** (a test or build failure,
+  or an infrastructure failure twice): split in halves, a half of
   two or more tried again, one alone goes back to its own CI. Anything else (no run in 15 minutes, a
   refused rerun) sends them all back.
 - **The required-checks rule** (#962's open question, decided here): the queue's own rule, with no
@@ -608,7 +642,8 @@ step shows on the screen.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
-  (pure) and their steps on GitHub.
+  (pure) and their steps on GitHub. `run-failure.mjs` — why a CI run failed, real or infrastructure
+  (pure: the rerun policy). `queue-conflict.mjs` — the git work of a conflict.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
