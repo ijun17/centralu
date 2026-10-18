@@ -1,9 +1,11 @@
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import {
+  CANCEL_CALL_METHOD,
   PROTOCOL_VERSION,
   ProtocolErrorCode,
   type HostBuild,
+  type RpcAnswer,
   type NormalizedEvent,
   type ProtocolError,
   parseClientFrame,
@@ -149,6 +151,12 @@ export const TRANSPORT_LIMITS = {
 /** What the pre-hello byte count allows beyond the one frame: its WebSocket header, and the bytes of a close it may answer */
 const PRE_HELLO_SLACK_BYTES = 1024
 
+/** A call this host sent a client (#550), until its answer */
+type ReverseCall = { resolve: (v: unknown) => void; reject: (e: Error) => void }
+
+/** How long a call this host sends a client may wait for its answer, when the caller sets no bound (#550) */
+export const REVERSE_CALL_TIMEOUT_MS = 30 * 60_000
+
 /** WebSocket close codes this server uses (4001 is the token rule's own) */
 const CLOSE_GOING_AWAY = 1001
 const CLOSE_AUTH = 4001
@@ -185,6 +193,12 @@ export class HostServer {
   private lastClient = 0
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
+  /** The sockets in `clients` by their `RpcContext.client`, for a call to one of them (`call`, #550) */
+  private byClient = new Map<number, WebSocket>()
+  /** This host's calls to a client still waiting for its answer, per socket (#550) */
+  private calls = new Map<WebSocket, Map<string, ReverseCall>>()
+  /** The last id of a call this host sent a client */
+  private lastCall = 0
   private closing: Promise<void> | null = null
   private readonly limits: {
     handshakeTimeoutMs: number
@@ -487,6 +501,10 @@ export class HostServer {
       const frame = parseClientFrame(parsedJson)
       if (!frame.success) {
         if (!authed) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
+        // An answer to one of this host's calls that does not read still ends that call (#550), as the link client's does
+        const f = parsedJson as { kind?: unknown; id?: unknown } | null
+        const call = f?.kind === 'res' && typeof f.id === 'string' && bridgeOf === null ? this.calls.get(ws)?.get(f.id) : undefined
+        if (call) return call.reject(rpcError('The other side answered in a form this host does not read'))
         return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
       }
 
@@ -546,12 +564,19 @@ export class HostServer {
           return
         }
         this.clients.add(ws)
+        this.byClient.set(client, ws)
         this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
         return
       }
 
       if (!authed) {
         this.refuse(ws, CLOSE_AUTH, 'not authed')
+        return
+      }
+
+      // The answer to a call this host sent a hub on this socket (#550); one it never sent is nobody's
+      if (frame.data.kind === 'res') {
+        if (bridgeOf === null) this.answered(ws, frame.data)
         return
       }
 
@@ -586,6 +611,8 @@ export class HostServer {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
+      if (this.byClient.get(client) === ws) this.byClient.delete(client)
+      this.failCalls(ws, 'The connection ended before it answered')
       // 'error' is followed by 'close': said once
       if (!authed || gone) return
       gone = true
@@ -593,6 +620,72 @@ export class HostServer {
     }
     ws.on('close', forget)
     ws.on('error', forget)
+  }
+
+  /**
+   * Calls a client: a hub linked to this host that said it answers the reverse direction (#550, `host.hubOffer`,
+   * docs/plans/remote-hub.md §12.7). The client is the `RpcContext.client` its offer came in on, so the call goes back
+   * over the socket the hub opened, and nowhere else. Fails at once when that connection is gone; withdrawn with
+   * `call.cancel` when `signal` fires; and bounded by `timeoutMs`, as a call nobody answers must not be held for good.
+   */
+  call(client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<unknown> {
+    const ws = this.byClient.get(client)
+    if (!ws || ws.readyState !== ws.OPEN) return Promise.reject(rpcError('That connection is not open', 'internal', { retryable: true }))
+    if (opts.signal?.aborted) return Promise.reject(rpcError('The call was cancelled', 'internal'))
+    const id = `h${++this.lastCall}`
+    let pending = this.calls.get(ws)
+    if (!pending) this.calls.set(ws, (pending = new Map()))
+    const calls = pending
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        calls.delete(id)
+        clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', onAbort)
+      }
+      const onAbort = () => {
+        if (!calls.has(id)) return
+        done()
+        this.sendTo(ws, JSON.stringify({ kind: 'rpc', id: `h${++this.lastCall}`, method: CANCEL_CALL_METHOD, params: { id } }))
+        reject(rpcError('The call was cancelled', 'internal'))
+      }
+      const timer = setTimeout(() => {
+        if (!calls.has(id)) return
+        done()
+        reject(rpcError(`The other side did not answer ${method} in time`, 'internal', { retryable: true }))
+      }, opts.timeoutMs ?? REVERSE_CALL_TIMEOUT_MS)
+      calls.set(id, {
+        resolve: (v) => {
+          done()
+          resolve(v)
+        },
+        reject: (e) => {
+          done()
+          reject(e)
+        },
+      })
+      opts.signal?.addEventListener('abort', onAbort, { once: true })
+      if (!this.sendTo(ws, JSON.stringify({ kind: 'rpc', id, method, params }))) {
+        done()
+        reject(rpcError('That connection is not open', 'internal', { retryable: true }))
+      }
+    })
+  }
+
+  /** A client's answer to one of this host's calls (#550) */
+  private answered(ws: WebSocket, a: RpcAnswer): void {
+    const call = this.calls.get(ws)?.get(a.id)
+    if (!call) return
+    if (a.ok) return call.resolve(a.result)
+    const e = a.error
+    call.reject(rpcError(e?.message ?? 'The other side refused the call', e?.code ?? 'internal', { retryable: e?.retryable === true, ...(e?.data !== undefined ? { data: e.data } : {}) }))
+  }
+
+  /** Every call still waiting on a socket that is gone gets its answer: its outcome there is unknown */
+  private failCalls(ws: WebSocket, why: string): void {
+    const pending = this.calls.get(ws)
+    if (!pending) return
+    this.calls.delete(ws)
+    for (const call of [...pending.values()]) call.reject(rpcError(why, 'internal', { retryable: false }))
   }
 
   private helloOk(resyncRequired: boolean): string {

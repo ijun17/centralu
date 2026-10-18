@@ -710,6 +710,86 @@ describe('RPC round trip', () => {
  * any process of the same user (measured on macOS 27.0.1 with `ps eww`), so what it holds must open
  * the bridge's own calls for its own session and nothing else.
  */
+describe('a call to a client: the reverse direction (#550)', () => {
+  /** A client in, and the number its calls carry: the one this host's call to it names */
+  async function inClient(port: number) {
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    c.send({ kind: 'rpc', id: 'who', method: 'whoami', params: {} })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === 'who'))
+    const client = (c.frames.find((f) => f.id === 'who') as { result: { client: number } }).result.client
+    return { c, client }
+  }
+  const echoClient: RpcHandler = async (_m, _p, ctx) => ({ client: ctx?.client })
+  const calls = (c: ReturnType<typeof connect>) => c.frames.filter((f) => f.kind === 'rpc') as { id: string; method: string; params: Record<string, unknown> }[]
+
+  it('reaches only the socket it names, and resolves with its answer or rejects with its refusal', async () => {
+    const { server, port } = await start(echoClient)
+    const a = await inClient(port)
+    const b = await inClient(port)
+    const ok = server.call(a.client, 'hub.projects', { x: 1 })
+    await a.c.wait(() => calls(a.c).length === 1)
+    expect(calls(b.c)).toEqual([])
+    const sent = calls(a.c)[0]!
+    expect(sent).toMatchObject({ method: 'hub.projects', params: { x: 1 } })
+    // An answer under another socket's id, or an id this host never sent, is nobody's
+    b.c.send({ kind: 'res', id: sent.id, ok: true, result: 'from b' })
+    a.c.send({ kind: 'res', id: 'h-never', ok: true, result: 'stray' })
+    a.c.send({ kind: 'res', id: sent.id, ok: true, result: { projects: [] } })
+    await expect(ok).resolves.toEqual({ projects: [] })
+
+    const refused = server.call(a.client, 'hub.askProject', {})
+    await a.c.wait(() => calls(a.c).length === 2)
+    a.c.send({ kind: 'res', id: calls(a.c)[1]!.id, ok: false, error: { code: 'internal', message: 'switched off', retryable: false } })
+    await expect(refused).rejects.toThrow('switched off')
+
+    // An answer that does not read still ends its call, rather than leaving it to its timeout
+    const garbled = server.call(a.client, 'hub.projects', {})
+    await a.c.wait(() => calls(a.c).length === 3)
+    a.c.send({ kind: 'res', id: calls(a.c)[2]!.id, ok: false, error: { code: 'no_such_code', message: 7 } })
+    await expect(garbled).rejects.toThrow('answered in a form this host does not read')
+  })
+
+  it('fails at once for a client that is gone, and a waiting call when its socket goes', async () => {
+    const { server, port } = await start(echoClient)
+    const a = await inClient(port)
+    const waiting = server.call(a.client, 'hub.askProject', {})
+    await a.c.wait(() => calls(a.c).length === 1)
+    a.c.ws.close()
+    await expect(waiting).rejects.toThrow('The connection ended before it answered')
+    await expect(server.call(a.client, 'hub.projects', {})).rejects.toThrow('That connection is not open')
+    await expect(server.call(9999, 'hub.projects', {})).rejects.toThrow('That connection is not open')
+  })
+
+  it('withdraws a call with call.cancel when its signal fires, and is bounded by its timeout', async () => {
+    const { server, port } = await start(echoClient)
+    const a = await inClient(port)
+    const ctl = new AbortController()
+    const asked = server.call(a.client, 'hub.askProject', {}, { signal: ctl.signal })
+    await a.c.wait(() => calls(a.c).length === 1)
+    ctl.abort()
+    await expect(asked).rejects.toThrow('cancelled')
+    await a.c.wait(() => calls(a.c).length === 2)
+    expect(calls(a.c)[1]).toMatchObject({ method: 'call.cancel', params: { id: calls(a.c)[0]!.id } })
+    await expect(server.call(a.client, 'hub.projects', {}, { timeoutMs: 30 })).rejects.toThrow('did not answer hub.projects in time')
+  })
+
+  it('never calls a bridge, and takes no answer from a socket before hello', async () => {
+    const { server, port } = await start(echoClient)
+    const bridge = connect(port)
+    await bridge.open()
+    bridge.send({ kind: 'hello', token: bridgeToken(TOKEN, 's1'), protocolVersion: PROTOCOL_VERSION })
+    await bridge.wait(() => bridge.frames.some((f) => f.kind === 'hello_ok'))
+    // A bridge has no client number to call: it is never in the set a call can reach
+    await expect(server.call(1, 'hub.projects', {})).rejects.toThrow('That connection is not open')
+    const early = connect(port)
+    await early.open()
+    early.send({ kind: 'res', id: 'h1', ok: true, result: null })
+    expect(await early.closed()).toBe(4001)
+  })
+})
+
 describe("the Codex bridge's credential (#382)", () => {
   async function bridgeConn(port: number, token: string) {
     const c = connect(port)
