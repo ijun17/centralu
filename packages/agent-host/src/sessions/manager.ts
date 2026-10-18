@@ -2410,6 +2410,11 @@ export class SessionManager {
     return this.appSessions.createApp(...a)
   }
 
+  /** `AppSessions.commitImport` (app-sessions.ts): an import brought in as a project of its own (#1141) */
+  commitImport(...a: Parameters<AppSessions['commitImport']>): ReturnType<AppSessions['commitImport']> {
+    return this.appSessions.commitImport(...a)
+  }
+
   /** `AppSessions.builderOf` (app-sessions.ts), kept on the manager for its callers */
   builderOf(...a: Parameters<AppSessions['builderOf']>): ReturnType<AppSessions['builderOf']> {
     return this.appSessions.builderOf(...a)

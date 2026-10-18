@@ -109,6 +109,20 @@ export class SecretStore {
     this.file.write(doc)
   }
 
+  /**
+   * Copies one app's values to another key (#1141): a user-folder app registered as a project. Only names the new key
+   * has no value for, so a value set since is never written over; the old key keeps its values (a previous build may
+   * still read them). Writes nothing when there is nothing to copy.
+   */
+  carry(from: string, to: string): void {
+    const doc = this.file.read()
+    const have = doc[to] ?? {}
+    const add = Object.entries(doc[from] ?? {}).filter(([name]) => !(name in have))
+    if (add.length === 0) return
+    doc[to] = { ...have, ...Object.fromEntries(add) }
+    this.file.write(doc)
+  }
+
   /** Writes a value (`value`) or clears it (`null`) */
   set(appKey: string, name: string, value: string | null): void {
     const doc = this.file.read()

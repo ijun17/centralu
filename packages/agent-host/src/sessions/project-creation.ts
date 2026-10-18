@@ -157,11 +157,12 @@ export class ProjectCreation {
   }
 
   /**
-   * Registers a folder Centralu just made for a new app (#1141) and tells every window. Trusted, as an empty folder
-   * Centralu made is (#655): only Centralu's template is in it.
+   * Registers a folder Centralu just made for a new app (#1141) and tells every window. Trusted by default, as an empty
+   * folder Centralu made is (#655): only Centralu's template is in it. An imported app's folder holds someone else's
+   * code, so it is trusted only when the person chose "Import and enable".
    */
-  async registerMadeFolder(path: string): Promise<ProjectInfo> {
-    const info = await this.addProject(path, { trusted: true })
+  async registerMadeFolder(path: string, opts: { trusted?: boolean } = {}): Promise<ProjectInfo> {
+    const info = await this.addProject(path, { trusted: opts.trusted ?? true })
     this.host.emit({ type: 'projects_changed' })
     return info
   }

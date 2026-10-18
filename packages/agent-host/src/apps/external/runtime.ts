@@ -22,6 +22,7 @@ import { AppStartEnv } from './app-start-env.js'
 import { AppResources } from './app-resources.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
+import { carryAppFiles } from './carry.js'
 import type { Snapshot } from './versions.js'
 import type { Audience } from './visibility.js'
 
@@ -50,6 +51,9 @@ import type { Audience } from './visibility.js'
 const USER_SCOPE = USER_APP_SCOPE
 
 export type { AppRef } from './ref.js'
+/** The file that makes a folder an app — the host's core asks whether a folder has one (#1141) */
+export { MANIFEST_FILE } from './manifest.js'
+export type { AppProjectTarget } from './app-folders.js'
 
 /** The shape of a check report also leaves through this door (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
@@ -572,6 +576,17 @@ export class ExternalApps {
     }
   }
 
+  /**
+   * Carries what is kept on disk for an app from one key to another (#1141): a user-folder app registered as a project
+   * keeps its data folder, log, kept versions and secrets under its new key. Each is **copied**, never moved — a previous
+   * build serving during a swap still reads the old key — and only where the new key has nothing yet, so running this
+   * again after an interruption changes nothing and never writes over what the app has written since.
+   */
+  carryAppState(from: AppRef, to: AppRef): void {
+    carryAppFiles(this.deps.dataRoot, this.startEnv.appKey(from), this.startEnv.appKey(to))
+    this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
+  }
+
   /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */
   setSecret(ref: AppRef, name: string, value: string | null): void {
     this.secrets.set(this.startEnv.appKey(ref), name, value)
@@ -631,6 +646,29 @@ export class ExternalApps {
     const made = this.find({ projectId: null, appId: id })
     if (!made) throw new AppUnavailableError(`The app was brought in, but discovery did not find it: ${id}`)
     return this.info(made)
+  }
+
+  /**
+   * Brings a staged app in as a new project of its own (#1141): its folder becomes `target.path`, which the host then
+   * registers as a project (trusted only when the person chose "Import and enable"; trusting it later is enabling it).
+   * The same checks as `commitImport` (the reviewed key, the manifest read again) come first. **This never starts it**
+   * @returns the app's id
+   */
+  commitImportAsProject(token: string, opts: { enable: boolean; reviewKey?: string }, target: AppProjectTarget): string {
+    if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
+    return this.handover.commitTo(token, opts, target)
+  }
+
+  /** The id of the app an import is staging, or null once it is gone — so the host can say where it would go */
+  stagedAppId(token: string): string | null {
+    return this.handover.stagedId(token)
+  }
+
+  /** Keeps the code an app arrived with as its first version, when Centralu keeps its versions (an import, E-1) */
+  keepArrivedVersion(ref: AppRef): void {
+    this.rescanScopeOf(ref)
+    const e = this.find(ref)
+    if (e && keepsVersions(e)) this.handover.snapshot(this.holdKey(ref), e.dir, 'imported')
   }
 
   cancelImport(token: string): void {
@@ -833,7 +871,7 @@ export class ExternalApps {
     const held = this.scopes.get(key)
     if (!held || this.disposed) return
     const { scope } = held
-    const result = scope.projectId === null ? scanApps(scope.root, USER_APPS_REL, []) : scanProject(scope.root)
+    const result = scope.projectId === null ? this.scanUserFolder(scope.root) : scanProject(scope.root)
     const seen = new Set<string>()
     /** Whether there was a change that could change the set of apps attached to a session (A-5) */
     let changed = false
@@ -887,6 +925,13 @@ export class ExternalApps {
     }
     this.watchers.setWatched(key, scope.root, result.watch)
     if (changed) this.appsChanged()
+  }
+
+  /** The user folder's apps, less those registered as projects in place (#1141): they are those projects' root apps */
+  private scanUserFolder(root: string): ReturnType<typeof scanApps> {
+    const found = scanApps(root, USER_APPS_REL, [])
+    const adopted = this.deps.adoptedUserApp
+    return adopted ? { ...found, apps: found.apps.filter((a) => !adopted(a.folder, a.dir)) } : found
   }
 
   private dropScope(key: string): void {

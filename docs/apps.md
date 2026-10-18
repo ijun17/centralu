@@ -78,6 +78,16 @@ visibility is not read as the default: the side that is wrong stays closed.
   subfolders such as `ui/`). Discovery only reads; it starts nothing.
 - Broken or untrusted apps are not hidden. They stand in the list with their reason (`invalid`,
   `untrusted`), so a person can see why an app does not run.
+- **User-folder apps become projects** (#1141): when the host starts, each `<data folder>/apps/<id>/`
+  holding a manifest is registered as a project **in place** and is that project's root app from then
+  on, once (`apps.adoptedUserApps`, bound to the folder's file id, so a project the person deletes is
+  not registered again). What was kept under `_user/<id>` is carried to `<project id>/<id>`: data,
+  logs, kept versions and secrets are copied; grants are copied, and so are other apps' grants to
+  call it; runs and the app's sessions move to the project; the builder map, attachments, grid panel,
+  view origin port and the window's span and open app follow the new key. The project is trusted,
+  except an imported app the person never enabled. Copies leave the old key's state for a previous
+  build during a swap (`user-app-adoption.ts`, [plans/root-apps.md](plans/root-apps.md) §4). One that
+  appears later, such as an approved MCP server, is registered the same way while the host runs.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes
@@ -1016,10 +1026,14 @@ link to a `.zip`. It takes two steps.
    runs, as the person), what it declares in `uses` (run your agent, call other apps, read Centralu
    data), the secrets it wants, whether it has a screen, and every file with its size, plus what
    was not copied and why. A download goes to a temporary folder first and is removed afterwards.
-2. **Bring it in.** "Import" moves it to `<data folder>/apps/<id>/` **turned off** (`unconfirmed`).
-   "Import and enable" does the same and confirms at once, sending back the key of the review the
-   person just saw; the host re-reads the staged manifest and refuses a key that does not match
-   it. Closing the dialog drops the staging; staging also expires after 30 minutes and is cleared
+2. **Bring it in.** The app lands as a **project of its own** (#1141): its folder moves to
+   `<parent>/<id>` (`~/Centralu` unless the person picks another parent, with a new project's folder
+   rules), which is registered as a project whose root is the app. "Import" registers it
+   **untrusted**, so it never runs until the person trusts the project (trusting it is enabling it);
+   "Import and enable" registers it trusted, sending back the key of the review the person just saw;
+   the host re-reads the staged manifest and refuses a key that does not match it. A host before
+   #1141 moved it to `<data folder>/apps/<id>/` turned off (`unconfirmed`) instead, and that path
+   (`commitImport`) is still what the import mark below governs. Closing the dialog drops the staging; staging also expires after 30 minutes and is cleared
    when the host starts. The app lands in the list and its pinned view opens.
 
 An imported app that is not enabled is treated like an untrusted project's app: it never starts,

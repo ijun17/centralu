@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
@@ -140,7 +140,10 @@ export class AppHandover {
         files = stageLocal(source.path, appDir, this.limits)
       }
       const { manifest, warnings } = readStagedManifest(appDir, this.host.reservedIds)
-      this.refuseTaken(manifest.id)
+      /*
+       * An import lands as a project of its own now (#1141, `commitTo`), whose folder is checked where it goes; an id
+       * the user folder holds is no reason to refuse it (a folder registered as a project in place stays there)
+       */
       const review = reviewOf(manifest, files, { source: source.label, warnings })
       const timer = setTimeout(() => this.cancel(token), this.opts.stagingMs ?? STAGING_MS)
       timer.unref()
@@ -187,6 +190,45 @@ export class AppHandover {
     this.snapshot(appKeyOf(null, id), dir, 'imported')
     this.cancel(token)
     this.host.rescanUser()
+    return id
+  }
+
+  /** The id of the app staged under this token, or null once it is gone */
+  stagedId(token: string): string | null {
+    return this.staged.get(token)?.review.appId ?? null
+  }
+
+  /**
+   * Brings a staged app in as a new project's folder (#1141): `target.path`, checked free by the caller and checked again
+   * here. The same checks as `commit` first (the key the person reviewed, the staged manifest read again). No import mark
+   * is written: the project's trust is what enables it, and the host registers it trusted only for "Import and enable".
+   * The staging area is in the data folder, so a parent on another volume gets a copy, not a rename.
+   * @returns the id of the app brought in
+   */
+  commitTo(token: string, opts: { enable: boolean; reviewKey?: string }, target: { path: string; isDefault: boolean }): string {
+    const s = this.staged.get(token)
+    if (!s) throw new ImportRefused('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
+    if (opts.enable && opts.reviewKey !== s.review.reviewKey) throw new ImportRefused('What would be enabled is not what you reviewed. Review it again')
+    const { manifest } = readStagedManifest(s.appDir, this.host.reservedIds)
+    if (reviewKey(manifest) !== s.review.reviewKey) throw new ImportRefused('The app changed while it was waiting. Review it again')
+    if (target.isDefault) mkdirSync(dirname(target.path), { recursive: true })
+    if (pathTaken(target.path)) throw new ImportRefused(`Something is already at ${target.path}. Choose another folder`)
+    try {
+      renameSync(s.appDir, target.path)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e
+      // Another volume: copied beside its place and renamed in, so it never stands half there
+      const tmp = join(dirname(target.path), `.${s.review.appId}.${randomUUID()}`)
+      try {
+        cpSync(s.appDir, tmp, { recursive: true, preserveTimestamps: true })
+        renameSync(tmp, target.path)
+      } catch (err) {
+        discard(tmp, this.opts.remove)
+        throw err
+      }
+    }
+    const id = s.review.appId
+    this.cancel(token)
     return id
   }
 
@@ -300,5 +342,15 @@ export class AppHandover {
     if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, ...USER_APPS_PARTS, id))) {
       throw new ImportRefused(`An app with the id "${id}" is already in your apps. Remove it first, or change the id in its manifest`)
     }
+  }
+}
+
+/** lstat, not exists: a broken link of that name is still a name taken */
+function pathTaken(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
   }
 }

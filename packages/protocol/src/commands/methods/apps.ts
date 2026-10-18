@@ -496,7 +496,11 @@ export const appMethods = {
    * meantime.
    */
   'apps.importCommit': {
-    params: z.object({ token: z.string(), enable: z.boolean().default(false), reviewKey: z.string().optional() }),
+    /**
+     * `parent` (#1141): the app lands as a project of its own, a folder `<parent>/<id>` (`~/Centralu` when absent),
+     * registered untrusted, or trusted with `enable`. An older host puts it in its user folder and ignores `parent`.
+     */
+    params: z.object({ token: z.string(), enable: z.boolean().default(false), reviewKey: z.string().optional(), parent: z.string().max(4096).optional() }),
     result: ExternalAppInfo,
   },
   'apps.importCancel': {

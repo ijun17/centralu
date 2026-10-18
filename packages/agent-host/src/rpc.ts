@@ -471,8 +471,10 @@ export function createRpcHandler(
     // with a review step if requested). All the judgment calls are made by the runtime's handoff
     'apps.importPrepare': async (p) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
     'apps.importCommit': async (p) => {
-      const { token, enable, reviewKey } = RpcMethods['apps.importCommit'].params.parse(p)
-      return requireExternalApps().commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) })
+      const { token, enable, reviewKey, parent } = RpcMethods['apps.importCommit'].params.parse(p)
+      // An import lands as a project of its own (#1141): `<parent>/<id>`, `~/Centralu` unless the person chose a parent
+      requireExternalApps()
+      return mgr.commitImport(token, { enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }, parent)
     },
     'apps.importCancel': async (p) => {
       requireExternalApps().cancelImport(RpcMethods['apps.importCancel'].params.parse(p).token)

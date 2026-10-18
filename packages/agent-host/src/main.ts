@@ -17,6 +17,7 @@ import { recordViewHandover, restoreViewHandover } from './view-handover.js'
 import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
+import { UserAppAdoption, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
@@ -355,12 +356,26 @@ const externalApps = new ExternalApps({
   builderBusy: (ref) => mgr.builderBusy(ref),
   // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
   shared: (ref) => readShared(store.settings, ref),
+  // A user-folder app registered as a project in place is that project's root app now (#1141)
+  adoptedUserApp: (appId, dir) => adoptedUserApp(store, appId, dir),
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
 onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_changed' }))
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
+/*
+ * User-folder apps become projects in place (#1141), before any window or session asks for them: each one, once, with
+ * what was kept under its old key carried to its new one. One that appears later (an approved MCP server) follows.
+ */
+const userAppAdoption = new UserAppAdoption({
+  rt: externalApps,
+  store,
+  addProject: (path, opts) => mgr.addProject(path, opts),
+  changed: () => events.push({ type: 'projects_changed' }),
+})
+await userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
+userAppAdoption.watch()
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

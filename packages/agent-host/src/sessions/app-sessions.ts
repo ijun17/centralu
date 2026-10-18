@@ -62,7 +62,7 @@ export type AppSessionsHost = {
   /** Where a new app project's folder goes (#1141): `ProjectCreation.appProjectTarget` */
   appProjectTarget: (id: string, parent?: string) => { path: string; isDefault: boolean }
   /** Registers a folder made for a new app as a trusted project, and tells the windows: `ProjectCreation.registerMadeFolder` */
-  registerMadeFolder: (path: string) => Promise<ProjectInfo>
+  registerMadeFolder: (path: string, opts?: { trusted?: boolean }) => Promise<ProjectInfo>
   readonly delegationFlow: DelegationFlow
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string; } | undefined, relayed: boolean, fromApp?: AppMessageSource, fromAppVia?: AppMessageVia, sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>
   readonly handles: Map<string, SessionHandle>
@@ -135,6 +135,33 @@ export class AppSessions {
     } catch (e) {
       return { app, builder: null, builderError: (e as Error).message }
     }
+  }
+
+  /**
+   * Brings a staged import in as a new project of its own (#1141, `apps.importCommit`): a folder `<parent>/<id>`
+   * (`~/Centralu` unless a parent is given), registered trusted only for "Import and enable" — an untrusted project's
+   * app never runs, and trusting the project is enabling it. The code it arrived with is kept as its first version
+   * when Centralu keeps its versions (outside git). A folder that fails to register is removed again.
+   */
+  async commitImport(token: string, opts: { enable: boolean; reviewKey?: string }, parent?: string): Promise<ExternalAppInfo> {
+    const rt = this.host.appsHub?.rt
+    if (!rt) throw rpcError('External apps are unavailable — there is nowhere to bring an app in')
+    const id = rt.stagedAppId(token)
+    if (id === null) throw rpcError('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
+    const target = this.host.appProjectTarget(id, parent)
+    rt.commitImportAsProject(token, opts, target)
+    let projectId: string
+    try {
+      projectId = (await this.host.registerMadeFolder(target.path, { trusted: opts.enable })).id
+    } catch (e) {
+      rmSync(target.path, { recursive: true, force: true })
+      throw e
+    }
+    rt.refresh()
+    const app = rt.list().find((a) => a.projectId === projectId && a.root === true)
+    if (!app) throw rpcError(`The app was brought in and registered, but discovery did not find it: ${target.path}`)
+    rt.keepArrivedVersion({ projectId, appId: app.appId })
+    return rt.list().find((a) => a.projectId === projectId && a.root === true) ?? app
   }
 
   /** A new app project (#1141): see `createApp` */
