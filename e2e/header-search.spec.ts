@@ -127,7 +127,9 @@ test('the bar around the field and the gaps inside it are the native drag region
   await demo(page)
   await expect(page.getByTestId('app-header')).toHaveAttribute('data-tauri-drag-region', 'true')
   // The wrapper of the right-hand controls: its own gaps are part of the region too
-  await expect(page.getByTestId('open-settings').locator('xpath=..')).toHaveAttribute('data-tauri-drag-region', 'true')
+  // (the settings gear sits in its tooltip's wrapper, so the row is its nearest marked ancestor)
+  await expect(page.getByTestId('open-settings').locator('xpath=ancestor::*[@data-tauri-drag-region][1]')).toHaveAttribute('data-tauri-drag-region', 'true')
+  await expect(page.getByTestId('open-settings').locator('xpath=ancestor::*[@data-tauri-drag-region][1]')).not.toHaveAttribute('data-testid', 'app-header')
   // The field's slot lets presses through, so the strip around the field belongs to the bar
   await expect(page.getByTestId('search-slot')).toHaveCSS('pointer-events', 'none')
   await expect(page.getByTestId('search-button')).toHaveCSS('pointer-events', 'auto')

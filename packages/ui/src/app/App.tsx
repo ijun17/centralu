@@ -34,7 +34,9 @@ import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { IconButton } from '../components/IconButton.jsx'
-import { CloseIcon, StepIcon } from '../components/icons.jsx'
+import { InboxPill } from '../features/inbox/InboxPill.jsx'
+import { WindowControls } from './WindowControls.jsx'
+import { CloseIcon, GearIcon, StepIcon } from '../components/icons.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
 import { lazyComponent } from '../components/lazy.jsx'
 
@@ -435,6 +437,7 @@ function TopBar() {
   // wrong everywhere else: on desktops that draw their own decorations above us, the
   // same padding is just a hole at the left edge with nothing in it.
   const controlsInset = useCapability('windowControlsInset')
+  const windowControls = useCapability('windowControls')
   const sc = useShortcut()
   // The search field stands in the middle of the window and takes its width from what the two sides leave (useSearchReserve)
   const counterRef = useRef<HTMLSpanElement>(null)
@@ -481,23 +484,7 @@ function TopBar() {
       */}
       {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
       <span className="relative flex" ref={counterRef}>
-        <button
-          className="group flex items-center gap-2.5 rounded-md px-2 py-0.5 transition-colors hover:bg-surface-hover/50"
-          onClick={() => toggleInbox()}
-          data-testid="counter"
-          title={`Waiting (${sc('mod', 'I')})`}
-        >
-          <Metric
-            label="Waiting for input"
-            value={counts.approval + counts.input + counts.error}
-            tone={
-              counts.approval + counts.error > 0 ? 'signal'
-              : counts.input > 0 ? 'text-ink-muted'
-              : 'text-ink-faint'
-            }
-            testId="count-waiting"
-          />
-        </button>
+        <InboxPill counts={counts} onOpen={() => toggleInbox()} title={`Waiting (${sc('mod', 'I')})`} />
         <Inbox />
       </span>
 
@@ -535,7 +522,7 @@ function TopBar() {
       </div>
 
       {/* data-tauri-drag-region: a double press on the gap inside this wrapper zooms the window, as on the bar itself */}
-      <span className="ml-auto flex items-center gap-3" ref={rightRef} data-tauri-drag-region>
+      <span className="ml-auto flex items-center gap-3 self-stretch" ref={rightRef} data-tauri-drag-region>
         {/*
           "A new version is available" — a line that appears only when there is one (issue #43).
 
@@ -563,14 +550,18 @@ function TopBar() {
           the shortcuts table. Dogfooding surfaced this as "where are the settings?". Not forcing
           a flow is different from hiding the entrance.
         */}
-        <button
-          className="rounded-md px-2 py-1 text-xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
+        {/* A gear, not the word (owner, 2026-10-18): the one settings mark people already know; the name is its tooltip */}
+        <IconButton
+          label="Settings"
           onClick={() => useStore.getState().toggleSettings(true)}
-          data-testid="open-settings"
-          title="Settings (shortcuts · notifications · approval rules)"
+          testId="open-settings"
+          align="right"
         >
-          Settings
-        </button>
+          {/* 20px, the usage donuts' size beside it */}
+          <GearIcon size={20} />
+        </IconButton>
+        {/* Windows: the window's own controls, flush with the right edge, where the OS title bar was (WindowControls) */}
+        {windowControls && <WindowControls />}
         {/*
           "Add project" used to be here. It moved to the bottom of the sidebar (issue #4) — the
           place pressed (far right of the screen) and the place the result appeared (the sidebar
@@ -580,36 +571,6 @@ function TopBar() {
         */}
       </span>
     </DragRegion>
-  )
-}
-
-function Metric({
-  label,
-  value,
-  tone,
-  testId,
-}: {
-  label: string
-  value: number
-  tone: string
-  testId: string
-}) {
-  return (
-    <span className={`flex items-baseline gap-1.5 ${tone}`} data-testid={testId}>
-      {/*
-        The glow belongs to the number (user's observation, 2026-09-12: "it looks smeared").
-
-        `signal` sets both a color and `text-shadow: 0 0 6px var(--color-signal-glow)`. The color
-        gets overridden here by text-ink-faint, but the shadow is inherited — so the ink-faint label
-        text was wearing a white glow. A bright halo on dark text does not look luminous, it looks
-        out of focus. A glow is only a glow on pure white text.
-
-        Since the label sits out of the brightness competition (always ink-faint), only the
-        inheritance is cut off.
-      */}
-      <span className="text-2xs text-ink-faint [text-shadow:none]">{label}</span>
-      <span className="readout text-md leading-none">{String(value).padStart(2, '0')}</span>
-    </span>
   )
 }
 

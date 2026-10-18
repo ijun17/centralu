@@ -16,6 +16,59 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/**
+ * A gear — settings. Eight even teeth around a hollow centre (computed, so every tooth is the same), drawn with the
+ * magnifier's stroke weight beside it in the top bar.
+ */
+export function GearIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M6.53 2.70 L6.78 1.11 L9.22 1.11 L9.47 2.70 L10.71 3.21 L12.02 2.27 L13.73 3.98 L12.79 5.29 L13.30 6.53 L14.89 6.78 L14.89 9.22 L13.30 9.47 L12.79 10.71 L13.73 12.02 L12.02 13.73 L10.71 12.79 L9.47 13.30 L9.22 14.89 L6.78 14.89 L6.53 13.30 L5.29 12.79 L3.98 13.73 L2.27 12.02 L3.21 10.71 L2.70 9.47 L1.11 9.22 L1.11 6.78 L2.70 6.53 L3.21 5.29 L2.27 3.98 L3.98 2.27 L5.29 3.21Z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.25" />
+    </svg>
+  )
+}
+
+/** The window's own controls where the top bar draws them (Windows): minimize, maximize, restore. Thin, as the OS draws them */
+export function WindowMinIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+export function WindowMaxIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+export function WindowCloseIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <path d="m0.5 0.5 9 9M9.5 0.5l-9 9" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+/** An envelope — the inbox: what waits for the person */
+export function MailIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="2" y="3.5" width="12" height="9" rx="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <path d="m2.6 4.6 5.4 4 5.4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** A magnifier — search (#529) */
 export function SearchIcon({ size = 13 }: { size?: number }) {
   return (

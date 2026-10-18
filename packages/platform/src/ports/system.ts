@@ -1,6 +1,9 @@
 /** What it is calling about — this decides how strong the sound and the dock bounce are */
 export type AlertKind = 'approval' | 'error' | 'done' | 'all_done'
 
+/** What the top bar's own window controls ask of the window */
+export type WindowAction = 'minimize' | 'toggleMaximize' | 'close'
+
 export interface SystemPort {
   notify(title: string, body: string): Promise<void>
   /**
@@ -13,6 +16,11 @@ export interface SystemPort {
    */
   alert(kind: AlertKind, sound: boolean): Promise<void>
   setBadge(count: number): Promise<void>
+  /**
+   * Minimizes, maximizes or restores, or closes the app window, for the controls the top bar draws itself where the
+   * OS draws none (`windowControls`, Windows). Closing goes through the same quit question as the OS's close.
+   */
+  windowAction(action: WindowAction): Promise<void>
   openInIde(path: string, line?: number): Promise<void>
   /**
    * Opens an http(s) address in the OS's default browser (#159). Used by terminal links and
@@ -108,6 +116,13 @@ export type PlatformCapabilities = {
    * Thunar…), so the generic phrase is the honest one there rather than a guess.
    */
   fileManagerName: string
+  /**
+   * Whether the top bar draws the window's minimize, maximize and close itself, at its right end (owner, 2026-10-18).
+   *
+   * On Windows the OS title bar is turned off so the top bar is the only strip (as on macOS, where the traffic lights
+   * sit inside it); the controls it took away are drawn here. Asked as a yes/no, never as an OS name, like the inset.
+   */
+  windowControls: boolean
   /**
    * Whether a frame's `dragend` reports where the drag ended in the top page's coordinates rather
    * than the frame's own (#308). The UI places an item dragged out of an app view by that point

@@ -11,8 +11,13 @@ import type { SessionSummary } from '@cc/core'
  * the computation itself is wrapped in useMemo.
  */
 
+/*
+ * A question the agent asked and the person has not answered is listed as an approval is (owner, 2026-10-18): it stays
+ * in the inbox until it is answered, read or not. An error keeps its own place: it outranks the question.
+ */
 const toCandidate = (x: SessionSummary) => ({
-  id: x.id, projectId: x.projectId, name: x.name, state: x.state,
+  id: x.id, projectId: x.projectId, name: x.name,
+  state: x.state !== 'error' && x.pendingQuestions.length > 0 ? ('waiting_approval' as const) : x.state,
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
   preview: x.preview, interruption: x.interruption ?? null,
 })

@@ -12,7 +12,8 @@ import type {
 export type Notice = {
   sessionId: string
   /** `agent_start`: the session asks to start another agent (#673), left as a card even while the app is in front */
-  kind: 'done' | 'approval' | 'error' | 'agent_start'
+  /** `question`: the agent asked the person a question (a question card) */
+  kind: 'done' | 'approval' | 'error' | 'agent_start' | 'question'
   /** The session's name at that moment — kept as written even if the session is renamed later */
   name: string
   at: number

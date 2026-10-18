@@ -183,6 +183,16 @@ pub(crate) fn window_controls_inset() -> u32 {
     }
 }
 
+/// Whether the top bar draws the window's own minimize, maximize and close (owner, 2026-10-18).
+///
+/// On Windows the OS title bar is turned off at startup (`lib.rs`, setup) so the top bar is the only
+/// strip, as on macOS where the traffic lights sit inside it; the controls it took away are drawn in
+/// the bar instead. Answered as a yes/no so the UI never learns which OS it is on.
+#[tauri::command]
+pub(crate) fn window_controls_drawn() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// What this machine's keyboard prints on the two modifier keys the UI shows.
 ///
 /// `join` is what goes between keys when a combination is written as one string. macOS
