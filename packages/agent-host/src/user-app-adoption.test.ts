@@ -10,7 +10,7 @@ import { ADOPTED_USER_APPS_KEY } from './dev-services/store/user-app-adoption.js
 import { SessionManager } from './sessions/manager.js'
 import type { AppSessionKey } from './sessions/session-apps.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
-import { UserAppAdoption, adoptedUserApp } from './user-app-adoption.js'
+import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 
 /**
  * Existing user-folder apps become projects in place (#1141, docs/plans/root-apps.md §4). Each item kept under the
@@ -60,6 +60,7 @@ function makeRuntime(): void {
     dataRoot,
     reservedIds: ['control'],
     adoptedUserApp: (appId, dir) => adoptedUserApp(store, appId, dir),
+    adoptedProjectOf: (appId) => adoptedProjectOf(store, appId),
   })
   rt.refresh()
 }
@@ -242,6 +243,26 @@ describe('a user-folder app becomes a project in place', () => {
     rt.refresh()
     expect(await adoption.run()).toBe(1)
     expect(project()).toMatchObject({ trusted: true })
+  })
+
+  /*
+   * #1152's keeper e2e (macOS): a call by the old key `user/<id>` answered "There is no such app". Anything still holding
+   * the old key (an older window during a swap, a stored name, a script) reaches the project's app
+   */
+  it('its old key user/<id> still reaches it, until its project is deleted', async () => {
+    const old = { projectId: null, appId: 'notes' }
+    const now = { projectId: project()!.id, appId: 'notes' }
+    expect(rt.resolve(old)).toEqual(now)
+    expect(rt.exists(old)).toBe(true)
+    const out = await rt.call(old, 'echo', {}, { kind: 'view' })
+    expect(out.error ?? '').not.toContain('no such app')
+    expect(rt.runs(old).map((r) => r.id)).toEqual(rt.runs(now).map((r) => r.id))
+    expect(rt.resolve({ projectId: null, appId: 'helper' })).toEqual({ projectId: store.projects.listProjects().find((p) => p.name === 'helper')!.id, appId: 'helper' })
+    // Deleting the project ends it
+    await mgr.deleteProject(now.projectId)
+    rt.refresh()
+    expect(rt.exists(old)).toBe(false)
+    expect(rt.resolve(old)).toEqual(old)
   })
 
   it('one that appears later (an approved MCP server) follows, without a restart', async () => {

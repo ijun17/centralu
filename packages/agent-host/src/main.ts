@@ -17,7 +17,7 @@ import { recordViewHandover, restoreViewHandover } from './view-handover.js'
 import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
-import { UserAppAdoption, adoptedUserApp } from './user-app-adoption.js'
+import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
@@ -358,6 +358,7 @@ const externalApps = new ExternalApps({
   shared: (ref) => readShared(store.settings, ref),
   // A user-folder app registered as a project in place is that project's root app now (#1141)
   adoptedUserApp: (appId, dir) => adoptedUserApp(store, appId, dir),
+  adoptedProjectOf: (appId) => adoptedProjectOf(store, appId),
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list

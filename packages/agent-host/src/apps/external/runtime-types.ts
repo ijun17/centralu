@@ -195,4 +195,6 @@ export type ExternalAppsDeps = {
    * the folder's path, which the record is bound to. Absent: nothing was.
    */
   adoptedUserApp?: (appId: string, dir: string) => boolean
+  /** The project a user-folder app of this id was registered as in place (#1141), for its old key (`ExternalApps.resolve`) */
+  adoptedProjectOf?: (appId: string) => string | undefined
 }
