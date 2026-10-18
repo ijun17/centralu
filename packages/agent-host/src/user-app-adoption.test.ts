@@ -8,6 +8,7 @@ import { MANIFEST_VERSION } from './apps/external/manifest.js'
 import { Store } from './dev-services/store.js'
 import { ADOPTED_USER_APPS_KEY } from './dev-services/store/user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
+import type { AppSessionKey } from './sessions/session-apps.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 import { UserAppAdoption, adoptedUserApp } from './user-app-adoption.js'
 
@@ -50,6 +51,8 @@ function session(id: string, over: Record<string, unknown> = {}): void {
 const grant = (capability: string) => ({ capability, text: `may ${capability}`, decision: 'allow' as const, stamp: 'uses-1', decidedAt: 5 })
 
 let emitted: NormalizedEvent[] = []
+/** The builder's handle, live across the move (as one kept running across a host swap is): what its app attachment sees */
+let liveBuilder: { current(): { server: string }[] } | null = null
 
 function makeRuntime(): void {
   rt = new ExternalApps({
@@ -110,6 +113,9 @@ beforeEach(async () => {
   mkdirSync(join(dataRoot, 'app-data', '_user', 'helper.carry-0b7c2e4a-1f3d-4c5b-9a8e-123456789abc'), { recursive: true })
 
   startHost()
+  const hub = (mgr as unknown as { apps: { appsHub: { attach(k: AppSessionKey): { current(): { server: string }[] } } } }).apps.appsHub
+  liveBuilder = hub.attach({ id: 'builder', kind: 'worker', projectId: null, builderOf: { projectId: null, appId: 'notes' } })
+  expect(liveBuilder.current().map((x) => x.server)).toEqual(['app-notes'])
   expect(await adoption.run()).toBe(2)
 })
 
@@ -169,6 +175,8 @@ describe('a user-folder app becomes a project in place', () => {
     expect(mgr.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
     // And the windows hear of the move
     expect(emitted).toContainEqual(expect.objectContaining({ type: 'session_created', sessionId: 'builder', session: expect.objectContaining({ projectId: project()!.id }) }))
+    // Its handle, live across the move, is still given its own app, now the project's root app
+    expect(liveBuilder!.current().map((x) => x.server)).toEqual(['app-notes'])
     // So asking for its builder stands no second one up
     expect(await mgr.createAppBuilder({ projectId: project()!.id, appId: 'notes' })).toMatchObject({ id: 'builder' })
     expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ [OLD]: 'builder', [newKey()]: 'builder' })

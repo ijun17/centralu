@@ -504,6 +504,26 @@ export class SessionManager {
   }
 
   /**
+   * Sessions the store moved into a project behind the manager's back (#1141: a user-folder app's builder and agents,
+   * when its folder became a project in place, after this manager loaded them). The loaded copies follow, so the
+   * builder is found under the app's new key in this same run, and each window hears the session again
+   * (`session_created`, which a window applies to a session it already holds when the project differs). A live
+   * handle's attachment is moved as well, so a builder that outlived the move (kept across a host swap) is still given
+   * its own app.
+   */
+  sessionsMovedToProject(sessionIds: readonly string[], projectId: string): void {
+    for (const id of sessionIds) {
+      const m = this.meta.get(id)
+      if (!m || m.projectId === projectId) continue
+      const moved = { ...m, projectId }
+      this.meta.set(id, moved)
+      // A live handle's app attachment follows too (a builder kept running across a swap): it gets its own app again at once
+      this.apps.appsHub?.sessionMoved(id, projectId)
+      this.emit({ type: 'session_created', sessionId: id, session: moved })
+    }
+  }
+
+  /**
    * Deletes a project (this is a **delete**, not an unregister).
    *
    * Files are left untouched — removing a folder only ever happens through the OS trash, and that
@@ -524,22 +544,6 @@ export class SessionManager {
    * Trying to delete a manager that still has children first would be blocked by #69's protection.
    * So deletion goes **leaves first**.
    */
-  /**
-   * Sessions the store moved into a project behind the manager's back (#1141: a user-folder app's builder and agents,
-   * when its folder became a project in place, after this manager loaded them). The loaded copies follow, so the
-   * builder is found under the app's new key in this same run, and each window hears the session again
-   * (`session_created`, which a window applies to a session it already holds when the project differs).
-   */
-  sessionsMovedToProject(sessionIds: readonly string[], projectId: string): void {
-    for (const id of sessionIds) {
-      const m = this.meta.get(id)
-      if (!m || m.projectId === projectId) continue
-      const moved = { ...m, projectId }
-      this.meta.set(id, moved)
-      this.emit({ type: 'session_created', sessionId: id, session: moved })
-    }
-  }
-
   async deleteProject(projectId: string): Promise<void> {
     // Cards and queued asks that reach into it or out of it end first, before any wait: none outlives the project
     this.queue.withdrawReaches(

@@ -174,6 +174,19 @@ export class SessionAppsHub {
     })
   }
 
+  /**
+   * A session moved into a project behind its handle's back (#1141: a user-folder app's builder or agent, when the app's
+   * folder became a project in place). The live attachment's view of the session follows — its project, and the app it
+   * builds now under that project — and is counted again, so the builder is given its own app without a restart.
+   */
+  sessionMoved(sessionId: string, projectId: string): void {
+    const a = this.live.get(sessionId)
+    if (!a) return
+    a.session.projectId = projectId
+    if (a.session.builderOf && a.session.builderOf.projectId === null) a.session.builderOf = { projectId, appId: a.session.builderOf.appId }
+    a.recheck()
+  }
+
   /** Creates the attachment for one handle — handed to the adapter, and closed by the adapter when the handle closes */
   attach(session: AppSessionKey): SessionApps {
     const a = new Attachment(this, session)
