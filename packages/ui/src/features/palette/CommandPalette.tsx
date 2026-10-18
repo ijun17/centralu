@@ -11,6 +11,7 @@ import { Badge } from '../../components/Badge.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
+import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
@@ -51,21 +52,25 @@ export function CommandPalette() {
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
-  const [hits, setHits] = useState<{ sessionId: string; seq: number; snippet: string }[]>([])
+  // The hits with the query they answer: until the answer to the latest keystroke comes, the rows are an earlier query's
+  const [found, setFound] = useState<FoundHits<{ sessionId: string; seq: number; snippet: string }>>(NO_HITS)
+  const hits = found.list
+  const hitsFresh = hitsAnswer(found, query)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Searching conversation content asks the host (SQLite FTS)
   useEffect(() => {
     if (!open || query.trim().length < 2) {
-      setHits([])
+      setFound(NO_HITS)
       return
     }
     let alive = true
+    const asked = query.trim()
     const t = setTimeout(() => {
       void platform.search
-        .messages(query.trim(), 20)
-        .then((r) => alive && setHits(r))
-        .catch(() => alive && setHits([]))
+        .messages(asked, 20)
+        .then((r) => alive && setFound({ query: asked, list: r }))
+        .catch(() => alive && setFound({ query: asked, list: [] }))
     }, 150)
     return () => {
       alive = false
@@ -239,14 +244,15 @@ export function CommandPalette() {
       else if (e.key === 'ArrowUp') setCursor((c) => Math.max(c - 1, 0))
       else if (e.key === 'Enter') {
         const item = items[cursor]
-        if (item) choose(item)
+        // A hit from the query before this one is not opened: its answer is on its way and replaces the rows
+        if (item && enterMayOpen(item, hitsFresh)) choose(item)
       } else if (e.key === 'Escape') toggle(false)
       else return
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, choose, toggle])
+  }, [open, items, cursor, choose, toggle, hitsFresh])
 
   /*
    * A dialog with a combobox (#842 item 7): focus stays inside while it is up, the field says it drives the list, and the

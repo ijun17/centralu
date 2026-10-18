@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -90,28 +90,15 @@ function Changes({
   // A project on a linked machine opens in VS Code over Remote-SSH instead (#82); null where that cannot work
   const remoteIde = useRemoteIde(projectId)
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
-  const [diff, setDiff] = useState<{ diff: string; truncated: boolean; binary: boolean } | null>(null)
-
   /*
-   * A request generation number. This diff is **the basis for an approval decision** — clicking
-   * through files in quick succession can let a slow response arrive late and draw **a
-   * different file's diff** under the name of the file currently on screen. Only the most
-   * recent request is allowed to write to the screen.
+   * This diff is **the basis for an approval decision** — clicking through files in quick succession must not let a slow
+   * response arrive late and draw **a different file's diff** under the name of the file currently on screen. `useLoad`
+   * lets only the newest read write to the screen, clears the old file's diff at once, and says when a read failed
+   * instead of drawing an empty diff (the commit screen below asks the same way).
    */
-  const diffGen = useRef(0)
-  const openDiff = useCallback(
-    async (f: GitFileStatus) => {
-      const gen = ++diffGen.current
-      setSelected(f)
-      setDiff(null) // Does not leave an old file's diff sitting under the new file's name
-      try {
-        const d = await platform.git.diff(projectId, f.path, f.staged)
-        if (gen === diffGen.current) setDiff(d)
-      } catch (e) {
-        if (gen === diffGen.current) setToast(`Could not load diff: ${(e as Error).message}`)
-      }
-    },
-    [platform, projectId, setToast],
+  const diff = useLoad(
+    () => (selected ? platform.git.diff(projectId, selected.path, selected.staged) : null),
+    [platform, projectId, selected],
   )
 
   // Follows a sidebar click — once per pick. Clicking again is a retry
@@ -133,20 +120,21 @@ function Changes({
         const hit = files.find(
           (f) => f.path === initialPath && (initialStaged === undefined || f.staged === initialStaged),
         )
-        if (hit) void openDiff(hit)
+        if (hit) setSelected(hit)
       })
       // Said, as a failed diff is (#850 item 8): silent, the click looked like it did nothing. Clicking again retries
       .catch((e: Error) => alive && setToast(`Could not load diff: ${e.message}`))
     return () => {
       alive = false
     }
-  }, [pick, initialPath, initialStaged, platform, projectId, openDiff, setToast])
+  }, [pick, initialPath, initialStaged, platform, projectId, setToast])
 
   return (
     <div className="flex min-h-0 flex-1">
       <DiffView
         path={selected?.path}
-        data={diff}
+        data={diff.data ?? null}
+        failure={diff.error === null ? undefined : { what: 'the diff', error: diff.error, onRetry: () => void diff.reload() }}
         emptyHint="Pick a file from the Changes list on the right"
         /*
          * The working-tree diff is a single file — which file it is comes from the file that
@@ -201,9 +189,12 @@ function DiffView({
   onOpenInIde,
   onOpenViewer,
   ide,
+  failure,
 }: {
   path?: string
   data: { diff: string; truncated: boolean; binary: boolean } | null
+  /** The read of the diff failed (#850 item 8): said where the diff would be, never drawn as an empty diff */
+  failure?: { what: string; error: string; onRetry: () => void }
   /** When opened with nothing selected — the list lives in the sidebar, so this has to point there */
   emptyHint?: string
   /**
@@ -345,6 +336,7 @@ function DiffView({
             <span className="readout text-xs text-ink">{place.label}</span>
           </div>
         )}
+        {failure && <LoadFailed className="p-3" what={failure.what} error={failure.error} onRetry={failure.onRetry} testId="diff-failed" />}
         <div ref={rowsRef} className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualRows.map((v) => {
             const { kind, body } = rows[v.index]!
@@ -444,29 +436,23 @@ function History({
   const setToast = useStore((s) => s.setToast)
   const remote = useProjectMachine(projectId) !== null
   const remoteIde = useRemoteIde(projectId)
-  const [detail, setDetail] = useState<{
-    sha: string
-    files: string[]
-    diff: string
-    truncated: boolean
-  } | null>(null)
-
-  const opened = useRef(-1)
-  useEffect(() => {
-    if (!initialSha || opened.current === pick) return
-    opened.current = pick
-    void platform.git
-      .commitDetail(projectId, initialSha)
-      .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff, truncated: d.truncated }))
-      // Said, as a failed file diff is (#850 item 8): silent, the screen kept "Pick a commit" under the one just picked
-      .catch((e: Error) => setToast(`Could not load the commit: ${e.message}`))
-  }, [pick, initialSha, platform, projectId, setToast])
+  /*
+   * The newest click wins, as on the Changes screen: clicking commit A and then B must not let A's slower answer draw
+   * A's diff while B is picked, and a commit that fails must not leave the one before it on screen behind a toast.
+   * Each click is a new request (`pick`), so clicking the same commit again reads it again.
+   */
+  const request = useMemo(() => ({ sha: initialSha, pick }), [initialSha, pick])
+  const detail = useLoad(
+    () => (request.sha ? platform.git.commitDetail(projectId, request.sha) : null),
+    [platform, projectId, request],
+  )
 
   return (
     <div className="flex min-h-0 flex-1">
       <DiffView
-        path={detail ? `${detail.files.length} files` : undefined}
-        data={detail ? { diff: detail.diff, truncated: detail.truncated, binary: false } : null}
+        path={detail.data ? `${detail.data.files.length} files` : initialSha ? initialSha.slice(0, 7) : undefined}
+        data={detail.data ? { diff: detail.data.diff, truncated: detail.data.truncated, binary: false } : null}
+        failure={detail.error === null ? undefined : { what: 'the commit', error: detail.error, onRetry: () => void detail.reload() }}
         emptyHint="Pick a commit from the History list on the right"
         /*
          * An `async () => {}` used to sit here, so clicking the button on the commit screen did

@@ -37,6 +37,16 @@ export interface RoutedMachine {
   observe(kind: 'sessions' | 'projects', list: unknown[]): void
   /** A session of the remote the hub does not show: its orchestrator and coordinators (§3.4) */
   hides(session: unknown): boolean
+  /**
+   * Not connected, and connected when something needs it (#1134): its last known lists stand for it until then.
+   * Absent: a machine connected whenever the hub runs
+   */
+  readonly onDemand?: boolean
+  /**
+   * Something needs the machine now (#1134): one that connects when needed is connected, and this resolves once that
+   * attempt ended, connected or not. Any other machine is left as it is. Absent: nothing to do
+   */
+  need?(): Promise<void>
 }
 
 /**
@@ -402,7 +412,9 @@ export class Router {
       out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its trash was not emptied' }))] }
     }
     // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds
-    if (method === 'trash.list' && missed.length && isObj(out)) out = { ...out, unreached: missed.map((m) => ({ machineId: m.id, name: m.name })) }
+    if ((method === 'trash.list' || method === 'subagents.usage') && missed.length && isObj(out)) {
+      out = { ...out, unreached: missed.map((m) => ({ machineId: m.id, name: m.name })) }
+    }
     return out
   }
 }
@@ -422,11 +434,23 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
     case 'trash.list': {
       const a = isObj(acc) ? acc : { sessions: [], bytes: 0 }
       const b = isObj(r) ? r : { sessions: [], bytes: 0 }
+      // A machine's app-agent run records (#378) are listed with its sessions, named by machine for reading and deleting there
+      const runs = [...list(a.runs), ...list(b.runs).map((t) => q.trashedRun(t))]
       return {
         ...a,
         sessions: [...list(a.sessions), ...list(b.sessions).map((t) => q.trashed(t))],
+        ...(runs.length ? { runs } : {}),
         bytes: (typeof a.bytes === 'number' ? a.bytes : 0) + (typeof b.bytes === 'number' ? b.bytes : 0),
+        // A session's subagent steps in the trash (#418); absent when no host said it
+        ...('subagentSteps' in a || 'subagentSteps' in b
+          ? { subagentSteps: [...list(a.subagentSteps), ...list(b.subagentSteps).map((t) => q.subagentSteps(t))] }
+          : {}),
       }
+    }
+    case 'subagents.usage': {
+      const a = isObj(acc) ? acc : { sessions: [] }
+      const b = isObj(r) ? r : { sessions: [] }
+      return { ...a, sessions: [...list(a.sessions), ...list(b.sessions).map((t) => q.subagentSteps(t))] }
     }
     case 'trash.empty': {
       const a = isObj(acc) ? acc : { purged: 0, failed: [] }

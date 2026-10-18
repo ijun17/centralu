@@ -16,7 +16,7 @@ import { deriveHttpSecret } from './transport/http.js'
 import { recordViewHandover, restoreViewHandover } from './view-handover.js'
 import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
-import { OriginPorts, type PortBook } from './views/origin-ports.js'
+import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
@@ -459,8 +459,14 @@ const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) 
  * a different app would let that app read someone else's browser storage.
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
+/** The unreadable row last said (#384): every serve reads the book, and the row is said once until it changes */
+let portBookSaid: string | null = null
 function parseStoredPortBook(raw: string | null): PortBook | null {
-  return (parseJson(raw) ?? null) as PortBook | null
+  return parsePortBook(raw, (line) => {
+    if (portBookSaid === raw) return
+    portBookSaid = raw
+    console.error(`[agent-host] app_settings.${VIEW_PORTS_KEY} ${line}`)
+  })
 }
 const views: ViewHost = new ViewHost({
   secret: httpSecret,
@@ -529,6 +535,8 @@ const links = new Links({
   log: (line) => console.error(line),
   // A child start_agent started on a machine hangs under the session here that started it (#1038)
   ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
+  // A machine that connects when needed stays up while a session here waits on a child there (#1134)
+  workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)

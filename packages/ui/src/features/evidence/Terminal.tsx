@@ -85,11 +85,14 @@ export function TerminalPane({ projectId }: { projectId: string }) {
         if (gen !== loadGen.current) return
         holdEarly([t])
         setTerminals([t])
+        setError(null)
         return
       }
       // Only for the ones not on screen yet: a view already mounted listens for itself
       holdEarly(list.filter((t) => !mounted.current.has(viewKey(resyncs.current, t.terminalId))))
       setTerminals(list)
+      // The line says what the last thing tried did: an answer clears the reason an earlier one failed (#1143 U19)
+      setError(null)
     } catch (e) {
       if (gen === loadGen.current) setError((e as Error).message)
     }
@@ -118,6 +121,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       const t = await platform.terminal.create(projectId, 80, 24)
       holdEarly([t])
       setTerminals((prev) => [...(prev ?? []), t])
+      setError(null)
     } catch (e) {
       setError((e as Error).message)
     }

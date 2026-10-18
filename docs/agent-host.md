@@ -2317,7 +2317,7 @@ tool-neutral (`sessions/interruptions.ts`):
 | When no report is owed (no report mark, no call waiting on the turn now), the session that gave the turn hears once of a `network`, `interrupted` or `quit` stop (`tellAskerOfInterruption`): a delegation's caller nobody waits for now (`ask_project` or `start_agent` past its bound), else the session that started it (`askedBy`). A call still waiting reads the stop from its own answer | The 2026-10-15 case, and an `ask_project` turn whose session has no `askedBy`. One report per stopped turn; another needs another turn, so two sessions cannot wake each other in a loop |
 | Every report and every word Centralu gives a session about its request (a start that did not start, a note or a queued request that did not go) goes through `tellSession` (#428): never while the host hands over or quits, never to a session that is gone | A quit used to report each running child as "failed: Centralu is shutting down" in its caller, which the next start then told again as a `quit` stop, and a report could wake a sleeping caller on the way out |
 | A `quit` is told at the next start, once per child, to the first that still exists of: the session owed its report, the one that gave the turn (`delegated_turns`), its `askedBy` (`quitNotices`, after the keeper's adoption for a kept one). A kept process that cannot be re-attached settles its report the same way. **No requester that is itself stopped by a quit** is told, at the start or later: it waits for the person's Continue | An asker that delegated without waiting was at rest, not cut, and its report mark used to be dropped: it never heard. Waking it once costs a turn; never hearing costs the work. An orchestrator the same quit cut would be resumed at launch with nobody there, and that turn would clear its own "stopped" mark before the person saw it; its children's rows say they stopped once it is continued |
-| The orchestrator's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session`'s list (#690) does not exist yet |
+| The orchestrator's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session list` (#690) names such a child `stopped` and leaves the reason to `status`: it is a list for cleaning up, where what matters is that the child's work is not over |
 | The screen shows it beside the state: the inbox row's word and **Continue**, the sidebar mark's ring and tooltip, a line above the composer (product-spec FR-15) | The state alone looks the same for a stopped turn and a finished one; Continue is the one message that goes on |
 | `CLAUDE_CODE_MAX_RETRIES` is left as the CLI sets it | Its three minutes outlast most drops; a longer budget would hold a turn hostage through a long outage |
 
@@ -2685,11 +2685,34 @@ sessions resume on the new host through their stored ids, as after any restart.
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
-(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to a minute); `starting` (no host ran
+(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes, #1134); `starting` (no host ran
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
-it restarts).
+it restarts); `disconnected` (#1134: closed on purpose and not tried, below).
+
+**When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
+column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
+after every drop, so an orchestrator working through it hears reports and cards as they happen. `when_needed` is for a
+laptop that is often closed or a server used once a week: the machine is not connected at start, and no attempt is
+made until something needs it. A need is the window opening one of its projects or sessions (`machines.need`, said
+again every 2 minutes while it stays open), or the orchestrator acting there: `start_agent` with the machine,
+`agent_session`, `ask_project` on one of its projects, `read_session` of one of its sessions (`linked-sessions.ts`
+waits up to 60 s for the link). Looking a name up is not a need: such a machine's projects stand as last listed, not as
+away, also while it is connecting or between attempts, so the act that follows waits for the link instead of being
+refused. Each act there starts the hold again. The link stays up for 10 minutes after the last need, for as long as a
+session there is in a turn as the hub last heard it (followed event by event, so a turn open when the link dropped
+keeps it tried), and for as long as a session here waits on a child there (its report owed, over its turn or over its
+background work; `SessionManager.linkedWorkOwed`); then it closes (`disconnected`), also while it was away. A
+restarted hub connects such a machine at start while a report of a child there is owed. Its sessions keep running there meanwhile; on the next connect the window
+re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
+unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
+Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
+does not bring it back; Connect, the window opening something of it again, or an agent's work does. A machine connected
+at start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
+back. An install, update or autostart change on a disconnected machine connects it first, since it runs over the link's
+ssh, without pinning it: its hold runs from the end of the job. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
+`unreachable` and shows no setting.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with
@@ -2807,7 +2830,10 @@ step against:
    or any step touches the file, a host whose newest step is below the record refuses to start: "This data was
    written by a newer Centralu", naming both versions, on stderr and stdout, exit 1, the same path as a lock conflict.
    The desktop supervisor shows it at once instead of retrying. A host older than the store but at or above the
-   record opens it and runs no step it does not know.
+   record opens it and runs no step it does not know. A record that is not a version (a hand edit, a write cut short)
+   is worked out again, and said, by a host that knows every step the store has run; a host older than the store
+   refuses the same way, naming the row, since a floor worked out from fewer steps could open what it cannot read
+   (#384).
 4. **Heavy steps are marked `heavy: true`:** a step that rewrites or re-indexes every message, or `VACUUM`s (v3, v11,
    v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap runs them after the switch rather
    than during it.
@@ -2832,7 +2858,7 @@ step against:
 | Steps | What they do | Older build |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | add a column (45: `sessions.asked_by_session_id`, the session that asked for this one, #371, whose meaning moved with #561 and #614, see 48 and 55; 47: `grid_layout.remote_app_id` and `app_machine`, a panel of a linked machine's app, #82; 53: `sessions.interruption`, why the last turn did not finish, #698; 54: `queued_requests.opened_by_auto`, a queued ask only `auto` let through) | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 47: an older host reads app rows only where `app_id` is set, and its `setGridView` drops a linked machine's app panel when it rewrites the layout; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698; 54: an older host neither reads nor writes `opened_by_auto`; a row it queues is null, read as marked when the pair has no remembered consent) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677; 57 adds `app_run_records`, `app_run_messages` and `app_run_subagent_messages`, the record of a deleted app-agent session, and the nullable `app_runs.request`, `answer` and `output`, #378) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
@@ -2845,49 +2871,18 @@ mirror. `schema-doc.test.ts` fails until both are done.
 ### 5.2 Stored shapes another build reads (#384)
 
 The store's tables are one shape that two builds share; §5.1 covers them. Many other shapes are stored or exchanged
-the same way: JSON rows in `app_settings`, files in the data folder, files a person or another build writes, and
-the lines and frames between processes. An older and a newer build read each of them during a host swap, after a
-person goes back a release, and between two machines on different releases.
+the same way: JSON rows in `app_settings`, JSON columns, files in the data folder, files a person or another build
+writes, and the lines and frames between processes. An older and a newer build read each of them during a host swap,
+after a person goes back a release, and between two machines on different releases.
 
-A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
-`tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
-`purgeSession`), so a new per-session key needs no line in the purge.
+The rules for every shape: a field added is ignored by an older reader, and kept where it writes the record back; a
+field removed gets its default in a newer reader; a value this build cannot read takes its default alone, and a
+permission that cannot be read is a refusal; a broken file or row gives a clear message that names it, never a crash
+and never a setting reset without a word.
 
-The rules for every shape:
-
-- **A field added:** an older reader ignores it, and, where it writes the record back, keeps it.
-- **A field removed or not yet written:** a newer reader uses the default.
-- **A value this build cannot read** (a word from a newer enum): that value takes its default, alone; the rest of
-  the record still reads. A permission that cannot be read is a refusal, never a grant.
-- **A broken file:** a clear message that names the file or row, never a crash, and never a setting reset without
-  a word.
-
-| Shape | Where | Reader / writer | Older shape | Newer shape | Broken | Tests |
-|---|---|---|---|---|---|---|
-| Screen preferences (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | each missing field is its default | an unreadable value shows its default; unknown fields and unreadable values are kept when this build writes a change | defaults, one stderr line naming the row; the next change replaces it | `theme.test.ts`, `ui-preferences.test.ts` |
-| Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store-layout.test.ts` (ui), `notify.test.ts` |
-| Theme and typography cache | the page's `localStorage` | `applyCachedTheme`, `applyCachedTypography` | each value checked | ignored | same as no cache: only the first frame, the host's answer follows | (cache only) |
-| Keeper settings | `keeper-settings.json` | `source::load_settings` / `save_background` (keeper) | `background` defaults to off | unknown fields kept and written back; a `background` that is not true or false reads as off, alone, with a stderr line | reads as off, one stderr line naming the file; the next save replaces it | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
-| Grid placements | `grid_layout` | `Store.listGridView` / `setGridView` | a row without a span reads as none chosen (v43) | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. A span out of bounds reads as none | (rows) | `store.test.ts` (v42, v43) |
-| Consents between projects (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (rows) | a kind this build does not know stays in the store and is not listed (#384) | (rows) | `store.test.ts` |
-| A session's app consents | `app_settings.session_apps:<id>` | `parse` in `sessions/app-access.ts` | (list) | an element with an unknown consent is dropped | empty list | |
-| App permissions | `app_permissions` | `desk.ts` | a decision recorded for an older `uses` asks again | any decision but `allow` refuses | (rows) | `app-capabilities.test.ts` |
-| App manifest | `centralu.app.json` | `parseManifest` | optional fields default (`view.origin` opaque, `uses` empty) | an unknown field is a warning; an unknown `uses.host` capability is a warning and refused; another `manifestVersion` is an error naming both versions | an error naming the file, shown in the app list | `manifest.test.ts` |
-| App secrets | `app-secrets.json` | `AppSecrets` | (map) | extra keys ignored | apps start without secrets, said on stderr | `app-secrets.test.ts` (not the broken file) |
-| Imported-app marks | `app-imports.json` | `ImportBook` | (map) | extra keys kept | moved aside as `.unreadable-<time>` and reported, so an imported app asks again | |
-| App versions | `app-versions/<app>/<id>/meta.json` | `AppVersions.list` | | extra fields kept | a record without `id` and `at` is skipped, like a half-deleted one (#384) | `versions.test.ts` |
-| Theme files | `<data>/themes/*.json` | `parseThemeFile` (protocol) | missing tokens fall back to the base theme | an unknown key or token is listed as a problem and ignored | listed as broken, with the reason | `theme.test.ts`, `themes.test.ts` |
-| Orchestrator proposals and skills | `app_settings.orchestrator_*` | `OrchestratorProposals` | | an element keeps its extra fields | not a list reads as empty; an element without a name or content is skipped (#384) | `orchestrator-proposals.test.ts` |
-| View hand-over | `app_settings.views.handover` | `restoreViewHandover` | | an element that is not a view is skipped (#384) | nothing reopens; the row is deleted all the same | `view-handover.test.ts` |
-| View origin ports, agent versions seen, project JSON columns | `app_settings.apps.viewPorts`, `agents.versionsSeen`, `projects.*` | `readBook`, `readSeen`, `Store` | each value checked | ignored | read as none | |
-| Host build record | `CC_HOST_SOURCE` (keeper to host) | `hostBuild` (`keeper-link.ts`) | missing keys are left out | ignored | the host's own commit only | `keeper-link.test.ts` |
-| Start status | `shell-status.json` | the window's `start.rs`, field by field, matched by nonce | | ignored | treated as no status yet | `start.rs` tests |
-| Keeper record | `keeper.json` | written for a person; no build reads it | | | | |
-| Remote connection line | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version` and `dataDir` default | another `v` is an error that says which side to update; a missing port or token is an error | lines that are not JSON are skipped | `tunnel.test.ts` |
-| Host ↔ UI payloads | RPC results, events, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | defaults applied | undeclared fields dropped; an unreadable value is kept as sent, alone | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
-
-Not covered yet: an e2e that opens a newer store with the previous release's host; `older-host.spec.ts` covers the
-payload half.
+Every such shape, its owner, its parser and what it does today with each of those, with the tests that feed it the
+other build's shapes: [stored-shapes.md](stored-shapes.md). A new stored shape, or a new field in one, gets its row
+there in the same pull request.
 
 ## 6. Usage and limits (FR-9)
 

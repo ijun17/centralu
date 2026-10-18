@@ -1,5 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { isPlainEscape } from '../app/keys.js'
+import { coveringLayerOpened } from '../store/layers.js'
+import { useStore } from '../store/store.js'
 
 /**
  * How a popover, a menu or a modal goes away: one set of rules, written once (#428).
@@ -18,6 +20,10 @@ import { isPlainEscape } from '../app/keys.js'
  *   something else catches outside presses (a backdrop under the popover, or a modal's own scrim).
  * - **The window losing focus** closes it, unless `closeOnBlur` is off: the popovers that sit over an app's view need it,
  *   a modal or a popover with a backdrop (which covers the view) does not.
+ * - **A window opening over the screen** (the palette, the inbox, settings, usage) closes it, unless `closeOverWindow` is
+ *   off. Those windows hear Escape on the window after this capture listener has claimed it, so a popover left open
+ *   under them took the key and the window on top stayed (⌘K, then Esc, closed the hidden popover). A popover has
+ *   nothing the person can still reach under a window anyway.
  * - **`returnFocusTo`**: Escape gives focus back to the trigger, since the person is on the keyboard. A press outside
  *   or a blur does not: they moved focus on purpose. Only when focus is the popover's or nobody's: a composer the person
  *   is typing in (WebKit does not focus a button on click, so focus may never have left it) keeps the keyboard.
@@ -30,6 +36,7 @@ export function useDismiss({
   refs,
   returnFocusTo,
   closeOnBlur = refs !== undefined,
+  closeOverWindow = true,
 }: {
   /** Nothing is listened to while it is false. Absent: always listening (a modal exists only while it is open) */
   open?: boolean
@@ -40,6 +47,8 @@ export function useDismiss({
   returnFocusTo?: RefObject<HTMLElement | null> | HTMLElement | null
   /** Defaults to on when `refs` is given: a popover without a backdrop can be left through a click into an app's view */
   closeOnBlur?: boolean
+  /** Defaults to on: a popover goes when a window opens over the screen. A modal is itself such a layer and stays */
+  closeOverWindow?: boolean
 }): void {
   const latest = useRef({ onClose, refs, returnFocusTo })
   latest.current = { onClose, refs, returnFocusTo }
@@ -62,6 +71,11 @@ export function useDismiss({
       if (mine) to?.focus()
     }
     const onBlur = () => latest.current.onClose()
+    const stopWatchingWindows = closeOverWindow
+      ? useStore.subscribe((now, before) => {
+          if (coveringLayerOpened(before, now)) latest.current.onClose()
+        })
+      : undefined
     if (watchesOutside) window.addEventListener('mousedown', onDown, true)
     window.addEventListener('keydown', onKey, true)
     if (closeOnBlur) window.addEventListener('blur', onBlur)
@@ -69,6 +83,7 @@ export function useDismiss({
       window.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', onBlur)
+      stopWatchingWindows?.()
     }
-  }, [open, watchesOutside, closeOnBlur])
+  }, [open, watchesOutside, closeOnBlur, closeOverWindow])
 }

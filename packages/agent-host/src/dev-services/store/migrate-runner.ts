@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import { z } from 'zod'
-import { readJsonList } from './json.js'
+import { parseJson, readJsonList } from './json.js'
 import { type MigrationStep } from './migrations/context.js'
-import { ReaderGate, storeTooNewMessage } from './reader-gate.js'
+import { ReaderGate } from './reader-gate.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
 
@@ -12,6 +12,8 @@ import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
  * `user_version` has moved past them, so the list is how the next open knows they still have to run.
  */
 const DEFERRED_KEY = 'deferred_migrations'
+/** One element of that list */
+const DeferredStep = z.number().int().positive()
 
 export type StoreOptions = {
   /**
@@ -87,7 +89,16 @@ export abstract class MigrationRunner extends ReaderGate {
      */
     const stored = this.storedMinReader()
     let floor = stored ?? Math.max(0, ...steps.filter((s) => s.breaksOlderReaders && s.to <= current).map((s) => s.to))
-    if (stored === null) this.writeMinReader(floor)
+    if (stored === null) {
+      // A record that is not a version reaches here only on a store this host knows every step of (`tooNew`, #384)
+      const unreadable = this.unreadableMinReader()
+      if (unreadable !== null) {
+        console.error(
+          `[store] app_settings.min_reader_version in ${this.dbPath} held ${JSON.stringify(unreadable.slice(0, 40))}, not a store version; worked out again from the steps this store has run: ${floor}`,
+        )
+      }
+      this.writeMinReader(floor)
+    }
 
     const t0 = Date.now()
     /*
@@ -95,6 +106,7 @@ export abstract class MigrationRunner extends ReaderGate {
      * itself a swap. A host that died before `runDeferred` finished leaves them here for the next one.
      */
     const deferred = new Set(this.storedDeferred())
+    this.sayUnreadableDeferred()
     // A swap only ever meets a store an earlier host already built; a new store has nothing heavy to do
     const swap = this.opts.swap === true && current > 0
     for (const step of steps) {
@@ -283,7 +295,7 @@ export abstract class MigrationRunner extends ReaderGate {
         userVersion,
         minReaderVersion: floor ?? 0,
         latestKnownVersion: known,
-        tooNew: floor !== null && floor > known ? storeTooNewMessage(floor, known, dbPath) : null,
+        tooNew: probe.tooNew(dbPath)?.message ?? null,
         pending: steps
           .filter((s) => userVersion < s.to || deferred.has(s.to))
           .map((s) => ({ to: s.to, heavy: s.heavy === true, breaksOlderReaders: s.breaksOlderReaders })),
@@ -294,7 +306,22 @@ export abstract class MigrationRunner extends ReaderGate {
   }
 
   private storedDeferred(): number[] {
-    return readJsonList(readStoreKey(this.db, DEFERRED_KEY), z.number().int().positive())
+    return readJsonList(readStoreKey(this.db, DEFERRED_KEY), DeferredStep)
+  }
+
+  /**
+   * A list of owed steps that does not read whole is said, naming the row (#384): `user_version` is already past the
+   * steps it named, so a step it lost never runs. Not guessed at: a step a swap leaves owes an index, a vacuum or a
+   * contraction, never data, and only a hand edit or a write cut short leaves such a list.
+   */
+  private sayUnreadableDeferred(): void {
+    const raw = readStoreKey(this.db, DEFERRED_KEY)
+    if (raw === null) return
+    const list = parseJson(raw)
+    if (Array.isArray(list) && list.every((x) => DeferredStep.safeParse(x).success)) return
+    console.error(
+      `[store] app_settings.${DEFERRED_KEY} in ${this.dbPath} holds ${JSON.stringify(raw.slice(0, 80))}, not a list of steps; a step it named that a host swap left for later will not run`,
+    )
   }
 
   private writeDeferred(steps: number[]): void {

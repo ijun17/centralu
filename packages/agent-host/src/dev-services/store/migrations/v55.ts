@@ -71,40 +71,67 @@ export class StepsV55 extends MigrationRange {
         },
       },
       {
-        to: 60,
+        to: 57,
         breaksOlderReaders: false,
         /**
-         * The reverse direction of linked machines (#550, docs/plans/remote-hub.md §12.7): a linked machine's sessions
-         * asking this computer's projects.
+         * An app-agent run keeps its own record (#378). `app_runs` gains the app's request, the agent's answer and its
+         * structured output for a run_agent row (masked like the rest of the row). A session the run stood up is
+         * deleted once the run ends cleanly; what it said is copied first into `app_run_records` (one row per run, with
+         * what the trash lists), `app_run_messages` (its conversation, the same columns as `messages`) and
+         * `app_run_subagent_messages` (its subagents' steps, as `subagent_messages` keeps them, #222). None points at
+         * `sessions`: the record outlives the session, the run log line and the project.
          *
-         *   linked_machines.asks  the per-machine switch in Settings → Machines, off (0) by default. On the machine's
-         *                         row, so removing the machine removes it, and a machine linked again under the same
-         *                         name starts with it off
-         *   machine_ask_consents  one row per pair the person approved on this computer's card: a session of that
-         *                         machine (its own id there, and its name when approved, for Settings) and a project of
-         *                         this computer. Later asks in the pair need no card until the person withdraws it.
-         *                         Both ends are foreign keys with CASCADE: removing the machine (by any build, an older
-         *                         one included) or the project takes the pair with it
-         *
-         * **Expand only (#292's rule).** A defaulted column and a new table. An older host's insert does not name the
-         * column and gets the switch off; it never reads the table, and its `DELETE FROM linked_machines` cascades.
-         *
-         * Numbered 60: v57 to v59 belong to changes landing before this one (#1121, #418, #1134), whose steps go above it.
+         * **Expand only (#292's rule).** Nullable columns and new tables, which an older build never reads. An older
+         * build that purges a session still deletes its `app_runs` rows, as it always did; this build clears the link.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]
-          if (cols.length > 0 && !cols.some((c) => c.name === 'asks')) {
-            this.db.exec(`ALTER TABLE linked_machines ADD COLUMN asks INTEGER NOT NULL DEFAULT 0`)
+          const cols = new Set((this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]).map((c) => c.name))
+          // A store without the run log (a test's partial schema) gets it from its own step; the columns go with it there
+          if (cols.size > 0) {
+            if (!cols.has('request')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN request TEXT`)
+            if (!cols.has('answer')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN answer TEXT`)
+            if (!cols.has('output')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN output TEXT`)
           }
           this.db.exec(`
-            CREATE TABLE IF NOT EXISTS machine_ask_consents (
-              machine_id   TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,
+            CREATE TABLE IF NOT EXISTS app_run_records (
+              run_id       TEXT PRIMARY KEY,
+              project_id   TEXT,
+              project_name TEXT,
+              app_id       TEXT NOT NULL,
+              app_name     TEXT NOT NULL,
               session_id   TEXT NOT NULL,
               session_name TEXT NOT NULL,
-              project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-              decided_at   INTEGER NOT NULL,
-              PRIMARY KEY (machine_id, session_id, project_id)
-            )
+              tool         TEXT NOT NULL,
+              status       TEXT NOT NULL,
+              duration_ms  INTEGER,
+              tokens_in    INTEGER,
+              tokens_out   INTEGER,
+              request      TEXT NOT NULL,
+              answer       TEXT NOT NULL,
+              output       TEXT,
+              started_at   INTEGER NOT NULL,
+              kept_at      INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_run_records_app ON app_run_records(app_id, project_id, started_at);
+            CREATE TABLE IF NOT EXISTS app_run_messages (
+              run_id  TEXT NOT NULL,
+              seq     INTEGER NOT NULL,
+              role    TEXT NOT NULL,
+              kind    TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              ts      INTEGER NOT NULL,
+              PRIMARY KEY (run_id, seq)
+            );
+            CREATE TABLE IF NOT EXISTS app_run_subagent_messages (
+              run_id         TEXT NOT NULL,
+              parent_call_id TEXT NOT NULL,
+              seq            INTEGER NOT NULL,
+              role           TEXT NOT NULL,
+              kind           TEXT NOT NULL,
+              payload        TEXT NOT NULL,
+              ts             INTEGER NOT NULL,
+              PRIMARY KEY (run_id, parent_call_id, seq)
+            );
           `)
         },
       },

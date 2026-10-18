@@ -66,6 +66,29 @@ test('The orchestrator sits above the grid and opens on click', async ({ page })
 })
 
 /**
+ * The box before the orchestrator exists is a composer like any other (#1143 U17): `/usage` opens the usage screen
+ * rather than starting the orchestrator with "/usage" as its first message, and the box grows with its text.
+ */
+test('Before the orchestrator exists, /usage opens its screen and the box grows with its text', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('orchestrator-button').click()
+  const input = page.getByTestId('orchestrator-input')
+  await expect(input).toBeVisible()
+
+  const oneLine = (await input.boundingBox())!.height
+  await input.fill('line one\nline two\nline three\nline four')
+  expect((await input.boundingBox())!.height).toBeGreaterThan(oneLine + 20)
+
+  await input.fill('/usage')
+  await input.press('Enter')
+  await expect(page.getByTestId('usage-drop')).toBeVisible()
+  // Nothing was sent: the orchestrator is still not born, and the box is empty
+  await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
+  await expect(input).toHaveValue('')
+  expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeFalsy()
+})
+
+/**
  * Neither sidebar door carries a badge any more. The grid graduated on 2026-08-27; the
  * orchestrator's "Evolving" went on 2026-10-17 (the owner's call), with the dot that marked a
  * waiting proposal: the proposal card itself waits in the orchestrator's screen.

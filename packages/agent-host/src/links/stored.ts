@@ -17,6 +17,7 @@ export function storeRegistry(store: Store): MachineRegistry {
     add: (record: Omit<MachineRecord, 'slot'>) => store.machines.addLinkedMachine(record),
     remove: (id) => store.machines.removeLinkedMachine(id),
     setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
+    setConnect: (id, connect) => store.machines.setLinkedMachineConnect(id, connect),
   }
 }
 

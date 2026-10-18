@@ -17,7 +17,9 @@ import { useStore } from '../../store/store.js'
 export type GuiCommand = {
   name: string
   description: string
-  run: (ctx: { sessionId: string }) => void
+  run: (ctx: { sessionId: string | null }) => void
+  /** It acts on a session (its menu), so it cannot run where there is none: before the orchestrator exists */
+  needsSession?: boolean
 }
 
 export const GUI_COMMANDS: GuiCommand[] = [
@@ -30,7 +32,8 @@ export const GUI_COMMANDS: GuiCommand[] = [
     name: 'model',
     description: 'Model, effort, permissions — this session',
     // A screen equivalent to the CLI's /model already exists — the settings menu below the composer
-    run: ({ sessionId }) => useStore.getState().requestSettingsMenu(sessionId),
+    run: ({ sessionId }) => sessionId && useStore.getState().requestSettingsMenu(sessionId),
+    needsSession: true,
   },
   {
     name: 'settings',
@@ -43,7 +46,7 @@ export const GUI_COMMANDS: GuiCommand[] = [
  * Whether the text to send is a GUI command itself — true only for `/usage` (leading/trailing
  * whitespace allowed)
  */
-export function guiCommandFor(text: string): GuiCommand | null {
+export function guiCommandFor(text: string, hasSession = true): GuiCommand | null {
   const m = /^\/([a-z][a-z-]*)$/.exec(text.trim())
-  return m ? (GUI_COMMANDS.find((c) => c.name === m[1]) ?? null) : null
+  return m ? (GUI_COMMANDS.find((c) => c.name === m[1] && (hasSession || !c.needsSession)) ?? null) : null
 }

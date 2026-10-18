@@ -3,7 +3,7 @@
  * read in. Before, `JSON.parse` ran unguarded over every row, so one row written by a crash mid-write (or a newer build
  * with a different shape) made a whole conversation page, the session list or a machine's mirrored list throw.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store } from './store.js'
@@ -88,5 +88,100 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
     expect(listed.map((t) => t.id).sort()).toEqual(['s1', 's2'])
     // Unreadable reads as "keep everything": deleting for good must be asked for
     expect(listed.find((t) => t.id === 's1')?.record).toMatchObject({ removeExternal: false, removeWorktree: false })
+  })
+})
+
+describe('a value a newer build wrote that this build cannot read (#384)', () => {
+  /*
+   * A newer build may add a preset (another word in `sessions.permission_preset`). Read as it was, every adapter and
+   * gate here took the word it did not know for `normal`, the person's own settings, and `=== 'safe'` checks read it as
+   * a session that may be raised. A permission that cannot be read is a refusal: it reads as `safe`, which asks about
+   * everything, and the presets this build knows read as they are.
+   */
+  it('a permission preset this build does not know reads as safe, and the known ones as they are', () => {
+    const s = seeded()
+    s.sessions.upsertSession(session('s2', { permissionPreset: 'auto' }))
+    s.sessions.upsertSession(session('s3', { permissionPreset: 'safe' }))
+    dbOf(s).prepare(`UPDATE sessions SET permission_preset = 'plan' WHERE id = 's1'`).run()
+    const presets = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.permissionPreset]))
+    expect(presets).toEqual({ s1: 'safe', s2: 'auto', s3: 'safe' })
+  })
+
+  /*
+   * The highest slot handed to a linked machine (#82) is a number in `app_settings`. One that is not a number made the
+   * next slot NaN, and every `machines.add` failed on the table's NOT NULL with a raw SQL error that named nothing. The
+   * mark keeps a removed machine's slot from coming back: once it cannot be read, the highest slot in use is all
+   * there is, so it is used and the row is named on stderr.
+   */
+  it('a high-water mark for linked machines that is not a number still adds the machine, past every slot in use, and says so', () => {
+    const s = seeded()
+    s.machines.addLinkedMachine({ id: 'm1', name: 'm1', sshTarget: 'h1', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    s.machines.addLinkedMachine({ id: 'm2', name: 'm2', sshTarget: 'h2', remote: { shell: 'posix' }, addedAt: 2, acceptedVersions: null })
+    s.settings.setAppSetting('links.slotHighWater', 'many')
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const m3 = s.machines.addLinkedMachine({ id: 'm3', name: 'm3', sshTarget: 'h3', remote: { shell: 'posix' }, addedAt: 3, acceptedVersions: null })
+    expect(m3.slot).toBe(3)
+    expect(s.settings.appSetting('links.slotHighWater')).toBe('3')
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.links\.slotHighWater .*"many"/)
+    said.mockRestore()
+  })
+
+  /*
+   * The workspace snapshot is the window's, written whole. A row that is not JSON read as none with no word, and one that
+   * is JSON but not an object went to the window as it was; either way the window came up as its defaults and saved
+   * them over the row with its next change. It reads as none in both cases, and the row is named on stderr, with
+   * what it held, so a person can find what was lost.
+   */
+  it.each([
+    ['not JSON', '{"view":"grid","foldedProjects":['],
+    ['JSON but not an object', '["grid"]'],
+  ])('a workspace snapshot that is %s reads as none, and is named on stderr', (_label, text) => {
+    const s = seeded()
+    s.settings.saveWorkspace({ view: 'grid' })
+    dbOf(s).prepare(`UPDATE workspace SET layout = ? WHERE id = 1`).run(text)
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(s.settings.loadWorkspace()).toBeNull()
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain(`the workspace snapshot (workspace row 1) is not a JSON object: ${JSON.stringify(text)}`)
+    said.mockRestore()
+  })
+
+  /*
+   * A project's remembered model and effort per tool (#107) is one JSON column, rewritten on every pick. It was rebuilt
+   * from this build's reading, so a pick dropped what a newer build kept next to a tool's model and effort, and a
+   * value that was not JSON was replaced with no word.
+   */
+  it("a pick for one tool keeps what a newer build stored for it and for the other tools", () => {
+    const s = seeded()
+    const newer = { claude: { model: 'opus', effort: 'high', verbosity: 'low' }, codex: { model: 'gpt-5', tier: 'fast' }, laterTool: { model: 'm' } }
+    dbOf(s).prepare(`UPDATE projects SET default_models = ? WHERE id = 'p1'`).run(JSON.stringify(newer))
+    s.projects.setProjectToolDefaults('p1', 'claude', { model: 'sonnet', effort: null })
+    const row = dbOf(s).prepare(`SELECT default_models FROM projects WHERE id = 'p1'`).get() as { default_models: string }
+    expect(JSON.parse(row.default_models)).toEqual({ ...newer, claude: { model: 'sonnet', effort: null, verbosity: 'low' } })
+    expect(s.projects.projectToolDefaults('p1').claude).toEqual({ model: 'sonnet', effort: null })
+  })
+
+  it('remembered tool defaults that are not JSON read as none, and are named on stderr when a pick replaces them', () => {
+    const s = seeded()
+    dbOf(s).prepare(`UPDATE projects SET default_models = '{"claude":{"model":"opus"' WHERE id = 'p1'`).run()
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(s.projects.projectToolDefaults('p1')).toEqual({})
+    s.projects.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5', effort: null })
+    expect(s.projects.projectToolDefaults('p1')).toEqual({ codex: { model: 'gpt-5', effort: null } })
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('projects.default_models of p1')
+    said.mockRestore()
+  })
+
+  /*
+   * Why a session's last turn did not finish (#698): a reason a newer build added reads as `interrupted`, alone, and a
+   * value that does not read at all is no interruption, never a lost session row.
+   */
+  it('an interruption with a reason this build does not know reads as interrupted, and one that does not read as none', () => {
+    const s = seeded()
+    s.sessions.upsertSession(session('s2'))
+    dbOf(s).prepare(`UPDATE sessions SET interruption = ? WHERE id = 's1'`).run(JSON.stringify({ reason: 'power-cut', at: 5, laterField: 1 }))
+    dbOf(s).prepare(`UPDATE sessions SET interruption = '{"reason":"net' WHERE id = 's2'`).run()
+    const byId = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.interruption]))
+    expect(byId).toEqual({ s1: { reason: 'interrupted', at: 5 }, s2: null })
   })
 })

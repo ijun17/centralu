@@ -39,6 +39,24 @@ describe('foldGroupsHiding (#666)', () => {
     expect(foldGroupsHiding(strayKid, all(loose, strayKid), keyOf, listed)).toEqual([appGroupKey('p/slider')])
   })
 
+  // #1038: a child started on another machine is a session of that machine's project, but the sidebar draws it under its parent
+  it('names the parent’s group for a child that stands in the parent’s project but belongs to another machine’s', () => {
+    const parent = s('parent')
+    const kid = s('m1.kid', { projectId: 'm1.q', machine: 'm1', askedBy: 'parent' })
+    expect(foldGroupsHiding(kid, all(parent, kid), keyOf, listed)).toEqual([childrenGroupKey('parent')])
+  })
+
+  // The tree draws a fork under its asker when the session it was copied from is gone (`treeParentOf`); the reveal followed forkedFrom
+  it('names the asker’s group for a fork whose source is gone', () => {
+    const asker = s('asker')
+    const fork = s('fork', { askedBy: 'asker', parentSessionId: 'asker', forkedFrom: 'deleted' })
+    expect(foldGroupsHiding(fork, all(asker, fork), keyOf, listed)).toEqual([childrenGroupKey('asker')])
+    // The source is in another group than the fork's: the tree does not nest the fork under it either
+    const far = s('far', { projectId: 'q' })
+    const strayFork = s('stray', { askedBy: 'asker', forkedFrom: 'far' })
+    expect(foldGroupsHiding(strayFork, all(asker, far, strayFork), keyOf, listed)).toEqual([childrenGroupKey('asker')])
+  })
+
   it('names nothing for a top-level session, a parent in another project or one that is gone', () => {
     expect(foldGroupsHiding(s('top'), all(s('top')), keyOf, listed)).toEqual([])
     const far = s('far', { askedBy: 'elsewhere' })

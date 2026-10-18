@@ -348,13 +348,31 @@ export async function worktreeRecoveryBytes(sessionId: string): Promise<number> 
   return dataBytes(worktreeRecoveryDir(sessionId))
 }
 
+/**
+ * The snapshot a save wrote, read back (#384). A file cut short or edited by hand fails the restore with its name, not
+ * with JSON's own error, and the folder is left as it is: its patches and bundles can still be applied by hand.
+ */
+async function readSnapshot(file: string): Promise<Snapshot> {
+  let v: unknown
+  try {
+    v = JSON.parse(await readFile(file, 'utf8'))
+  } catch (e) {
+    throw new Error(`The recovery snapshot ${file} could not be read (${(e as Error).message}); its files are left where they are`, { cause: e })
+  }
+  const repositories = (v as { repositories?: unknown } | null)?.repositories
+  if (!Array.isArray(repositories) || repositories.length === 0 || typeof repositories[0] !== 'object' || repositories[0] === null) {
+    throw new Error(`The recovery snapshot ${file} could not be read (it names no repository); its files are left where they are`)
+  }
+  return v as Snapshot
+}
+
 /** Restore the root branch/worktree; keep patches available if applying them is no longer feasible. */
 export async function restoreWorktreeRecovery(
   sessionId: string, repo: string, path: string, branch: string, recovery: WorktreeRecovery, trust: GitTrust,
 ): Promise<{ branch: string; notice: string }> {
   if (!isSessionId(recovery.snapshot)) throw new Error('Invalid recovery snapshot')
   const dir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
-  const snapshot = JSON.parse(await readFile(join(dir, 'snapshot.json'), 'utf8')) as Snapshot
+  const snapshot = await readSnapshot(join(dir, 'snapshot.json'))
   const root = snapshot.repositories[0]!
   let extraNotice = ''
   if (root.bundle) {

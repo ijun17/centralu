@@ -60,7 +60,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -383,8 +383,15 @@ export class SessionsMock {
     },
     loadSubagentMessages: async (sessionId: string, parentCallId: string, afterSeq = 0, limit = SUBAGENT_STEPS_PAGE) => {
       this.store.subagentReads += 1
-      const all = this.store.subagentMessages.get(`${sessionId} ${parentCallId}`) ?? []
-      return all.filter((m) => m.seq > afterSeq).slice(0, limit)
+      const key = `${sessionId} ${parentCallId}`
+      const all = this.store.subagentMessages.get(key) ?? []
+      // Steps in the trash (#418) are not read under their card
+      return all.filter((m) => m.seq > afterSeq && !this.store.subagentTrashedAt.has(`${key} ${m.seq}`)).slice(0, limit)
+    },
+    subagentTrashed: async (sessionId: string, parentCallId: string) => {
+      const key = `${sessionId} ${parentCallId}`
+      const all = this.store.subagentMessages.get(key) ?? []
+      return { steps: all.filter((m) => this.store.subagentTrashedAt.has(`${key} ${m.seq}`)).length }
     },
   }
 

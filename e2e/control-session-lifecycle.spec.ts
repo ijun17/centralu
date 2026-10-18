@@ -192,6 +192,43 @@ test('Command palette ⌘K: searches sessions and conversation content together 
   await expect(page.getByTestId('session-name')).toContainText('auth refactor')
 })
 
+/**
+ * Enter never opens a conversation hit from an earlier query (#1143 U15): type "token", see its hit, type one more
+ * letter and press Enter before the answer. The hit of "token" is still the first row, and it used to open.
+ */
+test('Command palette: Enter waits for the search of the latest keystroke instead of opening an earlier hit', async ({
+  page,
+}) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'auth refactor')
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const ids = [...m.sessions.keys()]
+    m.searchResults = [{ sessionId: ids[0], seq: 3, snippet: 'Fixed token expiry handling' }]
+  })
+  await newSession(page, 'alpha', 'deploy script')
+  const focused = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.keyboard.press('Meta+k')
+  const input = page.getByTestId('palette-input')
+  await input.fill('token')
+  await expect(page.getByTestId('palette-item-message')).toContainText('token expiry')
+
+  // The next answer is held, so the hit of "token" is what is on screen when Enter is pressed
+  await page.evaluate(() => {
+    ;(window as any).__mock.searchHold = new Promise<void>((resolve) => ((window as any).__releaseSearch = resolve))
+  })
+  await input.pressSequentially('z')
+  await expect(input).toHaveValue('tokenz')
+  await input.press('Enter')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(focused)
+
+  // The answer comes: nothing matches "tokenz", and the old hit is gone
+  await page.evaluate(() => (window as any).__releaseSearch())
+  await expect(page.getByTestId('palette-empty')).toBeVisible()
+})
+
 /** Picking a project with no sessions from the palette also navigates to that project (#183) — it used to just close the palette */
 test('Command palette: picking a project with no sessions navigates to that project (#183)', async ({
   page,
