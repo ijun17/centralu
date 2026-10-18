@@ -85,8 +85,8 @@ export const ComposerFooter = memo(function ComposerFooter({
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span>Context {ctxPct === null ? '—' : `${ctxPct}%`}</span>
-        <span className="block h-[2px] overflow-hidden rounded-full bg-line" aria-hidden>
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${ctxPct}%`}</span>
+        <span className="block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
           {ctxPct !== null && (
             <span
               className={`block h-full rounded-full ${ctxPct >= 80 ? 'bg-ink' : 'bg-ink-faint'}`}
