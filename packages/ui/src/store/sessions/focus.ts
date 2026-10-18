@@ -1,6 +1,7 @@
 import { appKeyOf, gridSessionIds, isProposalId } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
+import { sidebarProjectOf } from '../sidebarTree.js'
 import { trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { omitKey } from '../patch.js'
 
@@ -89,10 +90,13 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
      * left by the person) and clicking a grid panel (the session is already visible in its panel, and
      * if typing into a panel unfolded its project every time, folding would be pointless).
      */
-    const reveal =
-      opts?.reveal !== false && !!projectId && get().foldedProjects.includes(projectId)
-    // The same for the group the row stands in (#666): the children of its parent, the sessions of its app
+    // The row stands under the project the sidebar puts it in (`sidebarProjectOf`): a child started on another machine
+    // stands under its parent's project, not under its own, so that is the fold to open (#1038)
     const picked = id ? get().sessions[id] : undefined
+    const rowProject = picked ? sidebarProjectOf(picked, get().sessions) : null
+    const reveal =
+      opts?.reveal !== false && !!rowProject && get().foldedProjects.includes(rowProject)
+    // The same for the group the row stands in (#666): the children of its parent, the sessions of its app
     if (picked && opts?.reveal !== false) {
       const listed = new Set(get().externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
       const hiding = foldGroupsHiding(picked, get().sessions, (x) => appKeyOf(x.projectId, x.appId!, x.machine), listed)
@@ -105,7 +109,7 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       overlay: null,
       // A composer asked to take the keyboard belongs to the session asked for, not the one shown now (#528)
       ...(get().composerFocusFor !== null && get().composerFocusFor !== id ? { composerFocusFor: null } : {}),
-      ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== projectId) } : {}),
+      ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== rowProject) } : {}),
       ...(id
         ? {
             /*

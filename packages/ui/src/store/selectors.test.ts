@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
 import { projectLabelOf, sidebarProjectOf } from './selectors.js'
+import { openProjectOf } from './screens.js'
 
 describe('sidebarProjectOf (#1038)', () => {
   const s = (id: string, projectId: string | null, over: Partial<SessionSummary> = {}) => ({ id, projectId, askedBy: null, machine: null, ...over }) as SessionSummary
@@ -27,6 +28,22 @@ describe('sidebarProjectOf (#1038)', () => {
     const y = s('y', 'p', { askedBy: 'm1.x' })
     // It ends where the loop closes, at the last session before it
     expect(sidebarProjectOf(x, all(x, y))).toBe('p')
+  })
+})
+
+describe('openProjectOf (#1038)', () => {
+  it('tints the project a child started on another machine stands under, not the machine’s own', () => {
+    const parent = { id: 'h1', projectId: 'p-hub', askedBy: null, machine: null } as unknown as SessionSummary
+    const child = { id: 'm1.c1', projectId: 'm1.p-app', askedBy: 'h1', machine: 'm1' } as unknown as SessionSummary
+    const state = {
+      view: 'focus' as const,
+      focusedSessionId: 'm1.c1',
+      focusedProjectId: 'm1.p-app',
+      focusedApp: null,
+      projects: { 'p-hub': {}, 'm1.p-app': {} },
+      sessions: { h1: parent, 'm1.c1': child },
+    }
+    expect(openProjectOf(state as never)).toBe('p-hub')
   })
 })
 
