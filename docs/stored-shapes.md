@@ -81,9 +81,9 @@ anything either, so a reader whose fallback would be written back has to say it 
 |---|---|---|---|---|---|---|---|
 | Grid placements | `grid_layout` | agent-host store | `GridRecords.listGridView` / `setGridView` `agent-host/src/dev-services/store/grid.ts:18`, `:70` | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. `setGridView` rewrites the table, so a newer build's columns are lost (v46, v47, said in §5.1) | a row without a span reads as none chosen (v43) | a span out of bounds or half set reads as none | `store.test.ts` (v42, v43, spans) |
 | Consents between projects (#371) | `project_consents` | agent-host store | `getProjectConsent` / `listProjectConsents` `agent-host/src/dev-services/store/permissions.ts:102`, `:134` | a kind this build does not know stays in the store, grants nothing, and is not listed | (rows) | (rows) | `store.test.ts` |
-| Approval rules ("always allow") | `approval_rules` | agent-host sessions | `PermissionRecords.listApprovalRules` `agent-host/src/dev-services/store/permissions.ts:34`; `SessionManager.rulesFor` `sessions/manager.ts:1807` | `decision` and `scope` are not read: a rule a newer build wrote with another decision, or another scope, allows its command ✗3 | — | (rows) | none |
-| A session's permission preset | `sessions.permission_preset` | agent-host store | `SessionRecords.readSessions` `agent-host/src/dev-services/store/sessions.ts:111` | passed on unchecked; the adapters read a word they do not know as `normal`, the person's own settings ✗3 | none chosen is `normal` | (column) | none |
-| Requests queued for a busy session | `queued_requests.via` | agent-host sessions | `ChildOwnershipRecords` `agent-host/src/dev-services/store/child-ownership.ts:100`; `QueuedRequests.queuedGateError` `sessions/queued-requests.ts:197` | a `via` this build does not know passes the gate and is delivered as an ask_project without its gates ✗3 | — | (column) | none |
+| Approval rules ("always allow") | `approval_rules` | agent-host sessions | `PermissionRecords.listApprovalRules` `agent-host/src/dev-services/store/permissions.ts:34`; `SessionManager.rulesFor` `sessions/manager.ts:1810` | only an `allow` of a scope this build knows (`session`, `project`) applies: a rule a newer build wrote with another decision or scope allows nothing, and stays in the store | — | (rows) | `rules.test.ts` |
+| A session's permission preset | `sessions.permission_preset` | agent-host store | `SessionRecords.readSessions` `agent-host/src/dev-services/store/sessions.ts:111` | a word this build does not know reads as `safe`, which asks about everything; the next write of the session from this build stores `safe` in its place ([Left](#left)) | none chosen is `normal` | (column) | `store-unreadable-rows.test.ts` |
+| Requests queued for a busy session | `queued_requests.via` | agent-host sessions | `ChildOwnershipRecords` `agent-host/src/dev-services/store/child-ownership.ts:100`; `QueuedRequests.queuedGateError` `sessions/queued-requests.ts:197` | a `via` this build does not know is not delivered: the request is dropped and the requester told why | — | (column) | `busy-requests.test.ts` |
 | Linked machines (#82) | `linked_machines` | agent-host store | `LinkedMachineRecords.listLinkedMachines` `agent-host/src/dev-services/store/linked-machines.ts:29` | an unknown `shell` reads as `posix` | — | (rows) | `links/*.test.ts` |
 | The highest slot handed out | `app_settings.links.slotHighWater` | agent-host store | `addLinkedMachine` `agent-host/src/dev-services/store/linked-machines.ts:62` | — | none written: the highest slot in use | a value that is not a number makes the slot NaN, and every `machines.add` fails on a raw SQL error ✗4 | none |
 | Mirrored headers | `machine_headers.info` | agent-host store | `machineHeaders` `agent-host/src/dev-services/store/linked-machines.ts:96` | kept (the remote's `SessionInfo` / project, read by the protocol's tolerant parse) | — | a header that is not JSON is skipped; the next mirror writes it again | `store-unreadable-rows.test.ts` |
@@ -122,7 +122,9 @@ anything either, so a reader whose fallback would be written back has to say it 
 
 What this inventory found and the pull requests of #384 do not change, with the reason:
 
-- (filled in by the pull requests that follow)
+- **A permission preset this build cannot read is written back as `safe`.** `upsertSession` writes the whole row, so
+  keeping the newer word would mean every writer knowing which value it read rather than chose. `safe` only asks more;
+  the person sets the preset again in the newer build.
 
 ## An older host on a newer store, end to end
 

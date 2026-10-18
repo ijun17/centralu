@@ -680,6 +680,24 @@ describe('a queued request across a host swap (#677)', () => {
     },
   )
 
+  /*
+   * A newer build may queue through a tool this one does not know (#384): another word in `queued_requests.via`, left
+   * for whichever host serves the store next. It used to pass the delivery gate, which checks only the tools it names,
+   * and go in framed as an ask_project without that tool's gates. A request this build cannot read is not delivered,
+   * and the requester is told.
+   */
+  it('is not delivered by a next host that does not know the tool it was queued through, and the requester is told', async () => {
+    const { a, b } = await queuedFor()
+    await w.mgr.detachAll()
+    // A conversation the next host can resume, to tell the requester in
+    w.store.sessions.upsertSession({ ...w.store.sessions.listSessions().find((x) => x.id === b)!, externalId: 'ext-b' })
+    ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare(`UPDATE queued_requests SET via = 'hand_off'`).run()
+    const { claude } = next([])
+    await w.until(() => w.store.children.listQueuedRequests().length === 0)
+    expect(claude.handles.get(a)?.sent ?? []).toEqual([])
+    await w.until(() => w.store.messages.loadMessages(b, 50).some((m) => JSON.stringify(m.payload).includes('which this version of Centralu cannot deliver')))
+  })
+
   it('is delivered at once by a next host that finds the session at rest', async () => {
     const { a } = await queuedFor()
     await w.mgr.detachAll()

@@ -1813,10 +1813,14 @@ export class SessionManager {
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
-  /** Saved rules that apply to this session (session-scoped plus project-scoped) */
+  /**
+   * Saved rules that apply to this session (session-scoped plus project-scoped). Only an `allow` of a scope this build
+   * knows: a newer build may store another decision or scope (#384), and a rule that cannot be read allows nothing.
+   */
   private rulesFor(sessionId: string, projectId: string | null): string[] {
     return this.store
       .permissions.listApprovalRules()
+      .filter((r) => r.decision === 'allow' && (r.scope === 'session' || r.scope === 'project'))
       .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
       .map((r) => r.matcher)
       .filter(Boolean)

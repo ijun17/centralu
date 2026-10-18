@@ -90,3 +90,20 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
     expect(listed.find((t) => t.id === 's1')?.record).toMatchObject({ removeExternal: false, removeWorktree: false })
   })
 })
+
+describe('a value a newer build wrote that this build cannot read (#384)', () => {
+  /*
+   * A newer build may add a preset (another word in `sessions.permission_preset`). Read as it was, every adapter and
+   * gate here took the word it did not know for `normal`, the person's own settings, and `=== 'safe'` checks read it as
+   * a session that may be raised. A permission that cannot be read is a refusal: it reads as `safe`, which asks about
+   * everything, and the presets this build knows read as they are.
+   */
+  it('a permission preset this build does not know reads as safe, and the known ones as they are', () => {
+    const s = seeded()
+    s.sessions.upsertSession(session('s2', { permissionPreset: 'auto' }))
+    s.sessions.upsertSession(session('s3', { permissionPreset: 'safe' }))
+    dbOf(s).prepare(`UPDATE sessions SET permission_preset = 'plan' WHERE id = 's1'`).run()
+    const presets = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.permissionPreset]))
+    expect(presets).toEqual({ s1: 'safe', s2: 'auto', s3: 'safe' })
+  })
+})
