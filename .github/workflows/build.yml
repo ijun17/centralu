@@ -64,6 +64,7 @@ jobs:
       host: ${{ steps.classify.outputs.host }}
       host_tests: ${{ steps.classify.outputs.host_tests }}
       code: ${{ steps.classify.outputs.code }}
+      fail_fast: ${{ steps.classify.outputs.fail_fast }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -354,6 +355,35 @@ jobs:
           overwrite: true
           # The runs after this one read main's newest record; a long quiet spell on main must not expire it
           retention-days: 90
+
+  # Fail fast (2026-10-19, the owner's decision): on a manual run, the merge queue's batches, a failed `verify`
+  # cancels the rest of the run at once. Nothing lands from a run whose `verify` failed, and its e2e shards kept the
+  # batch, and the runners every other run waits for, another 10 minutes before the queue heard. Which runs:
+  # `changes` says (`fail_fast`, .github/scripts/ci-changes.mjs): a manual run, never a pull request's (quick tier
+  # keeps every job to its end), never main's, never one that changes the version (a release bump's run is never cut
+  # short, docs/releasing.md).
+  #
+  # Its own job, after `verify` has ended, not a step inside it: `verify`'s check stays `failure`, which is how the
+  # queue tells this run, `cancelled` as a whole, from one cancelled for nothing (no rerun for a test failure). This
+  # job then reports `cancelled` itself, with the run. It cancels this run by its id and nothing else, so the
+  # concurrency group above is untouched.
+  fail-fast:
+    name: fail fast
+    needs: [changes, verify]
+    if: ${{ !cancelled() && needs.verify.result == 'failure' && needs.changes.outputs.fail_fast == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel the rest of this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          echo "::error title=verify failed: the rest of this run is cancelled::verify failed in a manual run (the merge queue's batches), so nothing can land from it: the jobs still running are cancelled (fail fast). Read verify's log; the cancelled jobs are not failures of their own."
+          gh run cancel "$RUN_ID"
 
   # The content verifier (docs/plans/thin-shell.md §4): the signature check and the copy the shell
   # and the keeper will run before starting anything from a content folder. A small crate with no
