@@ -181,6 +181,12 @@ export class Qualifier {
     }
   }
 
+  /** `TrashedRun` (#378): its app's project is this machine's, and the record is read and deleted here */
+  trashedRun(t: unknown): unknown {
+    if (!isObj(t)) return t
+    return { ...t, app: isObj(t.app) ? { ...t.app, projectId: this.maybeId(t.app.projectId) } : t.app, machine: this.machine }
+  }
+
   /** `ExternalAppInfo`: a project app is that project's; a user-folder app says which machine's folder */
   app(a: unknown): unknown {
     return isObj(a) ? { ...a, projectId: this.maybeId(a.projectId), machine: this.machine } : a

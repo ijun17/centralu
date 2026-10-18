@@ -352,6 +352,7 @@ classDiagram
 - `app_runs`: 실행 기록. `run_agent` 줄은 부탁과 답도 남긴다(#378).
 - `app_run_records`: 휴지통에 남은, 지운 앱 에이전트 세션의 기록(#378). 휴지통이 보여 주는 것.
 - `app_run_messages`: 그 기록에 복사해 둔 세션의 대화 전체(#378).
+- `app_run_subagent_messages`: 그 기록에 복사해 둔 세션의 서브에이전트 걸음(#378).
 - `app_run_failures`: 앱의 최근 실패한 호출의 원래 인자와 결과(20개까지). 빌더를 위해.
 - `app_permissions`: 앱과 능력마다 사람이 한 답, 그리고 그 답을 준 때의 `uses` 지문.
 - `app_settings`: 호스트가 가진 설정을 키와 값으로. 앱에 관해서는 빌더 지도(`apps.builders`), 공유

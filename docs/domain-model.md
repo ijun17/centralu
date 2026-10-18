@@ -353,6 +353,7 @@ Where it is stored:
 - `app_runs`: the run ledger; a `run_agent` row also keeps its request and answer (#378).
 - `app_run_records`: the record of a deleted app-agent session in the trash (#378), with what the trash lists.
 - `app_run_messages`: that record's copy of the session's whole conversation (#378).
+- `app_run_subagent_messages`: that record's copy of the session's subagent steps (#378).
 - `app_run_failures`: the raw arguments and result of an app's latest failed calls (20 kept), for its builder.
 - `app_permissions`: a person's answer per app and capability, with the `uses` fingerprint it was given for.
 - `app_settings`: host-owned settings as key and value; for apps the builder map (`apps.builders`), sharing

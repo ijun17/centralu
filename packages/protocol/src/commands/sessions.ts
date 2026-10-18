@@ -484,5 +484,7 @@ export const TrashedRun = z.object({
   requestPreview: z.string(),
   messages: z.number(),
   bytes: z.number(),
+  /** The linked machine whose record it is (#378 review): the run, and the delete, happened where its app runs */
+  ...machineField,
 })
 export type TrashedRun = z.infer<typeof TrashedRun>

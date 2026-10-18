@@ -516,8 +516,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('trash.purge', { sessionId })
       },
       empty: () => rpc.call('trash.empty', {}),
-      readRun: (runId, limit, beforeSeq) => rpc.call('trash.readRun', { runId, limit, beforeSeq }),
-      purgeRuns: (runIds) => rpc.call('trash.purgeRuns', { runIds }),
+      readRun: (runId, limit, beforeSeq, machine) => rpc.call('trash.readRun', { runId, limit, beforeSeq, ...(machine ? { machine } : {}) }),
+      purgeRuns: (runIds, machine) => rpc.call('trash.purgeRuns', { runIds, ...(machine ? { machine } : {}) }),
     },
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),

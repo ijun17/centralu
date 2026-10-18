@@ -14,7 +14,8 @@ type RunGroup = { key: string; name: string; projectName: string | null; runs: T
 export function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
   const groups = new Map<string, RunGroup>()
   for (const r of runs) {
-    const key = `${r.app.projectId ?? '_user'}/${r.app.id}`
+    // A linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378 review)
+    const key = `${r.app.projectId ?? (r.machine ? `${r.machine}._user` : '_user')}/${r.app.id}`
     const g = groups.get(key) ?? { key, name: r.app.name, projectName: r.app.projectName, runs: [] }
     g.runs.push(r)
     groups.set(key, g)
@@ -38,7 +39,7 @@ export function TrashRuns({
   busy: boolean
   onRead: (run: TrashedRun) => void
   /** Deletes these for good; `at` is the row or app a refusal is shown next to */
-  onPurge: (runIds: string[], at: string) => Promise<void>
+  onPurge: (runs: readonly TrashedRun[], at: string) => Promise<void>
 }) {
   /** The one confirmation open: a record by its id, or a whole app's by its group key */
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -73,7 +74,7 @@ export function TrashRuns({
               yesLabel="Delete for good"
               tone="danger"
               busy={busy}
-              onYes={() => void onPurge(g.runs.map((r) => r.runId), g.key).finally(() => setConfirming(null))}
+              onYes={() => void onPurge(g.runs, g.key).finally(() => setConfirming(null))}
               onNo={() => setConfirming(null)}
               testId="trash-confirm"
             />
@@ -113,7 +114,7 @@ export function TrashRuns({
                     yesLabel="Delete for good"
                     tone="danger"
                     busy={busy}
-                    onYes={() => void onPurge([r.runId], r.runId).finally(() => setConfirming(null))}
+                    onYes={() => void onPurge([r], r.runId).finally(() => setConfirming(null))}
                     onNo={() => setConfirming(null)}
                     testId="trash-confirm"
                   />
@@ -141,7 +142,7 @@ export function TrashRunReader({ run, onBack }: { run: TrashedRun; onBack: () =>
   const page = useCallback(
     (beforeSeq?: number) => {
       platform.trash
-        .readRun(run.runId, PAGE, beforeSeq)
+        .readRun(run.runId, PAGE, beforeSeq, run.machine)
         .then((r) => {
           if (beforeSeq === undefined) setHead({ request: r.request, answer: r.answer, ...(r.output !== undefined ? { output: r.output } : {}) })
           setItems((cur) => [...messagesToChat(r.messages), ...(beforeSeq === undefined ? [] : (cur ?? []))])
@@ -150,7 +151,7 @@ export function TrashRunReader({ run, onBack }: { run: TrashedRun; onBack: () =>
         })
         .catch((e: Error) => setError(e.message))
     },
-    [platform, run.runId],
+    [platform, run.runId, run.machine],
   )
   useEffect(() => page(), [page])
 

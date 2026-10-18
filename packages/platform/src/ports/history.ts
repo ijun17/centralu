@@ -32,7 +32,7 @@ export interface ApprovalRulesPort {
  * (Settings → Trash). Nothing here is emptied on its own, so `list` carries the total size.
  */
 export interface TrashPort {
-  /** `runs`: the records of deleted app-agent sessions (#378), this machine's own; `bytes` counts them too */
+  /** `runs`: the records of deleted app-agent sessions (#378), each with its machine; `bytes` counts them too */
   list(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number }>
   /** A trashed conversation, read-only — pages like `AgentPort.loadMessages` */
   read(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
@@ -42,8 +42,11 @@ export interface TrashPort {
   purge(sessionId: string): Promise<void>
   /** Deletes every session in it for good; one that fails stays in the trash and is reported. Run records are `purgeRuns`' */
   empty(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }>
-  /** An app-agent run's record (#378): its request, answer and structured output, and a page of its conversation */
-  readRun(runId: string, limit?: number, beforeSeq?: number): Promise<{ request: string; answer: string; output?: unknown; messages: StoredMessage[] }>
-  /** Deletes app-agent run records for good (#378) */
-  purgeRuns(runIds: string[]): Promise<{ purged: number }>
+  /**
+   * An app-agent run's record (#378): its request, answer and structured output, and a page of its conversation.
+   * `machine` is the record's (`TrashedRun.machine`): a linked machine's is read there
+   */
+  readRun(runId: string, limit?: number, beforeSeq?: number, machine?: string | null): Promise<{ request: string; answer: string; output?: unknown; messages: StoredMessage[] }>
+  /** Deletes app-agent run records for good (#378), all of one machine (`machine`, as `readRun`) */
+  purgeRuns(runIds: string[], machine?: string | null): Promise<{ purged: number }>
 }

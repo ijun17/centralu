@@ -237,16 +237,20 @@ agent reads its whole context again on every call and that is the use the person
   purging an app-agent session erased its run, and purging a session that called an app erased
   those calls.
 - **The record of a deleted app-agent session (#378)** is kept in `app_run_records` (what the trash
-  lists: app, session name, tool, status, duration, tokens, request, answer, output, times) and
+  lists: app, session name, tool, status, duration, tokens, request, answer, output, times),
   `app_run_messages` (the whole conversation, tool calls and their results included, copied from
-  `messages` in one transaction before the session goes; owner decision 2026-10-06). Neither points
+  `messages`; owner decision 2026-10-06) and `app_run_subagent_messages` (its subagents' steps, from
+  `subagent_messages`), in one transaction before the session goes, checked by its row counts
+  against the session's: a copy that is not whole keeps nothing, and the session stays. None points
   at `sessions`, and the project name is copied in, so a record outlives the session, its log line
   and the project. The person reads it in Settings → Trash, grouped by app, and deletes it there, one,
   an app's all, or with the trash emptied; deleting it also clears the request, answer and output on
-  its log line, which keeps status, time and tokens. Otherwise it goes with the log's 30 days. The
-  records are the hub's own: `trash.list` merges no linked machine's, and `trash.empty` leaves them
-  alone (the window deletes the ones it listed with `trash.purgeRuns`), so emptying across machines
-  never takes records nobody was shown. An agent use count reads a row whose session is gone by its
+  its log line, which keeps status, time and tokens. Otherwise it goes with the log's 30 days. A
+  record is the machine's its app ran on, as the run and the delete were: `trash.list` merges a
+  linked machine's under its name, and `trash.readRun` and `trash.purgeRuns` go there by `machine`.
+  `trash.empty` leaves the records alone (the window deletes the ones it listed with
+  `trash.purgeRuns`, one call per machine), so emptying across machines never takes records nobody
+  was shown. An agent use count reads a row whose session is gone by its
   kept request, so a deleted session still counts as an agent started.
 - Shown beside a pinned view (the Runs panel): time, tool, caller (with the session's name), status,
   duration, and the reason of a failure. Reading one app's runs returns its rows **and the chain
@@ -888,8 +892,12 @@ gate happens in one place, the broker desk (`desk.ts`).
   deleted (#378)** and its record kept in the trash (§5.2): an app that calls `run_agent` a few dozen
   times a day filled the sidebar with sessions nobody would talk to. It stays in the list, as before,
   when the run failed, was stopped or cancelled (the person needs to see what went wrong, a schema
-  mismatch included), when a card was shown during it (the person took part), or when the person
-  opened it or wrote to it while it ran (it has become theirs). While it runs it is visible as any
+  mismatch included), when a card was shown during it (the person took part), when the person
+  opened it or wrote to it from the run until the delete is final, its process's close included (it
+  has become theirs), when it woke again, is waking or holds something sent to it, or when it has
+  attachments (the record copies no files). The delete is decided at the moment the session leaves
+  the lists, with nothing awaited after, so a message sent meanwhile either keeps the session or is
+  told the session is gone; a waking session is never deleted by withdrawing its wake. While it runs it is visible as any
   session: its approval cards appear there. The app has its answer once the session is gone, so a
   screen that reads `sessions.list` after its call sees it as it stays.
 - **`call_app { app, tool, args }`.** Only apps listed in `uses.apps` and only their `model` tools,

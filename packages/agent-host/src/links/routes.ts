@@ -205,9 +205,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'approvals.deleteRule': MERGE,
   'trash.list': MERGE,
   'trash.empty': MERGE,
-  // The records of deleted app-agent sessions (#378) are the hub's own: `trash.list` merges no other machine's
-  'trash.readRun': HUB,
-  'trash.purgeRuns': HUB,
+  // The records of deleted app-agent sessions (#378), on the machine whose app ran (`trash.list` names it)
+  'trash.readRun': { kind: 'machine', result: fields({ messages }) },
+  'trash.purgeRuns': { kind: 'machine' },
 
   // ── Apps: a project app routes with its project; a user-folder app by `machine` where the call takes it ──
   'apps.runs': app(each((r, q) => q.appRun(r))),

@@ -69,9 +69,15 @@ export function TrashSection() {
         (e: Error) => e.message,
       ),
     )
-  const purgeRuns = (runIds: string[], at: string) =>
+  /** One call per machine (#378 review): a linked machine's records are deleted there */
+  const purgeRunsOf = async (list: readonly TrashedRun[]) => {
+    const byMachine = new Map<string | null, string[]>()
+    for (const r of list) byMachine.set(r.machine ?? null, [...(byMachine.get(r.machine ?? null) ?? []), r.runId])
+    for (const [machine, runIds] of byMachine) await platform.trash.purgeRuns(runIds, machine)
+  }
+  const purgeRuns = (list: readonly TrashedRun[], at: string) =>
     act(at, () =>
-      platform.trash.purgeRuns(runIds).then(
+      purgeRunsOf(list).then(
         () => null,
         (e: Error) => e.message,
       ),
@@ -82,7 +88,7 @@ export function TrashSection() {
    */
   const emptyAll = () =>
     act(null, async () => {
-      const runIds = (trash?.runs ?? []).map((r) => r.runId)
+      const listed = trash?.runs ?? []
       const failed: string[] = []
       if (sessions.length) {
         await platform.trash.empty().then(
@@ -92,7 +98,7 @@ export function TrashSection() {
           (e: Error) => failed.push(e.message),
         )
       }
-      if (runIds.length) await platform.trash.purgeRuns(runIds).catch((e: Error) => failed.push(`The app runs stayed: ${e.message}`))
+      if (listed.length) await purgeRunsOf(listed).catch((e: Error) => failed.push(`The app runs stayed: ${e.message}`))
       return failed.length ? failed.join(' ') : null
     })
 
