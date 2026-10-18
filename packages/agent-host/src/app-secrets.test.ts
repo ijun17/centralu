@@ -252,4 +252,51 @@ describe('the value is left nowhere inside the host', () => {
     expect(places['app list']).toContain('[redacted:API_KEY]')
     expect(places.check).toContain('[redacted:API_KEY]')
   })
+  // #1142: the check quoted what the app's own error said, in two places #850's masking did not reach
+  it('a check report quotes a failed screen read with the name of a secret, not its value', async () => {
+    plant(['--leak-read'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const read = await rt.check(ref)
+    expect(read.text).toContain('upstream refused API_KEY=[redacted:API_KEY]')
+    expect(JSON.stringify(read)).not.toContain(VALUE)
+  })
+  it('a check report quotes a failed tool list with the name of a secret, not its value', async () => {
+    plant(['--leak-list-later'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const listed = await rt.check(ref)
+    expect(listed.text).toContain('could not list tools again with API_KEY=[redacted:API_KEY]')
+    expect(JSON.stringify(listed)).not.toContain(VALUE)
+  })
+  // #1142: a screen read that fails goes on to the UI and over the linked-machine relay (apps.readResource, apps.viewDocument)
+  it('a resource read that fails with the value in its error reaches the caller with the name of the secret', async () => {
+    plant(['--leak-read'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const failure = await rt.readResource(ref, 'ui://keys/index.html').then(
+      () => null,
+      (e: unknown) => e as Error,
+    )
+    expect(failure?.message).toContain('upstream refused API_KEY=[redacted:API_KEY]')
+    expect(failure?.message).not.toContain(VALUE)
+    expect(failure?.stack).not.toContain(VALUE)
+  })
+  // #1142: a long stderr line is cut at 8192 characters; a value across the cut was masked in neither piece
+  it('a value straddling the cut of a long stderr line does not reach the app log', async () => {
+    plant(['--leak-straddle'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    await envSeen()
+    const logFile = join(dataRoot, 'app-logs', 'p1', 'keys.log')
+    // The second half is written 300 ms after the first; the line ends with it
+    const half = Math.floor(VALUE.length / 2)
+    // Unmasked, the text is in the log as two pieces; masked, as the name once the line ends (a full line of x's comes first)
+    const text = await until(
+      () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : ''),
+      (t) => t.includes('[redacted:API_KEY]') || t.includes(VALUE.slice(half)),
+    )
+    expect(text).not.toContain(VALUE.slice(0, half))
+    expect(text).not.toContain(VALUE.slice(half))
+  })
 })

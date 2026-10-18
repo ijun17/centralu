@@ -100,10 +100,12 @@ app wrote there while running would reach the whole team.
   removed or each app's values are back. An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
   are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, and in the text of a failed start
-  (the list, a check, a caller's refusal), also where JSON
+  (the list, a check, a caller's refusal), and in what a check report and a screen read quote of the app's own errors
+  (a failed `resources/read`, a failed second tool list; also the tool and screen names the report prints), also where JSON
   escapes them (a multi-line key in an argument, #838). The app's log is masked a line at a time, so each line of a
   multi-line value (a PEM) of 16 characters or more is masked on its own; shorter lines of it (`}`, an empty line)
-  are not.
+  are not. A line past 8192 characters is written in pieces; the cut is made on the masked text and keeps back as many
+  characters as the longest value, so a value split across two reads is masked whole.
   A person enters them in the **Secrets** panel beside the pinned view (its button says how many
   are missing) or in the app's row in Settings > Apps: Set, Replace, Clear. Both call
   `apps.setSecret`, which takes only a name the manifest declares, refuses an empty value, and
@@ -1034,6 +1036,11 @@ What is refused before anything lands (`imports.test.ts`):
 | A zip link entry pointing outside the archive; an entry that inflates past its declared size (inflation stops there) or fails its checksum; two entries that differ only in case or Unicode form; a file and a folder with the same name; encrypted, split or ZIP64 archives | The list the person saw must be the files that are written |
 | More than 2,000 files, 64 MiB in all, 16 MiB in one file, 16 levels, or a `.zip` over 32 MiB | An app is small; the caps keep a mistake or a bomb from filling the disk |
 | A source that is not an absolute path, a `file:` URL of this machine, or an `https:` URL; https with a user or password in it; a loopback, link-local or unspecified host | Only local files and https. Redirects are followed by hand, at most five, and each target is checked again |
+
+**A zip made on Windows has no executable bit.** Explorer's "Send to > Compressed folder" and `Compress-Archive` write
+no Unix mode, so after import `start.sh` is not executable on macOS or Linux and the app fails to start with EACCES. Start
+it through its interpreter (`sh start.sh`, `node server.mjs`) in `centralu.app.json`, or zip it on macOS or Linux (`zip`
+keeps the mode).
 
 **Names starting with a dot are not copied** (`.git`, `.env`, and `.claude/` and `.codex/` among
 them): a user-folder app's builder works in the app folder and reads settings there, so an

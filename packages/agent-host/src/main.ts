@@ -527,6 +527,8 @@ const links = new Links({
   tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
+  // A child start_agent started on a machine hangs under the session here that started it (#1038)
+  ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)

@@ -5,6 +5,7 @@ import type {
   Interruption,
   ApprovalDetail,
   Question,
+  QuestionAnswer,
   SessionInfo,
   PermissionPreset,
   ToolName,
@@ -112,6 +113,18 @@ export type LinkedSessions = {
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
+  /**
+   * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
+   * last thousand messages: whose turn it is running (#1038 review)
+   */
+  lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown } | null }>>
+  /** The cards standing in a machine's session now, as that machine lists them (#1038: agent_session on a child there) */
+  cards(sessionId: string): Promise<Outcome<{
+    approval: { requestId: string; detail: ApprovalDetail } | null
+    questions: { requestId: string; questions: Question[] }[]
+  }>>
+  /** Answers a question card of a machine's session, as its window would (`agents.answerQuestion` there, #1038) */
+  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<Outcome>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */

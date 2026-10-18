@@ -6,8 +6,13 @@ import { parseJson } from './json.js'
  * `<name>:<sessionId>` (`agent_depth:`, `report_paused:`, `tool_prefix:`, …). A key built for one session takes that
  * shape, and the trash's purge deletes them all by it (`TrashRecords.purgeSession`), so a key added later goes with
  * its session without the purge having to learn its name.
+ *
+ * The id is the whole part after the name, and a name holds no `:` (#1142): a session whose id ends in `:<another id>`
+ * would otherwise lose its keys with the other session's.
  */
-export const SESSION_SETTING_OF = `length(key) > length(@sessionId) + 1 AND substr(key, -length(@sessionId) - 1) = ':' || @sessionId`
+export const SESSION_SETTING_OF =
+  `length(key) > length(@sessionId) + 1 AND substr(key, -length(@sessionId) - 1) = ':' || @sessionId` +
+  ` AND instr(substr(key, 1, length(key) - length(@sessionId) - 1), ':') = 0`
 
 /** The part of the store one setting is read from and written to */
 export type SettingAccess = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }

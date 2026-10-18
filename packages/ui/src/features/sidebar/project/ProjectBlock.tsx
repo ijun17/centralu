@@ -5,7 +5,7 @@ import { useStore } from '../../../store/store.js'
 import { NewSessionDialog } from '../../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../../project/NewAppDialog.jsx'
 import { DeleteProjectDialog } from '../../project/DeleteProjectDialog.jsx'
-import { useIsProjectOpen, useSessionsOf } from '../../../store/selectors.js'
+import { useIsProjectOpen, useSidebarSessionsOf } from '../../../store/selectors.js'
 import { useProjectApps } from '../../../store/app-catalog.js'
 import { PROJECT_MIME, moveTo } from '../reorder.js'
 import { useDropLine, dropLine } from '../dragDrop.js'
@@ -17,7 +17,8 @@ import { ProjectSessionDialogs } from './ProjectSessionDialogs.jsx'
 
 export function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
-  const sessions = useSessionsOf(projectId)
+  // A child started on another machine stands under its parent here (#1038), not under that machine's project
+  const sessions = useSidebarSessionsOf(projectId)
   // Whether the dialog is open is held by the store — the first-run screen also needs to open this dialog
   const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
   const openNewSession = useStore((s) => s.openNewSession)

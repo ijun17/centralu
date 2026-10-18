@@ -3,6 +3,7 @@ import { invalidReason, type AppEntry } from './app-entry.js'
 import type { AppLifecycle } from './app-lifecycle.js'
 import type { AppRef } from './ref.js'
 import type { RuntimeTiming } from './runtime-types.js'
+import { maskedError } from './secrets.js'
 import { AppUnavailableError } from './unavailable.js'
 import { resourceUriOf } from './visibility.js'
 
@@ -24,7 +25,14 @@ export class AppResources {
    */
   async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
     const e = this.require(ref)
-    return this.lifecycle.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
+    return this.lifecycle.use(e, async (proc) => {
+      try {
+        return await proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs })
+      } catch (err) {
+        // The app's own error goes on to a screen and over the linked-machine relay: masked like its log (#1142)
+        throw maskedError(err, (t) => proc.log.mask(t))
+      }
+    })
   }
 
   /**
@@ -40,7 +48,9 @@ export class AppResources {
       const out: ListResourcesResult['resources'] = []
       let cursor: string | undefined
       for (let page = 0; page < maxPages; page++) {
-        const r = await proc.client.listResources(cursor ? { cursor } : {}, { timeout: this.timing.connectTimeoutMs })
+        const r = await proc.client.listResources(cursor ? { cursor } : {}, { timeout: this.timing.connectTimeoutMs }).catch((err: unknown) => {
+          throw maskedError(err, (t) => proc.log.mask(t))
+        })
         out.push(...r.resources)
         cursor = r.nextCursor
         if (!cursor) break

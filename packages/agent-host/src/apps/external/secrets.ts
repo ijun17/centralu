@@ -144,7 +144,13 @@ export function secretValueProblem(value: string): string | null {
 /** The shortest line of a multi-line secret masked on its own: a PEM line is 64, a JSON key's line longer */
 export const SECRET_LINE_MIN_CHARS = 16
 
-export function redactor(secrets: Record<string, string>): (text: string) => string {
+/**
+ * What `redactor` returns. `reach` is the length of the longest text it masks: a reader that has to cut a stream
+ * somewhere keeps that many characters back, so the cut never lands inside a value (#1142). Absent on a plain function.
+ */
+export type Redact = ((text: string) => string) & { reach?: number }
+
+export function redactor(secrets: Record<string, string>): Redact {
   /*
    * Each value also in its JSON-escaped form (#838): a run record keeps the arguments as JSON (`describeArgs`), where
    * a value with a line break, a quote, a backslash or a control character is spelled differently (`\n`, `\"`), so a
@@ -166,10 +172,22 @@ export function redactor(secrets: Record<string, string>): (text: string) => str
       return [...forms, ...lines.map((l): [string, string] => [name, l])]
     })
     .sort((a, b) => b[1].length - a[1].length)
-  if (pairs.length === 0) return (t) => t
-  return (text) => {
+  if (pairs.length === 0) return Object.assign((t: string) => t, { reach: 0 })
+  const redact = (text: string) => {
     let out = text
     for (const [name, value] of pairs) out = out.split(value).join(`[redacted:${name}]`)
     return out
   }
+  return Object.assign(redact, { reach: pairs[0]![1].length })
+}
+
+/**
+ * An error the app raised, with its message masked (#1142). The same error when nothing in it needed masking;
+ * otherwise a new one under the same name, since the stack of the original holds the unmasked message too.
+ */
+export function maskedError(err: unknown, redact: (text: string) => string): Error {
+  if (!(err instanceof Error)) return new Error(redact(String(err)))
+  const message = redact(err.message)
+  if (message === err.message) return err
+  return Object.assign(new Error(message), { name: err.name })
 }

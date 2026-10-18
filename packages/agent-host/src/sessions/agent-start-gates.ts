@@ -9,7 +9,14 @@ import { ASK_THE_PERSON, ORCHESTRATOR_PLACE } from './start-agent-terms.js'
  * reaches of the manager is `DelegationHost`.
  */
 export class AgentStartGates {
-  constructor(private readonly host: DelegationHost) {}
+  constructor(
+    private readonly host: DelegationHost,
+    /**
+     * The children the project's sessions started on linked machines that are working now (#1038,
+     * `RemoteAgents.workingIn`): they count under the project's ceiling as its local children do
+     */
+    private readonly remoteWorking: (projectId: string) => number = () => 0,
+  ) {}
 
   /**
    * Places taken by starts between their ceiling check and the child's delegation (#673 review) — project id -> how
@@ -55,7 +62,11 @@ export class AgentStartGates {
     }
   }
 
-  /** A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. */
+  /**
+   * A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. A child on a
+   * linked machine counts under its parent's project (#1038): the ceiling bounds how much one project's sessions set
+   * going at once, wherever it runs, and the machine counts nothing for a session the hub started there
+   */
   agentCeilingError(callerId: string, projectId: string): string | null {
     const configured = this.host.uiPreferences().agentCeiling
     const ceiling = configured ?? (this.host.autoBoundaryOpen(callerId) ? 0 : AGENT_CEILING)
@@ -67,7 +78,8 @@ export class AgentStartGates {
         // A session gone is no one's (#994 review); one with no project is the orchestrator's place (#853)
         return d.agent && !d.settled && !!child && (child.projectId ?? ORCHESTRATOR_PLACE) === projectId
       }).length +
-      (this.agentStartReserved.get(projectId) ?? 0)
+      (this.agentStartReserved.get(projectId) ?? 0) +
+      this.remoteWorking(projectId)
     if (running < ceiling) return null
     const whose = projectId === ORCHESTRATOR_PLACE ? 'you started' : "started by this project's sessions"
     return `${running} agents ${whose} are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.`

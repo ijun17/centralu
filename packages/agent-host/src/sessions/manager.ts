@@ -408,6 +408,8 @@ export class SessionManager {
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     this.children.restoreReports(this.meta, keeperOpts.keptSessions)
     this.delegationFlow.starts.restoreAgentStarts()
+    // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
+    this.delegationFlow.remote.restore()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
     this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.queue.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
@@ -836,6 +838,14 @@ export class SessionManager {
 
   useLinkedReader(reader: LinkedSessions): void {
     this.linkedReader = reader
+  }
+
+  /**
+   * The session here that started a linked machine's session with start_agent (#1038), by its hub-side id; none for any
+   * other. The links name it as the session's `askedBy` (`LinkDeps.ownerOf`), so the sidebar hangs it under its parent.
+   */
+  remoteAgentParent(sessionId: string): string | undefined {
+    return this.delegationFlow.remote.of(sessionId)?.callerId
   }
 
   /**
@@ -2234,6 +2244,8 @@ export class SessionManager {
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
+      // Whose a linked child's turn is decides whether its report goes (#1038 review)
+      reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

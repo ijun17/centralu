@@ -32,6 +32,12 @@ export type LinkedReportsHost = {
     ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
     work?: ReportWork,
   ): Promise<void>
+  /**
+   * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine
+   * answers by whose its turn is (`RemoteAgents.reportGate`): its caller's goes, another's (the person's on that
+   * machine) is reported to nobody, and one the hub cannot tell yet stays owed until it can. Any other session's goes
+   */
+  reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -47,6 +53,10 @@ export type LinkedEvent = {
   state?: unknown
   reason?: unknown
   error?: { message?: string }
+  /** A card's request id (`approval_request`, `question_request`) */
+  requestId?: unknown
+  /** A message's number in its conversation (`user_message`) */
+  seq?: unknown
   machine?: unknown
   machineId?: unknown
   text?: unknown
@@ -132,6 +142,10 @@ export class LinkedReports {
       return
     }
     if (step?.step !== 'completed' && step?.step !== 'failed') return
+    // Whose turn ended (#1038 review): another's is reported to nobody; one the hub cannot tell yet stays owed
+    const gate = this.gate(sessionId)
+    if (gate === 'defer') return
+    if (gate === 'withhold') return this.drop(sessionId)
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = e.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
     if (running.length) {
@@ -140,6 +154,8 @@ export class LinkedReports {
       wait.paused = [...held, ...running.filter((t) => !held.some((h) => h.id === t.id))]
       // A state the machine reports before the next turn starts is not that turn's end
       wait.busy = false
+      // Changed in place: set again, so what keeps it stored reads the pause (#1038)
+      this.host.children.setLinkedReport(sessionId, wait)
       if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false })
       return
     }
@@ -156,10 +172,17 @@ export class LinkedReports {
     if (wait?.paused) this.settleLater(sessionId, wait)
   }
 
-  /** Every settle wait ends with the host: the next host has no linked report to settle (they live in memory) */
+  /**
+   * Every settle wait ends with the host. The next host settles only what a child start_agent started on a linked
+   * machine is still owed (`RemoteAgents.restore`, #1038); the orchestrator's linked reports live in memory
+   */
   dispose(): void {
     for (const timer of this.settling.values()) clearTimeout(timer)
     this.settling.clear()
+  }
+
+  private gate(sessionId: string): 'deliver' | 'withhold' | 'defer' {
+    return this.host.reportGate?.(sessionId) ?? 'deliver'
   }
 
   /** The session's own background work its machine lists as running; a timer the tool holds is not work (#721) */
@@ -194,6 +217,10 @@ export class LinkedReports {
 
   /** The paused work ended with no turn after it: the report goes out with how each task ended */
   private settle(sessionId: string, wait: LinkedReport): void {
+    // As a turn's end (#1038 review): another's work is reported to nobody; one the hub cannot tell yet waits again
+    const gate = this.gate(sessionId)
+    if (gate === 'defer') return this.settleLater(sessionId, wait)
+    if (gate === 'withhold') return this.drop(sessionId)
     const settled = this.pausedTasksNow(sessionId, wait)
     this.drop(sessionId)
     void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { settled })
@@ -297,6 +324,8 @@ export class LinkedReports {
     const about = reader.describe(sessionId) ?? known ?? this.about.get(sessionId) ?? { name: sessionId, project: '(unknown)' }
     // A machine that cannot be reached cannot be read: its last answer went with the paused report, which says so
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
+    // Words of the turn go only through the gate (#1038 review); a report that the link or the machine went says no words
+    if (!unreachable && this.gate(sessionId) !== 'deliver') return
     const preview = unreachable ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '') : await reader.lastWords(sessionId, 600).catch(() => '')
     await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work)
   }

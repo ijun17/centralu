@@ -90,6 +90,35 @@ export function useSessionsOf(projectId: string): SessionSummary[] {
   )
 }
 
+/**
+ * The project a session's row stands under in the sidebar (#1038). Its own, except for a child started on another
+ * machine than the session that started it (start_agent with a machine): that child is a session of the machine's
+ * checkout, but it hangs under its parent, as a local child does, so it goes to its parent's project. What it started
+ * in its own project goes with it. An ask_project session (`askedBy` of another project on the same machine) stays in
+ * its own project, as before; a loop in the links (which the host never makes) stops where it closes.
+ */
+export function sidebarProjectOf(s: SessionSummary, sessions: Readonly<Record<string, SessionSummary>>): string | null {
+  const seen = new Set<string>()
+  let cur = s
+  for (;;) {
+    seen.add(cur.id)
+    const parent = cur.askedBy ? sessions[cur.askedBy] : undefined
+    if (!parent || seen.has(parent.id)) return cur.projectId
+    const otherMachine = (parent.machine ?? null) !== (cur.machine ?? null)
+    if (!otherMachine && parent.projectId !== cur.projectId) return cur.projectId
+    cur = parent
+  }
+}
+
+/** The sessions whose rows stand under a project in the sidebar (`sidebarProjectOf`), in the host's order */
+export function useSidebarSessionsOf(projectId: string): SessionSummary[] {
+  const sessions = useStore((s) => s.sessions)
+  return useMemo(
+    () => Object.values(sessions).filter((x) => sidebarProjectOf(x, sessions) === projectId),
+    [sessions, projectId],
+  )
+}
+
 export function useUnread(sessionId: string): boolean {
   return useStore((s) => {
     const x = s.sessions[sessionId]

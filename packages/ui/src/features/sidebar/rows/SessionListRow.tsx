@@ -13,6 +13,7 @@ import { SessionRow, approvalLine } from './SessionRow.jsx'
 import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
+import { MachineTag } from '../../machines/MachineTag.jsx'
 import type { TreeRow } from '../tree.js'
 
 /**
@@ -51,6 +52,8 @@ export function SessionListRow({
   const focusSession = useStore((s) => s.focusSession)
   const renameSession = useStore((s) => s.rename)
   const setGroupsFolded = useStore((s) => s.setGroupsFolded)
+  // A child started on another machine than its project's (#1038) says where it runs; rows of the project's own machine do not
+  const projectMachine = useStore((st) => st.projects[projectId]?.machine ?? null)
   const unread = isUnread(s)
   const focused = focusedSessionId === s.id
   const groupKey = childrenGroupKey(s.id)
@@ -129,6 +132,7 @@ export function SessionListRow({
             */}
             <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+            {s.machine && s.machine !== projectMachine && <MachineTag machine={s.machine} testId={`session-machine-${s.id}`} />}
             {childrenFolded && (
               <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
             )}

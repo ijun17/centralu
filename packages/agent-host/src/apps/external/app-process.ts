@@ -7,9 +7,10 @@ import { CLIENT_INFO } from '@cc/protocol'
 import { KILL_GRACE_MS, hasProcessGroups, stopTree } from '../../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/grouped-child.js'
 import { RollingFile } from '../../log-file.js'
-import { LineTail, lineSplitter } from '../../stream-text.js'
+import { LineTail, lineSplitter, type LineSplitter } from '../../stream-text.js'
 import { ExitAfterDrain } from '../../exit-after-drain.js'
 import { resolveCommand, type ToolLaunch } from '../../tool-launch.js'
+import type { Redact } from './secrets.js'
 import { StreamTransport } from './stream-transport.js'
 
 /**
@@ -32,7 +33,7 @@ export type SpawnSpec = {
   logPath: string
   logMaxBytes: number
   /** Masks secret values: in the log, and in the text of a failed start (`AppStartError`) */
-  redact: (text: string) => string
+  redact: Redact
   /** The spec generation discovered last time for this app — skips the probe if present */
   prior?: PriorDiscovery
   probeTimeoutMs: number
@@ -348,6 +349,8 @@ function describeExit(e: ExitInfo): string {
 /** The tail of stderr to attach to a crash reason — both the number of lines and each line's length are capped */
 const TAIL_LINES = 20
 const TAIL_LINE_CHARS = 500
+/** A stderr line longer than this is written in pieces */
+const MAX_LINE_CHARS = 8192
 
 /**
  * An app's own log file. The same rules as host.log (`log-file.ts`): overflow rolls it to `.1`,
@@ -360,15 +363,28 @@ const TAIL_LINE_CHARS = 500
  */
 class AppLog {
   private readonly file: RollingFile
-  // So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off
-  private readonly lines = lineSplitter((line) => this.appLine(line), { maxLine: 8192 })
+  private readonly lines: LineSplitter
   private readonly recent = new LineTail(TAIL_LINES, TAIL_LINE_CHARS)
 
   constructor(
     path: string,
     maxBytes: number,
-    private redact: (text: string) => string,
+    private redact: Redact,
   ) {
+    /*
+     * So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off.
+     * The cut is made on the masked text, and the end of it stays for the next chunk: that end may be the start of a value
+     * the next chunk finishes, and a value cut in two is masked in neither piece (#1142). The longest value fits in what is
+     * kept back, so a line with secrets is cut only after MAX_LINE_CHARS and that much more.
+     */
+    const hold = Math.max(0, (redact.reach ?? 0) - 1)
+    this.lines = lineSplitter((line) => this.appLine(line), {
+      maxLine: MAX_LINE_CHARS + hold,
+      cut: (unfinished) => {
+        const masked = this.redact(unfinished)
+        return masked.length <= hold ? { line: masked, keep: '' } : { line: masked.slice(0, masked.length - hold), keep: masked.slice(masked.length - hold) }
+      },
+    })
     try {
       mkdirSync(dirname(path), { recursive: true })
     } catch {
@@ -391,6 +407,11 @@ class AppLog {
 
   tail(): string {
     return this.recent.text
+  }
+
+  /** Masks the app's secret values in a text that is about to leave: the same rule as the lines above (a check report quotes the app's own errors) */
+  mask(text: string): string {
+    return this.redact(text)
   }
 
   /** The last lines of stderr (after masking) — a copy. An error bundle (C-6) carries away the ones from that moment */
