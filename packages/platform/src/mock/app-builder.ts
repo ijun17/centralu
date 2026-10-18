@@ -8,6 +8,7 @@ import type { AppRegistry } from './app-registry.js'
 import type { ToolsMock } from './tools.js'
 import type { OrchestratorMock } from './orchestrator.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** Making an app and its builder session (M4 C), error bundles, and whether a session can reach an app (#308) */
 export class AppBuilderMock {
@@ -34,7 +35,7 @@ export class AppBuilderMock {
    */
   private deliverToBuilder(sessionId: string, text: string, attachments?: Attachment[]): void {
     const s = this.store.sessions.get(sessionId)
-    if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
     s.live = true
     // emit records it and assigns a seq, like the host (the same path as sendViewMessage)
     this.emit({ type: 'user_message', sessionId, seq: (this.store.messages.get(sessionId)?.length ?? 0) + 1, text, ...(attachments?.length ? { attachments } : {}) })

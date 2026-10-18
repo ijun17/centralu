@@ -9,6 +9,7 @@ import type { AgentConsents } from './agent-consents.js'
 import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import { gigabytes, type MemoryShortfall } from './memory-gate.js'
+import { FILL, namedCall } from './tool-seats.js'
 import { ASK_THE_PERSON, ORCHESTRATOR_PLACE, agentStartPending, agentStartPersonText, orchestratorPlace, type StartProgress } from './start-agent-terms.js'
 
 /** The sender Centralu's own messages to a session are recorded under (#673): like `HUB_SENDER`, no session's id */
@@ -203,7 +204,7 @@ export class AgentStartRequests {
       if (outcome === 'timeout') {
         const error =
           `Memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes, so no agent was started. ` +
-          `Close something or wait for other agents to finish, then call start_agent again. ${ASK_THE_PERSON}`
+          `Close something or wait for other agents to finish, then call ${namedCall(this.host.toolProfileOf(req.callerId), 'start_agent', { task: FILL })} again. ${ASK_THE_PERSON}`
         this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', `memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes`) })
         return
       }

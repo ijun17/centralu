@@ -9,6 +9,7 @@ import { AgentRunWait } from './app-agents.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { StartAgentDelegations } from './start-agent-flow.js'
+import { FILL, namedCall } from './tool-seats.js'
 import { turnAnswer } from './turn-answer.js'
 
 /** What an observed turn reaches of the rest of the delegation flow (`DelegationFlow`): a turn's reader and its wait */
@@ -99,7 +100,7 @@ export class ObservedTurns {
         `Session: ${frameField(name)}\n` +
         `id: ${sessionId}\n\n` +
         `Reason: ${why.slice(0, 600)}\n\n` +
-        `Send it again with agent_session, or read that session's recent conversation with read_session.`,
+        `Send it again with ${namedCall(this.host.toolProfileOf(observerId), 'agent_session', { sessionId, action: 'send', text: FILL })}, or read that session's recent conversation with read_session.`,
       { sessionId, name },
       true,
     )

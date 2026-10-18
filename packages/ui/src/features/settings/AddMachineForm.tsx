@@ -4,6 +4,9 @@ import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineCho
 import { useStore } from '../../store/store.js'
 import { offerFocus } from '../../components/offerFocus.js'
 import { isPlainEscape } from '../../app/keys.js'
+import { Button } from '../../components/Button.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 
 export const SHELL_LABEL: Record<RemoteShell, string> = {
   posix: 'Linux or macOS',
@@ -24,9 +27,10 @@ export function withCode(text: string) {
   )
 }
 
-const fieldClass =
-  'w-full rounded-md border border-line bg-surface-floor px-2 py-1 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
-
+/*
+ * The hosts list keeps its own toggle look: a press on the picked host asks it again (`pick`), which Segmented, picking
+ * only what is not picked yet, would swallow.
+ */
 const radioClass = (on: boolean) =>
   `rounded-md border text-xs transition-colors ${on ? 'border-ink-muted bg-surface-hover/40 text-ink' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'}`
 
@@ -178,23 +182,27 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
           {choices.length > 0 && (
             <>
               <p className="text-xs text-ink-muted">It runs</p>
-              <div className="mt-1 flex flex-col gap-1" role="radiogroup" aria-label={`What ${probing.alias} runs`} data-testid="machines-add-choices">
-                {choices.map((c) => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    role="radio"
-                    aria-checked={choiceKey === c.key}
-                    disabled={!!c.linkedAs}
-                    onClick={() => choose(c)}
-                    data-testid={`machines-add-choice-${c.key}`}
-                    className={`flex items-baseline gap-2 px-2 py-1 text-left disabled:cursor-default disabled:opacity-50 ${radioClass(choiceKey === c.key)}`}
-                  >
-                    <span className="shrink-0">{c.label}</span>
-                    <span className="min-w-0 truncate text-ink-faint">{c.linkedAs ? `Linked as ${c.linkedAs}` : c.detail}</span>
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                label={`What ${probing.alias} runs`}
+                value={choiceKey}
+                onChange={(key) => choose(choices.find((c) => c.key === key) ?? null)}
+                size="sm"
+                layout="column"
+                className="mt-1"
+                optionClassName="flex items-baseline gap-2"
+                testId="machines-add-choices"
+                options={choices.map((c) => ({
+                  value: c.key,
+                  disabled: !!c.linkedAs,
+                  testId: `machines-add-choice-${c.key}`,
+                  label: (
+                    <>
+                      <span className="shrink-0">{c.label}</span>
+                      <span className="min-w-0 truncate text-ink-faint">{c.linkedAs ? `Linked as ${c.linkedAs}` : c.detail}</span>
+                    </>
+                  ),
+                }))}
+              />
             </>
           )}
           {choices.length > 0 && !firstChoice(choices) && (
@@ -205,8 +213,10 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
           {choices.length > 0 && (
             <label className="mt-2 block text-xs text-ink-muted">
               Name
-              <input
-                className={`mt-1 ${fieldClass}`}
+              <TextInput
+                size="sm"
+                font="mono"
+                className="mt-1 w-full"
                 value={name}
                 onChange={(e) => {
                   nameTyped.current = true
@@ -250,8 +260,10 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
           <summary className="cursor-pointer text-xs text-ink-faint hover:text-ink">Command (optional)</summary>
           <label className="mt-1 block text-xs text-ink-muted">
             What runs in place of <code className="font-mono">centralu</code> there, when it is not on the PATH ssh gets
-            <input
-              className={`mt-1 ${fieldClass}`}
+            <TextInput
+              size="sm"
+              font="mono"
+              className="mt-1 w-full"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               placeholder="~/.npm-global/bin/centralu"
@@ -273,14 +285,9 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
             Cancel
           </button>
         )}
-        <button
-          type="submit"
-          disabled={busy || !ready}
-          className="rounded-md border border-line bg-surface-raised px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-          data-testid="machines-add-confirm"
-        >
+        <Button variant="primary" size="sm" type="submit" disabled={busy || !ready} data-testid="machines-add-confirm">
           {busy ? 'Adding…' : 'Add'}
-        </button>
+        </Button>
       </div>
     </form>
   )
@@ -375,8 +382,10 @@ function ManualFields({ name, setName, target, setTarget, shell, setShell, distr
       )}
       <label className="mt-2 block text-xs text-ink-muted">
         Name
-        <input
-          className={`mt-1 ${fieldClass}`}
+        <TextInput
+          size="sm"
+          font="mono"
+          className="mt-1 w-full"
           value={name}
           onChange={(e) => setName(e.target.value)}
           ref={nameRef}
@@ -387,8 +396,10 @@ function ManualFields({ name, setName, target, setTarget, shell, setShell, distr
       </label>
       <label className="mt-2 block text-xs text-ink-muted">
         ssh target
-        <input
-          className={`mt-1 ${fieldClass}`}
+        <TextInput
+          size="sm"
+          font="mono"
+          className="mt-1 w-full"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           placeholder="me@server, or a Host from ~/.ssh/config"
@@ -398,26 +409,21 @@ function ManualFields({ name, setName, target, setTarget, shell, setShell, distr
         />
       </label>
       <p className="mt-2 text-xs text-ink-muted">It runs</p>
-      <div className="mt-1 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Remote shell">
-        {(Object.keys(SHELL_LABEL) as RemoteShell[]).map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="radio"
-            aria-checked={shell === k}
-            onClick={() => setShell(k)}
-            data-testid={`machines-add-shell-${k}`}
-            className={`px-2 py-0.5 ${radioClass(shell === k)}`}
-          >
-            {SHELL_LABEL[k]}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="Remote shell"
+        value={shell}
+        onChange={setShell}
+        size="sm"
+        className="mt-1 flex-wrap"
+        options={(Object.keys(SHELL_LABEL) as RemoteShell[]).map((k) => ({ value: k, label: SHELL_LABEL[k], testId: `machines-add-shell-${k}` }))}
+      />
       {shell === 'wsl' && (
         <label className="mt-2 block text-xs text-ink-muted">
           WSL distro
-          <input
-            className={`mt-1 ${fieldClass}`}
+          <TextInput
+            size="sm"
+            font="mono"
+            className="mt-1 w-full"
             value={distro}
             onChange={(e) => setDistro(e.target.value)}
             placeholder="Ubuntu-24.04 (wsl.exe -l -v lists them)"

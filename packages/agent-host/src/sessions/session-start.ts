@@ -13,6 +13,7 @@ import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { truncate, type ExternalConversations } from './external-conversations.js'
 import { movedChildrenNote, type HandoffChildren } from './handoff-children.js'
+import { commandsSentence } from './tool-seats.js'
 import type { HandoffNotes } from './handoff-notes.js'
 import type { HostCardsHost } from './host-cards.js'
 import type { LaunchRecords, LaunchRecordsHost } from './launch-records.js'
@@ -64,7 +65,7 @@ function externalMissingReason(label: string, cwd: string): string {
  * What starting a session's process reaches of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store'> &
+export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf'> &
   Pick<SessionRecordHost, 'cacheLedger'> &
   Pick<SessionTrashHost, 'record' | 'restartPolicy'> &
   Pick<RestartHost, 'lettingGo'> &
@@ -432,7 +433,7 @@ export class SessionStarts {
        */
       const moved = fromSessionId ? this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'all' : 'live') : []
       if (moved.length) {
-        note = movedChildrenNote(moved) + note
+        note = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session'])) + note
         try {
           if (fromSessionId && params.projectId) writeHandoffNoteSync(params.projectId, fromSessionId, note)
         } catch (e) {

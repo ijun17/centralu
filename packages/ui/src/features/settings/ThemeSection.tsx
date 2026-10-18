@@ -19,6 +19,10 @@ import {
   type ThemeBase,
 } from '../../app/theme.js'
 import { SettingToggle } from './SettingToggle.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { Button } from '../../components/Button.jsx'
+import { Badge } from '../../components/Badge.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 
 const MODES: { id: ThemeMode; label: string }[] = [
   { id: 'dark', label: 'Dark' },
@@ -85,25 +89,15 @@ export function ThemeSection() {
         Theme. Custom themes are files you can also edit by hand or ask an agent to write; changes show up as soon as the
         file is saved.
       </p>
-      <div className="mt-3 flex gap-2" role="radiogroup" aria-label="Theme mode">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            role="radio"
-            aria-checked={prefs.themeMode === m.id}
-            data-testid={`settings-theme-mode-${m.id}`}
-            onClick={() => void setPrefs({ themeMode: m.id })}
-            className={`rounded-md border px-2.5 py-1 text-sm leading-none transition-colors ${
-              prefs.themeMode === m.id
-                ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                : 'border-line text-ink-muted hover:bg-surface-hover/25 hover:text-ink'
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="Theme mode"
+        value={prefs.themeMode}
+        onChange={(themeMode) => void setPrefs({ themeMode })}
+        size="md"
+        className="mt-3 gap-2"
+        optionClassName="leading-none"
+        options={MODES.map((m) => ({ value: m.id, label: m.label, testId: `settings-theme-mode-${m.id}` }))}
+      />
 
       <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-ink-muted">
         {(['dark', 'light'] as const).map((side) => (
@@ -132,22 +126,12 @@ export function ThemeSection() {
       </SettingToggle>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void duplicate()}
-          className="rounded-md border border-line px-2.5 py-1 text-sm text-ink transition-colors hover:border-line-strong"
-          data-testid="settings-theme-duplicate"
-        >
+        <Button variant="secondary" size="md" onClick={() => void duplicate()} data-testid="settings-theme-duplicate">
           Customise…
-        </button>
-        <button
-          type="button"
-          onClick={() => void importFile()}
-          className="rounded-md border border-line px-2.5 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
-          data-testid="settings-theme-import"
-        >
+        </Button>
+        <Button variant="quiet" size="md" onClick={() => void importFile()} data-testid="settings-theme-import">
           Import…
-        </button>
+        </Button>
         <span className="text-xs text-ink-faint">Customise copies the theme showing now into a file of your own.</span>
       </div>
 
@@ -332,11 +316,13 @@ function TokenEditor({ file }: { file: ThemeFileEntry }) {
     <div className="mt-2" data-testid={`theme-editor-${file.id}`}>
       <label className="flex items-center gap-2 text-xs text-ink-muted">
         Name
-        <input
+        <TextInput
+          size="sm"
+          text="sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => name.trim() && name !== file.name && void write(file.tokens, name.trim())}
-          className="min-w-0 flex-1 rounded-md border border-line bg-surface-floor px-2 py-1 text-sm text-ink"
+          className="min-w-0 flex-1"
           data-testid={`theme-name-${file.id}`}
         />
       </label>
@@ -349,9 +335,9 @@ function TokenEditor({ file }: { file: ThemeFileEntry }) {
           group = token.group
           return [
             heading && (
-              <p key={`${token.key}-group`} className="col-span-3 mt-2 text-2xs uppercase tracking-caps text-ink-faint">
+              <Badge as="p" key={`${token.key}-group`} className="col-span-3 mt-2 tracking-caps">
                 {token.group}
-              </p>
+              </Badge>
             ),
             <TokenRow
               key={token.key}
@@ -420,7 +406,10 @@ function TokenRow({
       ) : (
         <span />
       )}
-      <input
+      <TextInput
+        size="xs"
+        font="readout"
+        invalid={!valid}
         value={draft}
         placeholder="preset"
         onChange={(e) => setDraft(e.target.value)}
@@ -428,11 +417,8 @@ function TokenRow({
         onKeyDown={(e) => {
           if (isPlainEnter(e.nativeEvent)) commit()
         }}
-        aria-invalid={!valid}
         title={valid ? undefined : 'The browser does not accept this value'}
-        className={`readout min-w-0 rounded-md border bg-surface-floor px-1.5 py-0.5 text-xs text-ink ${
-          valid ? 'border-line focus:border-line-strong' : 'border-danger'
-        } focus:outline-none`}
+        className="min-w-0"
         data-testid={`theme-token-${tokenKey}`}
       />
     </>

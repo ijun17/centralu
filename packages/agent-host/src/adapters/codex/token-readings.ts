@@ -11,6 +11,16 @@ import { type NormalizedEvent, type RequestInput } from '@cc/protocol'
  * than 0. (codex-cli 0.160's breakdown has a `cacheWriteInputTokens` field; whether it is ever non-zero for OpenAI
  * models, and whether `inputTokens` includes it, is not measured, so it is not read.)
  */
+/**
+ * Codex's input count split the protocol's way: Codex counts cached input inside `inputTokens`, and TokenUsage keeps
+ * the two apart. Cached input is never more than the input it is part of, so a reading that says so is clamped; the
+ * running reading and the request's own reading both split here, so they cannot disagree (#850).
+ */
+function splitInput(input: number, cachedInput: number): { inputTokens: number; cacheReadTokens: number } {
+  const cached = Math.max(0, Math.min(cachedInput, input))
+  return { inputTokens: Math.max(0, input - cached), cacheReadTokens: cached }
+}
+
 export class CodexRequestInputs {
   private lastTotal: string | null = null
 
@@ -22,9 +32,8 @@ export class CodexRequestInputs {
     this.lastTotal = at
     const last = asObj(usage.last)
     const input = finite(last.inputTokens) ?? 0
-    const cached = Math.min(finite(last.cachedInputTokens) ?? 0, input)
     if (input <= 0) return undefined
-    return { inputTokens: input - cached, cacheReadTokens: cached }
+    return splitInput(input, finite(last.cachedInputTokens) ?? 0)
   }
 }
 
@@ -66,7 +75,7 @@ export function tokenUsageEvents(sessionId: string, p: Record<string, unknown>):
      * reported, `TokenUsage`): the request's own reading, which the cache accounting reads, leaves it absent
      * (`CodexRequestInputs`).
      */
-    { type: 'usage_update', sessionId, tokens: { inputTokens: Math.max(0, input - cached), outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
+    { type: 'usage_update', sessionId, tokens: { ...splitInput(input, cached), outputTokens: output, cacheCreationTokens: 0 } },
   ]
   const occupied = finite(lastTurn.totalTokens)
   if (window && occupied !== undefined && occupied <= window) {
