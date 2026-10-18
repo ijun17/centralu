@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { centraluCallOf, launchesSubagent } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
@@ -303,28 +303,6 @@ export function ToolCard({
   )
   const linked = pieces.some((p) => p.ref)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
-  const hidden = Math.max(0, lines.length - PREVIEW_LINES)
-  /*
-   * Whether the height cap **actually kicked in** cannot be known by counting — where wrapping
-   * happens is decided by the card's width. This has to be measured instead. Without it, one
-   * blob with no newlines (hidden === 0) gets clipped silently: the worst state is one where
-   * nothing tells anyone there is more to expand.
-   */
-  const outRef = useRef<HTMLPreElement>(null)
-  const [clamped, setClamped] = useState(false)
-  useLayoutEffect(() => {
-    const el = outRef.current
-    if (!el || open) {
-      setClamped(false)
-      return
-    }
-    const measure = () => setClamped(el.scrollHeight - el.clientHeight > 1)
-    measure()
-    // A change in card width changes how many lines wrap into it (a pane's width keeps moving in the grid)
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [open, item.result])
   /*
    * The tail of output while the tool is still running (#58, Codex's outputDelta). Only shown
    * until `result` arrives — unlike the preview, this shows **the end**: for a command still
@@ -338,7 +316,7 @@ export function ToolCard({
   /** Still running: no answer yet and no failure */
   const running = item.result === undefined && item.ok === undefined
   const liveTail =
-    item.result === undefined && item.live
+    open && item.result === undefined && item.live
       ? item.live.replace(/\s+$/, '').split('\n').slice(-PREVIEW_LINES)
       : []
 
@@ -467,7 +445,11 @@ export function ToolCard({
         </div>
       )}
 
-      {!call && lines.length > 0 && (
+      {/*
+        The output only once the card is open (owner, 2026-10-18: the preview lines were rarely read and made every
+        call a block). Closed, a card is its one title row; the tail of a running command shows when it is opened.
+      */}
+      {!call && open && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
           {/* Named only beside a shown input, where the two would otherwise read as one block */}
           {showInput && (
@@ -476,25 +458,11 @@ export function ToolCard({
             </span>
           )}
           <pre
-            ref={outRef}
-            className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted ${
-              open ? '' : PREVIEW_CLAMP
-            }`}
+            className="whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted"
             data-testid="tool-card-output"
           >
-            {open ? lines.join('\n') : lines.slice(0, PREVIEW_LINES).join('\n')}
+            {lines.join('\n')}
           </pre>
-          {!open && (hidden > 0 || clamped) && (
-            <button
-              className="readout mt-1 text-2xs text-ink-faint transition-colors hover:text-ink"
-              onClick={() => setOpen(true)}
-              data-testid="tool-card-more"
-            >
-              {/* Only counted when lines can actually be counted — "N more lines" would be a
-              lie for a blob with no newlines */}
-              {hidden > 0 ? `${hidden} more lines` : 'Show all'}
-            </button>
-          )}
         </div>
       )}
 
