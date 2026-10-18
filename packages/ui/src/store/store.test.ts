@@ -3712,8 +3712,11 @@ describe('new projects', () => {
     await mock.projects.setCommands(p.id, [{ command: 'pnpm dev' }])
     mock.emit({ type: 'projects_changed' } as NormalizedEvent)
 
-    await vi.waitFor(() => expect(useStore.getState().projects[p.id]?.trusted).toBe(true))
-    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    // Each write tells the windows itself too, as the host's do: the reads may land one at a time
+    await vi.waitFor(() => {
+      expect(useStore.getState().projects[p.id]?.trusted).toBe(true)
+      expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    })
     expect(useStore.getState().projects[p.id]?.git).toEqual(git)
     // A row nothing changed for keeps its object
     expect(useStore.getState().projects[other.id]).toBe(untouched)

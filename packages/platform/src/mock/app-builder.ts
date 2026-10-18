@@ -149,7 +149,10 @@ export class AppBuilderMock {
       this.store.sessions.set(id, info)
       this.registry.appBuilders.set(key, id)
       // The same rule as the real thing: creating a session sets that project's default tool (manager.createSession)
-      if (project) project.defaultTool = chosen
+      if (project && project.defaultTool !== chosen) {
+        project.defaultTool = chosen
+        this.emit({ type: 'projects_changed' })
+      }
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       return structuredClone(info)
     },
