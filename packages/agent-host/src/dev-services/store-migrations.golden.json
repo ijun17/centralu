@@ -224,12 +224,16 @@
   {
    "to": 56,
    "breaksOlderReaders": true
+  },
+  {
+   "to": 57,
+   "breaksOlderReaders": false
   }
  ],
- "version": 56,
- "ran": 55,
+ "version": 57,
+ "ran": 56,
  "store": {
-  "userVersion": 56,
+  "userVersion": 57,
   "master": [
    {
     "type": "index",
@@ -319,6 +323,12 @@
     "type": "index",
     "name": "sqlite_autoindex_linked_machines_2",
     "tbl_name": "linked_machines",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_machine_ask_consents_1",
+    "tbl_name": "machine_ask_consents",
     "sql": null
    },
    {
@@ -445,7 +455,13 @@
     "type": "table",
     "name": "linked_machines",
     "tbl_name": "linked_machines",
-    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            )"
+    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , asks INTEGER NOT NULL DEFAULT 0)"
+   },
+   {
+    "type": "table",
+    "name": "machine_ask_consents",
+    "tbl_name": "machine_ask_consents",
+    "sql": "CREATE TABLE machine_ask_consents (\n              machine_id   TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,\n              session_id   TEXT NOT NULL,\n              session_name TEXT NOT NULL,\n              project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              decided_at   INTEGER NOT NULL,\n              PRIMARY KEY (machine_id, session_id, project_id)\n            )"
    },
    {
     "type": "table",
@@ -621,6 +637,28 @@
     }
    ],
    "linked_machines": [],
+   "machine_ask_consents": [
+    {
+     "id": 0,
+     "seq": 0,
+     "table": "projects",
+     "from": "project_id",
+     "to": "id",
+     "on_update": "NO ACTION",
+     "on_delete": "CASCADE",
+     "match": "NONE"
+    },
+    {
+     "id": 1,
+     "seq": 0,
+     "table": "linked_machines",
+     "from": "machine_id",
+     "to": "id",
+     "on_update": "NO ACTION",
+     "on_delete": "CASCADE",
+     "match": "NONE"
+    }
+   ],
    "machine_headers": [
     {
      "id": 0,
@@ -861,7 +899,18 @@
      "command TEXT notnull=0 default=null pk=0",
      "slot INTEGER notnull=1 default=null pk=0",
      "added_at INTEGER notnull=1 default=null pk=0",
-     "accepted_versions TEXT notnull=0 default=null pk=0"
+     "accepted_versions TEXT notnull=0 default=null pk=0",
+     "asks INTEGER notnull=1 default=0 pk=0"
+    ],
+    "rows": []
+   },
+   "machine_ask_consents": {
+    "columns": [
+     "machine_id TEXT notnull=1 default=null pk=1",
+     "session_id TEXT notnull=1 default=null pk=2",
+     "session_name TEXT notnull=1 default=null pk=0",
+     "project_id TEXT notnull=1 default=null pk=3",
+     "decided_at INTEGER notnull=1 default=null pk=0"
     ],
     "rows": []
    },

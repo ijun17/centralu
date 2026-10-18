@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 56, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 57, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -22,6 +22,8 @@ Only foreign keys the schema declares are drawn; references kept by convention (
 erDiagram
   sessions |o--o{ grid_layout : "session_id"
   sessions ||--o{ grid_panels : "session_id"
+  projects ||--o{ machine_ask_consents : "project_id"
+  linked_machines ||--o{ machine_ask_consents : "machine_id"
   linked_machines ||--o{ machine_headers : "machine_id"
   sessions ||--o{ messages : "session_id"
   projects ||--o{ project_consents : "to_project_id"
@@ -129,6 +131,14 @@ erDiagram
     INTEGER slot
     INTEGER added_at
     TEXT accepted_versions
+    INTEGER asks
+  }
+  machine_ask_consents {
+    TEXT machine_id PK, FK
+    TEXT session_id PK
+    TEXT session_name
+    TEXT project_id PK, FK
+    INTEGER decided_at
   }
   machine_headers {
     TEXT machine_id PK, FK
@@ -405,6 +415,19 @@ Added in v46.
 | `slot` | INTEGER | no |  |  | v46 |
 | `added_at` | INTEGER | no |  |  | v46 |
 | `accepted_versions` | TEXT | yes |  |  | v46 |
+| `asks` | INTEGER | no | `0` |  | v57 |
+
+### `machine_ask_consents`
+
+Added in v57.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `machine_id` | TEXT | no |  | PK 1, FK → `linked_machines.id` (cascade) | v57 |
+| `session_id` | TEXT | no |  | PK 2 | v57 |
+| `session_name` | TEXT | no |  |  | v57 |
+| `project_id` | TEXT | no |  | PK 3, FK → `projects.id` (cascade) | v57 |
+| `decided_at` | INTEGER | no |  |  | v57 |
 
 ### `machine_headers`
 
