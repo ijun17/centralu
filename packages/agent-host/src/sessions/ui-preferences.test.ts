@@ -58,4 +58,19 @@ describe('screen preferences across builds', () => {
     mgr.setUiPreferences({ sessionTools: false })
     expect(row()).toEqual({ sessionTools: false })
   })
+
+  /*
+   * Reading is not a change (#384): the text size moves out of an old workspace snapshot once, on the first read that
+   * finds no `textSize` in the record. A broken row has no field either, so that read wrote `{ textSize }` over it,
+   * before the person had changed anything, and the next build to read it found every other choice gone.
+   */
+  it('a broken row is not written over by reading it, even with an old text size to move', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = new Store()
+    store.settings.saveWorkspace({ textScale: 3 })
+    store.settings.setAppSetting(KEY, '{"textSize": 1.1, ')
+    const mgr = new SessionManager(store, new Map(), () => {})
+    expect(mgr.uiPreferences()).toEqual(DEFAULT_UI_PREFERENCES)
+    expect(store.settings.appSetting(KEY)).toBe('{"textSize": 1.1, ')
+  })
 })

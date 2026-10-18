@@ -161,7 +161,7 @@ export async function settleUnsureSends(
 }
 
 /** The store's actions for what the composer sends */
-type SendActions = Pick<AppState, 'setDraft' | 'attachFile' | 'send'>
+type SendActions = Pick<AppState, 'setDraft' | 'dismissKeptDraft' | 'attachFile' | 'send'>
 
 export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
   setDraft(sessionId, draft) {
@@ -174,6 +174,10 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
       }
       return { drafts: { ...s.drafts, [sessionId]: draft } }
     })
+  },
+
+  dismissKeptDraft(sessionId) {
+    set((s) => (s.keptDrafts.some((d) => d.sessionId === sessionId) ? { keptDrafts: s.keptDrafts.filter((d) => d.sessionId !== sessionId) } : {}))
   },
 
   /** Saves a file that came in through paste or drag to the host, and receives its attachment info (FR-13) */

@@ -54,7 +54,15 @@ export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
   /** Tokens on a run_agent row (D-5) */
   tokens: AgentTokens | null
   failure: { args: string; result: string | null } | null
+  /** A run_agent row whose deleted session's record is kept in the trash (#378) */
+  kept?: boolean
 }
+
+/**
+ * What a run_agent row keeps of its agent (#378): the app's request, the answer and the structured output as JSON text,
+ * each masked with the app's secrets like the row's other text. The answer is null while the agent never answered.
+ */
+export type AgentRunKept = { request: string; answer: string | null; output: string | null }
 
 /**
  * The agent usage one app has requested (M4 D-5) — over a period, the count of agent runs that
@@ -66,7 +74,7 @@ export type { AgentUse }
 
 export type RunLedger = {
   begin(row: AppRunRow): void
-  end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null; tokens?: AgentTokens | null }): void
+  end(id: string, end: { status: AppRunRow['status']; durationMs: number; error: string | null; tokens?: AgentTokens | null; agent?: AgentRunKept | null }): void
   /** Links an agent session to a still-running row (D-6) — the moment the session exists, before it ends */
   link(id: string, sessionId: string): void
   keepFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void
@@ -142,6 +150,10 @@ export class RunRow {
   private closed = false
   /** Tokens an agent spent — overwritten every time the tool reports it (it is a cumulative value). Written when this closes */
   used: AgentTokens | null = null
+  /** A run_agent row's request, and its answer once there is one (#378), written masked when this closes */
+  agent: { request: string; answer?: string; output?: unknown } | null = null
+  /** The agent session this row was linked to (`link`), if any */
+  sessionId: string | null = null
 
   constructor(
     private ledger: RunLedger | null,
@@ -168,6 +180,7 @@ export class RunRow {
 
   /** Links the agent session this request started — the moment the session exists, before it ends */
   link(sessionId: string): void {
+    this.sessionId = sessionId
     this.open()
     this.ledger?.link(this.id, sessionId)
   }
@@ -182,7 +195,14 @@ export class RunRow {
     this.closed = true
     this.open()
     const t0 = this.head.createdAt
-    this.ledger.end(this.id, { status, durationMs: Date.now() - t0, error: error === null ? null : this.redact(error), tokens: this.used })
+    const agent: AgentRunKept | null = this.agent
+      ? {
+          request: this.redact(this.agent.request),
+          answer: this.agent.answer === undefined ? null : this.redact(this.agent.answer),
+          output: this.agent.output === undefined ? null : maskedJson(this.agent.output, this.redact),
+        }
+      : null
+    this.ledger.end(this.id, { status, durationMs: Date.now() - t0, error: error === null ? null : this.redact(error), tokens: this.used, agent })
     if (status === 'error') {
       this.ledger.keepFailure(
         {

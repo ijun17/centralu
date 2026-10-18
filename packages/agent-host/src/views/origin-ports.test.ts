@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { randomInt } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { OriginPorts, type PortBook, type PortBookStore } from './origin-ports.js'
+import { OriginPorts, parsePortBook, type PortBook, type PortBookStore } from './origin-ports.js'
 
 const open: Server[] = []
 afterEach(async () => {
@@ -188,6 +188,52 @@ describe('OriginPorts', () => {
     expect(ports.book()).toEqual({ assigned: { good: p }, retired: [q] })
     disk.raw = '"not an object"'
     expect(ports.book()).toEqual({ assigned: {}, retired: [] })
+  })
+
+  /*
+   * The book is one row another build reads and writes too (#384): during a host swap, and after a person goes back
+   * a release. Whatever it holds that this build cannot read must not cost the promise above, that a port once given
+   * to an app is never given to another one.
+   */
+  describe('a book another build wrote', () => {
+    /** The row as main.ts reads it: text, parsed by `parsePortBook` */
+    function textStore(raw: string): PortBookStore & { raw: string; said: string[] } {
+      return {
+        raw,
+        said: [],
+        load() {
+          return parsePortBook(this.raw, (line) => void this.said.push(line))
+        },
+        save(book) {
+          this.raw = JSON.stringify(book)
+        },
+      }
+    }
+
+    it('keeps the fields this build does not know when it records a port', async () => {
+      const [p, q] = await freePorts(2)
+      const disk = textStore(JSON.stringify({ assigned: { 'p/a': p }, retired: [], movedAt: { 'p/a': 5 } }))
+      const ports = new OriginPorts(disk, { range: RANGE, pick: sequence([q!]), log: noop })
+      expect((await serve(ports, 'p/b')).port).toBe(q)
+      expect(JSON.parse(disk.raw)).toEqual({ assigned: { 'p/a': p, 'p/b': q }, retired: [], movedAt: { 'p/a': 5 } })
+    })
+
+    it('never gives the port inside an assignment it cannot read to another app', async () => {
+      const [p, q] = await freePorts(2)
+      const disk = textStore(JSON.stringify({ assigned: { 'p/a': { port: p, since: 1 } }, retired: [] }))
+      const ports = new OriginPorts(disk, { range: RANGE, pick: sequence([p!, q!]), log: noop })
+      expect((await serve(ports, 'p/b')).port).toBe(q)
+      expect(JSON.parse(disk.raw).retired).toContain(p)
+    })
+
+    it('retires every port a book that is not JSON names, says so naming the row, and gives the next app another', async () => {
+      const [p, q, r] = await freePorts(3)
+      const disk = textStore(`{"assigned":{"p/a":${p},"p/b":${q},"p/c":`)
+      const ports = new OriginPorts(disk, { range: RANGE, pick: sequence([p!, q!, r!]), log: noop })
+      expect((await serve(ports, 'p/d')).port).toBe(r)
+      expect(JSON.parse(disk.raw)).toMatchObject({ assigned: { 'p/d': r }, retired: expect.arrayContaining([p, q]) })
+      expect(disk.said.join(' | ')).toMatch(/not a JSON object.*retired/)
+    })
   })
 
   it('keeps every key recorded when several first-time keys are served at once', async () => {

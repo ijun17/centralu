@@ -102,6 +102,14 @@ only update suggestions; they never restore the composer's text.
 - **Writing**: write-through after applying an event. Messages are appended in batches (500ms debounce); session metadata and workspace on every change. There is no such concept as "save on exit" — crash safety comes for free.
 - **Restore order**: ① load the workspace + session metadata from the store → show the sidebar and inbox immediately (read-only) → ② connect to the host → ③ attempt resume per session → on success switch to active, on failure show the "view the record + new session" card. That the UI does not need the host to come up is the key to the 3-second cold start target.
 - The relationship between event reconnection (`afterSeq`) and restore is in [agent-host.md](agent-host.md) §4.
+- **A snapshot that could not be read is not saved over** (#384). The snapshot holds settings as well as the layout
+  (the notification switches, app spans, `introSeen`), and the window writes it whole. When `workspace.load` fails or
+  the restore throws partway, the window says so in a toast, shows the defaults, and saves nothing over it
+  (`workspaceUnread`) while it reads it again: on every reconnect, and after 1, 5 and 30 seconds while connected. Read,
+  its settings and layout come back (not its screen: the person is on one already) and saving resumes. Past the last
+  try, the snapshot the window holds is saved in its place, said once, so a row that never reads cannot stop saving
+  for good. A row that is not a JSON object reads as none on the host, which names it on stderr with what it held
+  ([stored-shapes.md](stored-shapes.md)).
 - **Startup and reconnect recovery read the session list while live events keep arriving.** The list can be older than
   them (the hub answers once every linked machine has), so it is merged against the sessions as they were when it
   was asked for (`mergeListedSince`): a field the store changed since then keeps the store's value. State and liveness

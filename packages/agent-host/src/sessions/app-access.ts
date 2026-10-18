@@ -3,7 +3,7 @@ import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
-import { readJsonObjects } from '../dev-services/store/json.js'
+import { listSetting } from '../dev-services/store/settings.js'
 
 /**
  * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
@@ -338,7 +338,7 @@ export class AppAccess implements OnDemandApps {
   private records(sessionId: string): Record_[] {
     let r = this.cache.get(sessionId)
     if (!r) {
-      r = parse(this.deps.store.settings.appSetting(KEY(sessionId)))
+      r = this.stored(sessionId).read()
       this.cache.set(sessionId, r)
     }
     return r
@@ -346,8 +346,16 @@ export class AppAccess implements OnDemandApps {
 
   private save(sessionId: string, list: Record_[]): void {
     this.cache.set(sessionId, list)
-    if (list.length === 0) this.deps.store.settings.deleteAppSetting(KEY(sessionId))
-    else this.deps.store.settings.setAppSetting(KEY(sessionId), JSON.stringify(list))
+    this.stored(sessionId).write(list)
+  }
+
+  /**
+   * The session's row, read and rewritten by more than one build (#384, `listSetting`): an attachment this build cannot
+   * read (a consent a newer build added) is not used, a consent that cannot be read granting nothing, and is kept when
+   * the list is written back
+   */
+  private stored(sessionId: string) {
+    return listSetting<Record_>(this.deps.store.settings, KEY(sessionId), isRecord)
   }
 
   private forget(sessionId: string): void {
@@ -356,15 +364,13 @@ export class AppAccess implements OnDemandApps {
   }
 }
 
-/** A stored list — anything unreadable is dropped rather than trusted (the row is ours, but a hand edit is possible) */
-function parse(raw: string | null): Record_[] {
-  return readJsonObjects<Record_>(
-    raw,
-    (x) =>
-      (typeof x.projectId === 'string' || x.projectId === null) &&
-      typeof x.appId === 'string' &&
-      typeof x.server === 'string' &&
-      x.server.startsWith(appMcpServerName('')) &&
-      (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto'),
+/** An element of the stored list this build can use — anything else is not trusted (the row is ours, but a hand edit or a newer build is possible) */
+function isRecord(x: Record<string, unknown>): boolean {
+  return (
+    (typeof x.projectId === 'string' || x.projectId === null) &&
+    typeof x.appId === 'string' &&
+    typeof x.server === 'string' &&
+    x.server.startsWith(appMcpServerName('')) &&
+    (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto')
   )
 }
