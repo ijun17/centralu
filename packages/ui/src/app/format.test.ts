@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatCount, formatDuration } from './format.js'
+import { dayKey, formatBytes, formatCount, formatDayLong, formatDuration, formatSaidAt } from './format.js'
 
 describe('formatBytes', () => {
   it('writes whole bytes under a kilobyte', () => {
@@ -126,5 +126,44 @@ describe('formatDuration', () => {
     expect(formatDuration(NaN)).toBe('0ms')
     expect(formatDuration(0)).toBe('0ms')
     expect(formatDuration(NaN, { coarse: true })).toBe('0s')
+  })
+})
+
+/*
+ * The times in the conversation (owner, 2026-10-18): the clock time under a bubble, the day on a divider, both in
+ * English whatever the system's language. Moments are built in local time, as the screen reads them. Newer ICU puts a
+ * narrow no-break space before AM/PM, so spaces are compared as spaces.
+ */
+const spaced = (s: string) => s.replace(/\s/g, ' ')
+
+describe('formatSaidAt', () => {
+  it('writes the clock time only, in English with AM/PM', () => {
+    expect(spaced(formatSaidAt(new Date(2026, 9, 18, 15, 42).getTime()))).toBe('3:42 PM')
+    expect(spaced(formatSaidAt(new Date(2026, 9, 18, 9, 5).getTime()))).toBe('9:05 AM')
+  })
+
+  it('writes midnight and noon as a chat app does', () => {
+    expect(spaced(formatSaidAt(new Date(2026, 9, 18, 0, 7).getTime()))).toBe('12:07 AM')
+    expect(spaced(formatSaidAt(new Date(2026, 9, 18, 12, 0).getTime()))).toBe('12:00 PM')
+  })
+})
+
+describe('formatDayLong', () => {
+  it('names the weekday, the month and the year in English', () => {
+    expect(formatDayLong(new Date(2026, 9, 18, 15, 42).getTime())).toBe('Sunday, October 18, 2026')
+    expect(formatDayLong(new Date(2027, 0, 1, 0, 0).getTime())).toBe('Friday, January 1, 2027')
+  })
+})
+
+describe('dayKey', () => {
+  it('is one key for one local day, and a new one past midnight', () => {
+    const morning = new Date(2026, 9, 18, 0, 0).getTime()
+    const night = new Date(2026, 9, 18, 23, 59).getTime()
+    const next = new Date(2026, 9, 19, 0, 0).getTime()
+    expect(dayKey(morning)).toBe(dayKey(night))
+    expect(dayKey(next)).not.toBe(dayKey(night))
+    // The same day of another month or year is another day
+    expect(dayKey(new Date(2026, 10, 18).getTime())).not.toBe(dayKey(morning))
+    expect(dayKey(new Date(2027, 9, 18).getTime())).not.toBe(dayKey(morning))
   })
 })
