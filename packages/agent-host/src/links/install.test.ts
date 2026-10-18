@@ -113,7 +113,9 @@ describe('the install scripts per shell (plan §10.2)', () => {
    * the rename; one holding it without letting it be deleted does ("in use"). "Access denied" there is what a file
    * system filter answers while it looks at the file: an on-access scanner, on a new executable, which a real install
    * meets as well. Here a process holds the file, without letting it be deleted, for a second and a half from the
-   * moment it is in `keep`; the step waits it out.
+   * moment it is in `keep`; the step waits it out. The step is told to wait for that process before its rename
+   * (CENTRALU_TEST_NODE_PLACE_GATE, a file the process creates once it holds the node.exe): on a fast runner the rename
+   * otherwise came before the process had opened the file, and nothing was tested.
    */
   it.runIf(process.platform === 'win32')('on Windows, places Node even when something still holds the node.exe it just ran', async () => {
     const { out, placed, held } = await windowsNodeStep('held', { holdMs: 1_500 })
@@ -125,7 +127,7 @@ describe('the install scripts per shell (plan §10.2)', () => {
   /**
    * The Node step's PowerShell script run for real against a zip of this Node served from loopback, the data folder
    * named `name`. `holdMs`: a PowerShell beside it opens `keep\node.exe` as soon as it is there, sharing read only,
-   * and keeps it that long, as a scanner does.
+   * and keeps it that long, as a scanner does; the step renames `keep` only once that PowerShell says it holds the file.
    */
   async function windowsNodeStep(name: string, o: { holdMs?: number } = {}): Promise<{ out: string; placed: boolean; held: boolean }> {
     const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-node-step-')))
@@ -143,9 +145,11 @@ describe('the install scripts per shell (plan §10.2)', () => {
       writeFileSync(script, `\ufeff${decode(nodeCommand({ shell: 'powershell' }, { version: NODE_V, url, sha256: sha256(zip) }))}`)
       const data = join(base, name)
       const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-      const holder = o.holdMs === undefined ? null : holdNodeExe(powershell, base, join(data, 'remote'), o.holdMs)
+      const gate = join(base, 'stand-in-holds-node.exe')
+      const holder = o.holdMs === undefined ? null : holdNodeExe(powershell, base, join(data, 'remote'), gate, o.holdMs)
       if (holder) await holder.watching
-      const run = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_DATA_DIR: data }, windowsHide: true })
+      const env = { ...process.env, CC_DATA_DIR: data, ...(holder ? { CENTRALU_TEST_NODE_PLACE_GATE: gate } : {}) }
+      const run = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env, windowsHide: true })
       let out = ''
       run.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')))
       run.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
@@ -158,8 +162,11 @@ describe('the install scripts per shell (plan §10.2)', () => {
     }
   }
 
-  /** Opens `<remote>\.partial-node-*\keep\node.exe` the moment it appears, sharing read only, for `ms` */
-  function holdNodeExe(powershell: string, base: string, remote: string, ms: number) {
+  /**
+   * Opens `<remote>\.partial-node-*\keep\node.exe` the moment it appears, sharing read only, for `ms`. Once it holds the
+   * file it creates `gate`, which the step waits for before its rename.
+   */
+  function holdNodeExe(powershell: string, base: string, remote: string, gate: string, ms: number) {
     const script = join(base, 'hold.ps1')
     writeFileSync(
       script,
@@ -170,6 +177,7 @@ while ((Get-Date) -lt $end) {
   $f = Get-ChildItem -LiteralPath $env:CC_HOLD_REMOTE -Filter '.partial-node-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'keep\\node.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
   if ($f) {
     try { $h = [IO.File]::Open($f, 'Open', 'Read', 'Read') } catch { Start-Sleep -Milliseconds 2; continue }
+    New-Item -ItemType File -Path $env:CC_HOLD_GATE | Out-Null
     "held"
     Start-Sleep -Milliseconds ${ms}
     $h.Dispose()
@@ -180,7 +188,7 @@ while ((Get-Date) -lt $end) {
 exit 1
 `,
     )
-    const p = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_HOLD_REMOTE: remote }, windowsHide: true })
+    const p = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_HOLD_REMOTE: remote, CC_HOLD_GATE: gate }, windowsHide: true })
     let said = ''
     const watching = new Promise<void>((ok) => p.stdout.on('data', (d: Buffer) => ((said += d.toString('utf8')), said.includes('watching') && ok())))
     const done = new Promise<boolean>((ok) => p.once('close', () => ok(said.includes('held'))))

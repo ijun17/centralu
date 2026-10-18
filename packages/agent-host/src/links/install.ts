@@ -190,6 +190,9 @@ try {
   # Windows refuses to rename a folder while something holds a file in it, and an on-access scanner holds the node.exe
   # just run for a moment ("Access to the path is denied", #368): the rename is tried again for up to 15 s. A rename
   # and nothing else: Move-Item, refused, went on to move the folder's files one by one and left half of it at $n.
+  # A test's stand-in for the scanner says it holds the file by creating CENTRALU_TEST_NODE_PLACE_GATE; unset, nothing waits.
+  $g = $env:CENTRALU_TEST_NODE_PLACE_GATE
+  if ($g) { $end = (Get-Date).AddSeconds(60); while (-not (Test-Path -LiteralPath $g) -and (Get-Date) -lt $end) { Start-Sleep -Milliseconds 20 } }
   for ($i = 1; ; $i++) { try { [IO.Directory]::Move($k, $n); break } catch { if ($i -ge 60) { throw }; Start-Sleep -Milliseconds 250 } }
   Say 'node ok'
 } catch {
