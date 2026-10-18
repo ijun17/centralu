@@ -150,12 +150,15 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 그리드 칸 수 고르기 | `SpanButton`(`SpanPicker.tsx`) |
 | 명령의 로그, 터미널 | `CommandLogView`, `xterm.ts`와 `terminalTheme.ts` |
 | 아이콘 | `icons.tsx` |
+| 테두리 있는 글자 버튼 | `Button`: `primary`(대화상자가 하려는 동작), `secondary`, `quiet`(호버 전까지 회색), `subtle`(흐림, 대화 안), `danger`, `ghost`(테두리 없음); `xs` / `sm` / `md`; `busy`와 `busyText` |
+| 한 번에 보이는 여럿 중 하나 | `Segmented`(라디오 그룹: Tab 한 번, 방향키로 고른다) |
+| 캡슐 | `Pill`: `size="bar"`(상단 바의 28px) 또는 `"label"`(기다리는 카드의 종류); 테두리 `quiet`, `live`, `solid`, `dashed` |
+| 작은 대문자 라벨 | `Badge`(숫자 사이에선 `readout`) |
+| 테두리 있는 입력칸 | `TextInput`, 또는 라벨·힌트·문제를 함께 그리는 `TextField` |
 
-**검토 중(#1122, #1128까지의 스택):** `Button`(primary, secondary, quiet, subtle, danger, ghost; xs, sm, md),
-`Segmented`(여럿 중 하나, 라디오 그룹), `Pill`(상단 바의 캡슐), `Badge`(작은 대문자 라벨), `TextInput` /
-`TextField`. 함께 `tooling/shared-components.test.ts`가 온다: `components/` 밖의 화면이 테두리 있는 버튼,
-입력칸, 작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다. 아직 옮기지 않은 자리의 목록은
-모서리 가드처럼 **줄어들 수만 있다**. 들어오면 새 버튼, 토글, 라벨, 캡슐, 입력칸에는 이것들을 쓴다.
+**가드.** `tooling/shared-components.test.ts`는 `components/` 밖의 화면이 테두리 있는 버튼, 테두리 있는 입력칸,
+작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다(판별 규칙은 `tooling/hand-made-looks.ts`).
+아직 옮기지 않은 자리의 목록은 모서리 가드처럼 **줄어들 수만 있다**.
 
 ## 정리된 어긋남
 

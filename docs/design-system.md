@@ -155,14 +155,16 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A grid span picker | `SpanButton` (`SpanPicker.tsx`) |
 | A command's log, a terminal | `CommandLogView`, `xterm.ts` with `terminalTheme.ts` |
 | Icons | `icons.tsx` |
+| A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame); `xs` / `sm` / `md`; `busy` with `busyText` |
+| One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick) |
+| A capsule | `Pill`: `size="bar"` (the top bar's 28px) or `"label"` (a waiting card's kind); edges `quiet`, `live`, `solid`, `dashed` |
+| A small uppercase label | `Badge` (`readout` among figures) |
+| A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
 
-**Under review (#1122, stack to #1128):** `Button` (primary, secondary, quiet, subtle, danger, ghost;
-xs, sm, md), `Segmented` (one of several, as a radio group), `Pill` (the top bar's capsule), `Badge`
-(a small uppercase label) and `TextInput` / `TextField`. With them comes
-`tooling/shared-components.test.ts`: a screen outside `components/` that draws a framed button, field,
-small caps label or capsule by hand fails, naming the component to use. Its list of sites not moved yet
-**can only shrink**, as the corner guard's does. Once it lands, use these for any new button, toggle,
-label, capsule or field.
+**The guard.** `tooling/shared-components.test.ts` fails when a screen outside `components/` draws a
+framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use
+(the patterns are in `tooling/hand-made-looks.ts`). Its list of sites not moved yet **can only shrink**,
+as the corner guard's does.
 
 ## Settled departures
 
