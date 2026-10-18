@@ -187,7 +187,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'node_runs' }
   New-Item -ItemType Directory -Force (Join-Path $r 'node') | Out-Null
   if (Test-Path $n) { Remove-Item -Recurse -Force $n }
-  Move-Item $k $n
+  # Windows refuses to rename a folder while something holds a file in it, and an on-access scanner holds the node.exe
+  # just run for a moment ("Access to the path is denied", #368): the rename is tried again for up to 15 s. A rename
+  # and nothing else: Move-Item, refused, went on to move the folder's files one by one and left half of it at $n.
+  for ($i = 1; ; $i++) { try { [IO.Directory]::Move($k, $n); break } catch { if ($i -ge 60) { throw }; Start-Sleep -Milliseconds 250 } }
   Say 'node ok'
 } catch {
   $m = if ($_.Exception.Message) { $_.Exception.Message } else { "$_" }

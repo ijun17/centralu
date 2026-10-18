@@ -101,6 +101,33 @@ describe('the install scripts per shell (plan §10.2)', () => {
    * this Node, zipped and served from loopback.
    */
   it.runIf(process.platform === 'win32')('on Windows, installs Node into a data folder named outside the ANSI code page', async () => {
+    const { out, placed } = await windowsNodeStep('ทดสอบ-😀')
+    expect(out).toBe('CENTRALU-INSTALL node ok')
+    expect(placed).toBe(true)
+  }, 120_000 * SLOW)
+
+  /*
+   * #368: on windows-2022 runners the step failed now and then with "Access to the path '…\.partial-node-…\keep' is
+   * denied", at the rename that puts `keep` in place right after the node.exe in it, just unpacked, was run. Measured
+   * on Windows 11: a process running that node.exe, or one holding it open while letting it be deleted, does not stop
+   * the rename; one holding it without letting it be deleted does ("in use"). "Access denied" there is what a file
+   * system filter answers while it looks at the file: an on-access scanner, on a new executable, which a real install
+   * meets as well. Here a process holds the file, without letting it be deleted, for a second and a half from the
+   * moment it is in `keep`; the step waits it out.
+   */
+  it.runIf(process.platform === 'win32')('on Windows, places Node even when something still holds the node.exe it just ran', async () => {
+    const { out, placed, held } = await windowsNodeStep('held', { holdMs: 1_500 })
+    expect(held, 'the stand-in for the scanner never got hold of keep\\node.exe').toBe(true)
+    expect(out).toBe('CENTRALU-INSTALL node ok')
+    expect(placed).toBe(true)
+  }, 120_000 * SLOW)
+
+  /**
+   * The Node step's PowerShell script run for real against a zip of this Node served from loopback, the data folder
+   * named `name`. `holdMs`: a PowerShell beside it opens `keep\node.exe` as soon as it is there, sharing read only,
+   * and keeps it that long, as a scanner does.
+   */
+  async function windowsNodeStep(name: string, o: { holdMs?: number } = {}): Promise<{ out: string; placed: boolean; held: boolean }> {
     const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-node-step-')))
     const top = 'node-v24.21.0-win-x64'
     mkdirSync(join(base, 'zip', top), { recursive: true })
@@ -114,20 +141,51 @@ describe('the install scripts per shell (plan §10.2)', () => {
       const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/dist/v24.21.0/node-v24.21.0-win-x64.zip`
       const script = join(base, 'step.ps1')
       writeFileSync(script, `\ufeff${decode(nodeCommand({ shell: 'powershell' }, { version: NODE_V, url, sha256: sha256(zip) }))}`)
-      const data = join(base, 'ทดสอบ-😀')
+      const data = join(base, name)
       const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      const holder = o.holdMs === undefined ? null : holdNodeExe(powershell, base, join(data, 'remote'), o.holdMs)
+      if (holder) await holder.watching
       const run = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_DATA_DIR: data }, windowsHide: true })
       let out = ''
       run.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')))
       run.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
       await new Promise((done) => run.once('close', done))
-      expect(out.trim()).toBe('CENTRALU-INSTALL node ok')
-      expect(existsSync(join(data, 'remote', 'node', `v${NODE_V}`, 'node.exe'))).toBe(true)
+      const held = holder ? await holder.done : false
+      return { out: out.trim(), placed: existsSync(join(data, 'remote', 'node', `v${NODE_V}`, 'node.exe')), held }
     } finally {
       server.close()
       rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     }
-  }, 120_000 * SLOW)
+  }
+
+  /** Opens `<remote>\.partial-node-*\keep\node.exe` the moment it appears, sharing read only, for `ms` */
+  function holdNodeExe(powershell: string, base: string, remote: string, ms: number) {
+    const script = join(base, 'hold.ps1')
+    writeFileSync(
+      script,
+      `\ufeff$ErrorActionPreference = 'Stop'
+"watching"
+$end = (Get-Date).AddSeconds(60)
+while ((Get-Date) -lt $end) {
+  $f = Get-ChildItem -LiteralPath $env:CC_HOLD_REMOTE -Filter '.partial-node-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'keep\\node.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if ($f) {
+    try { $h = [IO.File]::Open($f, 'Open', 'Read', 'Read') } catch { Start-Sleep -Milliseconds 2; continue }
+    "held"
+    Start-Sleep -Milliseconds ${ms}
+    $h.Dispose()
+    exit 0
+  }
+  Start-Sleep -Milliseconds 2
+}
+exit 1
+`,
+    )
+    const p = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_HOLD_REMOTE: remote }, windowsHide: true })
+    let said = ''
+    const watching = new Promise<void>((ok) => p.stdout.on('data', (d: Buffer) => ((said += d.toString('utf8')), said.includes('watching') && ok())))
+    const done = new Promise<boolean>((ok) => p.once('close', () => ok(said.includes('held'))))
+    return { watching, done }
+  }
 
   it('refuses to put anything but plain words and a plain URL into a script', () => {
     expect(() => nodeCommand({ shell: 'posix' }, { version: NODE_V, url: 'https://x/"; rm -rf ~', sha256: 'a'.repeat(64) })).toThrow(/Not a Node archive/)
