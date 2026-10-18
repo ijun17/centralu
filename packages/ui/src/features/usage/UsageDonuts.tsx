@@ -2,7 +2,7 @@ import { usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
 import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol'
-import { MACHINE_STATUS_LABEL, cacheTooltipLine } from '@cc/core'
+import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
@@ -137,13 +137,30 @@ export function UsageDonuts() {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
             void platform.agents
               .usage(tool, on)
-              .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
+              .then((r) =>
+                put({
+                  usage: r.usage,
+                  reason: r.supported ? undefined : r.reason,
+                  cache: r.cache,
+                  sameAccount: r.sameAccountAsHub,
+                }),
+              )
               .catch((e: Error) => {
                 put({ usage: null, reason: e.message })
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
                 retries.current.push(
                   setTimeout(() => {
-                    void platform.agents.usage(tool, on).then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub })).catch(() => {})
+                    void platform.agents
+                      .usage(tool, on)
+                      .then((r) =>
+                        put({
+                          usage: r.usage,
+                          reason: r.supported ? undefined : r.reason,
+                          cache: r.cache,
+                          sameAccount: r.sameAccountAsHub,
+                        }),
+                      )
+                      .catch(() => {})
                   }, RETRY_MS),
                 )
               })
@@ -227,7 +244,8 @@ export function UsageDonuts() {
       const s = useStore.getState()
       const tool = usageTools(s)[0]
       const machine = s.focusedSessionId ? (s.sessions[s.focusedSessionId]?.machine ?? null) : null
-      if (tool) return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
+      if (tool)
+        return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
       const first = (live ?? [])[0]
       return first ? { machine: null, tool: first } : null
     })
@@ -307,7 +325,14 @@ export function UsageDonuts() {
             window drag region, and on Windows a window drag swallows the mouseup, so a click never
             came and the dropdown stayed open (#365, DragRegion.tsx).
           */}
-          {!leaving && <div className="fixed inset-0 z-30" onMouseDown={() => show(null)} data-no-drag data-testid="usage-backdrop" />}
+          {!leaving && (
+            <div
+              className="fixed inset-0 z-30"
+              onMouseDown={() => show(null)}
+              data-no-drag
+              data-testid="usage-backdrop"
+            />
+          )}
           <div
             data-no-drag
             className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)`}
@@ -352,8 +377,14 @@ function MachineGroup({
   show: (next: Open | null) => void
 }) {
   const info = useStore((s) => s.machines[machineId])
-  if (!info) return null
-  const connected = info.status === 'connected'
+  /*
+   * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected, or has no
+   * tool installed and logged in, is left out rather than drawn as "Offline" or "No agent". Tools will grow (OpenCode
+   * and others) and so will machines; the bar keeps only what the person can use. Settings → Machines still lists
+   * every machine with its state.
+   */
+  if (!info || info.status !== 'connected' || !group.live?.length) return null
+  const live = group.live
   return (
     <span
       className="ml-1.5 flex items-center gap-0.5 rounded-full bg-surface-hover/30 pl-2 pr-0.5"
@@ -366,9 +397,7 @@ function MachineGroup({
         content={
           <span className="block">
             <span className="block text-ink">{info.name}</span>
-            <span className="mt-1 block text-ink-faint">
-              {connected ? 'Usage on this machine' : `${MACHINE_STATUS_LABEL[info.status]}: not asked until it is back`}
-            </span>
+            <span className="mt-1 block text-ink-faint">Usage on this machine</span>
           </span>
         }
       >
@@ -376,36 +405,16 @@ function MachineGroup({
           {info.name}
         </span>
       </Tooltip>
-      {!connected ? (
-        <span className="ml-0.5 text-2xs text-ink-faint" data-testid={`usage-machine-state-${machineId}`}>
-          {MACHINE_STATUS_LABEL[info.status]}
-        </span>
-      ) : group.live !== null && group.live.length === 0 ? (
-        <Tooltip
-          align="right"
-          content={
-            <span className="block">
-              <span className="block text-ink">No agent on {info.name}</span>
-              <span className="mt-1 block text-ink-faint">Install or sign in to Claude Code or Codex there</span>
-            </span>
-          }
-        >
-          <span className="flex" data-testid={`usage-machine-no-agent-${machineId}`} aria-label={`No agent on ${info.name}`}>
-            <NoAgentMark />
-          </span>
-        </Tooltip>
-      ) : (
-        (group.live ?? []).map((tool) => (
-          <Donut
-            key={tool}
-            tool={tool}
-            machine={machineId}
-            snap={group.snap[tool]}
-            active={isOpen(machineId, tool)}
-            onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
-          />
-        ))
-      )}
+      {live.map((tool) => (
+        <Donut
+          key={tool}
+          tool={tool}
+          machine={machineId}
+          snap={group.snap[tool]}
+          active={isOpen(machineId, tool)}
+          onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
+        />
+      ))}
     </span>
   )
 }
@@ -452,7 +461,9 @@ function Donut({
         <span className="block">
           <span className="block text-ink">{label}</span>
           <span className="readout mt-1 block">
-            {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
+            {known
+              ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
+              : 'Weekly usage unknown'}
           </span>
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
           {known && snap?.sameAccount && (
@@ -553,7 +564,15 @@ function Donut({
 function NoAgentMark() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden className="shrink-0 text-ink-faint">
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.2 2.6" />
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="2.2 2.6"
+      />
     </svg>
   )
 }
