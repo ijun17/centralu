@@ -16,7 +16,15 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
  * It took the place of the sidebar's second button (the chevron that opened the dialog only to
  * offer this list): the choice now sits where the person already is when they start.
  */
-export function PastConversations({ sessionId, projectId, tool }: { sessionId: string; projectId: string; tool: string }) {
+export function PastConversations({
+  sessionId,
+  projectId,
+  tool,
+}: {
+  sessionId: string
+  projectId: string
+  tool: string
+}) {
   const platform = useStore((s) => s.platform)
   const createSession = useStore((s) => s.createSession)
   const focusSession = useStore((s) => s.focusSession)
@@ -49,7 +57,11 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
     }
     setBusy(s.externalId)
     try {
-      const created = await createSession(projectId, { tool, resumeExternalId: s.externalId, importHistory: true })
+      const created = await createSession(projectId, {
+        tool,
+        resumeExternalId: s.externalId,
+        importHistory: true,
+      })
       askComposerFocus(created.id)
       // Removing the empty one keeps the sidebar to the session the person chose
       discardEmpty()
@@ -62,8 +74,9 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
 
   return (
     <div className="mt-5" data-testid="past-conversations">
-      <p className="mb-1.5 text-xs text-ink-faint">Or continue a past conversation</p>
-      <div className="max-h-72 overflow-y-auto rounded-md border border-line bg-surface-raised">
+      <p className="mb-2 px-1 text-xs text-ink-faint">Or continue a past conversation</p>
+      {/* The conversation's card shape (owner, 2026-10-18): 14px, rows split by a faint hairline */}
+      <div className="max-h-72 divide-y divide-line/60 overflow-y-auto rounded-[14px] border border-line bg-surface-raised">
         {sessions.map((s) => (
           <button
             key={s.externalId}
@@ -71,9 +84,11 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
             disabled={busy !== null}
             onClick={() => void pick(s)}
             data-testid={`past-conversation-${s.externalId}`}
-            className="flex w-full flex-col gap-0.5 border-l-2 border-l-transparent px-2.5 py-1.5 text-left text-ink-muted transition-colors hover:bg-surface-hover/20 hover:text-ink disabled:opacity-60"
+            className="flex w-full flex-col gap-0.5 px-4 py-2.5 text-left text-ink-muted transition-colors hover:bg-surface-hover/40 hover:text-ink disabled:opacity-60"
           >
-            <span className="truncate text-sm leading-tight">{busy === s.externalId ? 'Loading…' : s.title}</span>
+            <span className="truncate text-sm leading-tight">
+              {busy === s.externalId ? 'Loading…' : s.title}
+            </span>
             <span className="readout truncate text-2xs text-ink-faint">
               last <RelativeAge when={s.updatedAt} />
               {s.branch && ` · ${s.branch}`}
@@ -90,10 +105,10 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
 function PastSkeleton() {
   return (
     <div className="mt-5" data-testid="past-conversations-loading">
-      <p className="mb-1.5 text-xs text-ink-faint">Or continue a past conversation</p>
-      <div className="rounded-md border border-line bg-surface-raised">
+      <p className="mb-2 px-1 text-xs text-ink-faint">Or continue a past conversation</p>
+      <div className="divide-y divide-line/60 rounded-[14px] border border-line bg-surface-raised">
         {[0, 1, 2].map((i) => (
-          <SkeletonLines key={i} lines={2} className="px-2.5 py-2" label="Looking for past conversations" />
+          <SkeletonLines key={i} lines={2} className="px-4 py-2.5" label="Looking for past conversations" />
         ))}
       </div>
     </div>

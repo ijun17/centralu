@@ -69,7 +69,16 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   }
 
   return (
-    <div className="flex gap-1.5" role="radiogroup" aria-label="Tool" data-testid="session-start-tools">
+    /*
+      The tools as one segmented capsule (owner, 2026-10-18), the top bar's shape: the chosen one filled a full hover
+      step, the others quiet until hovered.
+    */
+    <div
+      className="inline-flex gap-0.5 rounded-full border border-line p-0.5"
+      role="radiogroup"
+      aria-label="Tool"
+      data-testid="session-start-tools"
+    >
       {shown.map((t) => {
         const on = t.name === tool
         return (
@@ -81,10 +90,10 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
             disabled={busy !== null}
             onClick={() => void pick(t.name)}
             data-testid={`session-start-tool-${t.name}`}
-            className={`rounded-md border px-2.5 py-1 text-sm transition-colors disabled:cursor-default ${
+            className={`rounded-full px-3.5 py-1 text-sm transition-colors disabled:cursor-default ${
               on
-                ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                : 'border-line text-ink-muted hover:border-line-strong hover:text-ink disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink-muted'
+                ? 'bg-surface-hover text-ink'
+                : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent'
             }`}
           >
             {busy === t.name ? 'Switching…' : t.label}
