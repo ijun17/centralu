@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dialogOpen, isCovered } from './layers.js'
+import { coveringLayerOpened, dialogOpen, isCovered } from './layers.js'
 
 describe('isCovered (#850 item 11)', () => {
   const none = { openLayers: 0, paletteOpen: false, settingsOpen: false, usageOpen: false, inboxOpen: false, overlay: null }
@@ -35,5 +35,21 @@ describe('dialogOpen (#842 item 1)', () => {
     expect(dialogOpen({ ...none, openLayers: 1 })).toBe(true)
     expect(dialogOpen({ ...none, settingsOpen: true })).toBe(true)
     expect(dialogOpen({ ...none, usageOpen: true })).toBe(true)
+  })
+})
+
+describe('coveringLayerOpened (a popover under a window that opens goes)', () => {
+  const none = { paletteOpen: false, settingsOpen: false, usageOpen: false, inboxOpen: false }
+
+  it('is true when the palette, the inbox, settings or usage opens', () => {
+    for (const layer of ['paletteOpen', 'inboxOpen', 'settingsOpen', 'usageOpen'] as const) {
+      expect(coveringLayerOpened(none, { ...none, [layer]: true }), layer).toBe(true)
+    }
+  })
+
+  it('is false while one stays open or closes, and when another layer was open already', () => {
+    expect(coveringLayerOpened({ ...none, paletteOpen: true }, { ...none, paletteOpen: true })).toBe(false)
+    expect(coveringLayerOpened({ ...none, paletteOpen: true }, none)).toBe(false)
+    expect(coveringLayerOpened(none, none)).toBe(false)
   })
 })

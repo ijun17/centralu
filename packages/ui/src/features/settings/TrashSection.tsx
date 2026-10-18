@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol'
-import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { StoredMessage, SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol'
+import { messagesToChat, useStore } from '../../store/store.js'
+import { mergeBySeq } from '../../store/historyPages.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatDay } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './TrashReaderItem.jsx'
 import { TrashRunReader, TrashRuns } from './TrashRuns.jsx'
@@ -37,34 +40,27 @@ export function TrashSection() {
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
   const trashSubagentSteps = useStore((s) => s.trashSubagentSteps)
   const restoreSubagentSteps = useStore((s) => s.restoreSubagentSteps)
-  const [trash, setTrash] = useState<Awaited<ReturnType<typeof platform.trash.list>> | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // The trash list is read by `useLoad`: a failure is an error beside an empty box (with a retry), never "Loading…"
+  // for good, and an answer to an older read cannot overwrite a newer one
+  const list = useLoad(() => platform.trash.list(), [platform])
+  const trash = list.data ?? null
   const [reading, setReading] = useState<TrashedSession | null>(null)
   /** A kept app-agent run being read (#378) */
   const [readingRun, setReadingRun] = useState<TrashedRun | null>(null)
-  /** The one confirmation open: a session, or the whole trash */
-  const [confirming, setConfirming] = useState<TrashedSession | 'all' | null>(null)
   const [busy, setBusy] = useState(false)
   /** A refusal stays next to the row it is about — a toast is gone before it is read */
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
   const [emptyReport, setEmptyReport] = useState<string | null>(null)
   /**
-   * The confirmation open on a session's subagent steps (#418): `steps:<id>` for its entry in the trash, `held:<id>` for
-   * moving them there
+   * The one confirmation open on the whole screen: `all` for the whole trash, `session:<id>` for a trashed session,
+   * `steps:<id>` for a session's steps in the trash and `held:<id>` for moving them there (#418), `runs:<key>` for a
+   * kept app run or an app's runs (#378). One state, so a second "Delete for good…" closes the first
    */
-  const [confirmingSteps, setConfirmingSteps] = useState<string | null>(null)
-  /** What each live session's subagent steps take (#418); `undefined` when this computer's host is older and says nothing */
+  const [confirming, setConfirming] = useState<string | null>(null)
   const [held, setHeld] = useState<{ sessions: SubagentStepsHeld[]; unreached?: { machineId: string; name: string }[] } | null | undefined>(null)
   const [heldError, setHeldError] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    platform.trash
-      .list()
-      .then((t) => {
-        setTrash(t)
-        setLoadError(null)
-      })
-      .catch((e: Error) => setLoadError(e.message))
+  const loadHeld = useCallback(() => {
     platform.trash
       .subagentUsage()
       .then((h) => {
@@ -77,8 +73,13 @@ export function TrashSection() {
         else setHeldError(e.message)
       })
   }, [platform])
+  const { reload } = list
+  const load = useCallback(() => {
+    void reload()
+    loadHeld()
+  }, [reload, loadHeld])
 
-  useEffect(load, [load])
+  useEffect(loadHeld, [loadHeld])
 
   if (reading) return <TrashReader session={reading} onBack={() => setReading(null)} />
   if (readingRun) return <TrashRunReader run={readingRun} onBack={() => setReadingRun(null)} />
@@ -94,7 +95,6 @@ export function TrashSection() {
     } finally {
       setBusy(false)
       setConfirming(null)
-      setConfirmingSteps(null)
       load()
     }
   }
@@ -167,17 +167,15 @@ export function TrashSection() {
         this machine only when you delete it for good here.
       </p>
 
-      {loadError && (
-        <p className="mt-2 text-sm text-ink" data-testid="trash-load-error">
-          Could not read the trash: {loadError}
-        </p>
-      )}
+      {list.error && <LoadFailed what="the trash" error={list.error} onRetry={load} className="mt-2" testId="trash-load-error" />}
       <TrashUnreached unreached={trash?.unreached} />
 
       <div className="mt-3 flex items-baseline gap-3">
         <span className="readout text-sm text-ink-muted" data-testid="trash-total">
           {trash === null
-            ? 'Loading…'
+            ? list.error
+              ? 'Not read'
+              : 'Loading…'
             : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''}${
                 steps.length ? ` · subagent steps of ${stepsCount(steps.length, 'session', 'sessions')}` : ''
               } · ${formatBytes(trash.bytes)}`}
@@ -253,7 +251,7 @@ export function TrashSection() {
                   type="button"
                   className="text-ink-faint hover:text-danger disabled:opacity-50"
                   disabled={busy}
-                  onClick={() => setConfirming(s)}
+                  onClick={() => setConfirming(`session:${s.id}`)}
                   data-testid={`trash-purge-${s.id}`}
                 >
                   Delete for good…
@@ -264,7 +262,7 @@ export function TrashSection() {
                   {rowError.text}
                 </p>
               )}
-              {confirming !== 'all' && confirming?.id === s.id && (
+              {confirming === `session:${s.id}` && (
                 <Confirm
                   text={`Delete “${s.name}” for good? Its conversation, attachments and handoff note leave this machine${goesWithText(s)}. This cannot be undone.`}
                   busy={busy}
@@ -283,17 +281,24 @@ export function TrashSection() {
               key={`${t.machine ?? ''}/${t.sessionId}`}
               entry={t}
               busy={busy}
-              confirming={confirmingSteps === `steps:${t.sessionId}`}
+              confirming={confirming === `steps:${t.sessionId}`}
               error={errorOf(`steps:${t.sessionId}`)}
               onRestore={() => void act(`steps:${t.sessionId}`, () => restoreSubagentSteps(t.sessionId))}
-              onAskPurge={() => setConfirmingSteps(`steps:${t.sessionId}`)}
+              onAskPurge={() => setConfirming(`steps:${t.sessionId}`)}
               onPurge={() => void purgeSteps(t)}
-              onCancel={() => setConfirmingSteps(null)}
+              onCancel={() => setConfirming(null)}
             />
           ))}
         </ul>
       )}
-      <TrashRuns runs={runs} busy={busy} onRead={setReadingRun} onPurge={purgeRuns} />
+      <TrashRuns
+        runs={runs}
+        busy={busy}
+        confirming={confirming?.startsWith('runs:') ? confirming.slice(5) : null}
+        onConfirming={(key) => setConfirming(key === null ? null : `runs:${key}`)}
+        onRead={setReadingRun}
+        onPurge={purgeRuns}
+      />
       {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
         <p className="mt-1.5 text-xs leading-body text-ink" data-testid="trash-runs-error">
           {rowError.text}
@@ -306,10 +311,10 @@ export function TrashSection() {
           unreached={held?.unreached ?? []}
           error={heldError}
           onRetry={load}
-          row={(id) => ({ busy, confirming: confirmingSteps === `held:${id}`, error: errorOf(`held:${id}`) })}
-          onAsk={(id) => setConfirmingSteps(`held:${id}`)}
+          row={(id) => ({ busy, confirming: confirming === `held:${id}`, error: errorOf(`held:${id}`) })}
+          onAsk={(id) => setConfirming(`held:${id}`)}
           onMove={(h) => void act(`held:${h.sessionId}`, () => trashSubagentSteps(h.sessionId))}
-          onCancel={() => setConfirmingSteps(null)}
+          onCancel={() => setConfirming(null)}
         />
       )}
     </section>
@@ -363,21 +368,30 @@ const PAGE = 200
  */
 function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () => void }) {
   const platform = usePlatform()
-  const [items, setItems] = useState<ChatItem[] | null>(null)
-  const [oldest, setOldest] = useState<number | null>(null)
+  /** The stored messages read so far, one per `seq`, oldest first: a page that overlaps the rows held is not drawn twice */
+  const [msgs, setMsgs] = useState<StoredMessage[] | null>(null)
   const [more, setMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** A page is on its way: pressing "Load earlier messages" again would ask for the same page */
+  const inFlight = useRef(false)
+  const oldest = msgs?.[0]?.seq ?? null
+  const items = useMemo(() => (msgs ? messagesToChat(msgs) : null), [msgs])
 
   const page = useCallback(
     (beforeSeq?: number) => {
+      if (inFlight.current) return
+      inFlight.current = true
       platform.trash
         .read(session.id, PAGE, beforeSeq)
-        .then((msgs) => {
-          setItems((cur) => [...messagesToChat(msgs), ...(beforeSeq === undefined ? [] : (cur ?? []))])
-          setOldest(msgs[0]?.seq ?? null)
-          setMore(msgs.length >= PAGE)
+        .then((got) => {
+          setMsgs((cur) => mergeBySeq(cur ?? [], got))
+          setMore(got.length >= PAGE)
+          setError(null)
         })
         .catch((e: Error) => setError(e.message))
+        .finally(() => {
+          inFlight.current = false
+        })
     },
     [platform, session.id],
   )

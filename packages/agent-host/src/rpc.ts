@@ -32,6 +32,7 @@ import type {
   GridPanel,
   HostActivity,
   MachineAutostartResult,
+  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineProbe,
@@ -90,6 +91,11 @@ export type MachinesPort = {
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
   remove(id: string): Promise<void>
   reconnect(id: string): MachineInfo
+  /** Closes the link until it is connected or needed again (#1134) */
+  disconnect(id: string): Promise<MachineInfo>
+  setConnect(id: string, connect: MachineConnect): MachineInfo
+  /** The window needs the machine now (#1134) */
+  needs(id: string, repeat?: boolean): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
   update(id: string): Promise<MachineInstallResult>
@@ -829,6 +835,15 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
+    'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.setConnect': async (p) => {
+      const { machineId, connect } = RpcMethods['machines.setConnect'].params.parse(p)
+      return requireMachines().setConnect(machineId, connect)
+    },
+    'machines.need': async (p) => {
+      const { machineId, repeat } = RpcMethods['machines.need'].params.parse(p)
+      return requireMachines().needs(machineId, repeat === true)
+    },
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
