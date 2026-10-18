@@ -107,26 +107,39 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
 
-  // #1035: a flaky shard cost a rerun of its whole job, 5 to 7 minutes with the queue
-  it('runs a failed e2e shard once more inside its job, saying so, with time for both and the first report kept', () => {
+  // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
+  it('runs each e2e shard once, retrying a failed test inside Playwright, and names every test that passed only on retry', () => {
+    const config = readFileSync(new URL('../e2e/playwright.config.ts', import.meta.url), 'utf8')
+    expect(config).toContain('retries: process.env.CI ? 1 : 0,')
+    expect(config).toContain("['./flaky-report.ts']")
     for (const id of ['e2e', 'e2e-chromium']) {
       const body = job(id).body
       const step = body.slice(body.indexOf('- name: pnpm e2e'))
       expect(step, id).toMatch(/^ {8}id: e2e$/m)
-      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(step)?.[1] ?? ''
-      const lines = run.split('\n').map((l) => l.trim()).filter(Boolean)
-      expect(lines[0], id).toMatch(/^e2e\(\) \{ pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} .*; \}$/)
-      expect(lines[1], id).toBe('if e2e; then exit 0; fi')
-      expect(lines.at(-1), id).toBe('e2e')
-      const rest = lines.slice(2, -1)
-      expect(rest.some((l) => l.startsWith('echo "::warning title=e2e (')), id).toBe(true)
-      expect(rest.some((l) => l.includes('mv "$d" "e2e-first-attempt/')), id).toBe(true)
-      expect(rest, id).toContain('echo "retried=true" >> "$GITHUB_OUTPUT"')
-      // The first run's report, uploaded apart from the blobs `e2e report` merges
-      expect(body, id).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.e2e\.outputs\.retried == 'true' \}\}\n {8}with:\n {10}name: e2e-first-attempt-/)
-      expect(Number(/^ {4}timeout-minutes: (\d+)$/m.exec(body)?.[1]), id).toBeGreaterThanOrEqual(30)
+      // One run of the shard: the whole-shard retry (#1035) is gone with its first-attempt artifact
+      expect(step, id).toMatch(/^ {8}run: pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} --reporter=list,blob,\.\/e2e\/flaky-report\.ts --trace=retain-on-failure$/m)
+      expect(body, id).not.toContain('e2e-first-attempt')
+      expect(body, id).toMatch(/^ {4}outputs:\n {6}(?:#.*\n {6})?flaky: \$\{\{ steps\.e2e\.outputs\.flaky \}\}$/m)
     }
+    const report = job('e2e-report').body
+    for (const id of ['e2e', 'e2e-chromium']) {
+      expect(report).toContain(`needs.${id}.result == 'failure'`)
+      expect(report).toContain(`needs.${id}.outputs.flaky == 'true'`)
+    }
+    expect(report).toMatch(/E2E_FLAKY_LABEL="\$engine" .*merge-reports --reporter html,\.\/e2e\/flaky-report\.ts /)
     expect(workflow).toContain('pattern: e2e-blob-*')
+  })
+
+  // 2026-10-19 (owner): one e2e shard hung 35 minutes and held a merge batch; GitHub's default limit is 6 hours
+  it('gives every job that does real work a time limit near its slowest green run, the e2e shards 15 minutes', () => {
+    const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
+    // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
+    const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
+    for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
+    expect(limit('e2e')).toBe(15)
+    expect(limit('e2e-chromium')).toBe(15)
+    for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
   })
 
   it('gives each matrix job the files gate a stand-in with the same checks, run on the other answer only', () => {

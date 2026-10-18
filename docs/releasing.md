@@ -127,14 +127,21 @@ script rehearses by default and why nothing publishes automatically.
   Windows job (see [Windows](#windows-14-w3) below).
 - The same workflow runs the Playwright suite (`e2e/`) on ubuntu-24.04 in WebKit and in
   Chromium, the two engines the desktop app renders in, each split into shards that run side by
-  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). A shard that fails runs once
-  more inside its job, with a `::warning::` on the run naming it (#1035: a flaky shard cost a
-  rerun of the whole job, 5 to 7 minutes); Playwright itself does not retry, and a test that
-  passed only the second time is still one to fix. The first attempt's blob report and traces
-  are kept as the `e2e-first-attempt-<engine>-<shard>` artifact, and the jobs' 30-minute limit
-  leaves room for both runs. When a shard fails twice,
-  `e2e report` merges each engine's shard reports into one HTML report with traces and uploads
-  them as the `e2e-report` artifact, a folder per engine.
+  side (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). In CI a test that fails runs
+  once more (Playwright's `retries: 1`, owner decision 2026-10-19; until then a failed shard ran
+  whole a second time inside its job, about 6 minutes each time). A test that passes on the
+  retry is flaky, not green, and still one to fix: `e2e/flaky-report.ts` puts a `::warning::`
+  at the test, a table in the shard's summary, and has `e2e report` run. When a shard fails or
+  a test was flaky, `e2e report` merges each engine's shard reports into one HTML report with
+  traces (its Flaky filter shows the failed attempt), lists the flaky tests per engine in its
+  summary, and uploads the reports as the `e2e-report` artifact, a folder per engine.
+- **Time limits** (2026-10-19: one e2e shard hung 35 minutes and held a merge batch). Every job
+  that does real work has a `timeout-minutes` near its slowest green run of the last 20 full runs
+  with about half again on top: the e2e shards 15 minutes (slowest 9.7), `verify` 20 (10.8), the
+  Windows unit tests 25 (13.1); the Rust builds more, for a run that misses the cache (bundles
+  30, keeper end to end 20). `build.yml`'s comment above the `e2e` job has every number. A job
+  that hits its limit ends with GitHub's "has exceeded the maximum execution time" annotation,
+  which the merge queue counts as an infrastructure failure (rerun once), not a test failure.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
   tag (`dry_run`, default on). See below. A tag push skips `pnpm verify` in its platform jobs
