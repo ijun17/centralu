@@ -380,7 +380,7 @@ export function ChatStream({
  * The list is virtual, so the bubble is drawn in pieces, one per row: the first rounds the top, the last the
  * bottom, the ones between carry only the sides. No gap between rows inside a bubble: the spacing is the piece's
  * own padding, so the background runs on. Full width, with a rounder corner than the theme's scale has (14px, the
- * person's bubble's too), and the speaker's corner, bottom left where the time hangs, kept tight (4px) as a tail.
+ * person's bubble's too). No tail corner: the side, the width and the shade already say who spoke.
  */
 type BubblePart = 'solo' | 'first' | 'mid' | 'last'
 
@@ -401,10 +401,10 @@ function bubbleOf(chat: readonly ChatItem[], i: number): BubblePart | null {
 }
 
 const BUBBLE_EDGE: Record<BubblePart, string> = {
-  solo: 'rounded-[14px] rounded-bl-[4px] border pt-3 pb-3',
+  solo: 'rounded-[14px] border pt-3 pb-3',
   first: 'rounded-t-[14px] border border-b-0 pt-3 pb-3',
   mid: 'border-x pb-3',
-  last: 'rounded-b-[14px] rounded-bl-[4px] border border-t-0 pb-3',
+  last: 'rounded-b-[14px] border border-t-0 pb-3',
 }
 
 function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: number; children: ReactNode }) {
