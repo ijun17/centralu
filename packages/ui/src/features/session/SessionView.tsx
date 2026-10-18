@@ -243,6 +243,17 @@ export function SessionPane({
     return () => clearTimeout(t)
   }, [session, chat.length, markRead, appFocused])
 
+  /*
+   * An app's agent session on screen is the person's (#378): said the moment it is shown in front, not after the
+   * 3 seconds above: a short run ends, and its session is deleted, inside them
+   */
+  const markOpened = useStore((s) => s.markOpened)
+  const sessionShownId = session?.id
+  const shownAppSession = !!session?.appId
+  useEffect(() => {
+    if (sessionShownId && shownAppSession && appFocused) void markOpened(sessionShownId)
+  }, [sessionShownId, shownAppSession, appFocused, markOpened])
+
   // On a linked machine that is away (#82): dimmed, and nothing here tries to wake it
   const away = useSessionAway(sessionId)
 

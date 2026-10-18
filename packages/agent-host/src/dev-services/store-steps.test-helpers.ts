@@ -2,7 +2,7 @@ import { Store } from './store.js'
 
 /**
  * The store's step numbers as the tests count them. A step's number can be held for one that lands later (#1134: v59
- * went in while v57 and v58 were still in review), so "the steps after vN" is not `latest - N`: it is counted from the
+ * went in while v58 was still in review), so "the steps after vN" is not `latest - N`: it is counted from the
  * list.
  */
 
@@ -13,7 +13,7 @@ const steps = (): Step[] => (new Store() as unknown as { migrationSteps(): Step[
  * The numbers no step has yet, below the newest: held for steps in review. Each leaves this list in the pull request
  * that adds its step
  */
-export const HELD_STEPS: readonly number[] = [57, 58]
+export const HELD_STEPS: readonly number[] = [58]
 
 /** How many steps a store at `version` has still to run */
 export function stepsAfter(version: number): number {

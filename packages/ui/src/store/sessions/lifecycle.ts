@@ -85,6 +85,7 @@ type LifecycleActions = Pick<
   | 'restoreFromTrash'
   | 'rename'
   | 'markRead'
+  | 'markOpened'
   | 'reorderSessions'
 >
 
@@ -335,6 +336,23 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) },
       })),
     )
+  },
+
+  /*
+   * An app's agent session the person opened stays theirs (#378 review). The host hears "opened" through `markRead`
+   * only, and `markRead` above sends nothing when nothing is unread, which is how an app-agent session usually opens:
+   * the app's request is read as it arrives. A run that ended in the 3 seconds before the read mark then deleted the
+   * session the person was looking at. The read position sent is the one the host already has (it keeps the larger),
+   * so this moves nothing; it only says the session is on screen.
+   */
+  async markOpened(sessionId) {
+    const s = get().sessions[sessionId]
+    if (!s?.appId) return
+    try {
+      await get().platform!.agents.markRead(sessionId, s.lastReadSeq)
+    } catch {
+      // Offline or mid-swap: the 3-second read mark tries again, and a draft in a session deleted meanwhile is kept
+    }
   },
 
   async reorderSessions(projectId, orderedIds) {

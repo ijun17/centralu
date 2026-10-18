@@ -787,6 +787,37 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       })
     })
 
+    /*
+     * #378 review: an app's run, and the delete of its session, happen on the machine its app runs on (`apps.runs` routes
+     * there). Its record is that machine's: listed with its name, and read and deleted there, so the Runs panel's
+     * "in Settings → Trash" is true for a linked machine's app too.
+     */
+    it('lists a machine’s app-agent run records under its name, and reads and deletes them there', async () => {
+      const { router, local, localAnswers, m1 } = rig()
+      localAnswers['trash.list'] = { sessions: [], runs: [{ runId: 'run_h', app: { id: 'notes', projectId: 'p1' }, bytes: 7 }], bytes: 7 }
+      m1.answers['trash.list'] = { sessions: [{ id: 'a', project: null }], runs: [{ runId: 'run_m', app: { id: 'notes', projectId: 'p9' }, bytes: 30 }], bytes: 35 }
+      expect(await router.handle('trash.list', {})).toEqual({
+        sessions: [{ id: 'm1.a', project: null, machine: 'm1' }],
+        runs: [
+          { runId: 'run_h', app: { id: 'notes', projectId: 'p1' }, bytes: 7 },
+          { runId: 'run_m', app: { id: 'notes', projectId: 'm1.p9' }, bytes: 30, machine: 'm1' },
+        ],
+        bytes: 42,
+      })
+
+      m1.answers['trash.readRun'] = { request: 'q', answer: 'a', messages: [{ sessionId: 's9', seq: 1, role: 'user', kind: 'text', payload: { text: 'q' }, ts: 1 }] }
+      expect(await router.handle('trash.readRun', { runId: 'run_m', limit: 50, machine: 'm1' })).toMatchObject({ messages: [{ sessionId: 'm1.s9', seq: 1 }] })
+      m1.answers['trash.purgeRuns'] = { purged: 1 }
+      expect(await router.handle('trash.purgeRuns', { runIds: ['run_m'], machine: 'm1' })).toEqual({ purged: 1 })
+      expect(m1.calls.filter((c) => c.method !== 'trash.list')).toEqual([
+        { method: 'trash.readRun', params: { runId: 'run_m', limit: 50 } },
+        { method: 'trash.purgeRuns', params: { runIds: ['run_m'] } },
+      ])
+      // The hub's own record, with no machine, stays on the hub
+      await router.handle('trash.readRun', { runId: 'run_h' })
+      expect(local.at(-1)).toEqual({ method: 'trash.readRun', params: { runId: 'run_h' } })
+    })
+
     it('search hits name their machine’s sessions', async () => {
       const { router, localAnswers, m1 } = rig()
       localAnswers['messages.search'] = [{ sessionId: 'h1', seq: 1, snippet: 'x' }]
