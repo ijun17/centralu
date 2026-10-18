@@ -1174,6 +1174,9 @@
   border: 1px solid var(--color-line-strong);
   background-color: var(--color-surface-floor);
   box-shadow: none;
+  /* The letter sits high in the readout font's line box (measured at 4x: its middle up to 0.75px above the chip's);
+     1px on top brings every look within a quarter pixel of the middle */
+  padding-top: 1px;
 }
 .cc-mark[data-look='answering'] > .cc-chip {
   border: 2px solid var(--color-ink-muted);
