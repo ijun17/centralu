@@ -1129,13 +1129,22 @@
     border-collapse: collapse;
     font-size: 0.95em;
   }
+  /*
+   * A table's lines are `line-strong`, not the hairline (owner, 2026-10-18): the answer now sits in a bubble on
+   * `surface-raised` with a `line` border, so hairline cells and a raised header faded into the bubble itself. The
+   * header takes half a hover step over whatever it stands on, so it reads as a header on the bubble and off it.
+   */
   .cc-md th,
   .cc-md td {
-    border: 1px solid var(--color-line);
+    border: 1px solid var(--color-line-strong);
     padding: 0.3em 0.6em;
     text-align: left;
   }
-  .cc-md th { color: var(--color-ink); font-weight: var(--font-weight-semibold); background: var(--color-surface-raised); }
+  .cc-md th {
+    color: var(--color-ink);
+    font-weight: var(--font-weight-semibold);
+    background: color-mix(in oklab, var(--color-surface-hover) 50%, transparent);
+  }
   .cc-md td { color: var(--color-ink-muted); }
   /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
