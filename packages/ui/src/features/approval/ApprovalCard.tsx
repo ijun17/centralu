@@ -19,6 +19,7 @@ import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Pill } from '../../components/Pill.jsx'
 
 /**
  * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project. With the keyboard in this session's
@@ -155,9 +156,9 @@ export function ApprovalCard({
       data-keys={inComposer ? 'composer' : 'bare'}
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">Agent is blocked, waiting</span>
       </div>
 
@@ -249,9 +250,9 @@ export function PermissionCard({
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">An app asks for a permission, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
@@ -294,9 +295,9 @@ function ProjectAccessCard({
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">
           {detail.from.machine
             ? `A session on ${detail.from.machine} wants to ask a project here, and waits`
@@ -394,9 +395,9 @@ function AgentStartCard({
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">This session wants to start another agent, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
@@ -477,9 +478,9 @@ function ProjectCreateCard({
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">
           The orchestrator wants to make a new project, and waits
         </span>

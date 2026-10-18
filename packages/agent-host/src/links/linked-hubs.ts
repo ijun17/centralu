@@ -27,6 +27,8 @@ export type LinkedHubsDeps = {
   /** A call to a connected client (`HostServer.call`) */
   call: (client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal }) => Promise<unknown>
   lookupMs?: number
+  /** How long one ask may wait for the hub's answer, its card included; the transport's bound when absent. For tests */
+  askTimeoutMs?: number
 }
 
 /** The words a call that failed for an older hub says (it has no such method) */
@@ -94,7 +96,7 @@ export class LinkedHubs {
     if (h.client === null) return { ok: false, error: `${h.name} is ${NOT_REACHABLE}. Try again once its link is back.` }
     let raw: unknown
     try {
-      raw = await this.deps.call(h.client, 'hub.askProject', params, { signal })
+      raw = await this.deps.call(h.client, 'hub.askProject', params, { signal, ...(this.deps.askTimeoutMs ? { timeoutMs: this.deps.askTimeoutMs } : {}) })
     } catch (err) {
       if (signal?.aborted) return { ok: false, error: 'The call was cancelled.' }
       if (older(err)) return { ok: false, error: `${h.name} runs a Centralu from before this, so it cannot be asked. Update it there.` }

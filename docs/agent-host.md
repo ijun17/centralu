@@ -20,7 +20,8 @@ agent-host/src/
 │  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
-│  ├─ contract/         # the contract's larger parts: orchestrator tools, session apps, the tool's process
+│  ├─ contract/         # the contract's larger parts: orchestrator tools, session apps, the tool's process,
+│  │                    #   the tool's surface (what it offers, what the adapter limits, #270)
 │  ├─ registry.ts       # the tool → adapter map
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
@@ -770,7 +771,10 @@ needed setting aside. A saved notice also offers the recovery directory in the t
 count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
 keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
-index, HEAD tree, and every unmerged superproject commit against their remote refs. Candidate gitlinks
+index, HEAD tree, and every unmerged superproject commit against their remote refs. The configured trunk's
+history is scanned too (#623), when the project has modules: a gitlink merged there still names a module
+commit that may exist only in this checkout's private repository, so a commit that no remote has is kept even
+though the superproject history that records it landed. Candidate gitlinks
 are batch-checked in each module repository; unfetched objects are skipped because removing this
 checkout cannot lose them. Existence checks set `GIT_NO_LAZY_FETCH=1` and disable transports with
 `GIT_ALLOW_PROTOCOL=`; the latter also prevents network access on Git versions that predate the lazy-fetch
@@ -831,9 +835,8 @@ fails, so the entry stays restorable. A folder that cannot be moved back is logg
 name while the entry is still in the trash (joining any snapshot made since), and are deleted once it is gone,
 so a crash at any point of a purge is repaired. Purge and restore wait for that repair; a folder that cannot
 be repaired (held open on Windows) is logged and retried at the next start, and the others go on. No automatic trash expiry is implemented; expiry
-must use `purgeSession` if added. Gitlinks found only in older merged superproject history remain a
-follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
-that module commits were pushed. Writes by other programs during capture are outside this session's lock.
+must use `purgeSession` if added. A superproject merge does not prove that module commits were pushed, so
+gitlinks in merged trunk history are scanned like unmerged ones (#623). Writes by other programs during capture are outside this session's lock.
 
 **Size.** The two definitions are 1,357 characters (`AGENT_BUDGET_CHARS` 1,375; 1,332 before #861's `name`, a bare string; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
@@ -1490,7 +1493,10 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    `adapters` Map in `main.ts`.
 3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
-   hand-won protocol knowledge rots silently otherwise.
+   hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
+   (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
+   what the adapter blocks, drops or works around (each with its measurement), and a recorded
+   baseline. The weekly drift run then watches the new tool in the other direction as well.
 5. Done. **ui, core and platform are unchanged**, and protocol changes only by the two
    entries in step 2. (If more was needed, that is not the adapter's fault but the protocol
    lacking a concept — consider extending the protocol first)
@@ -1519,6 +1525,15 @@ explicit list of every vendor name it touches, and a script that re-verifies the
 | Codex | `adapters/codex/protocol-contract.json` — every RPC method and notification we send or read, plus approval enum values | `pnpm codex:bindings --check` (regenerates bindings from the installed CLI, greps for our names) | a method/notification leaving the protocol (change axis C4) |
 | Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields — plus a runtime argument probe: every explicit `permissionMode` must reach the CLI unchanged, accepting both `--permission-mode value` and `--permission-mode=value`; spawn is intercepted so no CLI runs (#578) | `pnpm drift:claude [version]` (installs `@latest`, or the given version, into a temp dir, never the workspace) | a name leaving the `.d.ts`, or the SDK dropping, rewriting or bypassing an explicit mode, **before** an upgrade lands it on us |
 | Claude (resume) | that a resumed process reads the prompt cache as a live one (#568, §4.6.1): what makes putting idle sessions to sleep free | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (live, haiku, a temporary data folder; exits 1 when the woken turn reads under 90% from cache) | a CLI whose resume rebuilds the request differently: sessions would still wake, only slower and dearer, and nothing else would say so |
+| Every adapter (the other direction, #270) | the contract's `surface` (`adapters/contract/surface.ts`): a reader of what the installed tool offers (Claude: the SDK's stdout message union, its `Options` keys and `Query` methods, and the CLI's `--help`; Codex: the generated client request, notification and server request methods, and its `--help`), the adapter's `limitations` (what it blocks, drops or works around, each with its measurement), and `adapters/<tool>/surface-baseline.ts` (what was last reviewed) | `pnpm drift:surface` (reads the latest published tools without a session or a turn; `--record` rewrites the baselines, `--file-issue` is the weekly job) | a command, message type or capability the tool now offers that nobody reviewed, a limitation whose reason may be gone (`/goal` stayed refused for weeks after the CLI ran it headless), or one on a name the tool dropped. Filed as one issue per tool; the job stays green |
+
+The surface check is news, not a break, so it files an issue instead of going red. What was reviewed is
+accounted for by test: every message type in an adapter's baseline is mapped, ignored on purpose, or a
+limitation (`claude/surface.test.ts`, `codex/surface.test.ts`), and a `dropped` one stays out of the known
+set so `UnmappedTypes` still logs its first instance. Claude's slash commands are listed only by a running
+CLI, so they are compared at run time instead: the init message's `slash_commands` against the command
+limitations, one host.log line each (`initSurfaceLines`); a limitation the adapter already follows by
+itself (`followsOffer`, `/goal`) says nothing.
 
 Claude's `normal` preset resolves `permissions.defaultMode` with the SDK's `resolveSettings` and
 `filterEscalatingDefaultMode`, using the same settings sources as the session, then sends it explicitly.
@@ -1565,7 +1580,8 @@ receives a type outside that list, `adapters/unmapped.ts` writes one host.log li
 `[claude] 1a2b3c4d unmapped message type: system/permission_denied`. Nothing on screen changes. Types the survey wants shown
 but nobody has wired yet stay off the list on purpose, so their first real instance is a grep away. When you wire one,
 or decide it is noise, move it onto the list in the same PR. Server *requests* need no list: the Codex adapter already
-logs every request it answers with `{}`.
+logs every request it answers with `{}`. The weekly counterpart, which hears of a type before any session receives
+it, is the surface check in the table above: a `dropped` limitation there is exactly a type kept off this list.
 
 ## 4. Session lifecycle and UI reconnection
 
@@ -2827,7 +2843,7 @@ step against:
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | add a column (45: `sessions.asked_by_session_id`, the session that asked for this one, #371, whose meaning moved with #561 and #614, see 48 and 55; 47: `grid_layout.remote_app_id` and `app_machine`, a panel of a linked machine's app, #82; 53: `sessions.interruption`, why the last turn did not finish, #698; 54: `queued_requests.opened_by_auto`, a queued ask only `auto` let through) | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 47: an older host reads app rows only where `app_id` is set, and its `setGridView` drops a linked machine's app panel when it rewrites the layout; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698; 54: an older host neither reads nor writes `opened_by_auto`; a row it queues is null, read as marked when the pair has no remembered consent) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
-| 57 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
+| 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
 | **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |

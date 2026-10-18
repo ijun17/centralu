@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Store } from './store.js'
 
 /**
- * The reverse direction's switch and approved pairs (#550, store v57): stored with the machine and removed with it, and
+ * The reverse direction's switch and approved pairs (#550, store v60): stored with the machine and removed with it, and
  * with the project at the other end.
  */
 

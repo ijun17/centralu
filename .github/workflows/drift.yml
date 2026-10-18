@@ -11,10 +11,14 @@
 #   codex-protocol  packages/agent-host/scripts/codex-bindings.mjs --check —
 #                   regenerates the app-server bindings from the installed codex and
 #                   diffs protocol-contract.json (the methods we use) against them.
+#   surface         scripts/surface-drift.mts --file-issue — the other direction (#270):
+#                   what the latest tools offer that their adapters have not reviewed,
+#                   and which limitations an adapter declares may be gone.
 #
 # A red run means a vendor moved under us; the run itself is the notification. Nothing
 # here bumps a pin, opens a PR, or fixes anything — detect and report only, per the
-# decision on #46. Scope is names, stated honestly: of the two drift bugs that
+# decision on #46. The one write is the surface job's issue: what became possible is
+# not a breakage, so it is said in an issue (#270's decision) instead of a red run. Scope is names, stated honestly: of the two drift bugs that
 # motivated this, 3ae2029 (contextWindow → modelContextWindow: a name we read left the
 # surface) is the class these checks catch; 970b674 (total vs last: both names real,
 # wrong one chosen) is semantic and invisible to any name diff — that class is covered
@@ -91,3 +95,42 @@ jobs:
       # `--check` verifies the contract and leaves no generated files behind; it needs
       # only node builtins, so no `pnpm install` here either.
       - run: pnpm codex:bindings --check
+
+  # The other direction (#270): not "is a name we use gone?" but "does the tool now offer something the adapter has
+  # not reviewed, or no longer need a limitation it works around?". Every adapter fills in the contract's `surface`, and
+  # this job reads it for each, so a new adapter is watched without editing this file. Findings are news, not a break:
+  # they go into one issue per tool (left alone while the week finds the same things), and the job stays green. It goes
+  # red only when a surface cannot be read or the issue cannot be filed.
+  surface:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Filing the issue is the job's output; nothing else here writes.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Unlike the jobs above, this one loads the adapters (the registry is how it finds them), so it needs the
+      # workspace. The pinned SDK that installs is never what it measures: the script installs each adapter's npm
+      # packages at @latest into a temp folder of its own.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install the latest CLIs
+        # What runs on a person's machine is their installed CLI, not the SDK, so the CLIs are read too: their
+        # --version and --help, and Codex's generated protocol. No session, no turn, no login.
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest
+          claude --version
+          codex --version
+
+      - run: pnpm drift:surface --file-issue
+        env:
+          GH_TOKEN: ${{ github.token }}

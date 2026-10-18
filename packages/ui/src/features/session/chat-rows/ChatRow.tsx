@@ -12,6 +12,7 @@ import { UserAttachment } from './attachments.jsx'
 import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
 import { CentraluCallBody } from './CentraluCallBody.jsx'
+import { Badge } from '../../../components/Badge.jsx'
 
 /*
  * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
@@ -419,7 +420,9 @@ export function ToolCard({
       */}
       {showInput && (
         <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-input">
-          <span className="readout mb-1 block text-2xs uppercase tracking-wide text-ink-faint">Input</span>
+          <Badge readout className="mb-1 block tracking-wide">
+            Input
+          </Badge>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-hover/25 px-2.5 py-1.5 font-mono text-xs leading-body text-ink-muted">
             {item.tool === 'Bash' && <span className="select-none text-ink-faint">$ </span>}
             {item.title}
@@ -453,9 +456,9 @@ export function ToolCard({
         <div className="border-t border-line px-2.5 py-1.5">
           {/* Named only beside a shown input, where the two would otherwise read as one block */}
           {showInput && (
-            <span className="readout mb-1 block px-0.5 text-2xs uppercase tracking-wide text-ink-faint">
+            <Badge readout className="mb-1 block px-0.5 tracking-wide">
               Output
-            </span>
+            </Badge>
           )}
           <pre
             className="whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted"

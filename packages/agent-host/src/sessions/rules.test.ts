@@ -135,6 +135,43 @@ describe('approval rules persist (C-2)', () => {
     expect(f2.applied[0]).toContain('git status')
   })
 
+  /*
+   * A session outside any project (an orchestrator, #994) has no project to remember for: ⌥ Always there used to be
+   * stored as a project rule with no project, which `rulesFor` then matched for every other session with no project.
+   */
+  it('a project-scoped answer in a session with no project stays with that session', async () => {
+    const store = new Store()
+    const f = fake()
+    const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(f)]]), () => {})
+    const start = (m: SessionManager) =>
+      m.createSession({ projectId: null, cwd: process.cwd(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
+    const session = await start(mgr)
+    f.emits.get(session.id)!({
+      type: 'approval_request', sessionId: session.id, requestId: 'req-1',
+      detail: { kind: 'command', command: 'git push', cwd: process.cwd() },
+    })
+    mgr.respondApproval(session.id, 'req-1', 'always', 'project', 'git push')
+    expect(mgr.listApprovalRules()).toMatchObject([{ scope: 'session', sessionId: session.id, projectId: null, matcher: 'git push' }])
+
+    // After a restart: the answering session keeps it, another session with no project does not get it
+    const f2 = fake()
+    const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
+    await mgr2.resumeSession(session.id)
+    expect(f2.applied[0]).toContain('git push')
+    await start(mgr2)
+    expect(f2.applied[f2.applied.length - 1]).not.toContain('git push')
+  })
+
+  // A row an earlier build stored that way (project scope, no project) belongs to no project, so it applies to no session
+  it('a stored project rule with no project applies to no session', async () => {
+    const store = new Store()
+    store.permissions.addApprovalRule({ scope: 'project', matcher: 'git push', decision: 'allow' })
+    const f = fake()
+    const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(f)]]), () => {})
+    await mgr.createSession({ projectId: null, cwd: process.cwd(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
+    expect(f.applied[0]).not.toContain('git push')
+  })
+
   // A rule ending in * allows nothing since #838, and an older build reads it as a prefix: it goes at startup
   it('drops saved rules ending in * when the host starts, and keeps the rest', async () => {
     const store = new Store()

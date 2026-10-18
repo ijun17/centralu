@@ -1,6 +1,7 @@
 import type { MachineAskConsent, MachineInfo, MachineProbe, SshHostList } from '@cc/protocol'
 import type { ProjectStore } from './project-store.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** The linked machines (#82), behind the `machines` port */
 export class MachinesMock {
@@ -24,7 +25,7 @@ export class MachinesMock {
   askPairs: MachineAskConsent[] = []
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
-    if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
+    if (at === -1) throw mockError(`No linked machine ${id}`)
     const next = { ...this.machinesList[at]!, ...patch }
     this.machinesList[at] = next
     this.emit({ type: 'machine_status', machine: { ...next } })
@@ -95,14 +96,14 @@ export class MachinesMock {
     reconnect: async (machineId: string) => this.machineRow(machineId, {}),
     acceptVersions: async (machineId: string) => {
       const v = this.machinesList.find((m) => m.id === machineId)?.versions
-      if (v && !v.compatible) throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })
+      if (v && !v.compatible) throw mockError('The two sides speak different protocols; one of them has to be updated first')
       return this.machineRow(machineId, { status: 'connected', error: null, versions: v ? { ...v, accepted: true } : null })
     },
     install: async (machineId: string) => this.mockInstall(machineId, 'install'),
     update: async (machineId: string) => this.mockInstall(machineId, 'update'),
     rollback: async (machineId: string) => {
       const prev = this.machinesList.find((m) => m.id === machineId)?.install?.previous
-      if (!prev) throw Object.assign(new Error('There is no earlier version installed there to go back to'), { code: 'internal' })
+      if (!prev) throw mockError('There is no earlier version installed there to go back to')
       const machine = this.machineRow(machineId, { status: 'versions_differ', install: { managed: true, current: prev, previous: null } })
       return { machine, current: prev, previous: null, removed: [], left: [] }
     },
@@ -114,7 +115,7 @@ export class MachinesMock {
     /** A mock machine takes the change at once; a systemd one lingers, as most would after `loginctl enable-linger` */
     autostart: async (machineId: string, on?: boolean) => {
       const was = this.machinesList.find((m) => m.id === machineId)?.autostart
-      if (!was?.how) throw Object.assign(new Error('Starting Centralu at boot is offered on Linux and Windows'), { code: 'internal' })
+      if (!was?.how) throw mockError('Starting Centralu at boot is offered on Linux and Windows')
       const autostart = on === undefined ? was : { ...was, on, linger: on && was.how === 'systemd' ? true : null }
       return { machine: this.machineRow(machineId, { autostart }), autostart }
     },

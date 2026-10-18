@@ -34,11 +34,11 @@ function folder(): string {
   return d
 }
 
-function seedSession(store: Store, projectId: string, id: string) {
+function seedSession(store: Store, projectId: string, id: string, preset: SessionInfo['permissionPreset'] = 'normal') {
   store.sessions.upsertSession({
     id, projectId, kind: 'worker' as SessionInfo['kind'], tool: 'claude', externalId: `ext-${id}`, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: Date.now(), waitingSince: null, live: false, model: null, effort: null, verbosity: null,
-    serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
+    serviceTier: null, permissionPreset: preset, importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
     roleAppend: null, appId: null, ...sessionLiveDefaults(),
   })
 }
@@ -52,13 +52,13 @@ function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly
 }
 
 /** The machine: a trusted project with an ordinary session (the caller), and the hubs that offer it the reverse direction */
-async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[] } = {}) {
+async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number } = {}) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
   for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id)
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000 })
+  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}) })
   mgr.useLinkedHubs(hubs)
   const server: HostServer = new HostServer({
     port: 0,
@@ -84,11 +84,11 @@ async function machineHost(o: { without?: readonly string[]; sessions?: readonly
 const lineFor = (port: number): ConnectionLine => ({ v: 1, port, token: TOKEN, version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dataDir: '/remote', hostRunning: true })
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
-async function hubHost(machinePort: number, o: { name?: string; reverse?: boolean; project?: string } = {}) {
+async function hubHost(machinePort: number, o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset'] } = {}) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
   store.projects.addProject({ id: 'p-hub', path: folder(), name: projectName })
-  seedSession(store, 'p-hub', 'h1')
+  seedSession(store, 'p-hub', 'h1', o.preset)
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const name = o.name ?? 'Hub mac'
@@ -147,9 +147,9 @@ async function hubHost(machinePort: number, o: { name?: string; reverse?: boolea
 }
 
 /** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise */
-async function rig(o: { on?: boolean; sessions?: readonly string[] } = {}) {
-  const machine = await machineHost({ sessions: o.sessions })
-  const hub = await hubHost(machine.port)
+async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
+  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs })
+  const hub = await hubHost(machine.port, { preset: o.preset })
   await eventually(() => hub.machine().status === 'connected')
   if (o.on !== false) {
     await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
@@ -279,6 +279,52 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     // The card closed unanswered; no task went in
     expect(hub.store.messages.loadMessages('h1', 20).some((m) => m.kind !== 'approval')).toBe(false)
     expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+  })
+
+  // #550 review: the target's `auto` is its own, and answers no card of another machine
+  it('raises the card for a hub session under auto too, and remembers nothing until Allow', async () => {
+    const { machine, hub } = await rig({ preset: 'auto' })
+    expect(hub.mgr.listSessions().find((s) => s.id === 'h1')?.permissionPreset).toBe('auto')
+    const call = machine.ask({ project: hub.projectName, task: 'say hello' })
+    await eventually(() => !!hub.card())
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+    expect(hub.store.messages.loadMessages('h1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    await hub.answer('allow')
+    expect(await call).toMatchObject({ ok: true, state: 'done' })
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([expect.objectContaining({ machineId: 'm1', sessionId: 'w1', projectId: 'p-hub' })])
+  })
+
+  // #550 review: a call given up on the machine is withdrawn on the hub, so its card does not wait for nobody
+  it('closes the hub’s card when the machine’s call runs out of time, and sends nothing', async () => {
+    const { machine, hub } = await rig({ askTimeoutMs: 500 })
+    const call = machine.ask({ project: hub.projectName, task: 'say hello' })
+    await eventually(() => !!hub.card())
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('did not answer hub.askProject in time') })
+    await eventually(() => !hub.card())
+    expect(hub.store.messages.loadMessages('h1', 20).some((m) => m.kind !== 'approval')).toBe(false)
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+  })
+
+  it('closes a card still standing when the switch goes off', async () => {
+    const { machine, hub } = await rig()
+    const call = machine.ask({ project: hub.projectName, task: 'say hello' })
+    await eventually(() => !!hub.card())
+    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: false })
+    await eventually(() => !hub.card())
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('does not let sessions on Remote box') })
+    expect(hub.store.messages.loadMessages('h1', 20).some((m) => m.kind !== 'approval')).toBe(false)
+  })
+
+  it('removing the machine takes its pairs and tells the machine the hub no longer answers it', async () => {
+    const { machine, hub } = await rig()
+    const first = machine.ask({ project: hub.projectName, task: 'one' })
+    await hub.answer('allow')
+    await first
+    expect(hub.store.machines.listMachineAskConsents()).toHaveLength(1)
+    await hub.router.handle('machines.remove', { machineId: 'm1' })
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+    await eventually(() => !machine.hubs.any)
+    expect(await machine.ask({ project: `Hub mac/${hub.projectName}`, task: 'two' })).toMatchObject({ ok: false, error: expect.stringContaining('No project named') })
   })
 
   it('refuses a session of the hub busy with a turn that is not the asker’s', async () => {

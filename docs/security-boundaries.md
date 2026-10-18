@@ -130,7 +130,7 @@ from HEAD also gets a `recovered/<session id>-stored-branch` branch, with a nume
 Existing branches are not overwritten. If a retry finds the worktree already present, it leaves the files
 and index alone. A marker written after successful patch application lets the notice report prior success;
 without one, it warns that manual recovery may still be needed. Recreating the worktree clears the marker.
-Gitlinks found only in older merged history remain tracked by [#623](https://github.com/ijun17/centralu/issues/623).
+Gitlinks found only in merged trunk history are scanned too (#623): merging a gitlink does not publish the module commit it names.
 Recovery files remain after restore and through later deletions, until the session is purged through Settings;
 purge/empty trash removes the entire session recovery directory before its row is deleted. The trash has no
 automatic expiry today; any future expiry must use the same purge path. Other programs with the person's
@@ -246,12 +246,15 @@ machine as the less trusted side: a compromised server must not reach the person
   app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
   call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
-  answer it; it names the machine and the asking session there, quoted on one line. Approving it is remembered for the
+  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review,
+  as start_agent's on another computer, #1038). It names the machine and the asking session there, quoted on one line;
+  turning the switch off closes it. Approving it is remembered for the
   pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
 - **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
   nothing; the task framed as from that session on that machine, never as the person or an orchestrator (so a seat that
-  directs would get it as someone else's words); the agent depth counted across the link; the target session's own
-  preset, trust and approvals; the answer cut to size; paths in it listed on the machine and none opened.
+  directs would get it as someone else's words); the agent depth counted across the link; once the pair is approved, the
+  target session works under its own preset, trust and approvals (its `auto`, if it has it, then applies to its tool
+  calls, never to the pair's card); the answer cut to size; paths in it listed on the machine and none opened.
 - **Residual:** the machine names the asking session itself. A compromised machine can use any pair approved for any of
   its sessions, and so reach every project of this computer that a session of that machine was approved for; that is
   what the switch and each approval consent to, and withdrawing a pair or turning the switch off ends it. While the

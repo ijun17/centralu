@@ -3,6 +3,7 @@ import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol'
 import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
+import { Button } from '../../components/Button.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 import { useLoad } from '../../app/useLoad.js'
@@ -39,14 +40,9 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
       {adding ? (
         <AddMachineForm onDone={() => setAdding(false)} canCancel={list.length > 0} />
       ) : (
-        <button
-          type="button"
-          className="mt-3 rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
-          onClick={() => setAdding(true)}
-          data-testid="machines-add-open"
-        >
+        <Button variant="quiet" size="sm" className="mt-3" onClick={() => setAdding(true)} data-testid="machines-add-open">
           Add a machine
-        </button>
+        </Button>
       )}
     </section>
   )
@@ -152,8 +148,6 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
 }
 
 const linkButton = 'text-xs text-ink-faint hover:text-ink disabled:opacity-50'
-const boxButton =
-  'rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50'
 
 /**
  * A change that stops the host there (update, rollback), asked first with what it stops (plan §10.5): the remote's
@@ -197,9 +191,9 @@ function InstalledRow({ m }: { m: MachineInfo }) {
     if (hubVersion?.dev) return null
     return (
       <div className="mt-1.5">
-        <button type="button" className={boxButton} disabled={busy} onClick={() => void change(m.id, 'install')} data-testid={`machine-install-${m.id}`}>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void change(m.id, 'install')} data-testid={`machine-install-${m.id}`}>
           Install Centralu on {m.name}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -411,14 +405,14 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
       {p.older === 'hub' && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {/* The same door as Settings → Updates: npm, then a relaunch that keeps agents running */}
-          <button
-            type="button"
-            className="rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void (update?.newer ? applyUpdate() : checkUpdate(true))}
             data-testid={`machine-update-hub-${m.id}`}
           >
             {update?.newer && update.latest ? `Update this computer to ${update.latest}` : 'Check for an update'}
-          </button>
+          </Button>
           <button type="button" className="text-xs text-ink-faint hover:text-ink" onClick={() => onOpenCategory('updates')}>
             Open Updates
           </button>
@@ -426,15 +420,15 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
       )}
       {p.updateHere && !confirming && (
         <div className="mt-2">
-          <button
-            type="button"
-            className={boxButton}
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={!!m.operation}
             onClick={() => setConfirming(true)}
             data-testid={`machine-update-remote-${m.id}`}
           >
             Update {m.name} to {p.target}
-          </button>
+          </Button>
         </div>
       )}
       {p.updateHere && confirming && (
@@ -477,15 +471,16 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
         </div>
       )}
       {!p.held ? null : p.compatible ? (
-        <button
-          type="button"
-          className="mt-2 rounded-md border border-line px-2 py-0.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+        <Button
+          variant="quiet"
+          size="sm"
+          className="mt-2"
           onClick={() => void accept(m.id)}
           data-testid={`machine-accept-versions-${m.id}`}
           title="Connect without aligning. Asked again when either side changes version."
         >
           Connect anyway
-        </button>
+        </Button>
       ) : (
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid={`machine-versions-refused-${m.id}`}>
           Machines on different protocol versions cannot connect, even anyway.

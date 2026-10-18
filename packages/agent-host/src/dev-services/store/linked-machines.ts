@@ -12,11 +12,11 @@ export type LinkedMachineRow = {
   slot: number
   addedAt: number
   acceptedVersions: string | null
-  /** Whether this machine's sessions may ask this computer's projects (#550, v57); off by default */
+  /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
   asks?: boolean
 }
 
-/** A pair the person approved for the reverse direction (#550, v57): a session of a linked machine, a project here */
+/** A pair the person approved for the reverse direction (#550, v60): a session of a linked machine, a project here */
 export type MachineAskConsentRow = {
   machineId: string
   /** The session's own id on that machine (not qualified) */
@@ -106,7 +106,7 @@ export class LinkedMachineRecords {
     this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
   }
 
-  // ── The reverse direction (#550, v57) ───────────────────────────────────────────────────────
+  // ── The reverse direction (#550, v60) ───────────────────────────────────────────────────────
 
   /**
    * Turns a machine's switch on or off. Off also forgets every pair approved for it: turning the switch on again is a

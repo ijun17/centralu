@@ -374,6 +374,78 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only recorded under old name')
   }, 30_000 * SLOW)
 
+  it('keeps a module commit recorded only by a gitlink already merged into the trunk (#623)', async () => {
+    const { base, module } = moduleFixture()
+    const tip = commit(module, 'only the deleted worktree has this\n')
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'record module work'])
+    // Merging the gitlink publishes nothing: the module object stays in the worker's private repository.
+    git(repo, ['merge', '--ff-only', branch])
+    git(module, ['checkout', '-q', '--detach', base])
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'move module back'])
+    git(repo, ['merge', '--ff-only', branch])
+    // Nothing is left unmerged, and neither HEAD's tree nor the index names the commit.
+    expect(git(child, ['rev-list', '--count', 'main..HEAD'])).toBe('0')
+    expect(git(module, ['branch', '--contains', tip])).toBe('')
+    const privateDir = canonicalPath(git(module, ['rev-parse', '--absolute-git-dir']))
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    const snapshotDir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
+    remove()
+    expect(existsSync(privateDir)).toBe(false)
+    const snapshot = JSON.parse(readFileSync(join(snapshotDir, 'snapshot.json'), 'utf8')) as {
+      repositories: { path: string }[]
+    }
+    const index = snapshot.repositories.findIndex((entry) => entry.path === 'old module')
+    const bundle = join(snapshotDir, `${index}.bundle`)
+    expect(existsSync(bundle)).toBe(true)
+    const ref = git(repo, ['bundle', 'list-heads', bundle]).split('\n').find((row) => row.startsWith(`${tip} `))!.split(' ')[1]!
+    const recovered = join(dir, 'recovered-merged')
+    git(dir, ['init', '-q', recovered])
+    git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
+    expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only the deleted worktree has this')
+  }, 30_000 * SLOW)
+
+  it('does not bundle a merged gitlink whose module commit a remote has (#623)', async () => {
+    const { source, base, module } = moduleFixture()
+    const published = commit(source, 'published by the module remote\n')
+    git(module, ['fetch', '-q', 'origin'])
+    git(module, ['checkout', '-q', '--detach', published])
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'record published module work'])
+    git(module, ['checkout', '-q', '--detach', base])
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'move module back'])
+    git(repo, ['merge', '--ff-only', branch])
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    const snapshot = JSON.parse(readFileSync(join(worktreeRecoveryDir(sessionId), recovery.snapshot, 'snapshot.json'), 'utf8')) as {
+      repositories: { path: string; bundle: boolean; refs: string[] }[]
+    }
+    remove()
+    expect(recovery.commits).toBe(0)
+    expect(snapshot.repositories.find((entry) => entry.path === 'old module')).toMatchObject({ bundle: false })
+    expect(snapshot.repositories.find((entry) => entry.path === 'old module')!.refs).not.toContain(published)
+  }, 30_000 * SLOW)
+
+  it('keeps a merged gitlink under a module name that was renamed since (#623)', async () => {
+    const { base, module } = moduleFixture()
+    const tip = commit(module, 'recorded under the old path, merged\n')
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'record module work'])
+    git(module, ['checkout', '-q', '--detach', base])
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'move module back'])
+    git(child, ['mv', 'old module', 'new module'])
+    git(child, ['commit', '-qm', 'rename module'])
+    git(repo, ['merge', '--ff-only', branch])
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    const snapshotDir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
+    remove()
+    const snapshot = JSON.parse(readFileSync(join(snapshotDir, 'snapshot.json'), 'utf8')) as { repositories: { path: string }[] }
+    const bundle = join(snapshotDir, `${snapshot.repositories.findIndex((entry) => entry.path === 'new module')}.bundle`)
+    expect(git(repo, ['bundle', 'list-heads', bundle])).toContain(`${tip} `)
+  }, 30_000 * SLOW)
+
   it('review: scans a long missing-trunk history and a tree larger than the stdout limit in bounded calls', async () => {
     /*
      * Not execFileSync (#368): writing a 32 MiB tree and 2,000 commits held the worker for 10 s on a fast Windows PC,

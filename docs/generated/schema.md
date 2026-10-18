@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 57, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 60, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -415,19 +415,19 @@ Added in v46.
 | `slot` | INTEGER | no |  |  | v46 |
 | `added_at` | INTEGER | no |  |  | v46 |
 | `accepted_versions` | TEXT | yes |  |  | v46 |
-| `asks` | INTEGER | no | `0` |  | v57 |
+| `asks` | INTEGER | no | `0` |  | v60 |
 
 ### `machine_ask_consents`
 
-Added in v57.
+Added in v60.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `machine_id` | TEXT | no |  | PK 1, FK → `linked_machines.id` (cascade) | v57 |
-| `session_id` | TEXT | no |  | PK 2 | v57 |
-| `session_name` | TEXT | no |  |  | v57 |
-| `project_id` | TEXT | no |  | PK 3, FK → `projects.id` (cascade) | v57 |
-| `decided_at` | INTEGER | no |  |  | v57 |
+| `machine_id` | TEXT | no |  | PK 1, FK → `linked_machines.id` (cascade) | v60 |
+| `session_id` | TEXT | no |  | PK 2 | v60 |
+| `session_name` | TEXT | no |  |  | v60 |
+| `project_id` | TEXT | no |  | PK 3, FK → `projects.id` (cascade) | v60 |
+| `decided_at` | INTEGER | no |  |  | v60 |
 
 ### `machine_headers`
 

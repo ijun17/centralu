@@ -626,7 +626,8 @@ export class HostServer {
    * Calls a client: a hub linked to this host that said it answers the reverse direction (#550, `host.hubOffer`,
    * docs/plans/remote-hub.md §12.7). The client is the `RpcContext.client` its offer came in on, so the call goes back
    * over the socket the hub opened, and nowhere else. Fails at once when that connection is gone; withdrawn with
-   * `call.cancel` when `signal` fires; and bounded by `timeoutMs`, as a call nobody answers must not be held for good.
+   * `call.cancel` when `signal` fires, and when `timeoutMs` runs out (a call nobody answers is not held for good, and its
+   * work on the other side, a card standing there, is not left waiting for nobody: #550 review).
    */
   call(client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<unknown> {
     const ws = this.byClient.get(client)
@@ -642,15 +643,18 @@ export class HostServer {
         clearTimeout(timer)
         opts.signal?.removeEventListener('abort', onAbort)
       }
+      // Withdrawn on the other side too: a call given up here must not leave its work there waiting for nobody
+      const withdraw = () => this.sendTo(ws, JSON.stringify({ kind: 'rpc', id: `h${++this.lastCall}`, method: CANCEL_CALL_METHOD, params: { id } }))
       const onAbort = () => {
         if (!calls.has(id)) return
         done()
-        this.sendTo(ws, JSON.stringify({ kind: 'rpc', id: `h${++this.lastCall}`, method: CANCEL_CALL_METHOD, params: { id } }))
+        withdraw()
         reject(rpcError('The call was cancelled', 'internal'))
       }
       const timer = setTimeout(() => {
         if (!calls.has(id)) return
         done()
+        withdraw()
         reject(rpcError(`The other side did not answer ${method} in time`, 'internal', { retryable: true }))
       }, opts.timeoutMs ?? REVERSE_CALL_TIMEOUT_MS)
       calls.set(id, {

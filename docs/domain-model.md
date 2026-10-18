@@ -63,7 +63,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Subagent step | A step of a subagent the agent launched (Claude's Task). Hangs off the launching tool call, never part of the conversation's numbering | `subagent_event`, `events.ts`; `subagent_messages` (store v41) | |
 | Approval | A pending yes/no on something the agent wants to do. At most one per session at a time | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | permission request |
 | Approval detail | What is being asked: `command`, `file_edit`, `other` (from an adapter; the host's apply and handoff cards ride on it too, with an `about`), `capability`, `project_access`, `agent_start`, `centralu_update` and `project_create` (raised by the host) | `ApprovalDetail`, `entities/approvals.ts` | |
-| Approval rule | A remembered "always allow" for commands, matched by a pattern with `*`, scoped to a session or a project. Only allows are stored; the adapter checks them before it asks | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | allowlist |
+| Approval rule | A remembered "always allow" for commands, matched by a pattern with `*`, scoped to a session or a project (a session with no project keeps a project-scope answer for itself). Only allows are stored; the adapter checks them before it asks | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | allowlist |
 | Question | A choice the agent asks the person to make (AskUserQuestion), answered with `agents.answerQuestion`. Any number may wait | `Question`, `pendingQuestions`, `entities/sessions.ts` | prompt |
 | Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities/approvals.ts`; `project_consents` (store v44) | |
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants` (held by `manager.ts`, handed to `sessions/delegation-host.ts`), `readableGrants`, `ask-project.ts` | |
@@ -713,10 +713,10 @@ Where it is stored:
 
 - `linked_machines`: the machines the person linked: id, name, ssh target, remote shell, the slot for folding
   numbers, the version pair accepted (store v46), and whether that machine's sessions may ask this computer's projects
-  (`asks`, off by default, store v57, #550).
+  (`asks`, off by default, store v60, #550).
 - `machine_headers`: the mirror: each machine's sessions and projects as it last listed them (store v46).
 - `machine_ask_consents`: the pairs the person approved for the reverse direction: a session of a linked machine and a
-  project of this computer, so later asks in that pair need no card until withdrawn (store v57, #550). Removed with the
+  project of this computer, so later asks in that pair need no card until withdrawn (store v60, #550). Removed with the
   machine, with the project, and when the machine's switch goes off.
 
 Live only (hub memory): each link's status, its ssh processes and forward, the remote's cursor and epoch. Not stored
