@@ -38,11 +38,28 @@ export const CI = {
 // ready make a batch, `max` at most (default 6). `min` is at least 2, or 1 with two tiers
 // (`ci.fullTier`): there every pull request lands through a batch, a batch of one included.
 // PROJECT_BOARD_QUEUE_BATCH_MIN: for the tests only, which queue several pull requests one call at a time
+// The checkout rebase_stack and the merge queue's conflicts work from by default: the one this app is committed in
+export const APP_DIR = fileURLToPath(new URL('.', import.meta.url))
+
 const batch = config.queue?.batch
 const batchMin = Number(process.env.PROJECT_BOARD_QUEUE_BATCH_MIN) || Number(batch?.min ?? 2) || 2
+// The merge queue's conflicts (#1182, queue-conflict.mjs): `mechanical` lists the files a command
+// regenerates (`{ files, run }`: path patterns, and the commands as argument lists, run in order
+// without a shell), which the queue regenerates and pushes itself; `never` the files it never does,
+// whatever `mechanical` says; `timeoutMinutes` how long one command may take. The merge is made in a
+// temporary worktree of `checkout` (default the one this app is committed in).
+// PROJECT_BOARD_QUEUE_CHECKOUT and PROJECT_BOARD_QUEUE_CONFLICTS (the lists as JSON): for the tests
+// only, which merge in a checkout of their own and regenerate with commands of their own (empty
+// checkout: none, so a conflict is handed off without a merge)
+const conflicts = process.env.PROJECT_BOARD_QUEUE_CONFLICTS ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_CONFLICTS) : (config.queue?.conflicts ?? {})
+const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 export const QUEUE = {
   batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
+  conflicts: {
+    mechanical: Array.isArray(conflicts.mechanical) ? conflicts.mechanical.filter((e) => Array.isArray(e?.files) && Array.isArray(e?.run) && e.run.every((a) => Array.isArray(a) && a.length > 0)) : [],
+    never: Array.isArray(conflicts.never) ? conflicts.never : [],
+    timeoutMs: Math.max(1, Number(conflicts.timeoutMinutes ?? 30) || 30) * 60_000,
+    checkout: checkoutEnv !== undefined ? checkoutEnv || null : (conflicts.checkout ?? APP_DIR),
+  },
 }
 
-// The checkout rebase_stack works from by default: the one this app is committed in
-export const APP_DIR = fileURLToPath(new URL('.', import.meta.url))

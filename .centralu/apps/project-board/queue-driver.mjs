@@ -34,10 +34,31 @@ import {
   sameRepo,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, lowerFailureCounts, normalize, noticeKey, onlySupersededFailures, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
+import {
+  ACTIVE,
+  attentionText,
+  cannotMergeBase,
+  decideBefore,
+  decideCi,
+  dueItem,
+  emptyQueue,
+  ERROR_LIMIT,
+  errorReason,
+  handoffReason,
+  itemKey,
+  lowerFailureCounts,
+  normalize,
+  noticeKey,
+  onlySupersededFailures,
+  POLL_MS,
+  pushEvent,
+  rerunRefused,
+  resetFor,
+} from './queue.mjs'
+import { mergeMain } from './queue-conflict.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
-import { short } from './util.mjs'
+import { listSome, short, span } from './util.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
 export const LEASE_FILE = 'merge-queue.lease.json'
@@ -308,6 +329,68 @@ export async function afterMerge(item, pr, ref, subject, { landed, defaultBranch
   return `Merge queue: merged ${n}${title}${how}.${closed.length ? ` Closed ${closed.join(', ')} as landed in it.` : ''}${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
 }
 
+/** One step of a conflict as an event (#1182): `step`, `ms` and what else it carries go into the event. */
+const conflictEvent = (text, data) => ({ kind: 'conflict', text, data })
+
+/**
+ * A pull request that conflicts with its base (#1182). Once per head: merges the default branch
+ * into it in a temporary worktree (queue-conflict.mjs), and pushes that when every conflict is in a
+ * mechanical file (regenerated), else hands it to the PR's author session. The lease is renewed
+ * while it works, since regenerating can take minutes. Answers `{ decision, patch?, events }`, or
+ * `{ yielded }` when another driver took the queue.
+ */
+async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
+  const n = ref(item.repo, item.pr)
+  const head = pr.headRefOid
+  const at = new Date(now).toISOString()
+  const done = item.conflict?.head === head ? item.conflict : null
+  // Pushed: GitHub still shows the head it merged into, for a moment
+  if (done?.outcome === 'pushed') return { decision: { state: 'waiting' }, events: [] }
+  // Handed off on this head already: the same reason, so no second message
+  if (done?.outcome === 'handoff' && done.reason) return { decision: { state: 'attention', reason: done.reason }, events: [] }
+  const since = item.conflict?.at ?? at
+  const hand = (why, files, steps = []) => {
+    const d = handoffReason({ item, pr, files, why, ref })
+    const to = d.reason.relay.to
+    return {
+      decision: d,
+      patch: { conflict: { head, at: since, outcome: 'handoff', files, reason: d.reason } },
+      events: [
+        ...steps,
+        conflictEvent(`${n}: conflict handed to ${to ? `its author session ${to}` : 'a session on its branch (no author session recorded)'}${files.length ? `; conflicted files: ${listSome(files, 8)}` : ''}.`, {
+          step: 'handoff',
+          ms: Date.now() - now,
+          files,
+          by: 'session',
+          relay: d.reason.relay,
+        }),
+      ],
+    }
+  }
+  const not = cannotMergeBase(pr, defaultBranch)
+  if (not) return hand(not, [])
+  // Regenerating can take minutes: hold the lease meanwhile (every write still asks renew first)
+  const keep = setInterval(() => renew(), Math.max(1_000, LEASE_MS / 6))
+  keep.unref?.()
+  let r
+  try {
+    r = await mergeMain({ repo: item.repo, pr, defaultBranch, dir: QUEUE.conflicts.checkout, conflicts: QUEUE.conflicts, renew })
+  } finally {
+    clearInterval(keep)
+  }
+  if (r.outcome === 'yielded') return { yielded: true }
+  if (r.outcome === 'moved') return { decision: { state: 'waiting' }, events: [] }
+  const steps = r.steps.map((st) =>
+    st.step === 'merge'
+      ? conflictEvent(`${n}: merged ${defaultBranch} into ${pr.headRefName} in a temporary worktree in ${span(st.ms)}; ${st.files.length ? `conflicts in ${listSome(st.files, 8)}` : 'no conflicts'}.`, { step: 'merge', ms: st.ms, files: st.files })
+      : st.step === 'regenerate'
+        ? conflictEvent(`${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}.`, { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands })
+        : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue' }),
+  )
+  if (r.outcome === 'pushed') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'pushed', sha: r.sha, files: r.files } }, events: steps }
+  return hand(r.why, r.files, steps)
+}
+
 /**
  * Reads one item's pull request and CI, decides, and acts. Answers what to write back: the new state
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
@@ -324,6 +407,20 @@ async function pollItem(item, { now, ref, renew, save }) {
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
 
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
+  if (d?.reason?.kind === 'dirty') {
+    if (!renew()) return { yielded: true }
+    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch })
+    if (c.yielded) return { yielded: true }
+    d = c.decision
+    Object.assign(base, c.patch ?? {})
+    events.push(...c.events)
+  } else if (item.conflict && item.conflict.head !== pr.headRefOid && !d) {
+    // Fixed: a new head that no longer conflicts, pushed by the queue or by a session (#1182)
+    const by = item.conflict.outcome === 'pushed' && item.conflict.sha === pr.headRefOid ? 'queue' : 'session'
+    const ms = now - Date.parse(item.conflict.at)
+    events.push(conflictEvent(`${ref(repo, item.pr)}: the conflict found at ${item.conflict.at.slice(11, 16)} UTC is fixed ${by === 'queue' ? 'by the queue' : 'by a push'} after ${span(ms)}.`, { step: 'fixed', ms, by }))
+    base.conflict = null
+  }
   // The latest CI run of each workflow on the head, once read: what proved it, if it lands
   let runs = []
   if (!d) {
@@ -398,7 +495,7 @@ async function pollItem(item, { now, ref, renew, save }) {
       const extra = d.reason.kind === 'failed' || d.reason.kind === 'failing' ? await failingLine(repo, d.reason.job) : ''
       const reason = { ...d.reason, text: `${d.reason.text}${extra}` }
       Object.assign(patch, { reason, noticeKey: key })
-      events.push({ kind: 'attention', text: attentionText({ ...item, title: pr.title }, reason, ref), notify: true })
+      events.push({ kind: 'attention', text: attentionText({ ...item, title: pr.title }, reason, ref), notify: true, data: reason.relay ? { relay: reason.relay } : null })
     } else patch.reason = item.reason ?? d.reason
   } else Object.assign(patch, { reason: null, noticeKey: null })
 
@@ -476,7 +573,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     const target = it ?? { ...item }
     Object.assign(target, r.patch, { state: r.state, updatedAt: at, lastError: null, nextAt: new Date(now + r.wait).toISOString() })
     if (r.state !== 'attention' && target.reason) target.reason = null
-    for (const ev of r.events) pushEvent(fresh, target, { kind: ev.kind, text: ev.text, notify: ev.notify === true, at })
+    for (const ev of r.events) pushEvent(fresh, target, { kind: ev.kind, text: ev.text, notify: ev.notify === true, at, data: ev.data ?? null })
   })
   return { did: 'polled', key, state: r.state }
 }
