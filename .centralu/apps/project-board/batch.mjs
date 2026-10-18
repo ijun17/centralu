@@ -24,7 +24,7 @@
 // included: the batch also takes items whose quick tier passed, one sent back from a batch goes alone,
 // and one whose batch of one ended without landing it is not batched again on that head (`alone`):
 // the queue tells its session why (queue.mjs decideCi).
-import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent } from './queue.mjs'
+import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder } from './queue.mjs'
 import { short } from './util.mjs'
 
 export const BRANCH_PREFIX = 'queue/batch-'
@@ -63,7 +63,8 @@ export function batchCandidates(q, { max, tiers = false }) {
       i.ci.batchable !== false &&
       (waiting(i) || (tiers && i.ci.verdict === 'quick')),
   )
-  ok.sort((a, b) => String(a.queuedAt).localeCompare(String(b.queuedAt)))
+  // The oldest first, after those fixed after a conflict (queueOrder)
+  ok.sort(queueOrder)
   const repo = ok[0]?.repo
   const same = ok.filter((i) => String(i.repo).toLowerCase() === String(repo).toLowerCase())
   if (!tiers) return same.slice(0, max)
