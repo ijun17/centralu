@@ -1,4 +1,4 @@
-import { isInTurn, type ProjectInfo, type SessionInfo, type StoredMessage } from '@cc/protocol'
+import { isInTurn, type ProjectInfo, type SessionInfo, type StoredMessage, type TrashedRun } from '@cc/protocol'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
@@ -25,6 +25,20 @@ export class TrashMock {
       removeWorktree: boolean
     }
   >()
+
+  /**
+   * The records of deleted app-agent sessions (#378), as the host keeps them. The mock never runs an app's agent, so a
+   * test or a demo scene puts one here (`keepRun`).
+   */
+  readonly keptRuns = new Map<string, { run: TrashedRun; request: string; answer: string; output?: unknown; messages: StoredMessage[] }>()
+
+  keepRun(r: { run: Omit<TrashedRun, 'messages' | 'bytes' | 'requestPreview'>; request: string; answer: string; output?: unknown; messages: StoredMessage[] }): void {
+    const bytes = r.request.length + r.answer.length + r.messages.reduce((n, m) => n + JSON.stringify(m.payload).length, 0)
+    this.keptRuns.set(r.run.runId, {
+      ...r,
+      run: { ...r.run, requestPreview: r.request.slice(0, 300), messages: r.messages.length, bytes },
+    })
+  }
 
   moveToTrash(sessionId: string, removeWorktree: boolean, removeExternal: boolean): void {
     const session = this.store.sessions.get(sessionId)
@@ -63,7 +77,19 @@ export class TrashMock {
             worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch, remove: removeWorktree } : null,
           }
         })
-      return { sessions, bytes: sessions.reduce((n, s) => n + s.bytes, 0) }
+      const runs = [...this.keptRuns.values()].map((k) => k.run).sort((a, b) => b.keptAt - a.keptAt)
+      return { sessions, runs, bytes: sessions.reduce((n, s) => n + s.bytes, 0) + runs.reduce((n, r) => n + r.bytes, 0) }
+    },
+    readRun: async (runId: string, limit = 200, beforeSeq?: number) => {
+      const k = this.keptRuns.get(runId)
+      if (!k) throw Object.assign(new Error(`Not in the trash: ${runId}`), { code: 'session_not_found' })
+      const filtered = beforeSeq ? k.messages.filter((m) => m.seq < beforeSeq) : k.messages
+      return { request: k.request, answer: k.answer, ...(k.output !== undefined ? { output: k.output } : {}), messages: filtered.slice(-limit) }
+    },
+    purgeRuns: async (runIds: string[]) => {
+      let purged = 0
+      for (const id of runIds) if (this.keptRuns.delete(id)) purged++
+      return { purged }
     },
     read: async (sessionId: string, limit = 200, beforeSeq?: number) => {
       const t = this.trashBin.get(sessionId)

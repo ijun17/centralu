@@ -152,7 +152,7 @@ describe('v41 — the table for subagent steps (#222)', () => {
     raw.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(15) // v41, then v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844)
+    expect(s.migrationsRun).toBe(16) // v41, then v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#378)
     expect(s.schemaVersion).toBe(s.latestKnownVersion)
     expect(s.messages.loadMessages('s1', 200, undefined, { full: true })).toEqual(conversation)
     expect(steps(s)).toEqual([1, 2, 3, 4])

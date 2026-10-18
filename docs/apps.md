@@ -230,10 +230,29 @@ agent reads its whole context again on every call and that is the use the person
   (`app_run_failures`). The builder needs the input that failed.
 - Kept 30 days, pruned when the host starts. A row left `running` because the host died is closed
   at the next start.
+- **A `run_agent` row keeps its request and answer (#378, store v56)**: the app's prompt once a
+  session stood up for it, the agent's answer and its structured output, redacted like the rest of
+  the row. Deleting a session for good no longer deletes the runs it started or ran in: the link
+  (`session_id`, `caller_session_id`) is cleared and the row stays in the app's log. Until then
+  purging an app-agent session erased its run, and purging a session that called an app erased
+  those calls.
+- **The record of a deleted app-agent session (#378)** is kept in `app_run_records` (what the trash
+  lists: app, session name, tool, status, duration, tokens, request, answer, output, times) and
+  `app_run_messages` (the whole conversation, tool calls and their results included, copied from
+  `messages` in one transaction before the session goes; owner decision 2026-10-06). Neither points
+  at `sessions`, and the project name is copied in, so a record outlives the session, its log line
+  and the project. The person reads it in Settings → Trash, grouped by app, and deletes it there, one,
+  an app's all, or with the trash emptied; deleting it also clears the request, answer and output on
+  its log line, which keeps status, time and tokens. Otherwise it goes with the log's 30 days. The
+  records are the hub's own: `trash.list` merges no linked machine's, and `trash.empty` leaves them
+  alone (the window deletes the ones it listed with `trash.purgeRuns`), so emptying across machines
+  never takes records nobody was shown. An agent use count reads a row whose session is gone by its
+  kept request, so a deleted session still counts as an agent started.
 - Shown beside a pinned view (the Runs panel): time, tool, caller (with the session's name), status,
   duration, and the reason of a failure. Reading one app's runs returns its rows **and the chain
   under them** (the other apps it called, the requests it and they made), and the panel indents each
-  row under the one that caused it, jumps to an agent's session ("Open session"), and re-reads
+  row under the one that caused it, jumps to an agent's session ("Open session"), or says a deleted
+  one's record is in Settings → Trash (#378), and re-reads
   whenever a row it shows begins, gets its agent session, or ends: the host announces that per app
   (`external_app_runs_changed`, coalesced like §6.3's notification) for every row of the app and of
   the chain under it, a read-only tool's call and the agent run it asked for included. Open views do
@@ -864,9 +883,15 @@ gate happens in one place, the broker desk (`desk.ts`).
   waits for the turn and returns the final answer: the agent's text after its last tool call. With
   `schema` (a JSON Schema whose top level is an object), Claude receives it as `outputFormat` when
   the query starts and Codex as the turn's `outputSchema`; the host validates the answer against
-  the same schema and returns it as `structuredContent`. A finished session is left `idle` in the
-  list (archiving was retired, FR-20), so it does not wait in the inbox; an agent session gets no
-  apps.
+  the same schema and returns it as `structuredContent`. A finished session is left `idle`, so it
+  does not wait in the inbox; an agent session gets no apps. **Once the run ends cleanly it is
+  deleted (#378)** and its record kept in the trash (§5.2): an app that calls `run_agent` a few dozen
+  times a day filled the sidebar with sessions nobody would talk to. It stays in the list, as before,
+  when the run failed, was stopped or cancelled (the person needs to see what went wrong, a schema
+  mismatch included), when a card was shown during it (the person took part), or when the person
+  opened it or wrote to it while it ran (it has become theirs). While it runs it is visible as any
+  session: its approval cards appear there. The app has its answer once the session is gone, so a
+  screen that reads `sessions.list` after its call sees it as it stays.
 - **`call_app { app, tool, args }`.** Only apps listed in `uses.apps` and only their `model` tools,
   through `ExternalApps.call` with caller `app` and the parent run id (§5): visibility, trust, the
   record, the change notification (the cause is the asking run) and cancellation are the same as

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { TrashedSession } from '@cc/protocol'
+import type { TrashedRun, TrashedSession } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { useToolMeta } from '../../store/selectors.js'
-import { Markdown } from '../session/Markdown.jsx'
+import { ReaderItem } from './TrashReaderItem.jsx'
+import { TrashRunReader, TrashRuns } from './TrashRuns.jsx'
 
 /**
  * Settings → Trash (#204): the way out of a deleted session, built in the same change as the way in.
@@ -20,9 +21,11 @@ import { Markdown } from '../session/Markdown.jsx'
 export function TrashSection() {
   const platform = usePlatform()
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
-  const [trash, setTrash] = useState<{ sessions: TrashedSession[]; bytes: number } | null>(null)
+  const [trash, setTrash] = useState<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reading, setReading] = useState<TrashedSession | null>(null)
+  /** A kept app-agent run being read (#378) */
+  const [readingRun, setReadingRun] = useState<TrashedRun | null>(null)
   /** The one confirmation open: a session, or the whole trash */
   const [confirming, setConfirming] = useState<TrashedSession | 'all' | null>(null)
   const [busy, setBusy] = useState(false)
@@ -43,6 +46,7 @@ export function TrashSection() {
   useEffect(load, [load])
 
   if (reading) return <TrashReader session={reading} onBack={() => setReading(null)} />
+  if (readingRun) return <TrashRunReader run={readingRun} onBack={() => setReadingRun(null)} />
 
   const act = async (id: string | null, run: () => Promise<string | null>) => {
     setBusy(true)
@@ -65,18 +69,36 @@ export function TrashSection() {
         (e: Error) => e.message,
       ),
     )
-  const emptyAll = () =>
-    act(null, () =>
-      platform.trash.empty().then(
-        (r) =>
-          r.failed.length === 0
-            ? null
-            : `${r.failed.length} stayed in the trash: ${r.failed.map((f) => `${f.name} — ${f.error}`).join('; ')}`,
+  const purgeRuns = (runIds: string[], at: string) =>
+    act(at, () =>
+      platform.trash.purgeRuns(runIds).then(
+        () => null,
         (e: Error) => e.message,
       ),
     )
+  /*
+   * The sessions, then the run records this screen listed (#378): `trash.empty` leaves the records alone, so a linked
+   * machine's are never deleted unseen
+   */
+  const emptyAll = () =>
+    act(null, async () => {
+      const runIds = (trash?.runs ?? []).map((r) => r.runId)
+      const failed: string[] = []
+      if (sessions.length) {
+        await platform.trash.empty().then(
+          (r) => {
+            if (r.failed.length) failed.push(`${r.failed.length} stayed in the trash: ${r.failed.map((f) => `${f.name} — ${f.error}`).join('; ')}`)
+          },
+          (e: Error) => failed.push(e.message),
+        )
+      }
+      if (runIds.length) await platform.trash.purgeRuns(runIds).catch((e: Error) => failed.push(`The app runs stayed: ${e.message}`))
+      return failed.length ? failed.join(' ') : null
+    })
 
   const sessions = trash?.sessions ?? []
+  const runs = trash?.runs ?? []
+  const nothing = sessions.length === 0 && runs.length === 0
   return (
     <section data-testid="settings-trash">
       <p className="text-xs leading-body text-ink-faint">
@@ -94,12 +116,12 @@ export function TrashSection() {
         <span className="readout text-sm text-ink-muted" data-testid="trash-total">
           {trash === null
             ? 'Loading…'
-            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'} · ${formatBytes(trash.bytes)}`}
+            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''} · ${formatBytes(trash.bytes)}`}
         </span>
         <button
           type="button"
           className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-40 disabled:hover:text-ink-faint"
-          disabled={sessions.length === 0 || busy}
+          disabled={nothing || busy}
           onClick={() => setConfirming('all')}
           data-testid="trash-empty"
         >
@@ -109,7 +131,7 @@ export function TrashSection() {
 
       {confirming === 'all' && (
         <Confirm
-          text={`Delete all ${sessions.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below. This cannot be undone.`}
+          text={`Delete all ${sessions.length + runs.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below${runs.length ? ', and the kept app runs' : ''}. This cannot be undone.`}
           busy={busy}
           onYes={emptyAll}
           onNo={() => setConfirming(null)}
@@ -121,11 +143,11 @@ export function TrashSection() {
         </p>
       )}
 
-      {trash !== null && sessions.length === 0 ? (
+      {trash !== null && nothing ? (
         <p className="mt-2 text-sm text-ink-faint" data-testid="trash-list-empty">
           The trash is empty
         </p>
-      ) : (
+      ) : sessions.length === 0 ? null : (
         <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid="trash-list">
           {sessions.map((s) => (
             <li key={s.id} className="px-2.5 py-2" data-testid={`trash-row-${s.id}`}>
@@ -187,6 +209,12 @@ export function TrashSection() {
             </li>
           ))}
         </ul>
+      )}
+      <TrashRuns runs={runs} busy={busy} onRead={setReadingRun} onPurge={purgeRuns} />
+      {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
+        <p className="mt-1.5 text-xs leading-body text-ink" data-testid="trash-runs-error">
+          {rowError.text}
+        </p>
       )}
     </section>
   )
@@ -291,42 +319,3 @@ function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () 
     </section>
   )
 }
-
-function ReaderItem({ item }: { item: ChatItem }) {
-  switch (item.kind) {
-    case 'user':
-      return (
-        <li className="rounded-md bg-surface-raised px-2.5 py-1.5 text-sm whitespace-pre-wrap text-ink">
-          {item.from && <span className="mr-1.5 text-2xs text-ink-faint">from {item.from.name}</span>}
-          {item.text}
-          {item.attachments?.length ? (
-            <span className="ml-1.5 text-2xs text-ink-faint">
-              +{item.attachments.length} {item.attachments.length === 1 ? 'attachment' : 'attachments'}
-            </span>
-          ) : null}
-        </li>
-      )
-    case 'assistant':
-      return (
-        <li className="text-sm">
-          <Markdown text={item.text} projectRoot={null} />
-        </li>
-      )
-    case 'tool':
-      return <li className="font-mono text-2xs text-ink-faint">▸ {item.title || item.tool}</li>
-    case 'approval':
-      return (
-        <li className="text-2xs text-ink-faint">
-          Approval · {item.summary}
-          {item.decision ? ` — ${item.decision}` : ''}
-        </li>
-      )
-    case 'mark':
-      return <li className="border-t border-line/60 pt-1 text-center text-2xs text-ink-faint">{item.text}</li>
-    case 'image':
-      return <li className="text-2xs text-ink-faint">[image]</li>
-    case 'reasoning':
-      return null
-  }
-}
-

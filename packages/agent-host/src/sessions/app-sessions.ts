@@ -1,4 +1,5 @@
 import { orchestratorHome } from './orchestrator-home.js'
+import type { WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait } from './app-agents.js'
@@ -65,6 +66,10 @@ export type AppSessionsHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly record: SessionRecord
   rename: (sessionId: string, name: string) => void
+  /** The way a session goes (#378): to the trash, then deleted for good (`SessionTrash`) */
+  trashSession: (sessionId: string, removeWorktree?: boolean, removeExternal?: boolean, recovery?: WorktreeRecovery, fromCleanup?: boolean) => Promise<void>
+  purgeSession: (sessionId: string) => Promise<void>
+  emit: (e: NormalizedEvent) => void
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   readonly store: Store
 }
@@ -292,12 +297,11 @@ export class AppSessions {
    *             "work an app asked for" header (the rule from #120).
    *   Apps      None are attached (see the comment on `appsFor`).
    *
-   * **When it finishes, it is left to rest rather than archived.** The plan called for "archiving it",
-   * but the archive feature was dropped (2026-09-02, FR-20 — there is no session invisible to the app:
-   * a hidden session was indistinguishable from a deleted one). So a finished session simply has its
-   * process closed and is left `idle`. It stays in the list so what it did can still be read, but since
-   * it never ends up `waiting_input`, it never appears in the inbox — a turn whose answer an app has
-   * already collected is not a turn waiting on a person's reply.
+   * **When it finishes, its process is closed and it is left `idle`**, never `waiting_input`, so it never appears in
+   * the inbox: a turn whose answer an app has already collected is not a turn waiting on a person's reply. Once the
+   * desk has closed the run as `ok`, the session is deleted and its record kept in the trash (`agentRunEnded`, #378),
+   * unless the person took part in it. (The plan's "archive it" went with the archive, FR-20: a hidden session was
+   * indistinguishable from a deleted one. An app calling run_agent a few dozen times a day then filled the sidebar.)
    *
    * A cancellation (the requesting call was canceled, or something upstream in the chain stopped)
    * interrupts that session. If the person stops or deletes that session directly, the wait also ends,
@@ -395,19 +399,75 @@ export class AppSessions {
       }
     }
     ctx.signal.addEventListener('abort', onAbort, { once: true })
+    let answered = false
     try {
       // It could have been canceled while the session was still being stood up — a listener attached to a
       // signal that already fired is never called (the same pitfall as runtime.call)
       if (ctx.signal.aborted) onAbort()
       else await this.host.deliver(id, req.prompt, undefined, undefined, false, { appId: req.app.appId, projectId: req.app.projectId, name: req.appName }, 'request')
       const { output } = await wait.done
+      answered = true
       // The answer is read from the store — what a person sees in that session and what the app receives are
       // the same text
       return { sessionId: id, text: turnAnswer(this.host.store.messages.loadMessages(id, 50)), ...(output !== undefined ? { output } : {}) }
     } finally {
       ctx.signal.removeEventListener('abort', onAbort)
       await this.finishAppAgent(id, wait)
+      // Held until the desk says how the run ended (`agentRunEnded`): only an answer can end it cleanly
+      if (answered && !wait.deleted) this.answeredRuns.set(id, { appName: req.appName, tookPart: wait.personTookPart })
     }
+  }
+
+  /**
+   * App-agent sessions that answered, until the desk closes their run (#378), with how the person took part if they did.
+   * The entry lives between the turn's end and the desk's verdict, which comes in the same call (the schema check).
+   */
+  private readonly answeredRuns = new Map<string, { appName: string; tookPart: AgentRunWait['personTookPart'] }>()
+
+  /**
+   * The person opened an app-agent session or wrote to it (#378) while its run was on: it has become theirs, and it
+   * stays when the run ends. A card shown to them counts too, which the run's wait sees itself (`AgentRunWait`).
+   */
+  noteTookPart(sessionId: string, how: 'opened' | 'wrote'): void {
+    const run = this.host.agentRuns.get(sessionId)
+    if (run) run.personTookPart ??= how
+    const answered = this.answeredRuns.get(sessionId)
+    if (answered) answered.tookPart ??= how
+  }
+
+  /**
+   * A run_agent run is over (#378): its session is deleted when the run ended cleanly and nobody took part in it, and
+   * what it did is kept in the trash as the run's record (the app's request, the answer, the whole conversation). It
+   * stays, as before, when the run failed, was stopped or cancelled (the person needs to see what went wrong), when a
+   * card was shown during it, or when the person opened it or wrote to it.
+   */
+  async agentRunEnded(run: { runId: string; sessionId: string; status: string }): Promise<void> {
+    const answered = this.answeredRuns.get(run.sessionId)
+    this.answeredRuns.delete(run.sessionId)
+    if (!answered || run.status !== 'ok' || answered.tookPart) return
+    // A failure leaves the session where it is, as before #378: never the app's to hear about
+    await this.deleteAnsweredAgent(run.runId, run.sessionId, answered.appName).catch((e: Error) =>
+      console.error(`[apps] the agent session ${run.sessionId.slice(0, 8)} of a finished run was not deleted: ${e.message}`),
+    )
+  }
+
+  private async deleteAnsweredAgent(runId: string, sessionId: string, appName: string): Promise<void> {
+    const m = this.host.meta.get(sessionId)
+    if (!m) return
+    // Woken since (a person's message, a card): it is in use, and stays
+    if (inTurn(m.state) || this.host.handles.has(sessionId) || this.host.agentRuns.has(sessionId) || m.pendingApproval || m.pendingQuestions.length) return
+    const projectName = m.projectId ? (this.host.store.projects.listProjects().find((p) => p.id === m.projectId)?.name ?? null) : null
+    // The record first: a session whose record could not be kept stays, so what it did is never lost
+    if (!this.host.store.keptRuns.keepRun({ runId, sessionId, sessionName: m.name, appName, projectName, tool: m.tool, keptAt: Date.now() })) return
+    /*
+     * The tool's own conversation file goes with it when the tool can delete it: the record holds the whole conversation,
+     * and a file left behind would be listed under + → Past conversations for every run an app ever made.
+     */
+    const removeExternal = !!(m.externalId ?? m.importedFrom) && !!this.host.adapters.get(m.tool)?.deleteExternalConversation
+    await this.host.trashSession(sessionId, false, removeExternal)
+    await this.host.purgeSession(sessionId)
+    // The app's runs panel reads the run as kept now
+    if (m.appId) this.host.emit({ type: 'external_app_runs_changed', appId: m.appId, projectId: m.projectId })
   }
 
   /** Lets an agent session that has handed over its answer (or otherwise ended) rest — closes the process and

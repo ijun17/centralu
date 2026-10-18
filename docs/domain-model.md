@@ -37,7 +37,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Worktree session (worker) | A session working in its own git worktree and branch. One the person makes stands on its own; one a session started with `start_agent` hangs under that session (`parentSessionId`). The worktree manager that held them is gone (#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | branch session |
 | Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and trashed like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf` on `AppSessions`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
-| App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
+| App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app. Once its run ends cleanly and nobody took part, it is deleted and its record kept in the trash (#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | Delegated session | `<<role>>` An existing ordinary session that another project's session gave a task through `ask_project`. Centralu never creates a session in another project for it (#614) and puts no mark on it: the asker is the task's `from` in the conversation, and the task runs as a delegated turn. Before #614 `ask_project` started or reused one and marked it with `askedBy`; those marks are removed | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
 | Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. Like a session working on another project's task, it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent` in `sessions/start-agent-flow.ts`, `agentSession` in `sessions/delegation-flow.ts` (both reached through `manager.ts`); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
 | Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `scoped`, `builder`, `reader`, or none (the worktree manager's `manager` was folded into ordinary sessions, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (asked through `toolProfileOf`, `manager.ts`); [agent-host.md](agent-host.md) §1.1 | |
@@ -350,7 +350,9 @@ An app that is `invalid`, `untrusted`, `unconfirmed` or `failed` is given to nob
 
 Where it is stored:
 
-- `app_runs`: the run ledger.
+- `app_runs`: the run ledger; a `run_agent` row also keeps its request and answer (#378).
+- `app_run_records`: the record of a deleted app-agent session in the trash (#378), with what the trash lists.
+- `app_run_messages`: that record's copy of the session's whole conversation (#378).
 - `app_run_failures`: the raw arguments and result of an app's latest failed calls (20 kept), for its builder.
 - `app_permissions`: a person's answer per app and capability, with the `uses` fingerprint it was given for.
 - `app_settings`: host-owned settings as key and value; for apps the builder map (`apps.builders`), sharing
@@ -633,13 +635,19 @@ sequenceDiagram
   M->>AG: new session, appId set, safe preset, prompt
   AG-->>M: turn_complete
   M-->>B: final answer (validated against a schema if given)
+  B->>B: run row closed (request, answer)
+  B->>M: agentRunEnded
+  opt ok, and nobody took part
+    M->>M: keep the record (app_run_records), session to the trash and deleted
+  end
   B-->>App: result
   App-->>R: tool result
   R-->>V: result, run row closed
 ```
 
 Each `run_agent` stands up a new session; nothing is reused. The broker's request gets its own run row under the
-tool call's (`parentRunId`), linked to the session it stood up.
+tool call's (`parentRunId`), linked to the session it stood up. A clean run takes its session with it before the app
+has its answer (#378); the record of what it did stays in the trash.
 
 ### 5.4 Switching builds (blue-green swap, with a keeper)
 

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { StoredMessage } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
+import { KeptRuns } from './store/kept-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
@@ -79,6 +80,8 @@ export class Store extends MigrationRunner {
   readonly settings: SettingsRecords
   readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
+  /** The records of deleted app-agent sessions, kept in the trash (#378) */
+  readonly keptRuns: KeptRuns
   readonly children: ChildOwnershipRecords
   readonly machines: LinkedMachineRecords
 
@@ -98,6 +101,7 @@ export class Store extends MigrationRunner {
     this.trash = new TrashRecords(this.db, this.sessions)
     this.permissions = new PermissionRecords(this.db)
     this.appRuns = new AppRunRecords(this.db)
+    this.keptRuns = new KeptRuns(this.db)
     this.children = new ChildOwnershipRecords(this.db)
     this.machines = new LinkedMachineRecords(this.db, this.settings)
     try {

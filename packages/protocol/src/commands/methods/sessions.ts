@@ -24,6 +24,7 @@ import {
   SUBAGENT_STEPS_PAGE,
   SessionInfo,
   StoredMessage,
+  TrashedRun,
   TrashedSession,
   UpdateSettingsParams,
   UpdateSettingsResult,
@@ -433,11 +434,29 @@ export const sessionMethods = {
    * The trash (#204). Only the person reaches these: the RPC is the UI's channel, and neither the agents' tools nor
    * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
    *
-   * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own.
+   * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own. `runs` are
+   * the records of deleted app-agent sessions (#378), which `bytes` counts too: the hub's own, never a linked
+   * machine's; a host older than #378 sends none.
    */
   'trash.list': {
     params: z.object({}),
-    result: z.object({ sessions: z.array(TrashedSession), bytes: z.number() }),
+    result: z.object({ sessions: z.array(TrashedSession), runs: z.array(TrashedRun).default([]), bytes: z.number() }),
+  },
+  /**
+   * An app-agent run's record (#378), read-only: the request and the answer as the app's run saw them, the structured
+   * output when the app gave a schema, and a page of the conversation in the same shape as `trash.read`
+   */
+  'trash.readRun': {
+    params: z.object({ runId: z.string(), limit: z.number().default(200), beforeSeq: z.number().optional() }),
+    result: z.object({ request: z.string(), answer: z.string(), output: z.unknown().optional(), messages: z.array(StoredMessage) }),
+  },
+  /**
+   * Deletes app-agent run records for good (#378): one, every record of one app, or every one listed. Like
+   * `trash.readRun`, served by the hub alone: the records are the hub's (`trash.list` merges no other machine's).
+   */
+  'trash.purgeRuns': {
+    params: z.object({ runIds: z.array(z.string()).min(1) }),
+    result: z.object({ purged: z.number() }),
   },
   /** A trashed conversation, read-only — the same page shape as `messages.load` */
   'trash.read': {
@@ -457,7 +476,11 @@ export const sessionMethods = {
     params: z.object({ sessionId: SessionId }),
     result: z.object({ ok: z.literal(true) }),
   },
-  /** Deletes everything in the trash for good. One that fails stays in the trash and is reported; the rest go on */
+  /**
+   * Deletes every session in the trash for good. One that fails stays in the trash and is reported; the rest go on.
+   * The app-agent run records (#378) are not touched: they are this machine's alone, and the window deletes the ones it
+   * listed with `trash.purgeRuns`, so emptying across linked machines never takes records nobody was shown.
+   */
   'trash.empty': {
     params: z.object({}),
     result: z.object({

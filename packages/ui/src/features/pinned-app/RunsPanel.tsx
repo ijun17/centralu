@@ -294,6 +294,12 @@ function RunRow({
             Open session
           </button>
         )}
+        {/* Its session was deleted once the run ended cleanly (#378); what it did waits in the trash */}
+        {!onOpenSession && run.kept && (
+          <span className="shrink-0 text-2xs text-ink-faint" data-testid="run-kept">
+            in Settings → Trash
+          </span>
+        )}
         <span className="readout ml-auto shrink-0" data-testid="run-duration">
           {run.durationMs === null ? '…' : formatDuration(run.durationMs)}
         </span>

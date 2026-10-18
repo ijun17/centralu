@@ -13,6 +13,7 @@ import {
   type ProjectInfo,
   type SessionInfo,
   type StoredMessage,
+  type TrashedRun,
   type TrashedSession,
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
@@ -264,8 +265,8 @@ export class SessionTrash {
     }
   }
 
-  /** The trash as Settings lists it (#204), with the total it takes on this machine */
-  async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
+  /** The trash as Settings lists it (#204), with the records of deleted app-agent sessions (#378) and the total it takes on this machine */
+  async listTrash(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number }> {
     const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p]))
     const sessions = await Promise.all(
       this.host.store.trash.listTrash().map(async (r): Promise<TrashedSession> => {
@@ -296,7 +297,34 @@ export class SessionTrash {
         }
       }),
     )
-    return { sessions, bytes: sessions.reduce((a, s) => a + s.bytes, 0) }
+    const runs = this.host.store.keptRuns.listKeptRuns().map((r): TrashedRun => ({
+      runId: r.runId,
+      app: { id: r.appId, name: r.appName, projectId: r.projectId, projectName: r.projectId ? (projects.get(r.projectId)?.name ?? r.projectName) : null },
+      sessionName: r.sessionName,
+      tool: r.tool,
+      status: r.status,
+      startedAt: r.startedAt,
+      keptAt: r.keptAt,
+      durationMs: r.durationMs,
+      tokens: r.tokens,
+      requestPreview: r.requestPreview,
+      messages: r.messages,
+      bytes: r.bytes,
+    }))
+    return { sessions, runs, bytes: sessions.reduce((a, s) => a + s.bytes, 0) + runs.reduce((a, r) => a + r.bytes, 0) }
+  }
+
+  /** An app-agent run's record, read-only (#378): its request, answer and structured output, and a page of its conversation */
+  readTrashedRun(runId: string, limit: number, beforeSeq?: number): { request: string; answer: string; output?: unknown; messages: StoredMessage[] } {
+    const r = this.host.store.keptRuns.readKeptRun(runId, limit, beforeSeq)
+    if (!r) throw rpcError(`Not in the trash: ${runId}`, 'session_not_found')
+    const output = r.output === null ? undefined : (() => { try { return JSON.parse(r.output) as unknown } catch { return r.output } })()
+    return { request: r.request, answer: r.answer, ...(output !== undefined ? { output } : {}), messages: r.messages }
+  }
+
+  /** Deletes app-agent run records for good (#378), only from Settings like a trashed session */
+  purgeTrashedRuns(runIds: readonly string[]): { purged: number } {
+    return { purged: this.host.store.keptRuns.purgeKeptRuns(runIds) }
   }
 
   /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
@@ -454,7 +482,10 @@ export class SessionTrash {
     })
   }
 
-  /** Deletes everything in the trash for good. One that fails stays and is reported; the rest go on */
+  /**
+   * Deletes every session in the trash for good. One that fails stays and is reported; the rest go on. The app-agent run
+   * records (#378) are the window's to delete by id (`purgeTrashedRuns`), so a linked machine's are never emptied unseen.
+   */
   async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
     let purged = 0
     const failed: { sessionId: string; name: string; error: string }[] = []

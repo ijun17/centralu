@@ -141,8 +141,9 @@ export class TrashRecords {
    *
    * Everything that points at the session goes with it: its messages and whatever is left of their index, the steps
    * of the subagents it launched (`subagent_messages`, #222), its approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
-   * longer existed, because deleting used to leave them behind), and the app runs it started or ran in
-   * (`app_runs.session_id` / `caller_session_id`, with their kept failures).
+   * longer existed, because deleting used to leave them behind). The app runs it started or ran in stay in their app's
+   * run log with the link cleared (`app_runs.session_id` / `caller_session_id`, #378): until then purging an app-agent
+   * session erased its run, and purging a session that called an app erased those calls, from the app's history.
    *
    * Chunked like `trashSession` (#179: on the same copy of the real store the longest pause went from 2.9s to 84ms;
    * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
@@ -169,10 +170,8 @@ export class TrashRecords {
       if (rows.length === chunk) return false
       this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM commit_sessions WHERE session_id = ?`).run(sessionId)
-      this.db
-        .prepare(`DELETE FROM app_run_failures WHERE run_id IN (SELECT id FROM app_runs WHERE session_id = ? OR caller_session_id = ?)`)
-        .run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      this.db.prepare(`UPDATE app_runs SET session_id = NULL WHERE session_id = ?`).run(sessionId)
+      this.db.prepare(`UPDATE app_runs SET caller_session_id = NULL WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)

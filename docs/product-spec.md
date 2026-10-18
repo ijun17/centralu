@@ -565,12 +565,23 @@ with no way back.
 - **Nobody but the person deletes for good.** The trash is reached only through the UI's RPC; the
   agents' tools and the apps' broker have no verb for it. An agent can put a session in the trash (a session's
   deletion of an agent it started, `agent_session` `delete`, does; a child without a worktree is stopped first), never take one out of it.
+- **The one deletion the host makes itself: a finished app-agent session** ([#378](https://github.com/ijun17/centralu/issues/378)).
+  A session an app stood up with `run_agent` is deleted for good once its run ends cleanly, because what
+  it did is kept as the run's record: the app's request, the answer and the whole conversation, tool
+  calls included (owner decision, 2026-10-06). An app calling `run_agent` a few dozen times a day filled
+  the sidebar with sessions nobody would talk to. It stays a session, as before, when the run failed,
+  was stopped or cancelled, when a card was shown during it, or when the person opened it or wrote to it
+  while it ran. The records wait in Settings → Trash, grouped by app, next to trashed sessions: each
+  reads (request, answer, status, tokens, conversation) and is deleted for good there, one, an app's
+  all, or with the trash emptied. They go on their own only with the run log's 30-day retention.
 - Schema v39 adds `sessions.deleted_at` (NULL for a live session) and `sessions.trash` (JSON: where it
   came from, and what to remove when it is deleted for good). A trashed session has no `project_id`;
   its project is in `trash`, which is what lets its project be deleted without the foreign key taking
   the session with it. Later migrations have to consider rows that belong to a trashed session.
 - Not covered: attachments of a trashed session stay under the same 500MB attachment cap as every
-  attachment, and app runs pointing at it under the app-run retention.
+  attachment, and app runs pointing at it under the app-run retention. Deleting a session for good no
+  longer deletes those runs: they stay in the app's run log with the link cleared (#378). An agent cannot
+  read the kept records yet ([#1106](https://github.com/ijun17/centralu/issues/1106), #378's fourth part, left for a decision on what a tool for it may cost).
 
 ---
 

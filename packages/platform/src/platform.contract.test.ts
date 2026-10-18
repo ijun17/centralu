@@ -494,6 +494,14 @@ describe.each([
     await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the trash/)
   })
 
+  // App-agent run records (#378): the mock never runs an app's agent, but the empty answers match the host's
+  it('the trash lists its app-agent run records, and one that is not there reads and deletes as gone', async () => {
+    const listed = await h.platform.trash.list()
+    expect(listed.runs).toEqual([])
+    await expect(h.platform.trash.readRun('run_missing')).rejects.toThrow(/Not in the trash/)
+    expect(await h.platform.trash.purgeRuns(['run_missing'])).toEqual({ purged: 0 })
+  })
+
   /*
    * Where the mock had drifted from the host (#999): each of these answered differently in the mock, so e2e and the
    * demo showed what the app does not.

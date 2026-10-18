@@ -39,7 +39,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 사람이 만든 것은 따로 서고, 세션이 `start_agent`로 띄운 것은 그 세션 아래에 놓인다(`parentSessionId`). 이것들을 쥐던 워크트리 매니저는 없어졌다(#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
 | 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 휴지통에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `AppSessions`의 `builderRefOf`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
-| 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다 | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
+| 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다. 실행이 깨끗하게 끝나고 아무도 참여하지 않았으면 지워지고, 그 기록이 휴지통에 남는다(#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 일을 준, 이미 있는 평범한 세션. Centralu는 그 일을 위해 다른 프로젝트에 세션을 만들지 않고(#614) 표시도 붙이지 않는다. 부탁한 세션은 대화 속 그 일의 `from`이고, 일은 맡긴 턴으로 돈다. #614 이전에는 `ask_project`가 세션을 세우거나 다시 쓰고 `askedBy`로 표시했으며, 그 표시는 지워진다 | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
 | 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 다른 프로젝트의 일을 하는 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `sessions/start-agent-flow.ts`의 `startAgent`, `sessions/delegation-flow.ts`의 `agentSession`(둘 다 `manager.ts`를 거쳐 닿는다); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
@@ -349,7 +349,9 @@ classDiagram
 
 저장되는 곳:
 
-- `app_runs`: 실행 기록.
+- `app_runs`: 실행 기록. `run_agent` 줄은 부탁과 답도 남긴다(#378).
+- `app_run_records`: 휴지통에 남은, 지운 앱 에이전트 세션의 기록(#378). 휴지통이 보여 주는 것.
+- `app_run_messages`: 그 기록에 복사해 둔 세션의 대화 전체(#378).
 - `app_run_failures`: 앱의 최근 실패한 호출의 원래 인자와 결과(20개까지). 빌더를 위해.
 - `app_permissions`: 앱과 능력마다 사람이 한 답, 그리고 그 답을 준 때의 `uses` 지문.
 - `app_settings`: 호스트가 가진 설정을 키와 값으로. 앱에 관해서는 빌더 지도(`apps.builders`), 공유
@@ -626,13 +628,19 @@ sequenceDiagram
   M->>AG: new session, appId set, safe preset, prompt
   AG-->>M: turn_complete
   M-->>B: final answer (validated against a schema if given)
+  B->>B: run row closed (request, answer)
+  B->>M: agentRunEnded
+  opt ok, and nobody took part
+    M->>M: keep the record (app_run_records), session to the trash and deleted
+  end
   B-->>App: result
   App-->>R: tool result
   R-->>V: result, run row closed
 ```
 
 `run_agent`마다 새 세션을 세운다. 다시 쓰는 것은 없다. 중개자에게 온 부탁은 도구 호출의 실행 줄 아래에 자기 실행
-줄을 받고(`parentRunId`), 그것이 세운 세션과 이어진다.
+줄을 받고(`parentRunId`), 그것이 세운 세션과 이어진다. 깨끗하게 끝난 실행은 앱이 답을 받기 전에 그 세션을 데리고
+간다(#378). 그것이 한 일의 기록은 휴지통에 남는다.
 
 ### 5.4 빌드 바꾸기(키퍼가 있을 때의 블루그린 스왑)
 

@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 55, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 56, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -51,6 +51,33 @@ erDiagram
     TEXT result
     INTEGER created_at
   }
+  app_run_messages {
+    TEXT run_id PK
+    INTEGER seq PK
+    TEXT role
+    TEXT kind
+    TEXT payload
+    INTEGER ts
+  }
+  app_run_records {
+    TEXT run_id PK
+    TEXT project_id
+    TEXT project_name
+    TEXT app_id
+    TEXT app_name
+    TEXT session_id
+    TEXT session_name
+    TEXT tool
+    TEXT status
+    INTEGER duration_ms
+    INTEGER tokens_in
+    INTEGER tokens_out
+    TEXT request
+    TEXT answer
+    TEXT output
+    INTEGER started_at
+    INTEGER kept_at
+  }
   app_runs {
     TEXT id PK
     TEXT project_id
@@ -69,6 +96,9 @@ erDiagram
     TEXT session_id
     INTEGER tokens_in
     INTEGER tokens_out
+    TEXT request
+    TEXT answer
+    TEXT output
   }
   app_settings {
     TEXT key PK
@@ -287,6 +317,47 @@ Added in v34.
 | `result` | TEXT | yes |  |  | v34 |
 | `created_at` | INTEGER | no |  |  | v34 |
 
+### `app_run_messages`
+
+Added in v56.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | no |  | PK 1 | v56 |
+| `seq` | INTEGER | no |  | PK 2 | v56 |
+| `role` | TEXT | no |  |  | v56 |
+| `kind` | TEXT | no |  |  | v56 |
+| `payload` | TEXT | no |  |  | v56 |
+| `ts` | INTEGER | no |  |  | v56 |
+
+### `app_run_records`
+
+Added in v56.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | yes |  | PK | v56 |
+| `project_id` | TEXT | yes |  |  | v56 |
+| `project_name` | TEXT | yes |  |  | v56 |
+| `app_id` | TEXT | no |  |  | v56 |
+| `app_name` | TEXT | no |  |  | v56 |
+| `session_id` | TEXT | no |  |  | v56 |
+| `session_name` | TEXT | no |  |  | v56 |
+| `tool` | TEXT | no |  |  | v56 |
+| `status` | TEXT | no |  |  | v56 |
+| `duration_ms` | INTEGER | yes |  |  | v56 |
+| `tokens_in` | INTEGER | yes |  |  | v56 |
+| `tokens_out` | INTEGER | yes |  |  | v56 |
+| `request` | TEXT | no |  |  | v56 |
+| `answer` | TEXT | no |  |  | v56 |
+| `output` | TEXT | yes |  |  | v56 |
+| `started_at` | INTEGER | no |  |  | v56 |
+| `kept_at` | INTEGER | no |  |  | v56 |
+
+Indexes:
+
+- `idx_app_run_records_app`: `app_id`, `project_id`, `started_at`
+
 ### `app_runs`
 
 Added in v34.
@@ -310,6 +381,9 @@ Added in v34.
 | `session_id` | TEXT | yes |  |  | v37 |
 | `tokens_in` | INTEGER | yes |  |  | v38 |
 | `tokens_out` | INTEGER | yes |  |  | v38 |
+| `request` | TEXT | yes |  |  | v56 |
+| `answer` | TEXT | yes |  |  | v56 |
+| `output` | TEXT | yes |  |  | v56 |
 
 Indexes:
 

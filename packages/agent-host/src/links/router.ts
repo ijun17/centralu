@@ -420,10 +420,12 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
     case 'trash.list': {
       const a = isObj(acc) ? acc : { sessions: [], bytes: 0 }
       const b = isObj(r) ? r : { sessions: [], bytes: 0 }
+      // A machine's app-agent run records stay its own (#378): neither listed here nor counted in the total
+      const runBytes = list(b.runs).reduce((n: number, x) => n + (isObj(x) && typeof x.bytes === 'number' ? x.bytes : 0), 0)
       return {
         ...a,
         sessions: [...list(a.sessions), ...list(b.sessions).map((t) => q.trashed(t))],
-        bytes: (typeof a.bytes === 'number' ? a.bytes : 0) + (typeof b.bytes === 'number' ? b.bytes : 0),
+        bytes: (typeof a.bytes === 'number' ? a.bytes : 0) + (typeof b.bytes === 'number' ? b.bytes - runBytes : 0),
       }
     }
     case 'trash.empty': {

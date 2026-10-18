@@ -766,6 +766,18 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       })
     })
 
+    // #378: the records of deleted app-agent sessions are the hub's own; a machine's are neither listed nor counted
+    it('keeps the hub’s app-agent run records and leaves a machine’s out of the list and the total', async () => {
+      const { router, localAnswers, m1 } = rig()
+      localAnswers['trash.list'] = { sessions: [], runs: [{ runId: 'run_h', bytes: 7 }], bytes: 7 }
+      m1.answers['trash.list'] = { sessions: [{ id: 'a', project: null }], runs: [{ runId: 'run_m', bytes: 30 }], bytes: 35 }
+      expect(await router.handle('trash.list', {})).toEqual({
+        sessions: [{ id: 'm1.a', project: null, machine: 'm1' }],
+        runs: [{ runId: 'run_h', bytes: 7 }],
+        bytes: 12,
+      })
+    })
+
     it('search hits name their machine’s sessions', async () => {
       const { router, localAnswers, m1 } = rig()
       localAnswers['messages.search'] = [{ sessionId: 'h1', seq: 1, snippet: 'x' }]
