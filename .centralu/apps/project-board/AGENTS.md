@@ -365,6 +365,13 @@ and refuses with every reason at once, sending nothing.
   heading whose guidance says "keep the heading" (Situations checked, Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
+  When those rules pass, it runs the repository's `pnpm pre-pr` (`scripts/pre-pr.mjs`, or
+  `rules.prePr` in project.json; #1181) in the checkout at `path` (default this app's), on the
+  pushed head and the branches of the open pull requests under it, fetched under
+  `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`). Its findings refuse
+  the pull request and nothing is sent; when it passes, Verified says so. `skipPrePr` opens without
+  it, and its reason goes into Verified. It runs outside `oneAtATime`, with progress every minute, since a
+  stack takes minutes; a fork's branch cannot be fetched here and needs `skipPrePr`.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
@@ -502,6 +509,7 @@ step shows on the screen.
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
+- `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers
   (`sleep`, `mapLimit`, `short`, `plural`) the modules share (pure).

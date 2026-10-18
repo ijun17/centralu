@@ -292,7 +292,23 @@ inherits PATH from your terminal, so it will never reproduce that class of bug.
 
 ## Before opening a pull request
 
-Ask these against your change. Put anything you could not check in **Not exercised**.
+**Run `pnpm pre-pr` first** (#1181). It checks what reviewers kept sending back that a machine can
+see, on your branch's commits (not the working tree), each in a temporary worktree:
+
+- `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
+  so it must build on its own;
+- dependency-cruiser's orphans as errors (`pnpm verify` only warns);
+- each new or changed test file, run with every other change of the pull request reverted to its
+  base: a new test that passes there protects nothing, and is reported;
+- that the branch contains main (rebased on it, or main merged in), and if not, what a merge would
+  conflict on.
+
+`pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
+checks a branch other than the one checked out. The board's `open_pr` runs it on the pushed branch
+and refuses with what it finds. When a finding stands for a reason (a test that cannot fail without
+the change, and why), give `open_pr` that reason as `skipPrePr`: it goes into **Verified**.
+
+Then ask these against your change. Put anything you could not check in **Not exercised**.
 
 - **What earlier state could still be there?** The keeper could still report a stale swap
   ([#621](https://github.com/ijun17/centralu/pull/621)).

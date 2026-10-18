@@ -5,8 +5,10 @@ import { itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repo
 import { APP_DIR, config } from './config.mjs'
 import { GitError } from './git.mjs'
 import { createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
+import { progress } from './ci-tools.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
+import { runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
@@ -121,7 +123,7 @@ async function commitCheck({ message, messages, repo }) {
 
 const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
 
-export async function openPr({ title, head, base, draft, repo, sections, dryRun, ...named }) {
+export async function openPr({ title, head, base, draft, repo, sections, dryRun, verifiedNote, ...named }) {
   const r = repoOf(repo)
   const info = await readRepo(r)
   const target = base ?? info.defaultBranch
@@ -130,6 +132,11 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   if (template === null) throw new GitHubError('setup', `${r} has no pull request template on ${target} to fill (looked for ${RULES.prTemplates.join(', ')}). Nothing was opened.`)
   const given = { ...sections }
   for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined) given[heading] = named[k]
+  // What pnpm pre-pr said (or why it did not run) goes under Verified, where a reviewer reads what was run
+  if (verifiedNote) {
+    const key = Object.keys(given).find((k) => k.trim().toLowerCase() === 'verified') ?? 'Verified'
+    given[key] = [String(given[key] ?? '').trim(), verifiedNote].filter(Boolean).join('\n\n')
+  }
   const filled = fillTemplate(template, given)
   const { conventions } = await conventionsOf(r)
   const subject = subjectProblems(title, conventions)
@@ -157,6 +164,66 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
     }
   }
   return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}${stacked}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url, ...(stacked ? { drafted: lower.number } : {}) })
+}
+
+/** The branches of the open pull requests under `base`, oldest first: the rest of the stack. */
+async function lowerBranches(repo, base, defaultBranch) {
+  const chain = []
+  let branch = base
+  for (let i = 0; i < 20 && branch && branch !== defaultBranch && !chain.includes(branch); i++) {
+    const below = (await prsWithHead(repo, branch)).find((p) => p.state === 'OPEN')
+    if (!below) break
+    chain.unshift(branch)
+    branch = below.baseRefName
+  }
+  return chain
+}
+
+/**
+ * open_pr: the template and title rules first (cheap, and a wrong title is not learned after minutes),
+ * then the repository's pnpm pre-pr on the pushed commits (#1181), then the pull request. pre-pr's
+ * findings refuse it; `skipPrePr` with a reason opens it anyway and says so in Verified. pre-pr runs
+ * outside the one-write-at-a-time line, so other writes do not wait minutes behind it.
+ */
+async function openPrChecked({ skipPrePr, path, ...args }, ctx) {
+  if (args.dryRun) {
+    const dry = await openPr(args)
+    return dry.isError || skipPrePr !== undefined ? dry : { ...dry, content: [{ type: 'text', text: `${dry.content[0].text}\npnpm pre-pr runs when it opens (or give skipPrePr with the reason).` }] }
+  }
+  const dry = await openPr({ ...args, dryRun: true })
+  if (dry.isError) return dry
+  let note
+  if (skipPrePr !== undefined) {
+    const why = String(skipPrePr).trim()
+    if (!why) throw new GitHubError('input', 'skipPrePr needs the reason the checks are skipped; it goes into the description.')
+    note = `\`pnpm pre-pr\` was not run: ${why}`
+  } else {
+    if (String(args.head).includes(':')) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${args.head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
+    const r = repoOf(args.repo)
+    const info = await readRepo(r)
+    const target = args.base ?? info.defaultBranch
+    const lowers = await lowerBranches(r, target, info.defaultBranch)
+    progress(ctx, 0, `pnpm pre-pr on ${args.head}${lowers.length ? ` and the ${lowers.length} pull request(s) under it` : ''}`)
+    const res = await runPrePr({
+      dir: path ?? APP_DIR,
+      repo: r,
+      head: args.head,
+      base: target,
+      main: info.defaultBranch,
+      lowers,
+      script: config.rules?.prePr ?? 'scripts/pre-pr.mjs',
+      beat: (seconds) => progress(ctx, seconds, `pnpm pre-pr on ${args.head}: ${seconds} s so far`),
+    })
+    if (!res.ran) throw new GitHubError('input', `pnpm pre-pr did not run: ${res.why}. Give path (a checkout of ${r}), or skipPrePr with the reason it cannot run.`)
+    if (!res.ok) {
+      const found = res.findings.map((f) => `[${f.check}] ${f.message}`)
+      return asError(
+        linesAnswer(`Not opened: pnpm pre-pr found ${found.length} problem(s) on ${args.head}; nothing was sent to GitHub. Fix them and push, or give skipPrePr with the reason they stand.`, [['findings', '', found], ['notes', 'Notes:', res.notes]], { ok: false, prePr: { findings: res.findings, notes: res.notes } }),
+      )
+    }
+    note = `\`pnpm pre-pr\` passed at ${String(res.head ?? '').slice(0, 10)}: tsc at ${res.heads.length} head(s), no orphans, ${args.head} contains ${info.defaultBranch}, and no new test passes without the change.`
+  }
+  return serially(openPr)({ ...args, verifiedNote: note }, ctx)
 }
 
 async function fileIssue({ title, body, labels, repo, dryRun }) {
@@ -234,7 +301,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
+        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans, new tests that pass without the change, main merged in) and refuse with what it finds, unless skipPrePr gives the reason not to; then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),
@@ -247,6 +314,8 @@ export const tools = {
         notExercised: z.string().optional().describe('Surfaces this change touches that were not run; required'),
         closes: z.string().optional().describe('e.g. "Closes #386", or why there is no issue'),
         sections: z.record(z.string(), z.string()).optional().describe('Any heading of the template by its name, e.g. { "Screenshots": "…" }'),
+        skipPrePr: z.string().max(2000).optional().describe('Open without running pnpm pre-pr: the reason, which goes into Verified (e.g. a test that cannot fail without the change, and why)'),
+        path: pathInput,
         draft: z.boolean().optional(),
         repo: repoInput,
         dryRun: z.boolean().optional().describe('Fill and check without opening'),
@@ -254,7 +323,7 @@ export const tools = {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    handler: serially(answering(openPr, 'Not opened: ')),
+    handler: answering(openPrChecked, 'Not opened: '),
   },
 
   commit_check: {
