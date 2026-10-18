@@ -13,7 +13,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
-import { appKeyOf } from '@cc/protocol'
+import { appKeyOf, noSuchAppText } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
@@ -167,7 +167,7 @@ export class AppSessions {
     const rt = this.host.appsHub?.rt
     if (!rt) throw rpcError('External apps are unavailable')
     const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
-    if (!app) throw rpcError(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`)
+    if (!app) throw rpcError(noSuchAppText(ref))
     if (!app.trusted) {
       throw rpcError('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
     }

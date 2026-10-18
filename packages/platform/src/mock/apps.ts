@@ -1,4 +1,4 @@
-import { appKeyOf } from '@cc/protocol'
+import { appKeyOf, noSuchAppText } from '@cc/protocol'
 import type { AppRun, ExternalAppInfo } from '@cc/protocol'
 import type { AppCallOrigin, AppHomeView, AppResourceResult, AppToolResult, AppViewFrame, InlineViewKept, InlineViewReopened } from '../ports/index.js'
 import type { MockClock } from './clock.js'
@@ -178,7 +178,7 @@ export class AppsMock {
     remove: async (appId: string, projectId: string | null) => {
       if (projectId !== null) throw new Error("A project app is part of the project's repository — remove it there")
       const at = this.registry.externalAppList.findIndex((a) => a.appId === appId && a.projectId === null)
-      if (at === -1) throw new Error(`There is no such app: user/${appId}`)
+      if (at === -1) throw new Error(noSuchAppText({ projectId: null, appId }))
       this.registry.externalAppList.splice(at, 1)
       this.removedApps.push(appId)
       this.emit({ type: 'external_apps_changed' })
@@ -191,7 +191,7 @@ export class AppsMock {
     restart: async (appId: string, projectId: string | null) => {
       this.restarts.push({ appId, projectId })
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
-      if (!a) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
+      if (!a) throw new Error(noSuchAppText({ projectId, appId }))
       if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
       this.emit({ type: 'external_apps_changed' })
     },

@@ -1,6 +1,6 @@
 import { relative } from 'node:path'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, noSuchAppText, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -498,7 +498,7 @@ export function createRpcHandler(
       if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
       const project = (await mgr.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
-      if (!project || !app) throw rpcError(`There is no such app: ${projectId}/${appId}`)
+      if (!project || !app) throw rpcError(noSuchAppText({ projectId, appId }))
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
       return { kind: 'git' as const, repo, commits }
     },
