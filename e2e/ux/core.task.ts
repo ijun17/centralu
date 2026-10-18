@@ -67,11 +67,12 @@ uxTask({
   path: 'mouse',
   access: 'discoverable',
   notes: [
-    "The + on the project the person is in (#529) starts a session at once with the project's tool, model and effort (#543); the chevron beside it and the project's menu open the dialog that asks",
+    "The project menu's New session starts a session at once with the project's tool, model and effort (#543); the + on the project row is gone (owner, 2026-10-18: it moved the row's marks on hover)",
   ],
   start: demo,
   run: async (u, page) => {
-    await u.click(page.getByTestId('project-new-session-centralu'))
+    await u.click(page.getByTestId('project-menu-centralu'))
+    await u.click(page.getByTestId('new-session-centralu'))
     await u.until('the new session', () => expect(page.getByTestId('prompt-input')).toBeFocused())
     await u.fill(page.getByTestId('prompt-input'), 'Fix the login bug')
     await u.press('Enter')

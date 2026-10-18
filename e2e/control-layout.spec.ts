@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { setup, newSession } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on layout that must hold at any size: narrow windows, resizing, the top bar and modals. Moved out of control-loop.spec.ts by subject (#845); the
@@ -80,8 +81,7 @@ test('A modal is not trapped inside the sidebar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const sidebarWidth = (await page.getByTestId('sidebar').boundingBox())!.width
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   const dialog = (await page.getByTestId('new-session-dialog').boundingBox())!
   const viewport = page.viewportSize()!
   // The overlay covers the whole window (not just the sidebar's width)

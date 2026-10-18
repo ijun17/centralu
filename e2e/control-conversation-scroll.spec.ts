@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { setup, newSession, seedLongChat, distanceFromBottom, nextFrames } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on where the conversation is scrolled: following the bottom, keeping the spot being read, windowing. Moved out of control-loop.spec.ts by subject (#845); the
@@ -167,8 +168,7 @@ test("The new-session window's scroll stays put even while session events keep a
     }
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   const list = page.getByTestId('past-sessions')
   await expect(page.getByTestId('past-ext-0')).toBeVisible()
 

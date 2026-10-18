@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Answering an approval while typing: with the keyboard in the session's composer, y/n/a are letters of the message,
@@ -12,9 +13,7 @@ async function sessionTyping(page: Page): Promise<string> {
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
   await page.getByTestId('add-project').click()
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('session-view')).toBeVisible()
   // A new session's composer has the keyboard (#528)
   await expect(page.getByTestId('prompt-input')).toBeFocused()

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openSessionDialog, startSession } from './fixtures/new-session.js'
 
 /**
  * Keys go only to what the person is looking at (#158, #181) — real UI on a mock platform.
@@ -15,9 +16,7 @@ async function sessionWithApproval(page: Page): Promise<string> {
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
   await page.getByTestId('add-project').click()
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('session-view')).toBeVisible()
   const sessionId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
   // A new session's composer has the keyboard (#528); the card's letter keys answer from outside a field
@@ -59,9 +58,7 @@ async function freshSession(page: Page): Promise<string> {
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
   await page.getByTestId('add-project').click()
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('session-view')).toBeVisible()
   return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }
@@ -76,8 +73,7 @@ test('↑/↓ pressed inside a field of the new-session dialog do not select a p
       ],
     }
   })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-ext-0')).toBeVisible()
   await page.getByTestId('worktree-toggle').click()
   await page.getByTestId('worktree-branch-input').fill('feature/x')
@@ -205,8 +201,7 @@ test('the Enter and Esc an input method uses while renaming a session neither sa
 
 test('the Esc that cancels a composition in a dialog, the file viewer or settings does not close them (#181)', async ({ page }) => {
   await freshSession(page)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').click()
   await page.getByTestId('worktree-branch-input').fill('기능')
   for (const shape of shapes) {

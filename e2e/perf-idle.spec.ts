@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { expect, test, type Page } from '@playwright/test'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Measured steady-state render load (dogfooding finding: "the battery drains fast").
@@ -124,9 +125,7 @@ async function boot(page: Page, count: number): Promise<string[]> {
 
   const ids: string[] = []
   for (let i = 0; i < count; i++) {
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()
     // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
     await page.getByTestId('prompt-input').fill(`session ${i}`)

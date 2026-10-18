@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { setup } from './fixtures/control.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * A conversation that has messages but none read yet shows the shape of one (ChatSkeleton) while its history arrives,
@@ -48,9 +49,8 @@ test('a conversation not read yet shows its shape until the history arrives', as
 
 test('a brand-new session has nothing to read and shows no skeleton', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  // One the person made with +
-  await page.getByTestId('project-header-alpha').hover()
-  await page.getByTestId('project-new-session-alpha').click()
+  // One the person made from the project menu
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('session-start')).toBeVisible()
   await expect(page.getByTestId('chat-skeleton')).toHaveCount(0)
 

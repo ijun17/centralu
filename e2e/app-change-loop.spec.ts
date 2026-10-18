@@ -15,6 +15,7 @@ import { SessionAppsHub } from '../packages/agent-host/src/sessions/session-apps
 import { HostServer } from '../packages/agent-host/src/transport/server.js'
 import { OriginPorts } from '../packages/agent-host/src/views/origin-ports.js'
 import { ViewHost } from '../packages/agent-host/src/views/view-host.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The refresh loop of an open view (M4 B-5 regression) — reconstructed exactly as it was measured.
@@ -207,9 +208,7 @@ async function projectAndSession(page: Page): Promise<{ pid: string; sid: string
   const pid = await page.evaluate(
     () => (Object.values((window as any).__store.getState().projects) as { id: string; path: string }[]).find((x) => x.path === '/tmp/alpha')!.id,
   )
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
   return { pid, sid }
 }

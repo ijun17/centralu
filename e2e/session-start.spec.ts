@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import { setup } from './fixtures/control.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
- * A new session's empty screen (SessionStart): the sidebar's + starts a session at once, and before its first message
+ * A new session's empty screen (SessionStart): the project menu's New session starts a session at once, and before its first message
  * the screen offers the other tool and the project's past conversations of this tool. Picking a past conversation
  * resumes it as a new session and removes the empty one; one already open is a jump to it; picking the other tool
  * switches this same session.
@@ -47,15 +48,11 @@ const focused = (page: Page) => page.evaluate(() => (window as any).__store.getS
 const stored = (page: Page, id: string) => page.evaluate((s) => (window as any).__store.getState().sessions[s] ?? null, id)
 const inMock = (page: Page, id: string) => page.evaluate((s) => (window as any).__mock.sessions.has(s) as boolean, id)
 
-/** The sidebar's +, then the empty session it made */
+/** The project menu's New session, then the empty session it made */
 async function plus(page: Page): Promise<string> {
-  const before = await focused(page)
-  // A project the person is not in shows its + on hover, as a person reaches it
-  await page.getByTestId('project-header-alpha').hover()
-  await page.getByTestId('project-new-session-alpha').click()
-  await expect.poll(() => focused(page)).not.toBe(before)
+  const id = await startSession(page, 'alpha')
   await expect(page.getByTestId('session-start')).toBeVisible()
-  return (await focused(page))!
+  return id
 }
 
 test("the empty screen lists the project's past conversations, and picking one resumes it in place of the empty session", async ({

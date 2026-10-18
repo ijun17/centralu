@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test'
+import { openSessionDialog, startSession } from './new-session.js'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -59,12 +60,16 @@ export async function newSession(
   prompt: string,
   opts: { tool?: 'claude' | 'codex' } = {},
 ): Promise<string> {
-  // A new session goes through a dialog (FR-7: pick the tool, model and permission)
-  await page.getByTestId(`project-menu-${projectName}`).click()
-  await page.getByTestId(`new-session-${projectName}`).click()
-  if (opts.tool) await page.getByTestId(`tool-option-${opts.tool}`).click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  if (opts.tool) {
+    // A chosen tool goes through the dialog (FR-7: pick the tool, model and permission)
+    await openSessionDialog(page, projectName)
+    await page.getByTestId(`tool-option-${opts.tool}`).click()
+    await page.getByTestId('create-session-confirm').click()
+    await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  } else {
+    // The project menu's New session starts one at once (owner, 2026-10-18)
+    await startSession(page, projectName)
+  }
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
   await page.getByTestId('prompt-input').press('Enter')
