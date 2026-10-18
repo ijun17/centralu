@@ -75,7 +75,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         the fill steps up to ink from 80% as the number does; unknown draws the track alone.
       */}
       <span
-        className={`readout ml-auto flex shrink-0 flex-col items-stretch gap-[3px] text-xs ${
+        className={`readout ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs ${
           ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
