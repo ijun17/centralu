@@ -1587,7 +1587,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
-    const told = () => hub.store.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
+    const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
     const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
     const records = () => JSON.parse(hub.store.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
     return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf }
