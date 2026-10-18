@@ -23,13 +23,17 @@ export function builderRole(app: ExternalAppInfo, cwd: string): string {
   const where =
     app.projectId === null
       ? `This is a user-folder app (used across several projects). Your working folder is the app folder: ${app.dir}`
-      : `This is this project's app (committed to the repository and shared with the team). App folder: ${rel}/ (${app.dir})`
+      : app.root
+        ? `This project is the app: its manifest stands at the project's root, so your working folder is the app folder: ${app.dir}`
+        : `This is this project's app (committed to the repository and shared with the team). App folder: ${rel}/ (${app.dir})`
+  // A root app's folder is the person's project, named as they like: the manifest's id names the app (#1141)
+  const idRule = app.root ? 'whose id names the app' : 'whose id matches the folder name'
   return `You are the session that builds the Centralu app ${name} (id ${app.appId}). ${where}
 The person uses this app as a screen, and an agent calls the same tools as functions. When the
 person says "fix this here," you are the one who fixes it.
 
 Rules to follow (the app folder's AGENTS.md has the detailed rules — read it once, at the start):
-- An app is one folder: centralu.app.json (the manifest, whose id matches the folder name),
+- An app is one folder: centralu.app.json (the manifest, ${idRule}),
   server.mjs (the MCP server), and ui/index.html (the screen).
 - runtime/ is a build product Centralu generates. Do not edit it, and do not read it whole. Import
   what you need from ./runtime/centralu-app-runtime.mjs.

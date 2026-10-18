@@ -92,6 +92,12 @@ export const ExternalAppInfo = z.object({
    * every project already). An older host never sends it, which reads as off: the safe default.
    */
   shared: z.boolean().optional(),
+  /**
+   * A root app (#1141): the manifest stands at its project's own root, so the project is the app — `dir` is the
+   * project's folder, and the app is listed with its project rather than under it. True only when so; absent from an
+   * older host, which has none.
+   */
+  root: z.boolean().optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 

@@ -495,7 +495,8 @@ export function createRpcHandler(
     'apps.versions': async (p) => {
       const { appId, projectId } = RpcMethods['apps.versions'].params.parse(p)
       const apps = requireExternalApps()
-      if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
+      // A user-folder app, or a root app outside git (#1141): the copies Centralu keeps. Otherwise git's history
+      if (apps.keepsVersions({ appId, projectId })) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
       const project = (await mgr.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
       if (!project || !app) throw rpcError(noSuchAppText({ projectId, appId }))

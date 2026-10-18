@@ -15,7 +15,7 @@ import { ErrorLog } from './error-log.js'
 import { AppUnavailableError } from './unavailable.js'
 import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
-import { PROJECT_APPS_REL, USER_APPS_REL, scanApps } from './discovery.js'
+import { USER_APPS_REL, scanApps, scanProject } from './discovery.js'
 import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { SecretStore, secretValueProblem } from './secrets.js'
 import { AppStartEnv } from './app-start-env.js'
@@ -69,7 +69,7 @@ export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
 export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
-import { invalidReason, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
+import { invalidReason, keepsVersions, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
@@ -120,7 +120,9 @@ export class ExternalApps {
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       blocker: (e, opts) => this.blocker(e, opts),
       spawnSpec: (e, pipeId) => this.startEnv.spawnSpec(e, pipeId),
-      snapshot: (appId, dir, stamp) => this.handover.snapshot(appId, dir, 'started', stamp),
+      snapshot: (e, stamp) => {
+        if (keepsVersions(e)) this.handover.snapshot(this.holdKey(e.ref), e.dir, 'started', stamp)
+      },
       find: (ref) => this.find(ref),
       holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
@@ -537,8 +539,28 @@ export class ExternalApps {
 
   /** Rescans the user folder right now — scans everything if it has never scanned before (pre-startup) */
   private rescanUser(opts: { now?: string } = {}): void {
-    if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE, opts)
+    this.rescanScopeOf({ projectId: null, appId: '' }, opts)
+  }
+
+  /** Rescans the scope an app lives in right now — scans everything if it has never scanned it before */
+  private rescanScopeOf(ref: AppRef, opts: { now?: string } = {}): void {
+    const key = ref.projectId ?? USER_SCOPE
+    if (this.scopes.has(key)) this.rescan(key, opts)
     else this.refresh()
+  }
+
+  /**
+   * A project was deleted (#1141): its apps' secrets go with it, as its apps' grants and runs go with the project's rows
+   * (`deleteProject` in the store). A project id is never reused — the folder registered again is a new project — so
+   * nothing could read them again. Data, logs and kept versions stay on disk, as they always did.
+   */
+  forgetProject(projectId: string): void {
+    try {
+      this.secrets.forgetScope(projectId)
+    } catch (e) {
+      // A secrets file stuck in place (`private-json-file.ts`) — the project is gone either way; the values stay until it reads
+      console.error(`[apps] could not forget the secrets of deleted project ${projectId}: ${(e as Error).message}`)
+    }
   }
 
   /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */
@@ -621,11 +643,20 @@ export class ExternalApps {
 
   // ── Handover: versions (E-1) ────────────────────────────────────────────────────────────
 
-  /** Versions of an app outside git — user-folder apps only (a project app's versions are git, and the host's core reads those) */
+  /**
+   * Whether Centralu keeps copies of this app's code (E-1): a user-folder app, and a root app whose project is not a git
+   * repository (#1141). Any other app's versions are git's, which the host's core reads (`apps.versions`)
+   */
+  keepsVersions(ref: AppRef): boolean {
+    const e = this.find(ref)
+    return e ? keepsVersions(e) : ref.projectId === null
+  }
+
+  /** Versions of an app outside git (`keepsVersions`) — an app in git is versioned there, and the host's core reads those */
   snapshots(ref: AppRef): (Snapshot & { current: boolean })[] {
-    if (ref.projectId !== null) throw new AppUnavailableError('Project apps are versioned by git')
-    this.rescanUser()
-    return this.handover.versionsOf(ref.appId, this.require(ref).dir)
+    this.rescanScopeOf(ref)
+    if (!this.keepsVersions(ref)) throw new AppUnavailableError('Project apps are versioned by git')
+    return this.handover.versionsOf(this.holdKey(ref), this.require(ref).dir)
   }
 
   /**
@@ -637,12 +668,12 @@ export class ExternalApps {
    * waits on confirmation again.
    */
   restoreVersion(ref: AppRef, id: string): ExternalAppInfo {
-    if (ref.projectId !== null) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
-    this.rescanUser()
+    this.rescanScopeOf(ref)
+    if (!this.keepsVersions(ref)) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
     const before = this.require(ref)
-    this.handover.restore(ref.appId, id, before.dir)
+    this.handover.restore(this.holdKey(ref), id, before.dir)
     // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
-    this.rescanUser({ now: ref.appId })
+    this.rescanScopeOf(ref, { now: ref.appId })
     const e = this.require(ref)
     resetLife(e.life)
     void this.reflector.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
@@ -718,6 +749,7 @@ export class ExternalApps {
       ...this.importMark(e),
       // A user-folder app is available to every project already, so only a project app carries the mark (#371)
       ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
+      ...(e.found.root ? { root: true } : {}),
     }
   }
 
@@ -792,10 +824,7 @@ export class ExternalApps {
     const held = this.scopes.get(key)
     if (!held || this.disposed) return
     const { scope } = held
-    const result =
-      scope.projectId === null
-        ? scanApps(scope.root, USER_APPS_REL, [])
-        : scanApps(scope.root, PROJECT_APPS_REL, ['', '.centralu'])
+    const result = scope.projectId === null ? scanApps(scope.root, USER_APPS_REL, []) : scanProject(scope.root)
     const seen = new Set<string>()
     /** Whether there was a change that could change the set of apps attached to a session (A-5) */
     let changed = false

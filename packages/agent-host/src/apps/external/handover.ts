@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { USER_APP_SCOPE, type AppReview, type ExternalAppInfo } from '@cc/protocol'
+import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
 import {
@@ -76,7 +76,10 @@ const CHANGED = 'This app changed what it runs or what it uses since you enabled
 
 export class AppHandover {
   private book: ImportBook
-  /** Versions of an app outside git (a user-folder app) (E-1) */
+  /**
+   * Versions of an app outside git (E-1): a user-folder app, and a root app whose project is not a repository (#1141).
+   * Kept per app key (`<project id | _user>/<app id>`), so a user-folder app's stay where they always were
+   */
   private versions: AppVersions
   private staged = new Map<string, Staged>()
   private limits: ImportLimits
@@ -87,7 +90,7 @@ export class AppHandover {
     private opts: HandoverOptions = {},
   ) {
     this.book = new ImportBook(host.dataRoot)
-    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, USER_APP_SCOPE), opts.remove)
+    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL), opts.remove)
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
     // The staging area a previous host left behind — never brought in, so it is discarded (it can be imported again)
@@ -181,7 +184,7 @@ export class AppHandover {
     }
     if (opts.enable) this.book.confirm(id, dir, manifest)
     // Captures the state it arrived in as the first version (E-1) — so even if a building session breaks it while editing, it can be restored to the imported version
-    this.snapshot(id, dir, 'imported')
+    this.snapshot(appKeyOf(null, id), dir, 'imported')
     this.cancel(token)
     this.host.rescanUser()
     return id
@@ -239,23 +242,23 @@ export class AppHandover {
   // ── versions (E-1) ──────────────────────────────────────────────────────────────────
 
   /**
-   * Captures a user-folder app's current code as a version — does nothing if a version with the same
-   * fingerprint already exists. **Never throws on failure**: failing to capture a version must never
-   * stop the app from starting. The reason is written to the host's log.
+   * Captures an app's current code as a version, under its app key (`appKeyOf`) — does nothing if a version with the
+   * same fingerprint already exists. **Never throws on failure**: failing to capture a version must never stop the app
+   * from starting. The reason is written to the host's log.
    */
-  snapshot(appId: string, dir: string, reason: string, stamp?: string): Snapshot | null {
+  snapshot(key: string, dir: string, reason: string, stamp?: string): Snapshot | null {
     try {
-      return this.versions.capture(appId, dir, reason, stamp)
+      return this.versions.capture(key, dir, reason, stamp)
     } catch (e) {
-      console.error(`[apps] could not keep a version of user/${appId}: ${(e as Error).message}`)
+      console.error(`[apps] could not keep a version of ${key}: ${(e as Error).message}`)
       return null
     }
   }
 
-  /** An app's versions, most recent first — the version matching the folder's current fingerprint has `current` set */
-  versionsOf(appId: string, dir: string): (Snapshot & { current: boolean })[] {
+  /** An app's versions by app key, most recent first — the version matching the folder's current fingerprint has `current` set */
+  versionsOf(key: string, dir: string): (Snapshot & { current: boolean })[] {
     const now = folderFingerprint(dir)
-    return this.versions.list(appId).map((s) => ({ ...s, current: s.stamp === now }))
+    return this.versions.list(key).map((s) => ({ ...s, current: s.stamp === now }))
   }
 
   /**
@@ -263,10 +266,10 @@ export class AppHandover {
    * folder as a version too (so a restore can itself be undone). Restarting the app is the caller's
    * job (the runtime): that is where the rules for in-progress calls and reflecting changes live.
    */
-  restore(appId: string, id: string, dir: string): Snapshot {
-    this.snapshot(appId, dir, 'before restore')
+  restore(key: string, id: string, dir: string): Snapshot {
+    this.snapshot(key, dir, 'before restore')
     try {
-      return this.versions.restore(appId, id, dir)
+      return this.versions.restore(key, id, dir)
     } catch (e) {
       throw new ImportRefused((e as Error).message)
     }

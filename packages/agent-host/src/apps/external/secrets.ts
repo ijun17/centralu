@@ -97,6 +97,18 @@ export class SecretStore {
     return out
   }
 
+  /**
+   * Clears every value kept for the apps of one scope (`<scope>/<app id>` keys) — a deleted project's (#1141). Writes
+   * nothing when there is none, so a project without app secrets never touches the file
+   */
+  forgetScope(scope: string): void {
+    const doc = this.file.read()
+    const gone = Object.keys(doc).filter((key) => key.startsWith(`${scope}/`))
+    if (gone.length === 0) return
+    for (const key of gone) delete doc[key]
+    this.file.write(doc)
+  }
+
   /** Writes a value (`value`) or clears it (`null`) */
   set(appKey: string, name: string, value: string | null): void {
     const doc = this.file.read()

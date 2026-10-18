@@ -290,7 +290,9 @@ export async function gitLogPath(cwd: string, rel: string, limit = 20): Promise<
   const SEP = '\x1f'
   let stdout: string
   try {
-    stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, '--', assertLexicalGitPath(cwd, rel)])
+    // An empty `rel` is the whole repository: a root app's folder is its project (#1141)
+    const path = rel === '' ? [] : ['--', assertLexicalGitPath(cwd, rel)]
+    stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, ...path])
   } catch {
     return { repo: true, commits: [] } // a repository with no commits at all
   }

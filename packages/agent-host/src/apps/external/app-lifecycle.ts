@@ -19,8 +19,8 @@ export type LifecycleHost = {
   recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc?: AppProcess | null): void
   blocker(e: AppEntry, opts: { boundaryOpen?: boolean }): Blocker | null
   spawnSpec(e: AppEntry, pipeId: number): SpawnSpec
-  /** Captures the code about to run as a version (E-1) — a user-folder app's */
-  snapshot(appId: string, dir: string, stamp: string): void
+  /** Captures the code about to run as a version (E-1) — an app outside git's (`keepsVersions`) */
+  snapshot(e: AppEntry, stamp: string): void
   find(ref: AppRef): AppEntry | undefined
   holdKey(ref: AppRef): string
   label(ref: AppRef): string
@@ -118,7 +118,7 @@ export class AppLifecycle {
        */
       L.stamp = folderFingerprint(e.dir)
       // An app outside git now has the code about to run captured as a version (E-1) — does nothing if it is the same code. The app still starts even if capturing the version fails
-      if (e.ref.projectId === null) this.host.snapshot(e.ref.appId, e.dir, L.stamp)
+      this.host.snapshot(e, L.stamp)
       let proc: AppProcess
       try {
         proc = await AppProcess.start({

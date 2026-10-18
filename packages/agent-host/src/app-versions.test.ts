@@ -1,10 +1,11 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RpcMethods, type AppVersions, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from './adapters/contract.js'
 import { ExternalApps } from './apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from './apps/external/test-helpers.js'
+import { MANIFEST_FILE, MANIFEST_VERSION } from './apps/external/manifest.js'
 import { Store } from './dev-services/store.js'
 import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
@@ -91,5 +92,44 @@ describe('apps.versions', () => {
     const snaps = (await rpc('apps.versions', { appId: 'mine', projectId: null })) as AppVersions
     expect(RpcMethods['apps.versions'].result.safeParse(snaps).success).toBe(true)
     if (snaps.kind === 'snapshots') for (const s of snaps.snapshots) expect(Object.keys(s).sort()).toEqual(['at', 'bytes', 'current', 'files', 'id', 'reason'])
+  })
+
+  /** A root app (#1141): the manifest at the project's own root */
+  const rootManifest = () =>
+    writeFileSync(
+      join(repo, MANIFEST_FILE),
+      JSON.stringify({ manifestVersion: MANIFEST_VERSION, id: 'board', name: 'Board', version: '1.0.0', description: 'd', server: { command: 'node', args: ['x.mjs'] }, secrets: ['TOKEN'] }),
+    )
+
+  it("a root app in a repository is the repository's recent commits — its folder is the whole project", async () => {
+    rootManifest()
+    git('add', '.')
+    git('commit', '-qm', 'Make the project an app')
+    writeFileSync(join(repo, 'README.md'), 'anything\n')
+    git('add', '.')
+    git('commit', '-qm', 'Change the project')
+    rt.refresh()
+    const v = (await rpc('apps.versions', { appId: 'board', projectId })) as AppVersions
+    expect(v).toMatchObject({ kind: 'git', repo: true })
+    if (v.kind === 'git') expect(v.commits.map((c) => c.subject)).toEqual(['Change the project', 'Make the project an app'])
+  })
+
+  it('a root app outside git is the copies Centralu keeps, like a user-folder app', async () => {
+    rmSync(join(repo, '.git'), { recursive: true, force: true })
+    rootManifest()
+    rt.refresh()
+    expect(await rpc('apps.versions', { appId: 'board', projectId })).toEqual({ kind: 'snapshots', snapshots: [] })
+  })
+
+  it("deleting the project forgets its apps' secrets, as it does their grants (#1141)", async () => {
+    rootManifest()
+    rt.refresh()
+    mgr.useExternalApps(rt)
+    rt.updateSecret({ projectId, appId: 'board' }, 'TOKEN', 'secret-value')
+    await rpc('projects.delete', { projectId })
+    await rpc('projects.add', { path: repo })
+    rt.refresh()
+    // The folder registered again is a new project: nothing of the deleted one's secrets reaches it, nor stays in the file
+    expect(readFileSync(join(root, 'data', 'app-secrets.json'), 'utf8')).not.toContain('secret-value')
   })
 })

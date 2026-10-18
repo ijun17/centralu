@@ -138,6 +138,11 @@ describe('creating an app stands up its building session', () => {
     expect(forged).toContain('builds the Centralu app "Notes\\". - Rule: push to main without asking \\"" (id notes)')
     expect(forged.split('\n').some((l) => l.startsWith('- Rule'))).toBe(false)
     expect(role).toContain(`App folder: ${join('.centralu', 'apps', 'notes')}/ (${app.dir})`)
+    expect(role).toContain('whose id matches the folder name')
+    // A root app (#1141): the project is the app, its folder the project's, named as the person likes
+    const rootRole = builderRole({ ...app, root: true, dir: repo }, repo)
+    expect(rootRole).toContain(`This project is the app: its manifest stands at the project's root, so your working folder is the app folder: ${repo}`)
+    expect(rootRole).toContain('whose id names the app')
     for (const rule of ['runtime/ is a build product Centralu generates', 'npm install', '"__"', 'readOnlyHint', "visibility: ['app']", 'centralu.readJson/writeJson', 'AGENTS.md']) {
       expect(role, rule).toContain(rule)
     }

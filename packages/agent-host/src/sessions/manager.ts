@@ -541,6 +541,8 @@ export class SessionManager {
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
     const root = this.projectRow(projectId)?.path
     this.store.trash.deleteProject(projectId)
+    // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
+    this.apps.appsHub?.rt.forgetProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
     this.watchers.drop(projectId)
     if (root) invalidateFileIndex(root)

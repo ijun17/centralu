@@ -30,6 +30,11 @@ the control rail (#81), were removed in #372 (decided in #97). Security reasonin
 The folder name is the app's id. An app is identified by (project, id): two projects may each have
 a `notes` app, and they are two apps.
 
+A **root app** (#1141) is a registered project whose own root holds the manifest: the project is the
+app. Its folder is the project's, named as the person likes, so its id is the manifest's `id`, not the
+folder name; it is still identified by (project, id), and its data, secrets, grants and runs are kept
+under that key. The design and the reasons: [plans/root-apps.md](plans/root-apps.md).
+
 ### 1.1 The manifest, `centralu.app.json`
 
 One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check` alike.
@@ -37,7 +42,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | Field | Meaning | Rule |
 |---|---|---|
 | `manifestVersion` | Manifest format | Must be `1`. Anything else is refused with "update Centralu": guessing at a format we do not know would run a changed field with its old meaning |
-| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
+| `id` | App id | Equal to the folder name (a root app's is the manifest's own, §1). `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
 | `name`, `version`, `description` | What people and agents read | Not empty; at most 80, 64 and 2000 characters |
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
@@ -60,10 +65,15 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9); another project's session that attaches it, if the person shares it (§9.4) | Through git. Centralu has no button for it |
+| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
 | User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.
+- The root's own `centralu.app.json` is read with it, and the root is always watched, so a manifest
+  added or removed there is seen without a restart. An app in `.centralu/apps/` with the same id keeps
+  it; the root app is then listed `invalid` with the reason. A root manifest that does not pass is listed
+  under its `id` when that much reads, else under `centralu-root`, an id no app can take.
 - A folder watcher follows apps appearing, disappearing and changing (the manifest, and one level of
   subfolders such as `ui/`). Discovery only reads; it starts nothing.
 - Broken or untrusted apps are not hidden. They stand in the list with their reason (`invalid`,
@@ -1052,6 +1062,10 @@ fingerprint does not count dot-names as code either.
 A **project app** is versioned by git: the Versions panel beside its pinned view lists the recent
 commits that touched `.centralu/apps/<id>` (read by the host core with `git log -- <folder>`;
 `repo: false` outside a repository). It is read-only; going back is done with git.
+
+A **root app** in a repository is versioned by git the same way, over the whole repository (its folder
+is the project). Outside a repository it keeps copies like a user-folder app, under
+`<data folder>/app-versions/<project id>/<id>/` (#1141).
 
 A **user-folder app** (imported ones included) has no git, so the host keeps copies. Each time the
 app starts on code it has not kept yet, and when an app is imported, its folder is copied to
