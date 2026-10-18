@@ -108,6 +108,12 @@ export class RemoteAgents {
   private readonly toldDown = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
+  /**
+   * Children seen taking the instruction this hub last sent them (its `user_message`, from `HUB_SENDER`, with that text)
+   * since anything of their turn may have been missed (#1038 review): only then is the turn running there the caller's
+   * to read the cards of, answer and add a note to (`ownTurn`). Gone with the turn's end, a link drop and the host
+   */
+  private readonly instructed = new Set<string>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -386,7 +392,10 @@ export class RemoteAgents {
           }
           const refused = this.gateError(callerId)
           if (refused) return { ok: false, error: refused }
-          const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label, { depth: depthOf(this.host, callerId) + 1 })
+          // Kept before it goes, as the machine records it before it answers: its record tells the turn that took it
+          const framed = agentNoteFrame(label, text)
+          this.sentNow(rec.sessionId, framed)
+          const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
           if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
           return this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId))
         }
@@ -462,6 +471,7 @@ export class RemoteAgents {
     const sessionId = e.sessionId
     const rec = this.of(sessionId)
     if (!rec) return
+    if (e.type === 'user_message' && this.fromHubHere(rec, e.from) && e.text === rec.sent) this.tookInstruction(rec)
     const wait = this.waits.get(sessionId)
     if ((e.type === 'approval_request' || e.type === 'question_request') && typeof e.requestId === 'string') {
       this.cardRaised(rec, e.type === 'approval_request' ? 'approval' : 'question', e.requestId, !!wait)
@@ -476,10 +486,9 @@ export class RemoteAgents {
     if (step?.step === 'busy') {
       wait.busy = true
       // A card in the turn: the call waiting on it reads the card, as a local child's wait does (#676)
-      if (step.waits) {
-        this.dropWait(sessionId)
-        wait.end({ step: 'asking' })
-      }
+      // Left in place for the call, which arms the report before it takes the wait down (`rearm`): the turn is never
+      // owed to nobody in between, so what tells it the caller's stays
+      if (step.waits) wait.end({ step: 'asking' })
     } else if (step && step.step !== 'card_closed') {
       this.dropWait(sessionId)
       wait.end(step)
@@ -533,9 +542,10 @@ export class RemoteAgents {
     // As a local child's wait takes its report down (#561): the call reads the answer, and it is put back if the call does not
     if (this.reportArmed(rec)) this.host.children.dropLinkedReport(rec.sessionId)
     const r = await raceBound(wait.done, boundMs, signal)
+    // The report first, then the wait down: the turn goes on, owed all along
     const rearm = () => {
-      if (this.waits.get(rec.sessionId) === wait) this.dropWait(rec.sessionId)
       this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: wait.busy })
+      if (this.waits.get(rec.sessionId) === wait) this.dropWait(rec.sessionId)
     }
     if (r === 'bound') {
       rearm()
@@ -589,8 +599,22 @@ export class RemoteAgents {
     const report = this.host.children.linkedReports.get(sessionId)
     const armed = report?.orchestratorId === rec.callerId ? report : undefined
     const owed = this.waits.has(sessionId) || armed ? { ...(armed?.paused ? { paused: armed.paused } : {}) } : undefined
+    // Nothing owed: the caller's turn is over, and what runs there next is not its own until it takes an instruction
+    if (!owed) this.instructed.delete(sessionId)
     if (JSON.stringify(owed) === JSON.stringify(rec.owed)) return
     this.save(this.records().map((r) => (r.sessionId !== sessionId ? r : owed ? { ...r, owed } : withoutOwed(r))))
+  }
+
+  /**
+   * The machine recorded the instruction this hub last sent the child (#1038 review): the turn that takes it is the
+   * caller's. If nothing was owed of it any more, the turn the instruction was meant for ended before it went in (a
+   * note sent as the turn ended), and the instruction starts a turn of its own: its end is owed as a start's or a send's
+   * is, so the caller hears of it rather than the child working on unseen
+   */
+  private tookInstruction(rec: RemoteAgent): void {
+    this.instructed.add(rec.sessionId)
+    if (this.waits.has(rec.sessionId) || this.reportArmed(rec) || !this.host.meta.has(rec.callerId)) return
+    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false })
   }
 
   /**
@@ -613,7 +637,7 @@ export class RemoteAgents {
 
   /** Whether the turn running there is the one its caller gave: a call waits on it, or its end is owed to the caller */
   private ownTurn(rec: RemoteAgent): boolean {
-    return this.waits.has(rec.sessionId) || this.reportArmed(rec)
+    return this.instructed.has(rec.sessionId) && (this.waits.has(rec.sessionId) || this.reportArmed(rec))
   }
 
   /**
@@ -693,6 +717,8 @@ export class RemoteAgents {
     const name = typeof m.name === 'string' && m.name ? m.name : m.id
     for (const rec of this.records()) {
       if (rec.machineId !== m.id) continue
+      // Whatever happens there while the link is down is unseen: the turn is the caller's again only on evidence
+      this.instructed.delete(rec.sessionId)
       const wait = this.waits.get(rec.sessionId)
       if (wait) {
         this.dropWait(rec.sessionId)
@@ -759,8 +785,10 @@ export class RemoteAgents {
     if (!last.ok || this.host.children.linkedReports.get(rec.sessionId) !== report) return
     const sent = this.of(rec.sessionId)?.sent
     if (last.message && sent !== undefined && last.message.text === sent && this.fromHubHere(rec, last.message.from)) {
-      if (running) report.busy = true
-      else this.host.settleLinkedTurn(rec.sessionId)
+      if (running) {
+        report.busy = true
+        this.instructed.add(rec.sessionId)
+      } else this.host.settleLinkedTurn(rec.sessionId)
       return
     }
     this.host.children.dropLinkedReport(rec.sessionId)
@@ -822,6 +850,7 @@ export class RemoteAgents {
   private forget(sessionId: string): void {
     if (this.records().some((r) => r.sessionId === sessionId)) this.save(this.records().filter((r) => r.sessionId !== sessionId))
     this.toldDown.delete(sessionId)
+    this.instructed.delete(sessionId)
     for (const key of [...this.toldCards]) if (key.startsWith(`${sessionId}\0`)) this.toldCards.delete(key)
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
   }

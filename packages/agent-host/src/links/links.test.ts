@@ -1876,6 +1876,66 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
   })
 
+  // #1038 review: after a missed end, the person's own card there was shown and answerable as the caller's
+  it("neither shows nor answers a card of a turn it has not seen take its instruction since the link came back", async () => {
+    const { remote, remoteStore, hub, answer, start, agent } = await rig()
+    // The machine cannot be read for whose turn it is: what is owed stays, and only the evidence decides
+    const reader = (hub.mgr as unknown as { linkedReader: Record<string, unknown> }).linkedReader
+    let asked = false
+    reader.lastUserMessage = async () => {
+      asked = true
+      return { ok: false, error: 'not read' }
+    }
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    const back = await remoteHost(remote.port, remoteStore, {
+      beforeListen: async (mgr) => {
+        await mgr.send(id, 'a question for you')
+        await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+      },
+    })
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => asked)
+    expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'working' })
+    expect(await agent(r.sessionId, 'answer', 'yes', 'any.card')).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(back.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions).toHaveLength(1)
+  })
+
+  // #1038 review: a note that went in as the turn ended started a turn nobody followed
+  it('follows the turn a note starts when the turn it was meant for ended before it went in', async () => {
+    const { remote, answer, start, agent, reports } = await rig()
+    const call = start({ task: 'a question for you', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+    // The machine holds the note until the person has answered there and the turn has ended
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const deliver = remote.mgr.sendFromHub.bind(remote.mgr)
+    const reached = vi.spyOn(remote.mgr, 'sendFromHub').mockImplementation(async (...a) => {
+      await held
+      return deliver(...a)
+    })
+    const note = agent(r.sessionId, 'send', 'use the staging data')
+    await eventually(() => reached.mock.calls.length === 1)
+    const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
+    remote.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    await eventually(() => reports() === 1)
+    release()
+    expect(await note).toMatchObject({ ok: true, state: 'working', reported: true })
+    // The turn the note started is the caller's: its end is reported too
+    await eventually(() => reports() === 2)
+  })
+
   // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
   it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
     const { remote, hub, answer, start, reports } = await rig()

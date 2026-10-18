@@ -578,7 +578,11 @@ card stays the person's on that machine, whatever the caller's preset: the child
 a caller's `auto`, which alone lets it answer a local child's approval, is never carried to another computer. `send`
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
-refused, as neither a queue nor a fork reaches another machine. When the link drops, a waiting call returns with that
+refused, as neither a queue nor a fork reaches another machine. "The turn the caller gave it" rests on evidence: the
+hub has seen the machine record the instruction it last sent (its `user_message` from `HUB_SENDER`, with the text it
+keeps as `sent`) since anything of that turn could have been missed (`instructed`); a link drop and a restart clear it
+until the machine's last message is read again (below). A note that goes in after the turn it was meant for ended
+starts a turn of its own, and that turn's end is owed as a send's is (`tookInstruction`). When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
 is back, the child is read (`onReturn`): what ran there meanwhile is the caller's only if the last message the child
 took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link
