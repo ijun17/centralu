@@ -353,16 +353,8 @@ pub fn run() {
                 sup.start(app.handle().clone());
                 #[cfg(target_os = "macos")]
                 traffic_lights::install(app.handle());
-                /*
-                 * Windows: no OS title bar above ours (owner, 2026-10-18). The top bar draws the minimize,
-                 * maximize and close it takes away (`window_controls_drawn`); the shadow keeps the window's
-                 * edge and the resize border an undecorated window would otherwise lose.
-                 */
-                #[cfg(target_os = "windows")]
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.set_decorations(false);
-                    let _ = w.set_shadow(true);
-                }
+                // Windows: no OS title bar above ours; the top bar draws the controls (os_integration.rs)
+                own_title_bar(app);
                 #[cfg(target_os = "macos")]
                 if let Err(e) = install_quit_menu(app.handle()) {
                     // The app still launches even if the menu could not be changed — ⌘Q just
