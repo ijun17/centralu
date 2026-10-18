@@ -93,6 +93,7 @@ export function queueView({ all = false } = {}) {
       title: i.title,
       lowers: i.lowers,
       owner: i.owner,
+      author: i.author ?? null,
       state: i.state,
       reason: i.reason,
       head: i.head,
@@ -106,7 +107,7 @@ export function queueView({ all = false } = {}) {
   }
 }
 
-async function queueMerge({ pr, lowers = [], owner, deleteBranch = true }) {
+async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true }) {
   const top = itemOf(pr)
   const under = lowers.map((l) => itemOf(l))
   const other = under.find((l) => l.repo.toLowerCase() !== top.repo.toLowerCase())
@@ -132,23 +133,28 @@ async function queueMerge({ pr, lowers = [], owner, deleteBranch = true }) {
   // No owner given: a new id, unless it is queued already (queued again, it stays the session's that
   // queued it first, whose watch command still listens for that owner)
   const given = owner?.trim() || null
+  // The PR's author session (#1182), which a conflict is handed to: given, else the caller's own,
+  // which is the owner it names (an app server cannot tell which session called it, docs/apps.md
+  // §5.1), else the one recorded when it was queued before. A generated owner id is no session.
+  const authorGiven = author?.trim() || given
   const at = new Date().toISOString()
   const r = updateQueue(dataDir(), (q) => {
     const owner = given ?? findItem(q, top.repo, top.number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
-    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, deleteBranch, title: p.title, at }, queueRef)
+    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, author: authorGiven, deleteBranch, title: p.title, at }, queueRef)
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length }
   })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))
   const who = r.item.owner
   const watch = watchCommand({ owner: who, after: r.seq })
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
-  const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${who}. ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`
+  const by = r.item.author ? ` Author session: ${r.item.author}.` : ' No author session recorded (give author to name it).'
+  const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${who}.${by} ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`
   const text = [
     summary,
     `To hear in this session when it needs you or lands, run in the background (it exits with the message; run it again after):`,
     watch,
   ].join('\n')
-  return answer(text, { queued: true, owner: who, watch, seq: r.seq })
+  return answer(text, { queued: true, owner: who, author: r.item.author ?? null, watch, seq: r.seq })
 }
 
 async function mergeQueue({ all = false }) {
@@ -175,6 +181,11 @@ export const tools = {
         pr: itemRef.describe(`The pull request to land (a stack's top): ${REF_HELP}`),
         lowers: z.array(itemRef).max(20).optional().describe('The PRs under it in a stack, landing with it; they are closed as landed and their branches deleted'),
         owner: z.string().max(80).optional().describe("Your session's name, so messages and the watch command are yours; default a new id"),
+        author: z
+          .string()
+          .max(80)
+          .optional()
+          .describe('The session that opened or owns the PR, which the queue hands a conflict to; default owner (your own session), or the author recorded when it was queued before'),
         deleteBranch: z.boolean().optional().describe('Delete the head branches on GitHub after landing (never a fork\'s, never a local branch); default true'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },

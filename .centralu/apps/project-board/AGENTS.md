@@ -166,15 +166,20 @@ this before and could only write a log line when a pull request went DIRTY; noth
 and a half hours. The decisions are pure functions in `queue.mjs`; `queue-driver.mjs` keeps the queue
 file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the watch command.
 
-- **`queue_merge`** (`pr`, `lowers?`, `owner?`, `deleteBranch?`; model only): one pull request, or a
+- **`queue_merge`** (`pr`, `lowers?`, `owner?`, `author?`, `deleteBranch?`; model only): one pull request, or a
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
   request, and for a top based on a branch none of its lowers has. A pull request is in one item only.
-  `owner` names the queuing session (default a new id); the answer gives the watch command. Queued
+  `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
+  names the PR's author session, the one that opened or owns it and that a conflict is handed to
+  (#1182): default the caller's own, which is the `owner` it gives (an app server cannot tell which
+  session called it, docs/apps.md §5.1), else the one recorded before, else none (a generated owner
+  id is no session); `merge_queue` lists it on each item. Queued
   again (what an attention message may ask for), an item is looked at afresh: its clocks and failure
   count start over, a merge GitHub refused is tried again, reruns spent on its head stay spent, and
-  without a new `owner` it stays the first session's, whose watch command listens for that owner.
+  without a new `owner` it stays the first session's, whose watch command listens for that owner (and
+  without a new `author`, the first author's).
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY,

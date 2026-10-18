@@ -191,6 +191,17 @@ describe('what the merge queue decides for one poll', () => {
     expect(q.items[0]).toMatchObject({ state: 'waiting', owner: 'first', noCiSince: null, missingSince: null, uncleanSince: null, errors: 0, reruns: spent })
   })
 
+  it("records the PR's author session, and keeps it when queued again without one (#1182)", () => {
+    const q = emptyQueue()
+    const { item } = enqueue(q, { repo: R, pr: 80, owner: 'integrator', author: 'writer', at: 'x' }, ref)
+    expect(item).toMatchObject({ owner: 'integrator', author: 'writer' })
+    enqueue(q, { repo: R, pr: 80, at: 'y' }, ref)
+    expect(q.items[0]).toMatchObject({ owner: 'integrator', author: 'writer' })
+    enqueue(q, { repo: R, pr: 80, author: 'fixer', at: 'z' }, ref)
+    expect(q.items[0].author).toBe('fixer')
+    expect(enqueue(q, { repo: R, pr: 81, at: 'z' }, ref).item.author).toBeNull()
+  })
+
   it("reruns the PR's own pull_request run when a push run shares its commit, and reads an old file without lowers", () => {
     const pr = { headRefName: 'feat/queue' }
     const push = { id: 1, run_attempt: 1, event: 'push', head_branch: 'feat/queue', status: 'completed', conclusion: 'failure', created_at: '2026-10-17T09:00:00Z', workflow_id: 7 }
@@ -658,6 +669,8 @@ afterEach(async () => {
 })
 
 const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
+/** A server that polls only at its start: what a test drives or reads, nothing moves under it */
+const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 /**
  * Without two tiers of CI unless a test asks for them (TIERS): the queue as a repository without them runs it, every
  * green run a full one. The tiers this repository has (project.json ci.fullTier) have tests of their own below.
@@ -883,6 +896,28 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(queueOnDisk().items.map((i: any) => i.owner)).toEqual(['tester'])
     // A new owner given replaces it
     expect((await call('queue_merge', { pr: 77, owner: 'orchestrator' })).data.owner).toBe('orchestrator')
+  })
+
+  it("records the PR's author session: the one given, else the caller's own (its owner), else none (#1182)", async () => {
+    runtime(ghState({ prs: { '77': ghPr(77), '78': ghPr(78), '79': ghPr(79) }, checks: {}, runs: {} }), IDLE_SERVER)
+    const given = await call('queue_merge', { pr: 77, owner: 'integrator', author: 'writer' })
+    expect(given.data).toMatchObject({ owner: 'integrator', author: 'writer' })
+    expect(given.text).toContain('Author session: writer.')
+    expect((await call('queue_merge', { pr: 78, owner: 'integrator' })).data.author).toBe('integrator')
+    const none = await call('queue_merge', { pr: 79 })
+    expect(none.data.author).toBeNull()
+    expect(none.text).toContain('No author session recorded (give author to name it).')
+    expect(queueOnDisk().items.map((i: any) => [i.pr, i.author])).toEqual([
+      [77, 'writer'],
+      [78, 'integrator'],
+      [79, null],
+    ])
+    const listed = (await call('merge_queue')).data.queue.map((i: any) => [i.pr, i.author]).sort((x: any, y: any) => x[0] - y[0])
+    expect(listed).toEqual([
+      [77, 'writer'],
+      [78, 'integrator'],
+      [79, null],
+    ])
   })
 
   it('refuses to queue for an account without maintain or admin, a draft, or a PR stacked on a branch not given as a lower', async () => {
@@ -1456,8 +1491,6 @@ function watch(args: string[]): Promise<{ code: number | null; out: string; err:
     child.on('close', (code) => (clearTimeout(t), resolve({ code, out, err })))
   })
 }
-
-const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 
 describe('the watch command: the queuing session hears about its items', { timeout: 60_000 * SLOW }, () => {
   it('drives the queue while the app is stopped, and exits 3 with the attention message for its owner only', async () => {

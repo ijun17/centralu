@@ -86,10 +86,12 @@ export function pushEvent(q, item, { kind, text, notify = false, at }) {
 
 /**
  * Queues a pull request (or a stack through its top). Queuing one already queued replaces its lowers,
- * owner and branch setting. A pull request may be in one active item only, as a top or a lower.
+ * owner, author and branch setting. A pull request may be in one active item only, as a top or a lower.
+ * `owner` is the session that queued it (it hears the queue's news); `author` the session that opened
+ * or owns the pull request, which a conflict is handed to (#1182), or null when none is known.
  * Answers `{ item, replaced }`, or `{ error }` and changes nothing.
  */
-export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
+export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
   const mine = findItem(q, repo, pr)
   for (const other of q.items.filter((i) => ACTIVE.has(i.state) && i !== mine && String(i.repo).toLowerCase() === String(repo).toLowerCase())) {
     if (other.lowers.includes(pr)) return { error: `${ref(repo, pr)} is already queued under ${ref(other.repo, other.pr)}.` }
@@ -99,10 +101,11 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
   if (mine) {
     // Queued again (what an attention message may ask for): it is looked at afresh, so its clocks
     // and failure count start again and a merge GitHub refused is tried again; reruns already spent
-    // on this head stay spent. Queued again without an owner, it stays the first session's
+    // on this head stay spent. Queued again without an owner or an author, it keeps the first ones
     Object.assign(mine, {
       lowers,
       owner: owner ?? mine.owner,
+      author: author ?? mine.author ?? null,
       deleteBranch,
       state: 'waiting',
       reason: null,
@@ -126,6 +129,7 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
     pr,
     lowers,
     owner,
+    author,
     deleteBranch,
     title,
     state: 'waiting',
