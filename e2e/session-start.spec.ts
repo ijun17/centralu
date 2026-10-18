@@ -133,7 +133,7 @@ test('the tool buttons switch the same session, keep a typed draft, and read tha
 /*
  * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not logged
  * in there is left out rather than shown greyed, since the list of tools will grow. The session's own tool always
- * stands; with one tool left there is nothing to switch to, and the switch goes.
+ * stands, alone in the capsule when it is the only one (the switch keeps its place so the screen does not move).
  */
 const codexAs = (page: Page, st: { installed: boolean; loggedIn: boolean }) =>
   page.evaluate((s) => {
@@ -145,12 +145,13 @@ for (const { status, why } of [
   { status: { installed: false, loggedIn: false }, why: 'not installed' },
   { status: { installed: true, loggedIn: false }, why: 'logged out' },
 ]) {
-  test(`a tool that cannot run here is not offered, and with one left there is no switch: ${why}`, async ({ page }) => {
+  test(`a tool that cannot run here is not offered, and the session's own stands alone: ${why}`, async ({ page }) => {
     await setup(page, { projects: ['/tmp/alpha'] })
     await codexAs(page, status)
     const id = await plus(page)
     await expect(page.getByTestId('session-start')).toBeVisible()
-    await expect(page.getByTestId('session-start-tools')).toHaveCount(0)
+    await expect(page.getByTestId('session-start-tools').getByRole('radio')).toHaveCount(1)
+    await expect(page.getByTestId('session-start-tool-claude')).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
     expect((await stored(page, id))?.tool).toBe('claude')
   })

@@ -90,10 +90,10 @@ export function backgroundTasksTests(): void {
       const id = await start(page)
       const badge = page.getByTestId('background-badge')
       await expect(badge).toHaveAttribute('data-count', '2')
-      // The top bar's capsule shape (owner, 2026-10-18): the number and a steady dot on it, its words for a screen reader
+      // The top bar's capsule shape (owner, 2026-10-18): the number in brighter ink and no dot, its words for a screen reader
       await expect(badge).toHaveText('2')
       await expect(badge).toHaveAttribute('aria-label', '2 background')
-      await expect(badge.getByTestId('background-running-dot')).toBeVisible()
+      await expect(badge.getByTestId('background-running-dot')).toHaveCount(0)
       await expect(page.getByTestId(`background-mark-${id}`)).toHaveText('2 bg')
     })
 
