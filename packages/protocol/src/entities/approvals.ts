@@ -89,7 +89,18 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('project_access'),
     access: ProjectConsentKind,
-    from: z.object({ id: z.string(), name: z.string() }),
+    from: z.object({
+      id: z.string(),
+      name: z.string(),
+      /**
+       * The linked machine the asking project is on (#550, the reverse direction): a session there asks a project of
+       * this computer. The card is this computer's and names the machine; approving it is remembered for the pair (that
+       * session, this project) until withdrawn in Settings → Machines. Absent: a project on this computer
+       */
+      machine: z.string().optional(),
+      /** The asking session there (#550), by its id on that machine and its name; absent otherwise */
+      session: z.object({ id: z.string(), name: z.string() }).optional(),
+    }),
     to: z.object({
       id: z.string(),
       name: z.string(),

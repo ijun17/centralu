@@ -5,6 +5,8 @@ import {
   HostReadSessionResult,
   HostRecallHit,
   HostSessionRow,
+  HubOffer,
+  MachineAskConsent,
   MachineAutostartResult,
   MachineId,
   MachineInfo,
@@ -166,6 +168,19 @@ export const hostMethods = {
    * "Update <machine>" prompt. Null when the machine cannot say (unreachable, other protocol, older)
    */
   'machines.activity': { params: z.object({ machineId: MachineId }), result: z.object({ activity: HostActivity.nullable() }) },
+  /**
+   * Lets a linked machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7,
+   * owner decision 2026-10-18): the per-machine switch, off by default, stored with the machine. Each pair (a session
+   * there, a project here) is asked on this computer's card once; off forgets every pair approved for it. Additive
+   */
+  'machines.setAsks': { params: z.object({ machineId: MachineId, on: z.boolean() }), result: MachineInfo },
+  /** The pairs approved for the reverse direction, every machine's, newest first (#550). Additive */
+  'machines.askConsents': { params: z.object({}), result: z.array(MachineAskConsent) },
+  /** Withdraws one approved pair: that session's next ask into that project raises the card again (#550). Additive */
+  'machines.withdrawAsk': {
+    params: z.object({ machineId: MachineId, sessionId: z.string().min(1), projectId: z.string().min(1) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   /** What would stop if this host stopped now (the `hostBusy` rule); for a hub's `machines.activity` */
   'host.activity': { params: z.object({}), result: HostActivity },
   /**
@@ -214,4 +229,12 @@ export const hostMethods = {
    * which the app stops (and which would only start the host again).
    */
   'host.stop': { params: z.object({}), result: z.object({ ok: z.literal(true) }) },
+  /**
+   * A hub linked to this host says who it is and whether this host's sessions may ask its projects (#550, the reverse
+   * direction, docs/plans/remote-hub.md §12.7). Sent by the hub at every connect and when its switch for this machine
+   * changes. This host calls that hub back (`hub.projects`, `hub.askProject`) on the connection the offer came in on
+   * only, and shows it to its sessions by its name, "not reachable" once that connection is gone. Asked by the hub
+   * directly, never routed. Additive
+   */
+  'host.hubOffer': { params: HubOffer, result: z.object({ ok: z.literal(true) }) },
 } as const

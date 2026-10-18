@@ -317,6 +317,16 @@ words, read there. It runs on that machine with its own logins, folder and prese
 | Cancelling the call stops the wait, not the machine's turn | This host asks the machine to run a task but has no interrupt of its own turn there |
 | The machine's own cards are answered by the person in the hub's window | `asking` (the caller answering them) is not built across machines; the call says it waits on the person |
 
+**The other way round** (#550, [plans/remote-hub.md](plans/remote-hub.md) §12.7). A session on a linked machine asks a
+project of a hub that turned the machine's switch on (Settings → Machines there, off by default): the machine's
+`ask_project` lists each such hub's projects under the hub's name (`LinkedHubs`, links/linked-hubs.ts; asked with
+`hub.projects` on the connection the hub offered on, 4 s each), and hands the whole ask to the hub (`askHubProject` →
+`hub.askProject`), which runs it as an ask here would (`MachineAsks`, sessions/machine-asks.ts): this computer's card for
+the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
+ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
+answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
+machine (`reverseCalls`).
+
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 
 An ordinary session can start another agent, Claude or Codex, in its own project and work with it: a Claude session

@@ -234,6 +234,30 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   in the caller's context can reach the target project as a task. The target's approvals, the
   visible session and Stop are the controls left; revoking the pair ends it.
 
+### A linked machine's session asking this computer (#550)
+
+The reverse direction of linked machines ([plans/remote-hub.md](plans/remote-hub.md) §12.7). The plan treats a linked
+machine as the less trusted side: a compromised server must not reach the person's computer by default (§3.2). So:
+
+- **Off by default, per machine, on this computer.** Only the hub's Settings → Machines turns it on, and the switch is
+  read at every call; off refuses at once and forgets the pairs. It is stored on the machine's row and goes with it.
+- **An allowlist of two calls**, `hub.projects` and `hub.askProject`, answered only through the handler the hub's link
+  to that machine was given. A machine cannot reach any RPC method, the router, a session's conversation, a file, an
+  app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
+  call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
+- **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
+  answer it; it names the machine and the asking session there, quoted on one line. Approving it is remembered for the
+  pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
+- **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
+  nothing; the task framed as from that session on that machine, never as the person or an orchestrator (so a seat that
+  directs would get it as someone else's words); the agent depth counted across the link; the target session's own
+  preset, trust and approvals; the answer cut to size; paths in it listed on the machine and none opened.
+- **Residual:** the machine names the asking session itself. A compromised machine can use any pair approved for any of
+  its sessions, and so reach every project of this computer that a session of that machine was approved for; that is
+  what the switch and each approval consent to, and withdrawing a pair or turning the switch off ends it. The task text
+  is the machine's agent's words, as for any ask (the residual above). The machine reads its own trust and depth gates
+  before it asks; a caller there losing trust while this computer's card stands does not withdraw the card.
+
 JSON framing prevents ambiguous transcript-line assembly; it does **not** make text safe
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
@@ -874,6 +898,10 @@ A host started with `centralu serve` on another machine is reached by the app th
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
 - **Single trusted user.** One host per data folder (the ownership lock), one person's sign-ins. There is no
   account model and no sharing between people.
+- **The reverse direction** (#550). A host calls a hub linked to it only on the connection that hub opened and offered
+  on (`host.hubOffer`), with `rpc` frames the hub answers only through its link's allowlist ("A linked machine's session
+  asking this computer", above). A window, or anything else holding the token, that offers itself as a hub only makes
+  the machine's sessions send it their asks: the token already gives it more than that.
 - **An administrator's ssh on Windows runs everything elevated** (#702). Windows OpenSSH gives an account in the
   Administrators group a full token for a network logon, with no UAC split, so a host the hub starts over ssh, every
   agent it starts and every tool call they make run with administrator rights, where the same person at the desktop

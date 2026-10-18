@@ -124,7 +124,63 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       operation: this.operation,
       autostart: this.bootStart,
       elevated: this.elevated,
+      asks: { on: this.record.asks === true, note: this.record.asks === true ? this.asksNote : null },
     }
+  }
+
+  // ── The reverse direction (#550) ──────────────────────────────────────────────────────────
+
+  /** Why the switch is on but cannot work, for the row: the machine runs a Centralu from before it */
+  private asksNote: string | null = null
+
+  /**
+   * Turns the switch on or off (#550): stored with the machine, said to the machine at once when it is connected, and
+   * at its every connect after. Off forgets the pairs approved for it (the registry's)
+   */
+  async setAsks(on: boolean): Promise<void> {
+    this.deps.registry.setAsks?.(this.id, on)
+    this.record = { ...this.record, asks: on }
+    if (!on) this.asksNote = null
+    const client = this.client
+    if (client && this.reachable) await this.offerAsks(client)
+    this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+  }
+
+  /**
+   * Tells the machine who this hub is and whether its sessions may ask this hub's projects (`host.hubOffer`), so the
+   * machine knows the connection to call back on. Said off too, so a machine that heard "on" earlier in its own life
+   * stops offering this hub to its sessions. A machine from before the reverse direction answers "Unknown method": the
+   * row then says to update it there, while the switch is on
+   */
+  protected async offerAsks(client: RemoteClient): Promise<void> {
+    const self = this.deps.hubSelf?.()
+    if (!self) return
+    const on = this.record.asks === true
+    let note: string | null = null
+    try {
+      await client.call('host.hubOffer', { hub: self, on })
+    } catch (err) {
+      if (on) {
+        note = /Unknown method/i.test((err as Error).message)
+          ? `${this.name} runs a Centralu from before this: update it there before its sessions can ask this computer's projects`
+          : `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
+      }
+    }
+    if (this.client !== client) return
+    const changed = note !== this.asksNote
+    this.asksNote = note
+    if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+  }
+
+  /**
+   * Tells the machine this hub no longer answers it (the machine is being removed while it is connected), so its
+   * sessions stop seeing this hub at once. Best effort: a machine that cannot hear it forgets the hub when the link ends
+   */
+  async withdrawOffer(): Promise<void> {
+    const self = this.deps.hubSelf?.()
+    const client = this.client
+    if (!self || !client || !this.reachable || this.record.asks !== true) return
+    await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
   }
 
   // ── RoutedMachine ───────────────────────────────────────────────────────────────────────
@@ -357,6 +413,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),
+        // The machine's calls to this hub (#550): answered as this machine, whatever they say, by the hub's allowlist
+        ...(this.deps.reverse ? { call: (method: string, params: unknown, signal: AbortSignal) => this.deps.reverse!({ id: this.id, name: this.name }, method, params, signal) } : {}),
         terminal: (f) => this.deps.terminal({ ...f, terminalId: this.q.id(f.terminalId) }),
         down: (reason) => {
           if (this.client !== client) return
@@ -421,6 +479,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.switchFailure = null
     this.lastConnectedAt = Date.now()
     this.setStatus('connected', null)
+    // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect
+    void this.offerAsks(client)
     /*
      * The UI re-reads this machine's sessions and projects, and wakes the ones that were live
      * before and are not now (a remote host that restarted without a keeper). Sent on every

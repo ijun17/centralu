@@ -298,6 +298,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.uninstall': HUB,
   'machines.autostart': HUB,
   'machines.activity': HUB,
+  // The reverse direction's switch and pairs are this computer's own (#550)
+  'machines.setAsks': HUB,
+  'machines.askConsents': HUB,
+  'machines.withdrawAsk': HUB,
+  // A hub offering itself to this host (#550): answered here, never passed on
+  'host.hubOffer': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
   // The hub's own sessions; the hub's orchestrator asks each machine's directly (links/linked-sessions.ts, plan §12)

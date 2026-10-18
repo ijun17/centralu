@@ -20,6 +20,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   operation: null,
   autostart: null,
   elevated: null,
+  asks: null,
   ...patch,
 })
 

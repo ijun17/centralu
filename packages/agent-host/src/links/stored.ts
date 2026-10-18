@@ -3,6 +3,7 @@ import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
 import { z } from 'zod'
+import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
 
 /**
@@ -17,7 +18,23 @@ export function storeRegistry(store: Store): MachineRegistry {
     add: (record: Omit<MachineRecord, 'slot'>) => store.machines.addLinkedMachine(record),
     remove: (id) => store.machines.removeLinkedMachine(id),
     setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
+    setAsks: (id, on) => store.machines.setLinkedMachineAsks(id, on),
   }
+}
+
+/**
+ * This computer's id as a hub (#550): made once and kept in its store, so a machine it links to knows it again after
+ * a restart or a reconnect. A setting the previous build never reads, so it needs no migration. Shaped as a machine id,
+ * since the machine qualifies this hub's project ids with it
+ */
+const HUB_SELF_KEY = 'hub.selfId'
+
+export function hubSelfId(store: Store): string {
+  const kept = store.settings.appSetting(HUB_SELF_KEY)
+  if (kept && /^hub-[0-9a-f]{8}$/.test(kept)) return kept
+  const made = `hub-${randomBytes(4).toString('hex')}`
+  store.settings.setAppSetting(HUB_SELF_KEY, made)
+  return made
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')

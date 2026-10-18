@@ -31,6 +31,7 @@ import type { InlineViews } from './inline-views.js'
 import type {
   GridPanel,
   HostActivity,
+  HubOffer,
   MachineAutostartResult,
   MachineInfo,
   MachineInstallResult,
@@ -82,6 +83,11 @@ export type RpcServices = {
   activity?: () => HostActivity
   /** The windows' answers to an agent's "Apply now" (#665, update-apply.ts) */
   updateApply?: UpdateApplyBroker
+  /**
+   * The hubs linked to this host that offer the reverse direction (#550, links/linked-hubs.ts): `host.hubOffer` records
+   * one on the connection it came in on. Without it an offer is taken and forgotten, as a host that cannot call back
+   */
+  hubs?: { offer(client: number, o: HubOffer): void }
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -100,6 +106,8 @@ export type MachinesPort = {
   probe(sshTarget: string): Promise<MachineProbe>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
+  /** The reverse direction's switch for one machine (#550) */
+  setAsks(id: string, on: boolean): Promise<MachineInfo>
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -111,7 +119,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity, updateApply }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity, updateApply, hubs }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -815,6 +823,25 @@ export function createRpcHandler(
       return requireMachines().autostart(machineId, on)
     },
     'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
+    // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
+    'machines.setAsks': async (p) => {
+      const { machineId, on } = RpcMethods['machines.setAsks'].params.parse(p)
+      return requireMachines().setAsks(machineId, on)
+    },
+    'machines.askConsents': async () => {
+      const names = new Map((machines?.list() ?? []).map((m) => [m.id, m.name]))
+      return mgr.machineAskConsents((id) => names.get(id))
+    },
+    'machines.withdrawAsk': async (p) => {
+      const { machineId, sessionId, projectId } = RpcMethods['machines.withdrawAsk'].params.parse(p)
+      mgr.withdrawMachineAsk(machineId, sessionId, projectId)
+      return { ok: true as const }
+    },
+    'host.hubOffer': async (p, ctx) => {
+      const offer = RpcMethods['host.hubOffer'].params.parse(p)
+      if (hubs && ctx) hubs.offer(ctx.client, offer)
+      return { ok: true as const }
+    },
     'host.activity': async () => {
       if (!activity) throw rpcError('This host does not report its activity')
       return activity()
