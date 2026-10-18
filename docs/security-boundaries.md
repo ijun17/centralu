@@ -254,7 +254,9 @@ machine as the less trusted side: a compromised server must not reach the person
   preset, trust and approvals; the answer cut to size; paths in it listed on the machine and none opened.
 - **Residual:** the machine names the asking session itself. A compromised machine can use any pair approved for any of
   its sessions, and so reach every project of this computer that a session of that machine was approved for; that is
-  what the switch and each approval consent to, and withdrawing a pair or turning the switch off ends it. The task text
+  what the switch and each approval consent to, and withdrawing a pair or turning the switch off ends it. While the
+  switch is on, it can also raise this computer's card as often as its calls allow (16 at once), under names it chose;
+  the card says which machine asks, and turning the switch off refuses every call from then on. The task text
   is the machine's agent's words, as for any ask (the residual above). The machine reads its own trust and depth gates
   before it asks; a caller there losing trust while this computer's card stands does not withdraw the card.
 

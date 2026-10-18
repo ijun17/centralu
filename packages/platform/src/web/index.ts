@@ -626,6 +626,11 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       uninstall: (machineId) => rpc.call('machines.uninstall', { machineId }),
       autostart: (machineId, on) => rpc.call('machines.autostart', on === undefined ? { machineId } : { machineId, on }),
       activity: async (machineId) => (await rpc.call('machines.activity', { machineId })).activity,
+      setAsks: (machineId, on) => rpc.call('machines.setAsks', { machineId, on }),
+      askConsents: () => rpc.call('machines.askConsents', {}),
+      withdrawAsk: async (machineId, sessionId, projectId) => {
+        await rpc.call('machines.withdrawAsk', { machineId, sessionId, projectId })
+      },
     },
     workspace: {
       async save(snapshot) {

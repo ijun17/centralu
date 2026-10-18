@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -250,5 +250,16 @@ describe('a machine whose host runs with administrator rights (#702)', () => {
     expect(elevatedNote(machine({ elevated: true }))?.title).toBe('Agents on Box run with administrator rights: its host runs as root.')
     expect(elevatedNote(machine({ elevated: false }))).toBeNull()
     expect(elevatedNote(machine({ elevated: null }))).toBeNull()
+  })
+})
+
+describe('the switch for a machine’s sessions to ask this computer’s projects (#550)', () => {
+  it('says what it allows, is off for a new machine, and says why it cannot work only while it is on', () => {
+    expect(asksRow(machine({ asks: null }))).toBeNull()
+    const off = asksRow(machine({ asks: { on: false, note: 'old' } }))!
+    expect(off).toMatchObject({ label: "Let sessions on Box ask this computer's projects", on: false, note: null })
+    expect(off.confirm).toContain('a card asks you on this computer')
+    expect(off.confirm).toContain('until you withdraw it')
+    expect(asksRow(machine({ asks: { on: true, note: 'Box runs a Centralu from before this' } }))).toMatchObject({ on: true, note: 'Box runs a Centralu from before this' })
   })
 })

@@ -73,6 +73,8 @@ export function ApprovalCard({
       if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
+      // Nor an ask from a linked machine's session (#550): Allow is already remembered for its pair
+      if (detail.kind === 'project_access' && detail.from.machine && action.decision === 'always') return
       // Nor an agent started on another machine (#1038), for the same reason
       if (detail.kind === 'agent_start' && detail.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
@@ -295,19 +297,32 @@ function ProjectAccessCard({
         <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
           Awaiting approval
         </span>
-        <span className="text-xs text-ink-faint">This session wants to reach another project, and waits</span>
+        <span className="text-xs text-ink-faint">
+          {detail.from.machine
+            ? `A session on ${detail.from.machine} wants to ask a project here, and waits`
+            : 'This session wants to reach another project, and waits'}
+        </span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {projectAccessQuestion(detail)}
       </p>
-      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        {detail.access === 'delegate'
-          ? `The task goes to an existing session in ${detail.to.name}${detail.to.machine ? ` on ${detail.to.machine}, which works with its own logins and folder there` : ', with its own folder, instructions and permissions'}, and its answer comes back here.`
-          : `The app's tools attach to this session while it uses them.`}{' '}
-        {detail.to.machine
-          ? 'Nothing is remembered for a project on another machine: it asks each time.'
-          : `Always is remembered for ${detail.from.name} → ${detail.to.name}; revoke it in Settings.`}
-      </p>
+      {detail.from.machine ? (
+        <p className="mt-1 px-3 text-xs leading-body text-ink-faint" data-testid="approval-from-machine">
+          The task goes to this session, which works on it with its own folder, instructions and permissions on this
+          computer, and its answer goes back to {detail.from.machine}. Allow is remembered for this session of{' '}
+          {detail.from.machine} and {detail.to.name}: its later asks need no card until you withdraw it in Settings →
+          Machines.
+        </p>
+      ) : (
+        <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+          {detail.access === 'delegate'
+            ? `The task goes to an existing session in ${detail.to.name}${detail.to.machine ? ` on ${detail.to.machine}, which works with its own logins and folder there` : ', with its own folder, instructions and permissions'}, and its answer comes back here.`
+            : `The app's tools attach to this session while it uses them.`}{' '}
+          {detail.to.machine
+            ? 'Nothing is remembered for a project on another machine: it asks each time.'
+            : `Always is remembered for ${detail.from.name} → ${detail.to.name}; revoke it in Settings.`}
+        </p>
+      )}
       {detail.to.trusted === false && (
         <p className="mt-1 px-3 text-xs leading-body text-ink-signal" data-testid="approval-untrusted">
           You have not trusted {detail.to.name}. The session there reads none of its settings or instruction
@@ -318,12 +333,12 @@ function ProjectAccessCard({
       <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
         <ActionKey
           k={keys.allow}
-          label="Allow once"
+          label={detail.from.machine ? 'Allow' : 'Allow once'}
           onClick={() => onAnswer('allow')}
           testId="approve-allow"
           disabled={busy}
         />
-        {!detail.to.machine && (
+        {!detail.to.machine && !detail.from.machine && (
           <ActionKey
             k={keys.always}
             label="Always for this pair"

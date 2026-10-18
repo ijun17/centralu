@@ -1,4 +1,4 @@
-import type { MachineInfo, MachineProbe, SshHostList } from '@cc/protocol'
+import type { MachineAskConsent, MachineInfo, MachineProbe, SshHostList } from '@cc/protocol'
 import type { ProjectStore } from './project-store.js'
 import type { Emit } from './event-bus.js'
 
@@ -17,6 +17,11 @@ export class MachinesMock {
    */
   sshConfig: SshHostList = { configFile: '~/.ssh/config', hosts: [], notes: [] }
   probeAnswers: Record<string, Omit<MachineProbe, 'sshTarget'>> = {}
+  /**
+   * The pairs approved for the reverse direction (#550): none until a test or the demo puts one here, as the mock
+   * raises no card of a machine's session
+   */
+  askPairs: MachineAskConsent[] = []
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
@@ -83,6 +88,7 @@ export class MachinesMock {
     },
     remove: async (machineId: string) => {
       this.machinesList = this.machinesList.filter((m) => m.id !== machineId)
+      this.askPairs = this.askPairs.filter((c) => c.machineId !== machineId)
       this.projectStore.list = this.projectStore.list.filter((p) => p.machine !== machineId)
       this.emit({ type: 'machine_resync', machineId })
     },
@@ -113,6 +119,20 @@ export class MachinesMock {
       return { machine: this.machineRow(machineId, { autostart }), autostart }
     },
     activity: async () => ({ working: 1, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 0 }),
+    /** The switch takes at once; off forgets the machine's pairs, as the host does */
+    setAsks: async (machineId: string, on: boolean) => {
+      if (!on && this.askPairs.some((c) => c.machineId === machineId)) {
+        this.askPairs = this.askPairs.filter((c) => c.machineId !== machineId)
+        this.emit({ type: 'project_consents_changed' })
+      }
+      return this.machineRow(machineId, { asks: { on, note: null } })
+    },
+    askConsents: async () => this.askPairs.map((c) => ({ ...c })),
+    withdrawAsk: async (machineId: string, sessionId: string, projectId: string) => {
+      const before = this.askPairs.length
+      this.askPairs = this.askPairs.filter((c) => !(c.machineId === machineId && c.sessionId === sessionId && c.projectId === projectId))
+      if (this.askPairs.length !== before) this.emit({ type: 'project_consents_changed' })
+    },
   }
 
   constructor(

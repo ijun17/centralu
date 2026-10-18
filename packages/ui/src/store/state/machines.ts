@@ -44,6 +44,8 @@ export type MachinesSlice = {
   changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): Promise<boolean>
   /** Starts a machine's host at boot, or stops doing that (plan §10.4); false (with a toast) when it was refused */
   setMachineAutostart(machineId: string, on: boolean): Promise<boolean>
+  /** Lets a machine's sessions ask this computer's projects, or stops it (#550); false (with a toast) when it was refused */
+  setMachineAsks(machineId: string, on: boolean): Promise<boolean>
   /** What would stop on a machine if its host stopped now, for the update prompt; null when unknown */
   machineActivity(machineId: string): Promise<HostActivity | null>
   checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>

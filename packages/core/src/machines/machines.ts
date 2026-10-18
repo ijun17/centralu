@@ -273,6 +273,24 @@ export type AutostartRow = { label: string; on: boolean; note: string | null }
  * The note says where the switch falls short of "at boot": a systemd user manager that starts only at login because
  * enabling lingering there needs an administrator, and a Windows task, which runs at sign-in.
  */
+/**
+ * The reverse direction's switch (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): its label, the
+ * question turning it on asks once (what it allows, and what it does not), and the row's note when it is on but cannot
+ * work. Null from a hub that predates it
+ */
+export function asksRow(m: Pick<MachineInfo, 'asks' | 'name'>): { label: string; on: boolean; confirm: string; note: string | null } | null {
+  if (!m.asks) return null
+  return {
+    label: `Let sessions on ${m.name} ask this computer's projects`,
+    on: m.asks.on,
+    confirm:
+      `Sessions on ${m.name} may then ask this computer's projects to do work, with ask_project, and nothing else here. ` +
+      `The first time a session there asks a project here, a card asks you on this computer; once you allow that pair, ` +
+      `its later asks need no card until you withdraw it below. Turning this off forgets every pair.`,
+    note: m.asks.on ? m.asks.note : null,
+  }
+}
+
 export function autostartRow(m: Pick<MachineInfo, 'autostart' | 'name'>): AutostartRow | null {
   const a = m.autostart
   if (!a?.how) return null

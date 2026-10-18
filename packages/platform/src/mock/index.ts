@@ -342,6 +342,9 @@ export class MockPlatform implements Platform {
   set sshConfig(value: MachinesMock['sshConfig']) { this.machinesMock.sshConfig = value }
   get probeAnswers() { return this.machinesMock.probeAnswers }
   set probeAnswers(value: MachinesMock['probeAnswers']) { this.machinesMock.probeAnswers = value }
+  /** The pairs approved for a machine's sessions to ask this computer's projects (#550) */
+  get askPairs() { return this.machinesMock.askPairs }
+  set askPairs(value: MachinesMock['askPairs']) { this.machinesMock.askPairs = value }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }

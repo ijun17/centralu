@@ -30,6 +30,7 @@ type MachineActions = Pick<
   | 'reconnectMachine'
   | 'changeMachineInstall'
   | 'setMachineAutostart'
+  | 'setMachineAsks'
   | 'machineActivity'
   | 'acceptMachineVersions'
   | 'checkMachineAgentVersions'
@@ -105,6 +106,17 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       return true
     } catch (e) {
       set({ toast: `Could not turn ${on ? 'on' : 'off'} starting at boot: ${(e as Error).message}` })
+      return false
+    }
+  },
+
+  async setMachineAsks(machineId, on) {
+    try {
+      const machine = await get().platform!.machines.setAsks(machineId, on)
+      set((s) => ({ machines: withAnswered(s.machines, machine) }))
+      return true
+    } catch (e) {
+      set({ toast: `Could not turn ${on ? 'on' : 'off'} asks from that machine: ${(e as Error).message}` })
       return false
     }
   },

@@ -1097,8 +1097,10 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
 
 - **The switch** (question 2). Per machine in Settings → Machines, off by default, stored on the machine's row
   (`linked_machines.asks`, store v57) so removing the machine removes it, and a machine linked again under the same id
-  starts with it off. Turning it on asks once and says what it allows. Turning it off refuses the next call at once and
-  forgets every pair approved for that machine: turning it on again is a new consent.
+  starts with it off. Turning it on asks once and says what it allows (core's `asksRow`): ask_project into this
+  computer's projects and nothing else, a card for each pair's first ask, no card after it until withdrawn. Turning it off
+  does not ask, refuses the next call at once and forgets every pair approved for that machine: turning it on again is a
+  new consent. While it is on, the row lists the approved pairs (`machines.askConsents`), each with Withdraw.
 - **The link carries it.** The hub tells the machine who it is at every connect and when the switch moves
   (`host.hubOffer { hub: { id, name }, on }`, additive). The hub's id is its own, made once and kept in its store
   (`hub.selfId`, `hub-` and 8 hex digits). The machine calls it back on that connection only (`HostServer.call`: an
@@ -1139,4 +1141,7 @@ the machine and the session, an approved pair with no card, withdrawing, another
 pair, the switch off forgetting the pairs and refusing an approval given after it, a cancelled call withdrawing the
 card, a busy session, two hubs by name and one away, a machine and a hub from before it), `transport/server.test.ts`
 and `links/remote-client.test.ts` (the calls on the socket), `dev-services/store-machine-asks.test.ts` (the switch and
-pairs, removed with the machine by an older build and with the project). No live model, no real ssh link.
+pairs, removed with the machine by an older build and with the project), `e2e/machine-asks.spec.ts` (the switch
+off for a new machine, its question, the pairs withdrawn, off forgetting them; the card naming the machine and the
+session there, Allow and Deny only), `core/approval/approval.test.ts` and `core/machines/machines.test.ts` (the
+words). No live model, no real ssh link.
