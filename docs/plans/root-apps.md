@@ -29,6 +29,9 @@ nothing inherited.
 
 - **Added** (by hand, by an agent, by `git pull`): the folder watcher that already watches the
   project root sees it, and the app appears without a restart. Nothing else about the project changes.
+  In a project already trusted, an app it did not have (a manifest a `git pull` brought, root or inside)
+  is trusted with the project, as the owner decided; the inbox says so once, with its name and what it
+  declares it may ask for, so the person sees what their trust now covers.
 - **Removed**: the app leaves the list and its process stops, as when an inner app's folder goes.
   Its state is **kept** under the same key, so adding the manifest back (same id) brings back its data,
   secrets, grants, runs and builder.
@@ -91,10 +94,16 @@ may reach other projects. Capability grants stay as they are (#1173 folds them i
 | Another project's session | Attaches it through `find_apps` / `attach_app` without a consent card, as a user-folder app; named `<project>/<id>`, or its bare id when one project has it |
 | App-agent sessions | None, as before |
 
-An untrusted project's root app reaches no session outside its project, the orchestrator included,
-even one running under `auto` (whose boundaries open for its own project's apps only). Apps inside a
-project (`.centralu/apps`) keep their share switch and the pair consent; they too run only in a
-trusted project.
+**An untrusted project's apps attach nowhere** (owner, on the second review): its root app and the
+apps inside it alike, to no session, its own project's included, and under `auto` too; #603's opening
+of an untrusted project's apps to an `auto` session no longer applies to apps. The project's sessions
+still run and may still read its code. Apps inside a project (`.centralu/apps`) keep their share
+switch and the pair consent for reaching other projects.
+
+**Names are stable.** A session's agent calls an app by its server name (`app-<id>`), and a Codex
+thread keeps the names it started with. Once a session has seen a name, it stays bound to the same app
+for that session's life, kept with the session (`session_app_names:<session>`); a later app with the
+same id gets a name qualified by its project (`app-<id>-<project>`), never the name another app held.
 
 Its broker: `call_app` reaches another trusted project's root app by id after the caller's own project
 and the user folder, when exactly one has it. `host_data sessions.list` answers its own project's
@@ -112,7 +121,10 @@ sessions, as for any project app and as the permission card says; `git.status` r
 | Approved MCP servers | Become root apps too, in place | Stay hidden user-folder apps: two kinds of app again, and Settings would be the only place to find them |
 | Imported apps | Project trust replaces the import mark (enabled = trusted) | Keep the per-app review on `server`/`uses` changes: a second gate a project app does not have; capability questions still ask before any broker use |
 | Versions of a root app | git when the project is a repository, kept copies otherwise | Always copies: a large repository would be copied on every start |
-| A root app's reach | A user-folder app's (orchestrator, attach without a card) while its project is trusted; the trust card says the project's apps may reach other projects (owner) | A per-app switch ("Share", then "Trust this app"): a second decision about the same code, which the owner ruled out. Never: migrated apps would lose what they did yesterday |
+| A root app's reach | A user-folder app's (orchestrator, attach without a card) while its project is trusted; the trust card lists the project's apps (owner) | A per-app switch ("Share", then "Trust this app"): a second decision about the same code, which the owner ruled out. Never: migrated apps would lose what they did yesterday |
+| An untrusted project's apps under `auto` | Attach nowhere, its own project's sessions included (owner) | #603's opening for `auto` sessions: an app is code that runs, which reading code is not |
+| An app a trusted project gains later | Trusted with the project; the inbox says so once (owner) | A card per new app: a second decision about the same project |
+| Two apps with one id in a session | The name a session has seen stays with its app; a later one is `app-<id>-<project>` | Naming by sort order: a new app could take a name the orchestrator already calls, and its calls would go to the other app |
 | `host_data sessions.list` of a root app | Its project's sessions, as the permission card says | Every session: the card would have to say so, and a repository's app would read every project's session names |
 | Restoring a root app's version outside git | Copies the version back, deletes nothing, refused if the copy taken first failed | As a user-folder app (deletes what the version lacks): the folder is the person's whole project |
 | When user-folder apps move | After the host is ready, sessions moved live | At start: a host failing before ready leaves the previous build serving on old copies, marked done |
