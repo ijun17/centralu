@@ -745,7 +745,7 @@ and "Send to builder".
 
 | Session | Apps |
 |---|---|
-| Orchestrator | User-folder apps |
+| Orchestrator | User-folder apps and root apps (#1141: a project that is an app takes the user-folder app's place). Two of one id are named apart: the user folder's first keeps `app-<id>`, then by project, `app-<id>-2`, … |
 | A project's sessions, worktree sessions included | That project's apps, if the project is trusted |
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
@@ -843,6 +843,7 @@ session's apps (and so at every call):
 |---|---|---|
 | Another project's app | The person shares it (off by default), its project is trusted, and it is not `invalid`, `untrusted` or `failed` | Once per pair of projects, in the calling session: the consent card (Allow once, Always for this pair, Deny). "Always" is kept per (from project, to project, `apps`) in `project_consents` (store v44, shared with part B's `ask_project`) and listed in Settings, where revoking it detaches what it allowed. "Once" lasts for that attachment; a denial is not remembered |
 | User-folder app | Not `invalid`, `unconfirmed` or `failed` | Never: the person put it in their own folder to use across projects |
+| Another project's root app (#1141) | Its project is trusted, and it is not `invalid` or `failed`. Found as `<project>/<id>`, and attached by its bare id too when one project's root app has it | Never, as a user-folder app: it took that app's place. No share switch either |
 | This project's own app | Already attached by decision 4 | — |
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one
@@ -965,10 +966,12 @@ gate happens in one place, the broker desk (`desk.ts`).
   through `ExternalApps.call` with caller `app` and the parent run id (§5): visibility, trust, the
   record, the change notification (the cause is the asking run) and cancellation are the same as
   for any other caller. A project app reaches its own project's app of that id first, then the user
-  folder's; a user-folder app reaches only user-folder apps.
+  folder's, then the root app of that id (#1141) when exactly one project is an app of that id; a
+  user-folder app or a root app reaches the user folder's, then that root app. Another project's inner
+  app is never reached.
 - **`host_data { name }`.** A closed list, read-only, deny by default: `sessions.list` (the names
   shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
-  project's sessions for a project app, every session for a user-folder app; never those in the trash, FR-22) and `git.status` (the
+  project's sessions for a project app, every session for a user-folder app or a root app, #1141; never those in the trash, FR-22) and `git.status` (the
   project's branch and changed files; project apps only). Only names declared in `uses.host`.
 - **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
   the person is asked where the chain started: on the approval card of the session whose agent

@@ -42,6 +42,8 @@ export type AttachWorld = {
   rt: ExternalApps
   /** Plants one fixture app (`--mode attach` by default). Returns the app folder */
   plant(where: 'p1' | 'p2' | 'user', id: string, args?: string[]): string
+  /** Makes the project itself an app (#1141): the fixture's manifest at the project's root, with this id */
+  plantRoot(where: 'p1' | 'p2', id: string, args?: string[]): string
   /** The record that app process wrote about itself */
   records(id: string): Rec[]
   /** The path to the gate file that releases the `hold` tool (passed via `--gate`) */
@@ -81,6 +83,12 @@ export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}, 
       const parent = where === 'user' ? join(dataRoot, 'apps') : join(roots[where], ...kit.PROJECT_APPS)
       return kit.plantApp(parent, id, {
         server: { command: process.execPath, args: [FIXTURE_APP, '--log', join(logs, `${id}.jsonl`), '--gate', world.gate(id), ...args] },
+      })
+    },
+    plantRoot(where, id, args = ['--mode', 'attach']) {
+      return kit.plantApp(root, where, {
+        id,
+        server: { command: process.execPath, args: [FIXTURE_APP, '--log', join(logs, `${id}-${where}.jsonl`), '--gate', world.gate(id), ...args] },
       })
     },
     records(id) {

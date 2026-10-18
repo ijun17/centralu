@@ -163,6 +163,7 @@ export class ExternalApps {
     this.desk = new BrokerDesk(
       {
         has: (ref) => this.find(ref) !== undefined,
+        roots: (id) => [...this.scopes.values()].flatMap(({ apps }) => [...apps.values()]).filter((e) => e.found.root === true && e.ref.appId === id).map((e) => e.ref),
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => this.startEnv.masker(ref),
         origin: (runId) => this.calls.chainOrigin(runId),

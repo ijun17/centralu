@@ -141,15 +141,34 @@ export type OnDemandApps = {
 
 /**
  * Decision 4's scope, apart from the app's state: whether this session is ever given this app. The
- * orchestrator gets the user-folder apps, a project's sessions that project's apps, and a building
- * session its own app as well (see `refsFor`).
+ * orchestrator gets the user-folder apps and the root apps (#1141: a project that is an app takes the
+ * user-folder app's place), a project's sessions that project's apps (its root app included), and a
+ * building session its own app as well (see `refsFor`).
  */
-function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
+function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId' | 'root'>): boolean {
   return (
-    (session.kind === 'orchestrator' ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
+    (session.kind === 'orchestrator'
+      ? app.projectId === null || app.root === true
+      : session.projectId !== null && app.projectId === session.projectId) ||
     (session.builderOf?.appId === app.appId && session.builderOf.projectId === app.projectId)
   )
 }
+
+/** The first of `app-<id>`, `app-<id>-2`, … that `taken` does not hold */
+export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[]): string {
+  const has = (name: string) => (Array.isArray(taken) ? taken.includes(name) : (taken as ReadonlySet<string>).has(name))
+  const base = appMcpServerName(appId)
+  if (!has(base)) return base
+  for (let n = 2; ; n++) if (!has(`${base}-${n}`)) return `${base}-${n}`
+}
+
+/**
+ * The order decision 4's apps are named in: by id, the user folder's first, then by project. Two of a session's apps can
+ * share an id only for the orchestrator (root apps of two projects, #1141); the first keeps `app-<id>` and the next is
+ * `app-<id>-2`, the way an attached app steps aside (#371), so a user-folder app keeps the name it always had.
+ */
+const byNameOrder = (x: Pick<ExternalAppInfo, 'appId' | 'projectId'>, y: Pick<ExternalAppInfo, 'appId' | 'projectId'>): number =>
+  x.appId.localeCompare(y.appId) || (x.projectId === y.projectId ? 0 : x.projectId === null ? -1 : y.projectId === null ? 1 : x.projectId.localeCompare(y.projectId))
 
 export class SessionAppsHub {
   /** session id → the attachment of the handle currently alive for it. Swapping the handle out lets a new one take its place */
@@ -284,7 +303,8 @@ export class SessionAppsHub {
   /**
    * The apps this session receives (decision 4).
    *
-   *   orchestrator                the user-folder apps (it belongs to no project, so there are no project apps)
+   *   orchestrator                the user-folder apps and the root apps (#1141) — it belongs to no project, so it gets
+   *                               no project's inner apps
    *   a project's session         that project's apps — only if the project is trusted. A worktree session
    *                               carries the same project id, so it receives the root's apps too
    *                               (A-2: one instance per project)
@@ -299,9 +319,15 @@ export class SessionAppsHub {
    */
   refsFor(session: AppSessionKey): Hit[] {
     const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && !!this.opts.boundaryOpen?.(session.id)))
+    const named = new Set<string>()
     const hits = usable
       .filter((a) => givesApp(session, a))
-      .map((a) => ({ ref: { projectId: a.projectId, appId: a.appId }, server: appMcpServerName(a.appId) }))
+      .sort(byNameOrder)
+      .map((a) => {
+        const server = freeServerName(a.appId, named)
+        named.add(server)
+        return { ref: { projectId: a.projectId, appId: a.appId }, server }
+      })
       .sort((x, y) => x.server.localeCompare(y.server))
     /*
      * Then what the session attached itself (#371 part A), after decision 4's apps and in the order it
@@ -338,7 +364,7 @@ export class SessionAppsHub {
     if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
     if (app.status === 'untrusted' && !this.opts.boundaryOpen?.(session.id)) return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status) && !(app.status === 'untrusted' && this.opts.boundaryOpen?.(session.id))) return { reachable: false, reason: 'app-unusable', status: app.status }
-    const server = givesApp(session, app) ? appMcpServerName(app.appId) : own!.server
+    const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameRef(h.ref, ref))?.server ?? appMcpServerName(app.appId)) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }
     if (attached === 'failed') return { reachable: false, reason: 'bridge-failed' }

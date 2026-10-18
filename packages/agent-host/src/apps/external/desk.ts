@@ -70,6 +70,8 @@ export type AgentRunResult = {
 export type DeskApps = {
   /** Whether an app with this name is in the list — this also includes an app with an invalid manifest or an untrusted project's app (calling it gets refused with that reason) */
   has(ref: AppRef): boolean
+  /** The root apps (#1141) with this id, whatever their project — a project that is an app is reached by its id, as a user-folder app was */
+  roots(id: string): AppRef[]
   /** The name a person reads for an app — the manifest's `name`, or the id if absent */
   name(ref: AppRef): string
   /** A function that masks this app's stored secrets — arguments and reasons written to the ledger (D-6) are masked by the same rule as a tool call's own record */
@@ -219,18 +221,22 @@ const CallAppArgs = z.object({
 
 /**
  * A name an app calls another app by → the app (D-2). Same shape as the rule sessions use to resolve
- * an app (decision 4): a project app calls **its own project's app first**, and the user-folder app
- * of the same name if that does not exist. A user-folder app can call only other user-folder apps —
- * since it belongs to no project, there is no basis for picking any one project's app. An app in a
- * different project is never reachable even under the same name (trust differs per project).
+ * an app (decision 4): a project app calls **its own project's app first**, then the user-folder app
+ * of the same name, then the root app of that id (#1141): a project that is an app takes the
+ * user-folder app's place, so an app that called a user-folder app by its id still reaches it once
+ * it has moved into a project. Only when exactly one project's root app has that id: with two, there
+ * is no basis for picking one. Another project's inner app is never reachable even under the same
+ * name (trust differs per project, and its own project's sessions are its audience).
  */
-export function resolveCallTarget(asker: AppRef, id: string, has: (ref: AppRef) => boolean): AppRef | null {
+export function resolveCallTarget(asker: AppRef, id: string, has: (ref: AppRef) => boolean, roots: (id: string) => AppRef[] = () => []): AppRef | null {
   if (asker.projectId !== null) {
     const same = { projectId: asker.projectId, appId: id }
     if (has(same)) return same
   }
   const user = { projectId: null, appId: id }
-  return has(user) ? user : null
+  if (has(user)) return user
+  const found = roots(id)
+  return found.length === 1 ? found[0]! : null
 }
 
 const HostDataArgs = z.object({ name: z.string(), args: z.record(z.string(), z.unknown()).optional() })
@@ -563,12 +569,15 @@ export class BrokerDesk {
           'an app may call only the apps its manifest lists',
       )
     }
-    const target = resolveCallTarget(app.ref, id, (r) => this.apps.has(r))
+    const target = resolveCallTarget(app.ref, id, (r) => this.apps.has(r), (i) => this.apps.roots(i))
     if (!target) {
+      const several = this.apps.roots(id).length > 1
       return fail(
-        app.ref.projectId === null
-          ? `call_app: there is no app "${id}" in your user folder — an app from the user folder can call only other apps there`
-          : `call_app: there is no app "${id}" in this project or in your user folder`,
+        several
+          ? `call_app: more than one project is an app called "${id}", so it is not clear which one to call`
+          : app.ref.projectId === null
+            ? `call_app: there is no app "${id}" in your user folder, and no project is an app called that`
+            : `call_app: there is no app "${id}" in this project or in your user folder, and no project is an app called that`,
       )
     }
     // Runaway prevention (D-5) — before asking the person: they are never bothered with a request that would be refused anyway

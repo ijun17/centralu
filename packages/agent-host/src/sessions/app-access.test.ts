@@ -291,3 +291,52 @@ describe('how long an attachment lasts', () => {
     expect(access.attached('w1')).toEqual([])
   })
 })
+
+/**
+ * A project that is an app (#1141) takes the user-folder app's place: the orchestrator gets it, another project's
+ * session finds and attaches it without a share switch or a card, and its own project's sessions get it with the rest of
+ * their project's apps.
+ */
+describe('a project that is an app (#1141)', () => {
+  it("another project's root app is found and attached without a share switch or a card, as a user-folder app is, and its tools work", async () => {
+    w.plantRoot('p2', 'kanban')
+    w.rt.refresh()
+    const a = hub.attach(session('w1', 'p1'))
+    expect(refs('w1')).toEqual(['Beta/board', 'Beta/kanban', 'helper'])
+    expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: true, server: 'app-kanban' })
+    expect(asks).toEqual([])
+    expect((await a.call('app-kanban', 'poke', { to: 1 })).isError).toBe(false)
+    // By its bare id too, as when it was a user-folder app
+    expect(access.detach('w1', 'Beta/kanban')).toMatchObject({ ok: true })
+    expect(await access.attach('w1', 'kanban')).toMatchObject({ ok: true, server: 'app-kanban' })
+    expect(asks).toEqual([])
+  })
+
+  it('a root app in a project the person has not trusted is neither listed nor attached', async () => {
+    w.trust.p2 = false
+    w.plantRoot('p2', 'kanban')
+    w.rt.refresh()
+    session('w1', 'p1')
+    expect(refs('w1')).toEqual(['helper'])
+    expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
+  })
+
+  it("the orchestrator gets every root app and no project's inner app; its own project's sessions get it; two of one id are named apart", () => {
+    w.plant('user', 'kit')
+    w.plantRoot('p1', 'kit')
+    w.plantRoot('p2', 'kit')
+    w.rt.refresh()
+    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
+      ['app-helper', null],
+      ['app-kit', null],
+      ['app-kit-2', 'p1'],
+      ['app-kit-3', 'p2'],
+    ])
+    // A session of p1 gets its project's apps, its root app among them, under their own names
+    expect(hub.refsFor(session('w1', 'p1')).map((h) => h.server)).toEqual(['app-kit', 'app-notes'])
+    // The name a session's app answers to is the one it is listed under
+    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
+  })
+})
+

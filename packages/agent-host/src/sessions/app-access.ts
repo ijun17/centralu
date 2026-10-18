@@ -1,7 +1,7 @@
 import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS, freeServerName, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
 import { listSetting } from '../dev-services/store/settings.js'
 
@@ -21,6 +21,8 @@ import { listSetting } from '../dev-services/store/settings.js'
  *                                      consent card, `ensureProjectAccess`, shared with part B)
  *   a user-folder app                  always: the person put it in their own folder for use across
  *                                      projects, so it needs neither a share switch nor a card
+ *   another project's root app         the same (#1141): a project that is an app takes the user-folder
+ *                                      app's place, so it is reached as one was — its project trusted
  *   from an untrusted project          nothing: its repository's text could be the one asking, and an
  *                                      untrusted project runs none of its own apps either
  *
@@ -132,7 +134,8 @@ export class AppAccess implements OnDemandApps {
   allowed(session: AppSessionKey, app: ExternalAppInfo): boolean {
     const from = session.projectId
     if (from === null || (!this.projectTrusted(from) && !this.deps.boundaryOpen?.(session.id))) return false
-    if (app.projectId === null) return true
+    // A user-folder app, or another project's root app (#1141, which took the user-folder app's place): no switch, no card
+    if (app.projectId === null || (app.root === true && app.projectId !== from)) return true
     if (app.projectId === from || app.shared !== true) return false
     const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
     if (!r) return false
@@ -171,7 +174,8 @@ export class AppAccess implements OnDemandApps {
     }
 
     let consent: Record_['consent'] = 'none'
-    if (app.projectId !== null) {
+    // A root app is reached the way a user-folder app is (#1141): no consent card
+    if (app.projectId !== null && app.root !== true) {
       const res = await this.deps.ensureAccess(
         sessionId,
         app.projectId,
@@ -252,13 +256,13 @@ export class AppAccess implements OnDemandApps {
     return { ok: true, session }
   }
 
-  /** What this session could attach now: shared apps of other trusted projects, and user-folder apps, minus what it has */
+  /** What this session could attach now: shared apps and root apps (#1141) of other trusted projects, and user-folder apps, minus what it has */
   private candidates(session: AppSessionKey): ExternalAppInfo[] {
     const have = this.deps.hub.refsFor(session)
     return this.deps.hub.rt
       .list()
       .filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && this.deps.boundaryOpen?.(session.id)))
-      .filter((a) => a.projectId === null || (a.projectId !== session.projectId && a.shared === true))
+      .filter((a) => a.projectId === null || (a.projectId !== session.projectId && (a.shared === true || a.root === true)))
       .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
   }
@@ -267,7 +271,7 @@ export class AppAccess implements OnDemandApps {
     if (app.projectId !== null && app.projectId === session.projectId) return `${this.refOf(app)} is this project's own app; it is attached already when the project is trusted.`
     if (app.status === 'untrusted') return `${this.refOf(app)} is in a project the person has not trusted, so it does not run.`
     if (UNUSABLE.has(app.status)) return `${this.refOf(app)} cannot run now (${app.status}${app.error ? `: ${app.error.split('\n')[0]}` : ''}).`
-    if (app.projectId !== null && app.shared !== true) return `${this.refOf(app)} is not shared with other projects. Only the person can share it (Settings → Apps).`
+    if (app.projectId !== null && app.shared !== true && app.root !== true) return `${this.refOf(app)} is not shared with other projects. Only the person can share it (Settings → Apps).`
     return `${this.refOf(app)} cannot be attached to this session.`
   }
 
@@ -278,7 +282,9 @@ export class AppAccess implements OnDemandApps {
     let app: ExternalAppInfo | undefined
     if (slash === -1) {
       const id = want.startsWith(appMcpServerName('')) && !all.some((a) => a.appId === want) ? want.slice(appMcpServerName('').length) : want
-      app = all.find((a) => a.projectId === null && a.appId === id)
+      // A user-folder app by its id; else the one root app of that id (#1141: a user-folder app moved into a project keeps answering to it)
+      const roots = all.filter((a) => a.root === true && a.appId === id)
+      app = all.find((a) => a.projectId === null && a.appId === id) ?? (roots.length === 1 ? roots[0] : undefined)
     } else {
       const project = want.slice(0, slash).trim()
       const id = want.slice(slash + 1).trim()
@@ -319,9 +325,7 @@ export class AppAccess implements OnDemandApps {
 
   /** `app-<id>`, or the first `app-<id>-<n>` no app of this session uses — the session's own app keeps the plain name */
   private freeServer(appId: string, taken: string[]): string {
-    const base = appMcpServerName(appId)
-    if (!taken.includes(base)) return base
-    for (let n = 2; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`
+    return freeServerName(appId, taken)
   }
 
   /** The app's agent tools for the tool result — started here if never listed, within the hub's cap; empty on failure */
