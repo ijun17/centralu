@@ -16,6 +16,7 @@ import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { NodeTooOld } from './node-floor.js'
+import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -48,7 +49,7 @@ afterEach(async () => {
 async function remoteHost(
   port = 0,
   store = new Store(),
-  o: { version?: string; activity?: () => HostActivity; immediate?: boolean; without?: readonly string[] } = {},
+  o: { version?: string; activity?: () => HostActivity; immediate?: boolean; without?: readonly string[]; elevated?: () => boolean | null } = {},
 ) {
     const adapters = scriptedAdapters({ immediate: o.immediate })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
@@ -57,6 +58,7 @@ async function remoteHost(
     token: TOKEN,
     onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? []),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
+    ...(o.elevated ? { elevated: o.elevated } : {}),
   })
   const p = await server.listen()
   let closed = false
@@ -410,6 +412,26 @@ describe('a hub linked to another host (#82)', () => {
     await expect(u.call('machines.acceptVersions', { machineId: 'm1' })).rejects.toThrow(/different protocols/)
   })
 
+  it('says on the row when the machine’s host runs with administrator rights, as its hello said, and stops saying it once it does not (#702)', async () => {
+    let elevated: boolean | null = true
+    const remote = await remoteHost(0, new Store(), { elevated: () => elevated })
+    const hub = await hubHost(() => lineFor(remote.port, { install: undefined }))
+    const u = await ui(hub.port)
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.elevated).toBe(true)
+    // The window hears it with the row it gets on connect
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'connected'))
+    expect(u.events().filter((e) => e.type === 'machine_status').at(-1)!.machine.elevated).toBe(true)
+    // The host restarted through a standard account: its next hello says so, and the row follows
+    elevated = false
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.list()[0]!.elevated === false)
+    // A host that says nothing (one that predates it, or could not tell) is not reported either way
+    elevated = null
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.list()[0]!.elevated === null)
+  })
+
   it('tells a PowerShell machine’s person to type centralu.cmd and npm.cmd, never the bare names a default execution policy blocks (#688)', async () => {
     const remote = await remoteHost()
     const store = new Store()
@@ -547,17 +569,18 @@ describe('a hub linked to another host (#82)', () => {
 
   describe('a remote host the link finds not running (remote-hub.md §10.9, decision 7)', () => {
     /** Links over a tunnel whose remote host runs once `startHost` has run, with every status and log line kept */
-    async function linkTo(start: () => Promise<HostStart>) {
+    async function linkTo(start: () => Promise<HostStart>, exec?: (command: unknown) => Promise<{ code: number; stdout: string; stderr: string }>, over: Partial<ConnectionLine> = {}) {
       const remote = await remoteHost()
       let running = false
       let starts = 0
-      const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running })), {
+      const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, ...over })), {
         startHost: async () => {
           starts++
           const r = await start()
           running = true
           return r
         },
+        ...(exec ? { exec } : {}),
       })
       const store = new Store()
       const registry = storeRegistry(store)
@@ -581,6 +604,27 @@ describe('a hub linked to another host (#82)', () => {
       links.start()
       return { links, statuses, logs, starts: () => starts }
     }
+
+    it('starts none while `pnpm remote-dev` holds the machine for a swap, says it is updating, and starts one once the hold is lifted (#1036)', async () => {
+      // The machine's shell, answering the hold a swap wrote there (swap-hold.ts) until it is lifted
+      let hold: string | null = JSON.stringify({ until: Date.now() + 60_000, by: 'pnpm remote-dev' })
+      const asked: string[] = []
+      const l = await linkTo(
+        async () => ({ how: 'detached', note: null }),
+        async (cmd) => {
+          asked.push(String(cmd))
+          return { code: 0, stdout: hold ? `CENTRALU-HOLD ${hold}\n` : '', stderr: '' }
+        },
+        // A swap needs an install the hub manages there
+        { install: { managed: true, current: { version: APP_VERSION, node: '24.21.0' }, previous: null, node: '24.21.0' } },
+      )
+      await eventually(() => asked.length >= 2 && l.links.list()[0]!.status === 'updating')
+      expect(l.starts()).toBe(0)
+      expect(l.logs.filter((x) => x.includes('pnpm remote-dev is swapping its host'))).toHaveLength(1)
+      hold = null
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      expect(l.starts()).toBe(1)
+    })
 
     it('starts it without asking, says so in the row and the log, and connects', async () => {
       const l = await linkTo(async () => ({ how: 'detached', note: null }))
@@ -679,6 +723,8 @@ describe('a machine whose Node is below the floor (#699)', () => {
     ]
     const tunnel = Object.assign(new DirectTunnel(() => (opens++, lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line }))), {
       exec: async (cmd: string) => {
+        // A swap's hold (#1036), asked before a host is started where the hub manages an install: there is none here
+        if (cmd === readHoldCommand(o.remote ?? { shell: 'posix' })) return { code: 0, stderr: '', stdout: '' }
         runs.push(cmd)
         if (o.failInstall) return { code: 1, stderr: 'curl: (6) Could not resolve host', stdout: '' }
         const i = runs.length - 1
@@ -874,6 +920,22 @@ describe('machines.update never installs an older release than the remote runs (
     await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(new RegExp(`Remote box runs Centralu 9\\.0\\.0, newer than ${APP_VERSION.replaceAll('.', '\\.')}.*would downgrade`))
     expect(ran).toEqual([])
     expect(hub.links.list()[0]!.operation).toBeNull()
+  })
+
+  it('takes a dev build put there from a commit (`<base>.local.N`, #1036) back to its own release: that is no downgrade', async () => {
+    const dev = `${APP_VERSION}.local.3`
+    const remote = await remoteHost(0, new Store(), { version: dev })
+    const ran: string[] = []
+    // The first step answers nothing the installer can read: what matters is that the update got that far
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { version: dev })), { exec: async (cmd: string) => (ran.push(cmd), { code: 0, stderr: '', stdout: '' }) })
+    const installer = { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '// the installer', registry: {} }
+    const hub = await hubHost(() => lineFor(remote.port, { version: dev }), new Store(), true, { tunnelFor: () => tunnel, installer })
+    await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === dev)
+    // A dev build of the hub's own release does not make the hub the older side
+    expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
+    const u = await ui(hub.port)
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(/did not answer the install check/)
+    expect(ran.length).toBe(1)
   })
 })
 

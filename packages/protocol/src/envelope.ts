@@ -48,6 +48,11 @@ export const HelloServer = z.object({
    * from source has only `commit: 'dev'`, and an older host sends nothing.
    */
   build: HostBuild.optional(),
+  /**
+   * The host runs with administrator rights (#702): an elevated token on Windows, as Windows OpenSSH gives an
+   * administrator's network logon, or root elsewhere. Absent when the host could not tell yet, or predates it. Additive
+   */
+  elevated: z.boolean().optional(),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

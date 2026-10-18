@@ -546,7 +546,8 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       expect(before.proof).toBe(true)
 
       const ok = await hello(port, String(info.token))
-      expect(ok).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })
+      // Whether it runs with administrator rights is known before it listens (#702): a hub's first hello already says it
+      expect(ok).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, elevated: expect.any(Boolean) })
       await expect(hello(port, 'not-the-token')).rejects.toThrow(/closed 4001/)
 
       const second = serve(d, [])

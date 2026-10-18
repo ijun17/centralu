@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { autostartRow, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -19,6 +19,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   install: null,
   operation: null,
   autostart: null,
+  elevated: null,
   ...patch,
 })
 
@@ -206,6 +207,16 @@ describe('the update prompt and the install rows (plan §10.5)', () => {
     )
     expect(installNote(machine({ install: { managed: false, current: null, previous: null } }))).toBeNull()
   })
+
+  it('names a dev build made there from a commit as one, never as a release (#1036)', () => {
+    const dev = { version: '0.3.0-beta.7.local.2', node: '24', source: { kind: 'dev' as const, commit: '0123456789abcdef0123456789abcdef01234567', dirty: false } }
+    expect(installNote(machine({ install: { managed: true, current: dev, previous: { version: '0.3.0-beta.7', node: '24' } } }))).toBe(
+      'Installed from this computer: Centralu 0.3.0-beta.7.local.2, a dev build of 0123456789 (0.3.0-beta.7 kept to roll back to)',
+    )
+    expect(installNote(machine({ install: { managed: true, current: { ...dev, source: { ...dev.source, dirty: true } }, previous: null } }))).toBe(
+      'Installed from this computer: Centralu 0.3.0-beta.7.local.2, a dev build of 0123456789 with uncommitted changes',
+    )
+  })
 })
 
 describe('the start-at-boot switch (plan §10.4, owner decision 4)', () => {
@@ -226,5 +237,17 @@ describe('the start-at-boot switch (plan §10.4, owner decision 4)', () => {
 
   it('names the uninstall step that removes it', () => {
     expect(operationNote(machine({ operation: { kind: 'uninstall', step: 'autostart', target: null, at: 1 } }))).toBe('Removing Centralu: removing its start at boot…')
+  })
+})
+
+describe('a machine whose host runs with administrator rights (#702)', () => {
+  it('says so in one sentence with the way out, for Windows and elsewhere, and nothing when the host did not say', () => {
+    expect(elevatedNote(machine({ name: 'Win', shell: 'powershell', elevated: true }))).toEqual({
+      title: 'Agents on Win run with administrator rights: Windows gives an administrator who signs in over ssh a full, elevated token.',
+      fix: 'To run them as an ordinary user, link Win through a standard account with its own ssh key.',
+    })
+    expect(elevatedNote(machine({ elevated: true }))?.title).toBe('Agents on Box run with administrator rights: its host runs as root.')
+    expect(elevatedNote(machine({ elevated: false }))).toBeNull()
+    expect(elevatedNote(machine({ elevated: null }))).toBeNull()
   })
 })

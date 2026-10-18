@@ -9,6 +9,7 @@ import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { shimNames, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
+import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
 
 /**
  * A linked machine's connection (links.ts): its transport and client, the backoff, the version gate,
@@ -77,6 +78,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected switchTried = false
   /** Why the install that was tried failed, kept so the retries keep saying it */
   protected switchFailure: string | null = null
+  /** The link waits on a swap's hold there and said so once (swap-hold.ts) */
+  private holdSaid = false
+  /** Whether the remote host said in its last hello that it runs with administrator rights (#702); null: it did not say */
+  private elevated: boolean | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
 
@@ -118,6 +123,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       install: this.installed,
       operation: this.operation,
       autostart: this.bootStart,
+      elevated: this.elevated,
     }
   }
 
@@ -212,6 +218,21 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.bootStart = autostartOf(endpoint.line.autostart)
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
       if (this.held) return
+      /*
+       * `pnpm remote-dev` is swapping the host there (#1036, swap-hold.ts): a host started now would be the old version,
+       * between its stop and its switch. The link waits, asking again shortly; the command starts the new one itself.
+       * Asked only where the hub manages an install: a swap needs one (no other machine pays for the extra ssh)
+       */
+      const hold = endpoint.line.install?.current ? await this.swapHold() : null
+      if (this.stopped || this.held) return
+      if (hold) {
+        this.setStatus('updating', null)
+        if (!this.holdSaid) this.deps.log?.(`[links] ${this.name}: ${hold.by} is swapping its host; this link starts none until it is done`)
+        this.holdSaid = true
+        // Asked again at the backoff's first step (2 s), never later than the hold lapses
+        return this.retryLater(Math.max(50, Math.min(this.deps.retryMs?.[0] ?? 2_000, hold.until - Date.now())))
+      }
+      this.holdSaid = false
       // A Node below the floor crashes the host on its first database call; the connection line says which Node answered (#699)
       const there = endpoint.line.install
       const floor = this.floor()
@@ -264,6 +285,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return
     this.connectClient(endpoint)
+  }
+
+  /** A swap's hold on the machine (swap-hold.ts), asked over its shell; none where there is no shell or no answer */
+  private async swapHold(): Promise<SwapHold | null> {
+    if (!this.tunnel.exec) return null
+    try {
+      return parseHold((await this.tunnel.exec(readHoldCommand(this.record.remote))).stdout, Date.now())
+    } catch {
+      return null
+    }
   }
 
   /**
@@ -381,6 +412,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.client !== client) return
     this.attempt = 0
     this.refusedOnce = false
+    // Said by every hello: a host restarted unelevated (through a standard account) clears it. Logged when it changes
+    const elevated = h.elevated ?? null
+    if (elevated && !this.elevated) this.deps.log?.(`[links] ${this.name}: its host runs with administrator rights, and so does every agent it starts`)
+    this.elevated = elevated
     this.switched = null
     this.switchTried = false
     this.switchFailure = null

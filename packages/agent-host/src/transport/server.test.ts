@@ -187,6 +187,27 @@ describe('handshake', () => {
     c.ws.close()
   })
 
+  /** A hub linked to this host tells its person that agents here run as an administrator (#702) */
+  it('hello_ok says whether the host runs with administrator rights, once that is known, and nothing before', async () => {
+    let elevated: boolean | null = null
+    const { port } = await start(undefined, { elevated: () => elevated })
+    const hello = async () => {
+      const c = connect(port)
+      await c.open()
+      c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+      await c.wait(() => c.frames.length > 0)
+      c.ws.close()
+      return c.frames[0] as Record<string, unknown>
+    }
+    expect(await hello()).not.toHaveProperty('elevated')
+    elevated = true
+    const said = await hello()
+    expect(said).toMatchObject({ kind: 'hello_ok', elevated: true })
+    expect(parseServerFrame(said).success).toBe(true)
+    elevated = false
+    expect(await hello()).toMatchObject({ elevated: false })
+  })
+
 
 
   it.each(['http://localhost:5173', 'http://localhost:5174'])('localhost dev origin %s is allowed with the token', async (origin) => {

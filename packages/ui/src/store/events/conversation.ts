@@ -1,10 +1,11 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import { isInTurn, STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import { applyEvent, bumpSeq, gridSessionIds, markRead as markReadPure, nextStateFor, type SessionSummary } from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { StoreGet, StoreSet } from '../state.js'
 import { OFFSCREEN_TRIM_AT, putSubagentSteps, trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { projectScreenSessions } from '../screens.js'
 import { liveEventWatchers, penEvent, trackWorkingSince } from '../sessionList.js'
+import { omitKey } from '../patch.js'
 import { appendChat, subagentRow } from '../transcript.js'
 import { notifyStateChange } from './notices.js'
 
@@ -128,6 +129,8 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
 
   set((st) => {
     const sessions = { ...st.sessions, [sessionId]: withSeq }
+    const workingSince = trackWorkingSince(st.workingSince, sessions, Date.now())
+    const stop = stopAfter(st.stopping[sessionId], cur.state, withSeq.state, workingSince[sessionId])
     /*
      * An off-screen conversation is cut back to the window (OFFSCREEN_TRIM_AT), never while a page of history is
      * still on its way: that page is merged against the rows it was asked for. The focused session is never cut,
@@ -174,9 +177,29 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
       chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: trimmed ? trimmed.items : chat },
       // A turn begins because an event arrived — this is where its start instant is
       // recorded, so the elapsed line survives remounting (issue #23)
-      workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
+      workingSince,
+      ...(stop !== st.stopping[sessionId] ? { stopping: stop ? { ...st.stopping, [sessionId]: stop } : omitKey(st.stopping, sessionId) } : {}),
     }
   })
 
+  // The tool says the Stop has not taken effect: the button stops saying "Stopping…" and says why (`stopping`)
+  if (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL && get().stopping[sessionId]) {
+    set((st) => ({ stopping: { ...st.stopping, [sessionId]: { ...st.stopping[sessionId]!, failed: e.text } } }))
+  }
+
   notifyStateChange(e, sessionId, cur, withSeq, announced, set, get)
+}
+
+type Stop = { turn: number | undefined; failed?: string }
+
+/**
+ * A Stop the person pressed (#1060) as its turn moves on. It goes when the turn ends. Through an approval or a question
+ * the turn is the same one, but `workingSince` starts again when the session goes back to working, so the Stop moves to
+ * that instant: otherwise the button would read Stop again while the stop is still on its way.
+ */
+function stopAfter(stop: Stop | undefined, from: SessionState, to: SessionState, since: number | undefined): Stop | undefined {
+  if (!stop) return stop
+  if (!isInTurn(to)) return undefined
+  if (from === 'waiting_approval' && to === 'working') return { ...stop, turn: since }
+  return stop
 }

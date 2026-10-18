@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import { STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 
 /**
@@ -84,6 +84,14 @@ export class AgentRunWait {
       return this.onUsage({ input: t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens, output: t.outputTokens })
     }
     if (this.settled) return
+    /*
+     * The person's Stop did not take effect (#1060): the tool refused it or did not confirm it, and the turn runs on.
+     * Whatever it ends with is its own ending then, not the person's stop; a finished answer reaches the one waiting.
+     */
+    if (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL) {
+      this.stoppedByPerson = false
+      return
+    }
     if (e.type === 'message_delta' || (e.type === 'state_change' && e.state === 'working')) this.ending = undefined
     switch (e.type) {
       case 'turn_complete':

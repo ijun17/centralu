@@ -12,7 +12,7 @@ import { threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } fro
 import { CodexRequestInputs } from './token-readings.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
-import { couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
+import { stopNotConfirmed, undeliveredError, undeliveredText } from '../session-kit.js'
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
 import { CodexRequests } from './server-requests.js'
@@ -551,10 +551,14 @@ export class CodexSession implements SessionHandle {
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
     if (!this.threadId || !this.turns.turnId) return
     this.turns.noteInterruptSent(this.turns.turnId)
-    // Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so
+    /*
+     * Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so. As a
+     * notice, as Claude does (#1060): the turn is still running, and an error would end it for the host (a delegation
+     * wait settles, a queued request goes in) and leave its `turn_complete` an illegal move from `error`.
+     */
     void this.client
       .request('turn/interrupt', { threadId: this.threadId, turnId: this.turns.turnId })
-      .catch((err: Error) => this.emit(couldNotStop(this.sessionId, err)))
+      .catch((err: Error) => this.emit(stopNotConfirmed(this.sessionId, `Could not stop: ${err.message}. The turn is still running.`)))
   }
 
   /**

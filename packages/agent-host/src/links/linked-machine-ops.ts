@@ -1,4 +1,4 @@
-import { HostActivity, isNewerVersion } from '@cc/protocol'
+import { HostActivity, isNewerVersion, releaseOf } from '@cc/protocol'
 import type { MachineAutostartResult, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult } from './install.js'
@@ -53,9 +53,10 @@ export class LinkedMachine extends LinkedMachineConnection {
   /** `machines.update` (update.ts, plan §10.5): install beside, stop, switch, start, check, or put back */
   async update(): Promise<MachineInstallResult> {
     const pick = await this.versionToInstall()
-    // Never down: a local build whose base is unpublished may be handed an older release than the remote runs
+    // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
+    // build put there from a commit (`<base>.local.N`, `pnpm remote-dev`, #1036) going back to its own release is no downgrade
     const there = this.versions?.remote.version
-    if (there && isNewerVersion(there, pick.version)) {
+    if (there && releaseOf(there) !== pick.version && isNewerVersion(there, pick.version)) {
       throw linkError(`${this.name} runs Centralu ${there}, newer than ${pick.version}, the version this computer would install; updating would downgrade it, so nothing was changed`)
     }
     return this.operate('update', pick.version, async (c, installer) => {
@@ -67,7 +68,8 @@ export class LinkedMachine extends LinkedMachineConnection {
         nodeDist: installer.nodeDist,
       })
       this.deps.log?.(`[links] ${this.name}: updated to Centralu ${r.current.version}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
-      return { ...this.installedNow(r), ...(pick.note ? { note: pick.note } : {}) }
+      const note = [pick.note, r.note].filter(Boolean).join(' ')
+      return { ...this.installedNow(r), ...(note ? { note } : {}) }
     })
   }
 
@@ -173,7 +175,7 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   private installedNow(r: InstallResult): MachineInstallResult {
     this.installed = { managed: true, current: r.current, previous: r.previous }
-    return { machine: this.info(), current: r.current, previous: r.previous, removed: r.removed, left: r.left }
+    return { machine: this.info(), current: r.current, previous: r.previous, removed: r.removed, left: r.left, ...(r.note ? { note: r.note } : {}) }
   }
 
   /**

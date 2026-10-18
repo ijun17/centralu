@@ -6,7 +6,8 @@
  *   better-sqlite3 (a native addon) — too much cost for what dogfooding needs. If the deployment
  *   target broadens later, only this file needs to change to switch to SEA.
  *
- * Output (apps/desktop/src-tauri/resources/host/):
+ * Output (apps/desktop/src-tauri/resources/host/, or the absolute folder `CC_BUNDLE_OUT` names: a dev build for a
+ * linked machine lands straight in the version folder `pnpm remote-dev` makes there, #1036):
  *   main.mjs                     — the bundled host (only better-sqlite3 kept external)
  *   schema.sql                   — the store looks for this next to the bundle
  *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
@@ -23,10 +24,11 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
+import { bundleOutFolder } from './bundle-out.mjs'
 
 const require = createRequire(import.meta.url)
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
-const OUT = join(ROOT, 'apps/desktop/src-tauri/resources/host')
+const OUT = process.env.CC_BUNDLE_OUT ? bundleOutFolder(process.env.CC_BUNDLE_OUT, ROOT) : join(ROOT, 'apps/desktop/src-tauri/resources/host')
 
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })

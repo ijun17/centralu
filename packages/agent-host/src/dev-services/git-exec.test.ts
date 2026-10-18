@@ -13,7 +13,11 @@ import { __forgetPrograms } from '../tool-launch.js'
  */
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
-const ALLOWED = new Set(['dev-services/git-exec.ts'])
+/**
+ * `links/remote-install.mjs` runs on another machine, on its own Node, and imports nothing of the host: a dev build
+ * there checks the maintainer's working copy with the git on that machine's PATH (#1036, `devBuild`)
+ */
+const ALLOWED = new Set(['dev-services/git-exec.ts', 'links/remote-install.mjs'])
 
 /** `programPath('git')`, or git as the program of execFile / spawn / exec / execFileSync */
 const STARTS_GIT = /programPath\(\s*['"`]git['"`]\s*\)|\b(?:execFile|execFileSync|spawn|spawnSync|exec|execSync)\(\s*['"`]git(?:\.exe)?['"`]/

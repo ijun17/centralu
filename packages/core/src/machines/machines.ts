@@ -109,6 +109,21 @@ export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): s
 }
 
 /**
+ * The one sentence a machine's row says when its host runs with administrator rights (#702): on Windows an account in
+ * the Administrators group linked over ssh gets a full token, with no UAC split, so every agent there runs as an
+ * administrator. Not a refusal: the person may want it. The way out is a standard account with its own ssh key. Null
+ * when the host did not say so.
+ */
+export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>): { title: string; fix: string } | null {
+  if (m.elevated !== true) return null
+  const windows = m.shell === 'powershell' || m.shell === 'wsl'
+  return {
+    title: `Agents on ${m.name} run with administrator rights: ${windows ? 'Windows gives an administrator who signs in over ssh a full, elevated token' : 'its host runs as root'}.`,
+    fix: `To run them as an ordinary user, link ${m.name} through a standard account with its own ssh key.`,
+  }
+}
+
+/**
  * What the version prompt offers for a link held at `versions_differ` (plan §4): bring the older
  * side up to the newer one, or connect anyway when the protocols match. Across protocols nothing
  * connects, and the prompt says which side to update.
@@ -242,7 +257,9 @@ function shims(m: Partial<Pick<MachineInfo, 'shell'>>): { npm: string; centralu:
 export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
   const i = m.install
   if (!i?.current) return null
-  return `Installed from this computer: Centralu ${i.current.version}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
+  // A dev build made there from a commit (`pnpm remote-dev`, #1036) is never mistaken for a release
+  const dev = i.current.source?.kind === 'dev' ? `, a dev build of ${i.current.source.commit.slice(0, 10)}${i.current.source.dirty ? ' with uncommitted changes' : ''}` : ''
+  return `Installed from this computer: Centralu ${i.current.version}${dev}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
 }
 
 /** The row's start-at-boot switch: what it says, whether it is on, and what it does not do there yet */

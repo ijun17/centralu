@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import { STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
 
 /**
  * The bug where stop did not work (dogfooding 2026-09-07: "only the tool call stops, and a few
@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   holdStart: null as null | ((release: () => void) => void),
   /** What the adapter answered to the server's requests */
   responses: [] as { id: number | string; result: unknown }[],
+  /** When set, `turn/interrupt` is refused with this message */
+  interruptRefused: null as string | null,
 }))
 
 vi.mock('./client.js', () => ({
@@ -31,6 +33,7 @@ vi.mock('./client.js', () => ({
     }
     request(method: string, params?: Record<string, unknown>): Promise<unknown> {
       state.requests.push({ method, params })
+      if (method === 'turn/interrupt' && state.interruptRefused) return Promise.reject(new Error(state.interruptRefused))
       if (method === 'thread/start') return Promise.resolve({ thread: { id: 't1' } })
       if (method === 'turn/start' && state.startTurnId) {
         const res = { turn: { id: state.startTurnId } }
@@ -58,6 +61,7 @@ beforeEach(() => {
   state.responses.length = 0
   state.startTurnId = null
   state.holdStart = null
+  state.interruptRefused = null
 })
 
 async function session(events: NormalizedEvent[] = []) {
@@ -274,5 +278,43 @@ describe('codex: how an interrupted turn ends (#698)', () => {
     expect(events.filter((e) => e.type === 'turn_complete')).toEqual([])
     expect(log).toHaveBeenCalledWith(expect.stringContaining('turn turn-7 interrupted by a stop from Centralu'))
     log.mockRestore()
+  })
+})
+
+/**
+ * A refused `turn/interrupt` leaves the turn running, and says so as a notice, as Claude does (#1060). As an error it
+ * moved the session to `error`, which ended the turn for the host while Codex kept working, and the turn's own
+ * `turn/completed` was then an illegal move from `error`. The states are read through the shared state machine.
+ */
+describe('codex stop that Codex refuses', () => {
+  const stateOf = (events: NormalizedEvent[]): SessionState => {
+    let s: SessionState = 'idle'
+    for (const e of events) {
+      const step = transition(s, e)
+      expect(step.illegal, `${e.type} from ${s}`).toBe(false)
+      s = step.state
+    }
+    return s
+  }
+
+  it('keeps the turn working with a notice, and the turn ends as it does', async () => {
+    state.interruptRefused = 'turn not found'
+    const events: NormalizedEvent[] = []
+    const h = await session(events)
+    h.send('a long-running task')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-7' } } })
+    expect(stateOf(events)).toBe('working')
+
+    h.interrupt()
+    await tick()
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    expect(events.flatMap((e) => (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL ? [e.text] : []))).toEqual([
+      'Could not stop: turn not found. The turn is still running.',
+    ])
+    expect(stateOf(events)).toBe('working')
+
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'turn-7', items: [], status: 'completed' } } })
+    expect(stateOf(events)).toBe('waiting_input')
   })
 })
