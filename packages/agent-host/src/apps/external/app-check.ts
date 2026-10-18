@@ -76,14 +76,22 @@ export async function checkApp(host: CheckHost, ref: AppRef): Promise<AppCheckRe
   }
 
   let stderr: string | null = null
+  /*
+   * Masks what the report quotes from the app (#1142): its errors, and the names its tools and screens carry. The
+   * process's own rule, the one the start failure and the log use. There is none before a process exists: a start
+   * failure reaches the catch below already masked (`AppProcess.start`).
+   */
+  let mask = (text: string): string => text
+  const maskFinding = (f: CheckFinding): CheckFinding => ({ ...f, where: mask(f.where), message: mask(f.message) })
   try {
     await host.lifecycle.use(e, async (proc) => {
+      mask = (text) => proc.log.mask(text)
       const listed = await proc.client.listTools(undefined, { timeout: host.timing.connectTimeoutMs })
       proc.tools = listed.tools
       host.lifecycle.readTools(e, proc)
       const t = checkTools(e.manifest!, listed.tools)
-      findings.push(...t.findings)
-      tools = t.tools
+      findings.push(...t.findings.map(maskFinding))
+      tools = t.tools.map((x) => ({ ...x, name: mask(x.name), screen: x.screen === null ? null : mask(x.screen) }))
       for (const uri of t.screens) {
         let read: ReadResourceResult | Error
         try {
@@ -92,15 +100,15 @@ export async function checkApp(host: CheckHost, ref: AppRef): Promise<AppCheckRe
           read = err as Error
         }
         const s = checkScreen(uri, read)
-        findings.push(...s.findings)
-        screens.push({ uri, chars: s.chars })
+        findings.push(...s.findings.map(maskFinding))
+        screens.push({ uri: mask(uri), chars: s.chars })
       }
       procLine = `pid ${proc.child.pid}, ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()}), ${restarted ? 'restarted from the files on disk' : 'the process that was already running'}`
       stderr = proc.log.tail() || null
     })
   } catch (err) {
     // Failed to start — the reason already includes the tail of stderr (AppProcess.start)
-    findings.push({ level: 'problem', where: 'start', message: (err as Error).message })
+    findings.push({ level: 'problem', where: 'start', message: mask((err as Error).message) })
   }
   return report(stderr)
 }

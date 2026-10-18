@@ -393,6 +393,11 @@ class AppLog {
     return this.recent.text
   }
 
+  /** Masks the app's secret values in a text that is about to leave: the same rule as the lines above (a check report quotes the app's own errors) */
+  mask(text: string): string {
+    return this.redact(text)
+  }
+
   /** The last lines of stderr (after masking) — a copy. An error bundle (C-6) carries away the ones from that moment */
   tailLines(): string[] {
     return this.recent.snapshot()

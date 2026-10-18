@@ -252,4 +252,21 @@ describe('the value is left nowhere inside the host', () => {
     expect(places['app list']).toContain('[redacted:API_KEY]')
     expect(places.check).toContain('[redacted:API_KEY]')
   })
+  // #1142: the check quoted what the app's own error said, in two places #850's masking did not reach
+  it('a check report quotes a failed screen read with the name of a secret, not its value', async () => {
+    plant(['--leak-read'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const read = await rt.check(ref)
+    expect(read.text).toContain('upstream refused API_KEY=[redacted:API_KEY]')
+    expect(JSON.stringify(read)).not.toContain(VALUE)
+  })
+  it('a check report quotes a failed tool list with the name of a secret, not its value', async () => {
+    plant(['--leak-list-later'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const listed = await rt.check(ref)
+    expect(listed.text).toContain('could not list tools again with API_KEY=[redacted:API_KEY]')
+    expect(JSON.stringify(listed)).not.toContain(VALUE)
+  })
 })
