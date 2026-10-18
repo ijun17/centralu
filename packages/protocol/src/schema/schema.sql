@@ -65,22 +65,6 @@ CREATE TABLE IF NOT EXISTS approval_rules (
   created_at INTEGER NOT NULL
 );
 
--- Unused: a usage aggregate planned for the first milestone and never built (docs/agent-host.md §6); no build has ever
--- written a row. Released builds up to v0.1.0-beta.10 still run `DELETE FROM usage_facts` when a project is deleted.
--- Dropping it is a contract step (docs/agent-host.md §5.1 rule 2: an older copy of this file creates it), so it waits
--- for a release after the first one that no longer touches the table (#372 follow-up).
-CREATE TABLE IF NOT EXISTS usage_facts (
-  date       TEXT NOT NULL,
-  tool       TEXT NOT NULL,
-  model      TEXT NOT NULL,
-  project_id TEXT,
-  input_tokens  INTEGER NOT NULL DEFAULT 0,
-  output_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_tokens  INTEGER NOT NULL DEFAULT 0,
-  cost_est   REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (date, tool, model, project_id)
-);
-
 CREATE TABLE IF NOT EXISTS workspace (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
   layout     TEXT NOT NULL,

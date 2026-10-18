@@ -273,8 +273,7 @@ export class TrashRecords {
    * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
    *
    * The rows that belong to the project go with it as before: project-scope rules, the answers given to its apps, and
-   * the app runs and commit links that point at no session still here. (`usage_facts` is not touched: no build ever
-   * wrote a row to it, and this build is the first that leaves it alone, so a later step can drop it; schema.sql.) Rows that point at a session in the trash stay with that session until it is
+   * the app runs and commit links that point at no session still here. Rows that point at a session in the trash stay with that session until it is
    * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
    * the folder again under the same id finds them where they were.
    */
