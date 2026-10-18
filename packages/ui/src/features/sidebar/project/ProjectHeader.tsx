@@ -37,7 +37,7 @@ export function ProjectHeader({
   const openNewSession = useStore((s) => s.openNewSession)
   const startSessionNow = useStore((s) => s.startSessionNow)
   const selected = useIsProjectSelected(projectId)
-  // Does the manager's worktree proposal point at this project (#69)? The + button lights up
+  // Does the manager's worktree proposal point at this project (#69)? The ⋯ menu button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [menuOpen, setMenuOpen] = useState(false)
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)

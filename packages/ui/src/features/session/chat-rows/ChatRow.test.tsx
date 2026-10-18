@@ -239,12 +239,12 @@ describe('ChatRow: rows that point elsewhere', () => {
   it('draws a worktree proposal as a line naming the branch', () => {
     const { html, text } = row(tool({ tool: 'mcp__centralu__propose_worktree_session', title: 'feat/rows' }))
     expect(testIds(html)).toEqual(['worktree-proposal'])
-    expect(text).toBe('↖ Branch feat/rows proposed — the + button on this project opens the prefilled dialog')
+    expect(text).toBe("↖ Branch feat/rows proposed — New session in this project's ⋯ menu opens the prefilled dialog")
   })
 
   it('says a worktree session was proposed when the title is only the tool name', () => {
     const { text } = row(tool({ tool: 'propose_worktree_session', title: 'propose_worktree_session' }))
-    expect(text).toBe('↖ A worktree session was proposed — the + button on this project opens the prefilled dialog')
+    expect(text).toBe("↖ A worktree session was proposed — New session in this project's ⋯ menu opens the prefilled dialog")
   })
 
   it('draws an ask_project call still running with no way in yet', () => {
