@@ -1,4 +1,13 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+
+/*
+ * The update line is one small "Update" capsule (owner, 2026-10-18): the version and what a press does are in its
+ * tooltip, and its words change only while it installs, when it waits for a restart and when it failed.
+ */
+const tipOf = async (page: Page, el: Locator) => {
+  await el.hover()
+  return page.getByRole('tooltip')
+}
 
 async function start(page: Page) {
   await page.goto('/?demo')
@@ -97,7 +106,8 @@ test('focus checks sweep the one-hour boundary and throttle failures and paired 
   await page.clock.setFixedTime(base + 7200_002)
   await page.evaluate(() => { (window as any).__mock.registryVersion = '9.9.2' })
   await focus(page)
-  await expect(page.getByTestId('update-line')).toHaveText('Update to 9.9.2')
+  await expect(page.getByTestId('update-line')).toHaveText('Update')
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('9.9.2 is out')
   expect(await checks(page)).toEqual([true, true])
 })
 
@@ -132,8 +142,9 @@ test('the dashboard and Settings show the fresh install target and fallback noti
     const store = (window as any).__store
     store.setState({ update: { ...store.getState().update, latest: '9.9.2', newer: true, phase: 'updating', error } })
   }, notice)
-  await expect(page.getByTestId('update-line')).toContainText('Updating to 9.9.2')
+  await expect(page.getByTestId('update-line')).toContainText('Updating…')
   await expect(page.getByTestId('update-line')).toContainText(notice)
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('Installing 9.9.2')
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-updates').click()
   await expect(page.getByTestId('update-state')).toContainText(notice)
@@ -150,9 +161,11 @@ test('one install and apply reaches the newest release after the banner became s
     m.registryVersion = '9.9.2'
   })
   await page.clock.setFixedTime(Date.now() + 60_001)
-  await expect(page.getByTestId('update-line')).toHaveText('Update to 9.9.1')
+  await expect(page.getByTestId('update-line')).toHaveText('Update')
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('9.9.1 is out')
   await page.getByTestId('update-line').click()
-  await expect(page.getByTestId('update-line')).toContainText('9.9.2 installed')
+  await expect(page.getByTestId('update-apply-now')).toBeVisible()
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('9.9.2 is installed')
   await page.getByTestId('update-apply-now').click()
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
 })
@@ -190,7 +203,8 @@ test('an older build on disk is not offered as the installed update, to the pers
   await page.getByTestId('update-line').click()
   await focus(page)
   // The line says to restart, as where the window cannot relaunch, and offers no Apply now
-  await expect(page.getByTestId('update-line')).toContainText('Restart Centralu to finish updating to 9.9.1')
+  await expect(page.getByTestId('update-line')).toHaveText('Restart to update')
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('Restart Centralu to finish updating to 9.9.1')
   await expect(page.getByTestId('update-apply-now')).toHaveCount(0)
   const out = await page.evaluate(() => (window as any).__mock.agentApply())
   expect(out.ok).toBe(false)

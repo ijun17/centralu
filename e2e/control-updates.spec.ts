@@ -1,6 +1,15 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { APP_VERSION } from '@cc/protocol'
 import { nextFrames, setup } from './fixtures/control.js'
+
+/*
+ * The update line is one small "Update" capsule (owner, 2026-10-18): the version and what a press does are in its
+ * tooltip, and its words change only while it installs, when it waits for a restart and when it failed.
+ */
+const tipOf = async (page: Page, el: Locator) => {
+  await el.hover()
+  return page.getByRole('tooltip')
+}
 
 /**
  * The control loop's scenarios on updates: checking, installing, applying now or when idle, and relaunch refusals. Moved out of control-loop.spec.ts by subject (#845); the
@@ -22,7 +31,8 @@ test('A pending npm release is shown as a wait and disables duplicate update act
     const store = (window as any).__store
     store.setState({ update: { ...store.getState().update, phase: 'waiting_for_npm', error: 'Waiting for npm to serve 9.9.9' } })
   })
-  await expect(page.getByTestId('update-line')).toHaveText('Waiting for npm to serve 9.9.9')
+  await expect(page.getByTestId('update-line')).toHaveText('Update')
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toHaveText('Waiting for npm to serve 9.9.9')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
   await expect(page.getByTestId('update-state')).toHaveText('Waiting for npm to serve 9.9.9')
@@ -42,7 +52,8 @@ test('A quiet line appears when a new version exists, and installing requires a 
   // A new version has been published to the registry
   await page.evaluate(() => (window as any).__mock.offerUpdate('9.9.9'))
   const line = page.getByTestId('update-line')
-  await expect(line).toContainText('9.9.9')
+  await expect(line).toHaveText('Update')
+  await expect(await tipOf(page, line)).toContainText('9.9.9 is out')
 
   // Clicking it is the consent — nothing happens before that
   await line.click()
@@ -50,7 +61,8 @@ test('A quiet line appears when a new version exists, and installing requires a 
    * Even once it finishes, it **does not restart on its own.** Swapping out the running app is
    * the person's call to make, and this line is where it says so.
    */
-  await expect(line).toContainText('Restart')
+  await expect(line).toHaveText('Restart to update')
+  await expect(await tipOf(page, line)).toContainText('Restart Centralu to finish updating to 9.9.9')
 })
 
 /**
@@ -68,7 +80,7 @@ test('Once installed, the update line offers "Apply now" where the window can re
   const line = page.getByTestId('update-line')
   await line.click()
   await expect(page.getByTestId('update-apply-now')).toBeVisible()
-  await expect(line).toContainText('9.9.9 installed')
+  await expect(await tipOf(page, line)).toContainText('9.9.9 is installed')
   // Installing alone relaunched nothing; the click does
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
   await page.getByTestId('update-apply-now').click()
@@ -118,6 +130,7 @@ test('Applying automatically waits until nothing is running (#352)', async ({ pa
    * to apply. So the line on screen, plus the frames that let effects run, is the moment the
    * decision is known; nothing re-decides it while the keeper's report stays the same.
    */
+  await tipOf(page, page.getByTestId('update-line'))
   await expect(page.getByTestId('update-waiting')).toBeVisible()
   await nextFrames(page)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
@@ -191,7 +204,7 @@ test('A locally replaced bundle offers Apply now without an npm install event (#
     window.dispatchEvent(new Event('focus'))
   }, local)
   await expect(page.getByTestId('update-apply-now')).toBeVisible()
-  await expect(page.getByTestId('update-line')).toContainText(`${local} installed`)
+  await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText(`${local} is installed`)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
