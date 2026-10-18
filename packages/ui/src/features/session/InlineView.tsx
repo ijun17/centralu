@@ -5,6 +5,7 @@ import { AppFrame, type AppFrameHandle } from '../app-frame/AppFrame.jsx'
 import { useMessageAsk } from '../pinned-app/useMessageAsk.js'
 import { UpdatedCue } from '../pinned-app/UpdatedCue.jsx'
 import { AppIcon } from '../../components/icons.jsx'
+import { Button } from '../../components/Button.jsx'
 
 /**
  * An in-conversation app view (M4 B-1) — when the agent calls an app tool that has a view, this
@@ -195,14 +196,9 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                className="rounded-md border border-line bg-surface-floor px-3 py-1 text-ink transition-colors hover:border-line-strong"
-                onClick={() => void answer(true)}
-                data-testid="inline-view-ask-send"
-              >
+              <Button variant="primary" onRaised size="md" onClick={() => void answer(true)} data-testid="inline-view-ask-send">
                 Send
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -245,15 +241,17 @@ function Placeholder({
         {view.reason && <span className="text-ink-faint" data-testid="inline-view-reason"> · {view.reason}</span>}
       </p>
       {view.kept && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong"
+        <Button
+          variant="primary"
+          onRaised
+          size="md"
+          className="shrink-0"
           onClick={onReopen}
           title="Show this call's view again, with the same input and result. The tool is not called again."
           data-testid="inline-view-reopen"
         >
           Reopen
-        </button>
+        </Button>
       )}
       {canOpen && (
         <button

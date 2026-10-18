@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppReview } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { Button } from '../../components/Button.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { TextField } from '../../components/TextField.jsx'
 import { useStore } from '../../store/store.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
-
-const inputClass =
-  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * Import an app (M4 E-3) — from a folder, a .zip, or an https link to a .zip, into the user
@@ -123,19 +122,17 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
                   A link asked Centralu to import this app. Nothing is read or downloaded until you choose Review.
                 </p>
               )}
-              <label className="block">
-                <span className="mb-1 block text-2xs text-ink-muted">Folder, .zip file, or https link to a .zip</span>
-                <input
-                  autoFocus
-                  type="text"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                  placeholder="/Users/you/Downloads/notes.zip"
-                  spellCheck={false}
-                  className={inputClass}
-                  data-testid="import-source"
-                />
-              </label>
+              <TextField
+                label="Folder, .zip file, or https link to a .zip"
+                font="mono"
+                autoFocus
+                type="text"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                placeholder="/Users/you/Downloads/notes.zip"
+                spellCheck={false}
+                data-testid="import-source"
+              />
               <div className="flex gap-2">
                 <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink" onClick={() => void pick('folder')} data-testid="import-pick-folder">
                   Choose folder…
@@ -164,39 +161,21 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
                 Cancel
               </button>
-              <button
-                type="button"
-                className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
-                onClick={() => void commit(false)}
-                disabled={!!busy}
-                data-testid="import-commit"
-              >
+              <Button variant="quiet" onClick={() => void commit(false)} disabled={!!busy} data-testid="import-commit">
                 Import
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-                onClick={() => void commit(true)}
-                disabled={!!busy}
-                data-testid="import-enable"
-              >
+              </Button>
+              <Button variant="primary" onClick={() => void commit(true)} disabled={!!busy} data-testid="import-enable">
                 {busy === 'importing' ? 'Importing…' : 'Import and enable'}
-              </button>
+              </Button>
             </>
           ) : (
             <>
               <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={close} data-testid="import-cancel">
                 Cancel
               </button>
-              <button
-                type="button"
-                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-                onClick={() => void review()}
-                disabled={!source.trim() || !!busy}
-                data-testid="import-review"
-              >
+              <Button variant="primary" onClick={() => void review()} disabled={!source.trim() || !!busy} data-testid="import-review">
                 {busy === 'reading' ? (https ? 'Downloading…' : 'Reading…') : 'Review'}
-              </button>
+              </Button>
             </>
           )}
         </footer>
