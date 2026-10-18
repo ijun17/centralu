@@ -75,9 +75,16 @@ export class UserAppAdoptionRecords {
       this.db.prepare(`UPDATE app_runs SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
       this.db.prepare(`UPDATE app_run_failures SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
       // Its sessions (its builder, the agents it started): a user-folder app's had no project; the orchestrator and coordinators are not its
-      const mine = `project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`
-      const sessions = (this.db.prepare(`SELECT id FROM sessions WHERE ${mine}`).all(appId) as { id: string }[]).map((r) => r.id)
-      this.db.prepare(`UPDATE sessions SET project_id = ? WHERE ${mine}`).run(projectId, appId)
+      const sessions = (
+        this.db
+          .prepare(
+            `SELECT id FROM sessions
+              WHERE project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`,
+          )
+          .all(appId) as { id: string }[]
+      ).map((r) => r.id)
+      const move = this.db.prepare(`UPDATE sessions SET project_id = ? WHERE id = ? AND project_id IS NULL AND deleted_at IS NULL`)
+      for (const id of sessions) move.run(projectId, id)
       // Grid panels: moved, unless the project's key already has one
       const has = this.db.prepare(`SELECT 1 FROM grid_layout WHERE panel_key = ?`).get(`app:${to}`)
       if (has) this.db.prepare(`DELETE FROM grid_layout WHERE panel_key = ?`).run(`app:${from}`)
