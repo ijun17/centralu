@@ -246,7 +246,7 @@ describe('who may call them', () => {
     }
   })
 
-  it("refuses an ordinary session's call by name and through centralu_run, and adds nothing", async () => {
+  it("runs for the orchestrator, and refuses an ordinary session's call by name and through centralu_run", async () => {
     const dir = join(root, 'proj')
     mkdirSync(dir)
     const project = (await rpc('projects.add', { path: dir })) as { id: string }
@@ -259,5 +259,12 @@ describe('who may call them', () => {
     await expect(mgr.runOrchestratorTool(s.id, 'centralu_run', { command: 'add_project', args: { path: other } })).rejects.toThrow(/Not a tool of this session/)
     expect(card(s.id)).toBeUndefined()
     expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(1)
+    // The same calls from the orchestrator run: its card stands, and the machine list answers
+    const orc = await mgr.orchestrator()
+    const call = addProject(orc.id, { path: other })
+    await eventually(() => !!card(orc.id))
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    expect((await call).isError).toBe(true)
+    expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })).isError).toBeFalsy()
   })
 })
