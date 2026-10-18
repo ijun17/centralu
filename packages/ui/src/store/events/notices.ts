@@ -138,6 +138,17 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
   return announced
 }
 
+/**
+ * What a session that now waits or failed is told as: a request to start an agent (#673) and a question the agent asked
+ * keep their own words, pushed by `noticeEvent` for the same event, rather than read as a plain approval.
+ */
+function waitKind(e: NormalizedEvent, s: SessionSummary): Notice['kind'] {
+  if (s.state === 'error') return 'error'
+  if (e.type === 'approval_request' && e.detail.kind === 'agent_start') return 'agent_start'
+  if (e.type === 'question_request') return 'question'
+  return 'approval'
+}
+
 /** The notices for a session whose state the event changed (`cur` before it, `withSeq` after) */
 export function notifyStateChange(
   e: NormalizedEvent,
@@ -176,21 +187,13 @@ export function notifyStateChange(
     }
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     // "All done" is not about a single session, so it never creates a card (a per-session card already exists for that).
-    if (one) {
-      pushNotice(set, {
-        sessionId,
-        // A request to start an agent keeps its own words (#673), pushed above for the same event
-        kind: one.kind === 'error' ? 'error' : e.type === 'approval_request' && e.detail.kind === 'agent_start' ? 'agent_start' : 'approval',
-        name: withSeq.name,
-        at: Date.now(),
-      })
-    } else if (withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
+    if (one || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*
        * The notification policy decides the sound and the banner, not whether the top bar says it (owner, 2026-10-18).
        * With the cards gone, a notice is one line the inbox's capsule writes out for a few seconds and nothing that
        * covers the page, so an approval or an error is told there always, the session on screen included.
        */
-      pushNotice(set, { sessionId, kind: withSeq.state === 'error' ? 'error' : 'approval', name: withSeq.name, at: Date.now() })
+      pushNotice(set, { sessionId, kind: waitKind(e, withSeq), name: withSeq.name, at: Date.now() })
     }
     syncBadge(get)
   }
