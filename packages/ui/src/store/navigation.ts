@@ -1,5 +1,5 @@
 import type { AppState, StoreGet, StoreSet } from './state.js'
-import { step } from './navHistory.js'
+import { step, type Screen } from './navHistory.js'
 import { screenExists } from './screens.js'
 
 /**
@@ -26,34 +26,43 @@ function navigate(get: () => AppState, set: (partial: Partial<AppState>) => void
       return
     }
     if (get().settingsOpen) st.toggleSettings(false)
-    switch (screen.kind) {
-      case 'session':
-        st.focusSession(screen.id)
-        break
-      case 'project':
-        st.focusProject(screen.id)
-        break
-      case 'app':
-        st.openApp(screen.projectId, screen.appId, { machine: screen.machine })
-        break
-      case 'grid':
-      case 'orchestrator':
-        st.setView(screen.kind)
-        break
+    // A file or the git screen: the screen it was opened over first, then the page over it
+    if (screen.kind === 'file' || screen.kind === 'git') {
+      if (screen.under) show(st, screen.under)
+      if (screen.kind === 'file') st.openFile(screen.path, screen.projectId)
+      else if (screen.sub === 'history' && screen.sha) st.openCommit(screen.sha)
+      else if (screen.sub === 'branches') st.openBranches()
+      else st.openGit(screen.path ?? undefined, screen.staged ?? undefined)
+      return
     }
+    if (get().overlay) st.closeOverlay()
+    show(st, screen)
   } finally {
     navigating = false
   }
 }
 
+/** Puts a plain screen on through the door a click uses */
+function show(st: AppState, screen: Screen): void {
+  switch (screen.kind) {
+    case 'session':
+      st.focusSession(screen.id)
+      break
+    case 'project':
+      st.focusProject(screen.id)
+      break
+    case 'app':
+      st.openApp(screen.projectId, screen.appId, { machine: screen.machine })
+      break
+    case 'grid':
+    case 'orchestrator':
+      st.setView(screen.kind)
+      break
+  }
+}
+
 /** The store's actions that change the screen and step through its history */
-type NavigationActions = Pick<
-  AppState,
-  | 'focusProject'
-  | 'setView'
-  | 'goBack'
-  | 'goForward'
->
+type NavigationActions = Pick<AppState, 'focusProject' | 'setView' | 'goBack' | 'goForward'>
 
 export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActions => ({
   /** Selects only the project — git, files and the viewer can be viewed without picking a session */
@@ -74,7 +83,7 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
       // orchestrator view first (#63) (caught by e2e).
       view: 'focus',
       viewerPath: null,
-  viewerProjectId: null,
+      viewerProjectId: null,
       overlay: null,
     }))
     get().saveWorkspace()

@@ -378,7 +378,9 @@ function recordScreen(next: AppState, prev: AppState): void {
   if (navigating || restoringWorkspace) return
   const now = screenOf(next)
   if (!now || sameScreen(now, screenOf(prev) ?? undefined)) return
-  const nav = prev.settingsOpen && !next.settingsOpen ? closeLayer(next.nav, now) : visit(next.nav, now)
+  // Closing Settings, a file or the git screen (Esc, its close button) steps back over it, as back would
+  const closed = (prev.settingsOpen && !next.settingsOpen) || (prev.overlay !== null && next.overlay === null)
+  const nav = closed ? closeLayer(next.nav, now) : visit(next.nav, now)
   if (nav !== next.nav) useStore.setState({ nav })
 }
 
