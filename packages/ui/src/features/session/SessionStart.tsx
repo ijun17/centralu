@@ -40,14 +40,20 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     [platform, machine],
   )
   const [busy, setBusy] = useState<ToolName | null>(null)
-  if (tools.length < 2) return null
 
-  const status = (t: ToolName) => found.data?.find((x) => x.name === t)
-  // Unknown (not answered yet, or the question failed) is not "unusable": the button stays live, as the dialog's do
-  const usable = (t: ToolName) => {
-    const d = status(t)
-    return !d || (d.installed && d.loggedIn)
+  /*
+   * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not
+   * logged in there is left out, not shown greyed, since the list will grow (OpenCode and others) and a row of dead
+   * buttons says nothing useful. The session's own tool always stands. Until the machine answers only that one shows;
+   * if the question fails, every tool is offered and the switch itself says what went wrong.
+   */
+  const ready = (t: ToolName) => {
+    if (found.error) return true
+    const d = found.data?.find((x) => x.name === t)
+    return !!d && d.installed && d.loggedIn
   }
+  const shown = tools.filter((t) => t.name === tool || ready(t.name))
+  if (shown.length < 2) return null
 
   // The same session takes the other tool (`agents.switchTool`): nothing was said yet, so nothing is lost, and the slot,
   // its place in the sidebar and a draft already typed all stay
@@ -62,58 +68,29 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     }
   }
 
-  /*
-   * Why a tool cannot be picked, said in words beside the buttons (owner, 2026-10-18: Codex looked broken on a linked
-   * machine where it was not installed). A disabled button's tooltip barely shows, so the title alone left no reason.
-   */
-  const where = machine ? ` on ${machine}` : ''
-  const blocked = tools
-    .filter((t) => t.name !== tool && !usable(t.name))
-    .map((t) => {
-      // Only a tool the machine answered for is blocked (`usable`), so its answer is there
-      const d = status(t.name)!
-      return d.installed
-        ? `${t.label} needs a login${where}: ${d.login}`
-        : `${t.label} is not installed${where}: ${d.install}`
-    })
-
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex gap-1.5" role="radiogroup" aria-label="Tool" data-testid="session-start-tools">
-        {tools.map((t) => {
-          const on = t.name === tool
-          const d = status(t.name)
-          const why = usable(t.name)
-            ? undefined
-            : d?.installed
-              ? `${t.label} needs a login`
-              : `${t.label} is not installed`
-          return (
-            <button
-              key={t.name}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              disabled={busy !== null || (!on && !usable(t.name))}
-              onClick={() => void pick(t.name)}
-              title={why}
-              data-testid={`session-start-tool-${t.name}`}
-              className={`rounded-md border px-2.5 py-1 text-sm transition-colors disabled:cursor-default ${
-                on
-                  ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                  : 'border-line text-ink-muted hover:border-line-strong hover:text-ink disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink-muted'
-              }`}
-            >
-              {busy === t.name ? 'Switching…' : t.label}
-            </button>
-          )
-        })}
-      </div>
-      {blocked.map((line) => (
-        <p key={line} className="text-xs text-ink-faint" data-testid="session-start-tool-blocked">
-          {line}
-        </p>
-      ))}
+    <div className="flex gap-1.5" role="radiogroup" aria-label="Tool" data-testid="session-start-tools">
+      {shown.map((t) => {
+        const on = t.name === tool
+        return (
+          <button
+            key={t.name}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            disabled={busy !== null}
+            onClick={() => void pick(t.name)}
+            data-testid={`session-start-tool-${t.name}`}
+            className={`rounded-md border px-2.5 py-1 text-sm transition-colors disabled:cursor-default ${
+              on
+                ? 'border-ink-muted bg-surface-hover/40 text-ink'
+                : 'border-line text-ink-muted hover:border-line-strong hover:text-ink disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink-muted'
+            }`}
+          >
+            {busy === t.name ? 'Switching…' : t.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
