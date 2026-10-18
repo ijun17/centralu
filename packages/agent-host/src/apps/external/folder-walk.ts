@@ -6,9 +6,9 @@ import { join } from 'node:path'
  *
  * Every reader of an app folder walks it through here: the folder fingerprint (`fingerprint.ts`,
  * which decides whether a changed folder restarts the app), a version's capture and restore
- * (`versions.ts`), an import's copy and the re-review listing (`imports.ts`), the template's
- * expansion (`scaffold.ts`), and the subfolders discovery watches (`discovery.ts`). They used to
- * walk with their own code, and the depth had drifted: an import copied folders 16 deep while the
+ * (`versions.ts`), an import's copy and the re-review listing (`imports.ts`), and the template's
+ * expansion (`scaffold.ts`). Discovery's watched subfolders (`discovery.ts`) read one level only,
+ * with this file's skip rule (`outsideAppCode`), not a walk. They used to walk with their own code, and the depth had drifted: an import copied folders 16 deep while the
  * fingerprint and the versions stopped at 8 — so an edit deep in an imported app never restarted
  * it, and a version never captured nor restored those files. One depth now (`APP_FOLDER_DEPTH`).
  *

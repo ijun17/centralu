@@ -401,6 +401,8 @@ export class Router {
       const failed = Array.isArray(out.failed) ? out.failed : []
       out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its trash was not emptied' }))] }
     }
+    // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds
+    if (method === 'trash.list' && missed.length && isObj(out)) out = { ...out, unreached: missed.map((m) => ({ machineId: m.id, name: m.name })) }
     return out
   }
 }

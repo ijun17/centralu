@@ -1,13 +1,36 @@
 import { DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol'
-import type { ExternalAppInfo, GridPanel, GridSpan, MachineInfo, ThemeFileEntry, ToolStatus } from '@cc/protocol'
-import { appPanelId, isAway, migrateArrangement, readNotifyPolicy, sanitizeArrangements, sanitizeGridPanels, sanitizeGridSpan, sessionPanelId, type SessionSummary } from '@cc/core'
+import type {
+  ExternalAppInfo,
+  GridPanel,
+  GridSpan,
+  MachineInfo,
+  ThemeFileEntry,
+  ToolStatus,
+} from '@cc/protocol'
+import {
+  appPanelId,
+  isAway,
+  migrateArrangement,
+  readNotifyPolicy,
+  sanitizeArrangements,
+  sanitizeGridPanels,
+  sanitizeGridSpan,
+  sessionPanelId,
+  type SessionSummary,
+} from '@cc/core'
 import type { WorkspaceSnapshot } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { activateTab, defaultLayout, sanitizeLayout } from './panelLayout.js'
 import { EMPTY_NAV } from './navHistory.js'
 import { isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
-import { forgetSessions, mergeListedSince, replayPendingEvents, trackWorkingSince, watchLiveEvents } from './sessionList.js'
+import {
+  forgetSessions,
+  mergeListedSince,
+  replayPendingEvents,
+  trackWorkingSince,
+  watchLiveEvents,
+} from './sessionList.js'
 import { holdPinnedViews } from './apps.js'
 import { settleUnsureSends } from './sessions/send.js'
 
@@ -138,7 +161,10 @@ function detachAll(): void {
 }
 
 /** The last clean read of each theme file: a clean entry replaces it, a broken one leaves it (see `lastGoodThemes`) */
-export function goodThemes(prev: Record<string, ThemeFileEntry>, files: readonly ThemeFileEntry[]): Record<string, ThemeFileEntry> {
+export function goodThemes(
+  prev: Record<string, ThemeFileEntry>,
+  files: readonly ThemeFileEntry[],
+): Record<string, ThemeFileEntry> {
   const next: Record<string, ThemeFileEntry> = {}
   for (const f of files) {
     const good = f.broken ? prev[f.id] : f
@@ -148,12 +174,7 @@ export function goodThemes(prev: Record<string, ThemeFileEntry>, files: readonly
 }
 
 /** The store's actions for the connection to the host and the saved workspace */
-type ConnectionActions = Pick<
-  AppState,
-  | 'attach'
-  | 'saveWorkspace'
-  | 'recoverAfterReconnect'
->
+type ConnectionActions = Pick<AppState, 'attach' | 'saveWorkspace' | 'recoverAfterReconnect'>
 
 export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActions => ({
   async attach(platform) {
@@ -238,20 +259,24 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      */
     const unread: string[] = []
     const orEmpty =
-      <T,>(what: string, empty: T) =>
+      <T>(what: string, empty: T) =>
       (): T => {
         unread.push(what)
         return empty
       }
-    const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles, machines] = await Promise.all([
-      platform.projects.list(),
-      platform.agents.listSessions(),
-      // The app must come up even if the layout cannot be read — the grid just looks empty
-      // Sanitized: a host from before apps could stand on the grid answers bare session ids, which still read as sessions
-      platform.agents.grid().then(sanitizeGridPanels).catch(orEmpty('the grid layout', [] as GridPanel[])),
-      // Same reason: the tool list must not block the app either — if it cannot be read, only names show, with no label
-      platform.agents.detect().catch(orEmpty('the installed agent CLIs', [] as ToolStatus[])),
-      /*
+    const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles, machines] =
+      await Promise.all([
+        platform.projects.list(),
+        platform.agents.listSessions(),
+        // The app must come up even if the layout cannot be read — the grid just looks empty
+        // Sanitized: a host from before apps could stand on the grid answers bare session ids, which still read as sessions
+        platform.agents
+          .grid()
+          .then(sanitizeGridPanels)
+          .catch(orEmpty('the grid layout', [] as GridPanel[])),
+        // Same reason: the tool list must not block the app either — if it cannot be read, only names show, with no label
+        platform.agents.detect().catch(orEmpty('the installed agent CLIs', [] as ToolStatus[])),
+        /*
         The screen settings must **never arrive later than the first screen.**
 
         Unlike something that is fine arriving late (like an update check), this value decides how
@@ -261,18 +286,30 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         Even so, it must **never block**: if it cannot be read, use the default. An app that cannot
         come up because of one setting is far worse than whatever that setting does.
       */
-      // Read through the schema, field by field: an older host answers without the fields it does not know
-      platform.prefs.load().then(parseUiPreferences, orEmpty('the screen settings', DEFAULT_UI_PREFERENCES)),
-      // The external app list (A-8) also arrives with the first screen — so the sidebar's app rows
-      // do not pop in late. The app still comes up if it cannot be read: the app rows just look
-      // empty, and the next broadcast re-reads them
-      platform.apps.list().catch(orEmpty('the app list', [] as ExternalAppInfo[])),
-      // The theme files arrive with the preferences that choose among them, so the first screen
-      // already has its theme — and a folder that cannot be read just means the presets
-      platform.themes.list().catch(orEmpty('the theme files', [] as ThemeFileEntry[])),
-      // The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before them has none
-      platform.machines.list().catch(() => [] as MachineInfo[]),
-    ]).finally(watch.stop)
+        // Read through the schema, field by field: an older host answers without the fields it does not know
+        platform.prefs
+          .load()
+          .then(parseUiPreferences, orEmpty('the screen settings', DEFAULT_UI_PREFERENCES)),
+        // The external app list (A-8) also arrives with the first screen — so the sidebar's app rows
+        // do not pop in late. The app still comes up if it cannot be read: the app rows just look
+        // empty, and the next broadcast re-reads them
+        platform.apps.list().catch(orEmpty('the app list', [] as ExternalAppInfo[])),
+        // The theme files arrive with the preferences that choose among them, so the first screen
+        // already has its theme — and a folder that cannot be read just means the presets
+        platform.themes.list().catch(orEmpty('the theme files', [] as ThemeFileEntry[])),
+        /*
+         * The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before
+         * them has none, and says it does not know the method: that is no machine, quietly. Any other failure is a list
+         * that was not read, and is said (#841 item 10): the sidebar would show no machine where one is linked
+         */
+        platform.machines
+          .list()
+          .catch((e: unknown) =>
+            e instanceof Error && e.message.startsWith('Unknown method: machines.list')
+              ? ([] as MachineInfo[])
+              : orEmpty('the linked machines', [] as MachineInfo[])(),
+          ),
+      ]).finally(watch.stop)
     set((st) => {
       // Recovery or re-attachment may have updated the window while startup reads were pending (#640).
       const { sessions: known } = mergeListedSince(asked, st.sessions, sessions, watch.touched)
@@ -293,7 +330,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       }
     })
 
-    if (unread.length) set({ toast: `Could not read ${unread.join(', ')}; shown empty or as defaults until read again` })
+    if (unread.length)
+      set({ toast: `Could not read ${unread.join(', ')}; shown empty or as defaults until read again` })
 
     // Replay events that arrived before the list was registered — the first output of a session that
     // was already running before the app was even opened is held here
@@ -344,15 +382,23 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         // The project screens' arrangements (#203), first for the same reason as the fold above
         const arrangements = sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels)
         set({
-          projectPanels: Object.fromEntries(Object.entries(arrangements).map(([pid, saved]) => {
-            const present = [
-              ...Object.values(get().sessions).filter((s) => s.projectId === pid).map((s) => sessionPanelId(s.id)),
-              ...get().externalApps.filter((a) => a.projectId === pid)
-                .sort((a, b) => (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId))
-                .map((a) => appPanelId(a.appId)),
-            ]
-            return [pid, migrateArrangement(present, saved)]
-          })),
+          projectPanels: Object.fromEntries(
+            Object.entries(arrangements).map(([pid, saved]) => {
+              const present = [
+                ...Object.values(get().sessions)
+                  .filter((s) => s.projectId === pid)
+                  .map((s) => sessionPanelId(s.id)),
+                ...get()
+                  .externalApps.filter((a) => a.projectId === pid)
+                  .sort(
+                    (a, b) =>
+                      (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId),
+                  )
+                  .map((a) => appPanelId(a.appId)),
+              ]
+              return [pid, migrateArrangement(present, saved)]
+            }),
+          ),
         })
         // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
         const savedSpans = (snap as { appSpans?: unknown }).appSpans
@@ -465,7 +511,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     if (migratedProjectPanels) get().saveWorkspace()
     // History starts at the screen the restore left (#374): the steps it took to get there are not the person's
     const restored = screenOf(get())
-    set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV })
+    set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV, workspaceReady: true })
 
     /*
      * The grid's sessions are not woken at startup any more (#568). They used to be, one by one, to move a slow Codex
@@ -571,12 +617,20 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         if (wait === undefined) {
           // Said, not dropped (#841 item 9): the sidebar may miss what changed while the host was away
           if (generation === recoveryGeneration && get().platform === platform) {
-            set({ toast: 'Could not catch up after reconnecting: the session list may be out of date until the next reconnect' })
+            set({
+              toast:
+                'Could not catch up after reconnecting: the session list may be out of date until the next reconnect',
+            })
           }
           return
         }
         await new Promise((r) => setTimeout(r, wait))
-        if (generation !== recoveryGeneration || get().platform !== platform || get().connection !== 'connected') return
+        if (
+          generation !== recoveryGeneration ||
+          get().platform !== platform ||
+          get().connection !== 'connected'
+        )
+          return
       }
     } finally {
       watch.stop()

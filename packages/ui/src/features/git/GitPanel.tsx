@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -131,11 +133,12 @@ function Changes({
         )
         if (hit) void openDiff(hit)
       })
-      .catch(() => {})
+      // Said, as a failed diff is (#850 item 8): silent, the click looked like it did nothing. Clicking again retries
+      .catch((e: Error) => alive && setToast(`Could not load diff: ${e.message}`))
     return () => {
       alive = false
     }
-  }, [pick, initialPath, initialStaged, platform, projectId, openDiff])
+  }, [pick, initialPath, initialStaged, platform, projectId, openDiff, setToast])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -148,18 +151,24 @@ function Changes({
          * was clicked into, not from a `diff --git` inside the diff itself. That is why only
          * `line` is used and `file` is not.
          */
-        onOpenInIde={remote ? remoteIde ? async ({ line }) => {
-          if (selected) await remoteIde.open(selected.path, { line })
-        } : undefined : async ({ line }) => {
-          if (selected) {
-            try {
-              const { path } = await platform.fs.resolve(projectId, selected.path)
-              await platform.system.openInIde(path, line)
-            } catch (e) {
-              setToast(`Could not open in IDE: ${(e as Error).message}`)
-            }
-          }
-        }}
+        onOpenInIde={
+          remote
+            ? remoteIde
+              ? async ({ line }) => {
+                  if (selected) await remoteIde.open(selected.path, { line })
+                }
+              : undefined
+            : async ({ line }) => {
+                if (selected) {
+                  try {
+                    const { path } = await platform.fs.resolve(projectId, selected.path)
+                    await platform.system.openInIde(path, line)
+                  } catch (e) {
+                    setToast(`Could not open in IDE: ${(e as Error).message}`)
+                  }
+                }
+              }
+        }
         onOpenViewer={selected ? () => openFile(selected.path) : undefined}
         ide={remoteIde ?? undefined}
       />
@@ -267,7 +276,8 @@ function DiffView({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
-      <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+      {/* The panel's tab row height (31px, PanelTabs), so this bar's line meets the tabs' line beside it */}
+      <header className="flex h-[31px] shrink-0 items-center gap-2 border-b border-line px-3">
         <span className="readout truncate text-xs text-ink-muted">{path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
@@ -446,8 +456,9 @@ function History({
     void platform.git
       .commitDetail(projectId, initialSha)
       .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff, truncated: d.truncated }))
-      .catch(() => {})
-  }, [pick, initialSha, platform, projectId])
+      // Said, as a failed file diff is (#850 item 8): silent, the screen kept "Pick a commit" under the one just picked
+      .catch((e: Error) => setToast(`Could not load the commit: ${e.message}`))
+  }, [pick, initialSha, platform, projectId, setToast])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -465,21 +476,27 @@ function History({
          * based on the commit's new side, so it can drift if there have been edits since, but
          * it lands closer than dropping the person on line 1.
          */
-        onOpenInIde={remote ? remoteIde ? async ({ file, line }) => {
-          if (!file) return setToast('Could not tell which file this line belongs to')
-          await remoteIde.open(file, { line })
-        } : undefined : async ({ file, line }) => {
-          if (!file) {
-            setToast('Could not tell which file this line belongs to')
-            return
-          }
-          try {
-            const { path } = await platform.fs.resolve(projectId, file)
-            await platform.system.openInIde(path, line)
-          } catch (e) {
-            setToast(`Could not open in IDE: ${(e as Error).message}`)
-          }
-        }}
+        onOpenInIde={
+          remote
+            ? remoteIde
+              ? async ({ file, line }) => {
+                  if (!file) return setToast('Could not tell which file this line belongs to')
+                  await remoteIde.open(file, { line })
+                }
+              : undefined
+            : async ({ file, line }) => {
+                if (!file) {
+                  setToast('Could not tell which file this line belongs to')
+                  return
+                }
+                try {
+                  const { path } = await platform.fs.resolve(projectId, file)
+                  await platform.system.openInIde(path, line)
+                } catch (e) {
+                  setToast(`Could not open in IDE: ${(e as Error).message}`)
+                }
+              }
+        }
         ide={remoteIde ?? undefined}
       />
     </div>
@@ -493,16 +510,14 @@ function Branches({ projectId }: { projectId: string }) {
   // The one write here moves the branch **name** the sidebar prints, so it goes through the
   // store too (issue #49) — the dry run beside it changes nothing and stays a plain read.
   const gitCheckout = useStore((s) => s.gitCheckout)
-  const [branches, setBranches] = useState<GitBranch[] | null>(null)
+  /*
+   * A failed read is not an empty list (#850 item 8): it used to draw no branch at all, as if the repository had none.
+   * A refresh after a checkout that fails keeps the list beside the error
+   */
+  const loaded = useLoad<GitBranch[]>(() => platform.git.branches(projectId), [platform, projectId])
+  const branches = loaded.data ?? null
+  const load = () => void loaded.reload()
   const [pending, setPending] = useState<{ branch: string; conflicts: string[] } | null>(null)
-
-  const load = useCallback(() => {
-    void platform.git
-      .branches(projectId)
-      .then(setBranches)
-      .catch(() => setBranches([]))
-  }, [platform, projectId])
-  useEffect(load, [load])
 
   const attempt = async (branch: string) => {
     const dry = await platform.git.checkout(projectId, branch, true)
@@ -532,9 +547,7 @@ function Branches({ projectId }: { projectId: string }) {
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="git-branches">
       {pending && (
         <div className="border-b border-line bg-surface-raised p-3" data-testid="checkout-warning">
-          <p className="text-sm text-ink">
-            Switching to {pending.branch} may affect the changes below.
-          </p>
+          <p className="text-sm text-ink">Switching to {pending.branch} may affect the changes below.</p>
           <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-xs text-ink-muted">
             {pending.conflicts.slice(0, 10).map((p) => (
               <li key={p}>{p}</li>
@@ -556,6 +569,9 @@ function Branches({ projectId }: { projectId: string }) {
             </button>
           </div>
         </div>
+      )}
+      {loaded.error !== null && (
+        <LoadFailed what="the branches" error={loaded.error} onRetry={load} className="border-b border-line/60 px-2.5 py-1.5" testId="git-branches-failed" />
       )}
       <BranchList title="Local" branches={local} onPick={attempt} />
       <BranchList title="Remote" branches={remote} onPick={attempt} />
@@ -586,7 +602,9 @@ function BranchList({
               onClick={() => !b.current && onPick(b.name)}
               data-testid={`branch-${b.name}`}
             >
-              <span className="w-2.5 shrink-0 text-center text-2xs text-ink-faint">{b.current ? '●' : ''}</span>
+              <span className="w-2.5 shrink-0 text-center text-2xs text-ink-faint">
+                {b.current ? '●' : ''}
+              </span>
               <span className="truncate">{b.name}</span>
               {b.upstream && (
                 <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">→ {b.upstream}</span>

@@ -3,8 +3,9 @@ import type { WorktreeRecovery } from '../worktree-recovery.js'
 import type { SessionInfo } from '@cc/protocol'
 import { indexedText } from './search-index.js'
 import { type SessionRecords } from './sessions.js'
-import { asObj } from '../../json-value.js'
+import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
+import { SESSION_SETTING_OF } from './settings.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -42,14 +43,13 @@ export type TrashedRow = {
 function parseTrashRecord(json: string | null): TrashRecord {
   // Unreadable, or JSON that is not an object (#850): the defaults below keep the files
   const r: Partial<Record<keyof TrashRecord, unknown>> = asObj(parseJson(json))
-  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
   return {
-    projectId: str(r.projectId),
-    projectName: str(r.projectName),
-    projectPath: str(r.projectPath),
+    projectId: filled(r.projectId),
+    projectName: filled(r.projectName),
+    projectPath: filled(r.projectPath),
     removeExternal: r.removeExternal === true,
     removeWorktree: r.removeWorktree === true,
-    ...(r.recovery && typeof r.recovery === 'object' &&
+    ...(isObj(r.recovery) &&
       typeof (r.recovery as WorktreeRecovery).snapshot === 'string' &&
       typeof (r.recovery as WorktreeRecovery).tip === 'string' &&
       typeof (r.recovery as WorktreeRecovery).changedFiles === 'number' &&
@@ -148,6 +148,10 @@ export class TrashRecords {
    * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
    * transaction as the last chunk, so a purge cut short leaves the session in the trash with fewer messages, to be
    * purged again, and never messages without a session.
+   *
+   * The settings kept per session go too, all of them by their shape (`SESSION_SETTING_OF`) rather than by name: the
+   * purge used to name two of them, and every key added since stayed behind for good (a process's tool prefix and launch
+   * settings, its fresh-start mark, its last import, a paused report).
    */
   async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
     if (!this.isTrashed(sessionId)) return false
@@ -177,10 +181,8 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      // The depth it was started at (#867, `agentDepthKey` in sessions/agent-depth.ts)
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`agent_depth:${sessionId}`)
-      // A hub's task mark (#838, `hubAskDepthKey`)
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`hub_ask_depth:${sessionId}`)
+      // Every setting kept for it (`<name>:<sessionId>`, `SESSION_SETTING_OF` in store/settings.ts)
+      this.db.prepare(`DELETE FROM app_settings WHERE ${SESSION_SETTING_OF}`).run({ sessionId })
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })
@@ -273,8 +275,7 @@ export class TrashRecords {
    * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
    *
    * The rows that belong to the project go with it as before: project-scope rules, the answers given to its apps, and
-   * the app runs and commit links that point at no session still here. (`usage_facts` is not touched: no build ever
-   * wrote a row to it, and this build is the first that leaves it alone, so a later step can drop it; schema.sql.) Rows that point at a session in the trash stay with that session until it is
+   * the app runs and commit links that point at no session still here. Rows that point at a session in the trash stay with that session until it is
    * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
    * the folder again under the same id finds them where they were.
    */

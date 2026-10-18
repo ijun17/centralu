@@ -1644,8 +1644,10 @@ attached, and got no status again. A window the keeper closed itself may only be
 its reader blocked), so its detach does not stop the keeper even when it was the last one and background mode is
 off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window as it does for an announced relaunch, the next
 attach spends that, and if none comes the idle rule applies as usual. Each window has a writer thread of its own
-(`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one, and the
-attach answer is queued first and never replaced. Before, pushes were blocking writes under the keeper's state lock,
+(`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one of the same
+swap phase, and the attach answer is queued first and never replaced. A view of another swap phase is kept: a
+swap's phases follow each other at once (standby, then draining), and a window that had only read the later one
+was never told of the earlier (#368). Before, pushes were blocking writes under the keeper's state lock,
 so a window that stopped reading held every push, request and host status for up to 5 s at each change. A keeper
 handoff lets every writer send what it queued, then stops them before the windows' sockets change hands.
 
@@ -2563,7 +2565,7 @@ PowerShell):
 |---|---|---|
 | 0. Preflight | Prints one `CENTRALU-PREFLIGHT` line: `uname`, `getconf GNU_LIBC_VERSION`, musl, free space where the data folder is, `tar`, `gzip`, `curl`/`wget`, a SHA-256 tool (Windows: architecture, `tar.exe`, `curl.exe`) | Decides (`preflight`): glibc 2.34 or later, no musl, a published platform, the tools, 600 MB free (300 on Windows); otherwise one sentence and nothing is downloaded |
 | — | — | Reads `centralu@<v>` and the host's package from the npm registry and checks each `dist.signatures` against the registry's keys (`/-/npm/v1/keys`, unexpired), as `npm audit signatures` does. The host's package is `@centralu/host-<platform>@<v>`, the host alone ([releasing.md](releasing.md) "Host-only packages"); only when the registry answers 404 for it (a version published before those packages) is it `@centralu/<platform>@<v>`, the platform package with the window in it. Any other failure on the host-only package refuses |
-| 1. Node | Downloads the pinned archive from nodejs.org, compares its SHA-256 with the one the hub sends from `remote-runtime.json`, unpacks it with the system's tar (`System32\tar.exe` on Windows) into a `.partial-node-*` folder, keeps only `bin/node` (`node.exe`) and `LICENSE`, and renames it to `<data>/remote/node/v<N>/` | Sends the archive's name and hash; reads `CENTRALU-INSTALL node ok` or a failure code |
+| 1. Node | Downloads the pinned archive from nodejs.org, compares its SHA-256 with the one the hub sends from `remote-runtime.json`, unpacks it with the system's tar (`System32\tar.exe` on Windows) into a `.partial-node-*` folder, keeps only `bin/node` (`node.exe`) and `LICENSE`, and renames it to `<data>/remote/node/v<N>/` (on Windows, a rename refused while an on-access scanner holds the `node.exe` just run is tried again for up to 15 s, #368) | Sends the archive's name and hash; reads `CENTRALU-INSTALL node ok` or a failure code |
 | 2. Centralu | `remote-install.mjs`, written there gzipped in base64 and run on that Node: takes `install.lock`, fetches both tarballs, refuses any whose sha512 is not the integrity the hub sent, unpacks them in npm's layout into `.partial-<v>-<pid>/`, drops the AppImage or `centralu.exe` when the host came in the platform package, writes `install.json`, renames the folder to `versions/<v>/` (a folder already there, the same version with other bytes, is moved aside first and removed only after the new one is in place), writes the managed launcher if there is none (`managedLauncherScript` from that version's `serve.mjs`; never rewritten), moves `current` to `previous` and writes `current`, each by a rename over the file, and removes versions and Nodes neither names | Reads `CENTRALU-INSTALL done <json>`: `current`, `previous`, what was removed and what could not be (a Windows program running from it) |
 
 The remote prints codes, the hub turns them into sentences (`node_hash`, `integrity`, `download`, `busy`, …); exit
@@ -2657,7 +2659,9 @@ session keep their own machine's view.
 **And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
 delivered there as an instruction from `<orchestrator> on <this computer>`; with `reportBack`, `observeLinked` watches
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
-session's own background work running included (§1.2.1 step 7, #723).
+session's own background work running included (§1.2.1 step 7, #723). The watch starts at the instruction's own
+`user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
+is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
 refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s
@@ -2768,7 +2772,7 @@ step against:
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
-| **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
+| **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |
 
 A step that changes the schema regenerates [generated/schema.md](generated/schema.md) (`pnpm docs:schema`) in the
 same PR, and a new table gets a line in a "Where it is stored" list of [domain-model.md](domain-model.md) and its
@@ -2780,6 +2784,10 @@ The store's tables are one shape that two builds share; §5.1 covers them. Many 
 the same way: JSON rows in `app_settings`, files in the data folder, files a person or another build writes, and
 the lines and frames between processes. An older and a newer build read each of them during a host swap, after a
 person goes back a release, and between two machines on different releases.
+
+A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
+`tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
+`purgeSession`), so a new per-session key needs no line in the purge.
 
 The rules for every shape:
 
@@ -2793,7 +2801,7 @@ The rules for every shape:
 | Shape | Where | Reader / writer | Older shape | Newer shape | Broken | Tests |
 |---|---|---|---|---|---|---|
 | Screen preferences (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | each missing field is its default | an unreadable value shows its default; unknown fields and unreadable values are kept when this build writes a change | defaults, one stderr line naming the row; the next change replaces it | `theme.test.ts`, `ui-preferences.test.ts` |
-| Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store.test.ts` (ui), `notify.test.ts` |
+| Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store-layout.test.ts` (ui), `notify.test.ts` |
 | Theme and typography cache | the page's `localStorage` | `applyCachedTheme`, `applyCachedTypography` | each value checked | ignored | same as no cache: only the first frame, the host's answer follows | (cache only) |
 | Keeper settings | `keeper-settings.json` | `source::load_settings` / `save_background` (keeper) | `background` defaults to off | unknown fields kept and written back; a `background` that is not true or false reads as off, alone, with a stderr line | reads as off, one stderr line naming the file; the next save replaces it | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | Grid placements | `grid_layout` | `Store.listGridView` / `setGridView` | a row without a span reads as none chosen (v43) | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. A span out of bounds reads as none | (rows) | `store.test.ts` (v42, v43) |
@@ -2855,9 +2863,9 @@ This section used to describe something else entirely: a chokidar watcher parsin
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
 chokidar is not a dependency, `core/usage` holds only the cache arithmetic of §6.1, there is no `usage.weekly`
-method, and no build ever wrote a row to `usage_facts`. It stays in `schema.sql` for now: released builds up to
-v0.1.0-beta.10 still delete a project's rows from it, and this build is the first that leaves it alone, so dropping it
-is a contract step for a later release (§5.1 rule 2). It was
+method, and no build ever wrote a row to `usage_facts`. The table is gone from `schema.sql`, and store step 56
+drops it from an existing store (#423; a contract step, §5.1 rule 2, one release after the last that deleted a
+project's rows from it). It was
 also the *opposite* of the rule §8.1 states, and the two sections sat in this file
 contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break

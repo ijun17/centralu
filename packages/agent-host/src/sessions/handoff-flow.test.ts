@@ -34,7 +34,7 @@ beforeEach(() => {
   store = new Store()
   store.projects.addProject({ id: 'p1', path: '/work/p1', name: 'P1' })
   const t = target()
-  store.upsertSession(t)
+  store.sessions.upsertSession(t)
   meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null })]])
   turnObservers = new Map()
   steps = []
@@ -216,7 +216,7 @@ describe('the checks and the card', () => {
 describe('from a note the session writes', () => {
   beforeEach(() => {
     auto = true
-    store.appendMessages([{ sessionId: 't1', seq: 7, role: 'assistant', kind: 'text', payload: { text: 'earlier work' }, ts: 7 }])
+    store.messages.appendMessages([{ sessionId: 't1', seq: 7, role: 'assistant', kind: 'text', payload: { text: 'earlier work' }, ts: 7 }])
   })
 
   it("asks the session as the orchestrator, reads the note written after the ask, and stops reading the session's turn", async () => {

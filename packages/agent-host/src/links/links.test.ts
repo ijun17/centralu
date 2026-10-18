@@ -1265,8 +1265,8 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
       text: 'Sent: m1.w1 (I will let you know once it is done)',
     })
     // Recorded there as an instruction from this orchestrator, named with this computer
-    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
-    const there = remote.store.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
+    await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
+    const there = remote.store.messages.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
     expect(there.payload).toMatchObject({ from: { name: 'hub-orch on Hub mac' } })
     await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
     const report = told(hub).find((t) => t.startsWith('[Centralu]'))!
@@ -1290,11 +1290,36 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(reports[1]).toContain('echo: and a third time')
   })
 
+  /*
+   * #1082: the end of a turn the machine sent before it took in the next instruction can reach the hub after the hub
+   * set that instruction's report wait. Here the hub hears the first turn's end late, just before the machine's record
+   * of the second instruction, the order one link delivers them in. The report is the second instruction's turn.
+   */
+  it('a turn end the hub hears late is not the report of the instruction the machine took after it (#1082)', async () => {
+    const { tool, remote, hub } = await rig()
+    const hear = hub.mgr.observeLinked.bind(hub.mgr)
+    const late: Parameters<typeof hear>[0][] = []
+    let heldOne = false
+    hub.mgr.observeLinked = (e) => {
+      if (e.sessionId === 'm1.w1' && e.type === 'turn_complete' && !heldOne) return void ((heldOne = true), late.push(e))
+      if (e.sessionId === 'm1.w1' && e.type === 'user_message' && e.text === 'and now the restore') for (const held of late.splice(0)) hear(held)
+      hear(e)
+    }
+    await tool('send_to_session', { sessionId: 'm1.w1', text: 'run the backup' })
+    // That turn ended there; the hub has not heard it yet
+    await eventually(() => late.length === 1 && remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: run the backup'))
+    await tool('send_to_session', { sessionId: 'm1.w1', text: 'and now the restore', reportBack: true })
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu]')))
+    const reports = told(hub).filter((t) => t.startsWith('[Centralu]'))
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toContain('echo: and now the restore')
+  })
+
   it('reaches a machine’s session that has children (a former worktree manager, #561) as an instruction, not as someone else’s words (step 2)', async () => {
     const { tool, remote } = await rig({ worktreeChild: true })
     expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'merge the branch' })
-    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
+    await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
   })
 
   it('changes a machine’s session’s settings there, and says so to the hub’s windows (step 2)', async () => {
@@ -1311,7 +1336,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(made.text).toMatch(/^Created: Backups \[m1\.[0-9a-f-]+\] — sent the first instruction$/)
     const s = remote.mgr.listSessions().find((x) => x.name === 'Backups')!
     expect(s).toMatchObject({ projectId: 'p-remote', permissionPreset: 'normal' })
-    await eventually(() => remote.store.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
+    await eventually(() => remote.store.messages.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
 
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
@@ -1425,7 +1450,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await answer('allow')
     expect(await call).toMatchObject({ ok: true, state: 'done' })
     expect(sent).toHaveBeenCalledWith('w1', expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
-    await eventually(() => remote.store.appSetting('hub_ask_depth:w1') === null)
+    await eventually(() => remote.store.settings.appSetting('hub_ask_depth:w1') === null)
   })
 
   it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {
@@ -1587,9 +1612,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
-    const told = () => hub.store.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
+    const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
     const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
-    const records = () => JSON.parse(hub.store.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
+    const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
     return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf }
   }
 
@@ -1606,7 +1631,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // It is a session of that project there, recorded on that machine one level below the caller, and so is its task's turn
     const child = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!
     expect(child).toMatchObject({ projectId: 'p-app', permissionPreset: 'normal' })
-    expect(remoteStore.appSetting(`agent_depth:${child.id}`)).toBe('1')
+    expect(remoteStore.settings.appSetting(`agent_depth:${child.id}`)).toBe('1')
     expect(sent).toHaveBeenCalledWith(child.id, expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
     // The caller's own: listed with its machine, and followed through the link
     expect(await list()).toEqual([expect.objectContaining({ sessionId: r.sessionId, machine: 'Remote box', state: 'finished' })])

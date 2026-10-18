@@ -358,8 +358,9 @@ impl Keeper {
             return;
         }
         let line = json_line(&json!({ "event": "status", "view": self.view(st) }));
+        let phase = st.swap.as_ref().map(|s| s.phase);
         for w in &st.subscribers {
-            w.push.status(line.clone());
+            w.push.status(line.clone(), phase);
         }
     }
 

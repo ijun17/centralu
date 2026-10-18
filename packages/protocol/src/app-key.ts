@@ -49,3 +49,11 @@ export function parseAppKey(key: string): { projectId: string | null; appId: str
 export function appLabel(ref: { projectId: string | null; appId: string }): string {
   return `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
 }
+
+/**
+ * The refusal of an app that is not there, as the host and the mock both word it: the whole project id (or `user`),
+ * so the person can tell which project's app was meant. Written out by hand in five places before.
+ */
+export function noSuchAppText(ref: { projectId: string | null; appId: string }): string {
+  return `There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`
+}

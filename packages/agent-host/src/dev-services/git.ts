@@ -41,14 +41,26 @@ export function git(cwd: string, args: string[], trust: GitTrust = {}): Promise<
   return runGit(cwd, args, { allowRepoPrograms: trust.trusted === true })
 }
 
-/** Every read function returns an empty result when this is not a git repository — so callers do not have to guard every time */
+/**
+ * Every read function returns an empty result when this is not a git repository — so callers do not have to guard every
+ * time. Only what says so is "not a repository", by the rule `gitSummary` reads: git's own words for it, or no git at
+ * all. Any other failure (a repository git refuses to read, a timeout, a crash) is thrown, so the git panel says what
+ * went wrong instead of showing an empty repository (#841 item 1).
+ */
 export async function isRepo(cwd: string): Promise<boolean> {
   try {
     await git(cwd, ['rev-parse', '--git-dir'])
     return true
-  } catch {
-    return false
+  } catch (e) {
+    if (notARepository(e)) return false
+    throw e
   }
+}
+
+/** What git says of a folder that is no repository (untranslated, `gitEnv`), and a machine with no git at all */
+function notARepository(e: unknown): boolean {
+  const err = e as { stderr?: string; message?: string; code?: unknown }
+  return /not a git repository/i.test(String(err.stderr || err.message || '')) || err.code === 'ENOENT'
 }
 
 /** The most changed files a summary counts; past it the count says "at least" (`more`) and git is stopped */
@@ -104,7 +116,7 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
     if (/Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)) return { isRepo: true, branch: '', changedFiles: 0, denied: true }
     // What git says of a folder that is no repository (in English: every git call runs untranslated, `gitEnv`, as Git for
     // Windows and WSL translate it otherwise), and a machine with no git at all
-    if (/not a git repository/i.test(msg) || err.code === 'ENOENT') return { isRepo: false, branch: '', changedFiles: 0 }
+    if (notARepository(e)) return { isRepo: false, branch: '', changedFiles: 0 }
     /*
      * Anything else (git ran past its time on a slow disk, crashed, refused for another reason) says nothing about
      * whether this is a repository (#850 review). This summary is also the "is this a repository" check for new

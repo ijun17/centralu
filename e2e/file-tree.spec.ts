@@ -272,6 +272,23 @@ test('after a host resync the tree registers its watches again and re-reads what
 })
 
 /*
+ * #841: a watch the host refused was swallowed in the tree, which then stopped following what an agent or Finder
+ * changed with no word. The tree goes on reading, and says once that it is not following outside changes.
+ */
+test('a watch the host refuses is said, and the tree still shows what it read (#841)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedTree(page, { '': [{ name: 'a.ts' }] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.fs.watch = async () => {
+      throw new Error('too many open files')
+    }
+  })
+  await openTree(page)
+  await expect(page.getByTestId('file-a.ts')).toBeVisible()
+  await expect(page.getByTestId('toast')).toHaveText('The file tree will not follow changes made outside it: too many open files')
+})
+
+/*
  * The host keeps each window's watch set under its connection (#842 item 6), so a reconnect starts with none and a new
  * host knows none. The tree sends its set again on both, or the folders on screen go unwatched until one is opened or
  * folded by hand.

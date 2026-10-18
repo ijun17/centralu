@@ -231,7 +231,7 @@ What a Windows remote taught, all now in `links/tunnel.ts`:
 | WSL appends Windows' PATH, and `command -v centralu` in the distro named Windows' npm shim, the owner's Windows install | The WSL lookup takes `/mnt/*` off PATH. **That shim ran once during the probe** (with `serve --connection`, before the filter existed); it printed nothing and exited 0 |
 | WSL stops a distro about 15 s after its last `wsl.exe` client exits, and its services with it: `centralu serve` under systemd was stopped 19 s after it started; a `setsid nohup` one died with the ssh session that started it | The WSL forward runs `wsl.exe -d <distro> --exec sleep infinity` instead of `-N`, so the link holds the distro while it is up |
 | WSL2 forwards the distro's 127.0.0.1 to Windows' 127.0.0.1 | One forward to Windows' sshd reaches a host inside WSL, as the owner said |
-| ssh prints `** WARNING` lines about key exchange, PowerShell wraps errors in CLIXML, a Node crash ends with `Node.js v22.x` | The reason shown to the person skips all three |
+| ssh prints `** WARNING` lines about key exchange, PowerShell wraps errors in CLIXML, a Node crash ends with `Node.js v22.x` | The reason shown to the person skips the warnings and the Node line. Of the CLIXML only the header and the progress records go: what a command wrote to stderr after the header and the text of PowerShell's error records are read, without the lines that say where in the script it was (5.1's `At line:` and `+` lines, 7's ConciseView gutter) and without terminal colour (#1081) |
 | Windows needs Python and build tools for a source install (`better-sqlite3` has no prebuild for Node 24 there) | Not ours to install on the owner's laptop; the Windows host ran the published beta.10 bundle through main's `serve` launcher (`CENTRALU_HOST_ENTRY`). Phase 3's bundled install avoids it |
 
 A machine can name the command to run in place of `centralu` (`MachineInfo.command`); the probes used it to reach
@@ -854,7 +854,7 @@ real router and qualifier between them: the hub's door and CSP, four apps named 
 origins, the machine's answer checked, a hub that never gave the address out serving it, away, older and unlinked
 machines), `links/router.test.ts` (each view call and the `machine` parameter), `app-home-view.test.ts`
 (`apps.viewDocument` against a real app process), the window's keys and status (`app-catalog.test.ts`,
-`store.test.ts`), and e2e on the linked-hosts rig (`e2e/fixtures/linked-hosts-ui-scenarios.ts`).
+`store-apps.test.ts`), and e2e on the linked-hosts rig (`e2e/fixtures/linked-hosts-ui-scenarios.ts`).
 
 ### 11.7 Decided (owner, 2026-10-11)
 
@@ -910,7 +910,7 @@ pinned view shows all its panels, and Restart restarts it there. Remove was left
 machine, and would have removed this computer's app of the same id (§11.10 adds it).
 
 Tested: `links/router.test.ts` (each call sent by `machine`, the hub's own without it, the runs qualified, a builder
-asked from a view naming one machine), `store.test.ts` (Restart passes the machine), and the linked-hosts e2e in
+asked from a view naming one machine), `store-apps.test.ts` (Restart passes the machine), and the linked-hosts e2e in
 Chromium and WebKit (the machine's `notes` lists its own runs and asks that machine for its versions; this computer's
 `notes` lists none of them).
 
@@ -927,7 +927,7 @@ Settings → Apps did not list a machine's user-folder apps at all before this: 
 under its name, and the question before Remove names the machine and says this computer's apps are not touched.
 
 Tested: `links/router.test.ts` (removed on the named machine only, the hub's own without `machine`, an unlinked machine
-refused), `store.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
+refused), `store-apps.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
 `notes` on the grid and in pinned views, removing the machine's from Settings moves that machine's folder away and leaves
 this computer's folder, row, pinned view and grid panel as they were, while the machine's row, view and panel go.
 
@@ -1011,7 +1011,9 @@ machine, `takeInTurns` at every limit). No live model read through it, and no re
 - **`reportBack`** across machines: the hub's links already relay the machine's events, qualified, to its windows;
   `main.ts` also hands them to `SessionManager.observeLinked`, which watches the sessions the orchestrator asked about.
   The watch starts before the send (the machine's first events can reach the hub before its answer) and is put back
-  if the send fails. A turn ends as it does here (#166): `turn_complete`, `error`, `limit_reached`, or a state out of
+  if the send fails. It reads nothing until the machine's `user_message` of that instruction (from the hub's
+  orchestrator, the same text): a link relays one machine's events in order, so a turn end before it is an earlier
+  turn's that was still on its way (#1082). A record that never comes (lost in a host swap there) stops being waited for once the send has answered, which comes after it on the same link. A turn ends as it does here (#166): `turn_complete`, `error`, `limit_reached`, or a state out of
   work once the turn was seen working, so the session waking before its turn is not its end. The report is the same
   message as for this computer's sessions (`deliverReport`), its project named with the machine (`api on Ubuntu box`,
   from the headers mirror) and its last words read with `host.readSession`.

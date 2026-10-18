@@ -573,7 +573,7 @@ one session reaching another session's prompt is the privilege path it closed. S
   indexed (`INDEXED_KINDS` in `dev-services/store/search-index.ts`) — not tool calls, and not their output — so neither `recall` nor the palette
   can find a session by what a command printed, or by the command.
 
-Tests: `manager.test.ts` ("a tool call is kept whole in the store and leaves it only as its card") puts secrets where
+Tests: `manager-messages.test.ts` ("a tool call is kept whole in the store and leaves it only as its card") puts secrets where
 the card does not reach and looks for them in the broadcast, the history and trash pages, `read_session`, `recall`,
 search, `list_sessions`, the handoff record and file, and the orchestrator's memory; `store-tool-record.test.ts` holds
 the store's default read and the index.
@@ -598,7 +598,7 @@ with one more layer:
 - **They go when the session goes.** The rows belong to the session, so the trash keeps them and a purge deletes them
   (FR-22).
 
-Tests: `manager.test.ts` ("a subagent's steps are kept under its launch card and read by nothing else") looks for a
+Tests: `manager-messages.test.ts` ("a subagent's steps are kept under its launch card and read by nothing else") looks for a
 subagent's tool secrets, words and reasoning in every reader above, and for its tool secrets in the broadcast and
 `messages.subagent`; `store-subagent.test.ts` holds the table, the default read and the index.
 
@@ -774,7 +774,7 @@ A trusted project's reads run as plain git does (fsmonitor stays on for the chec
 the worktree dirty check, which can otherwise approach the 10-second limit on a large repository).
 `git.log` runs locked for every project; the signature check it skips only printed into output
 the parser never read. Tests: `git-untrusted.test.ts` runs each read against the planted copy and
-requires no marker, with the same read for a trusted project as the control; `manager.test.ts`
+requires no marker, with the same read for a trusted project as the control; `manager-projects.test.ts`
 "runs none of the repository's programs before project trust, through every door that reads it".
 
 Limits:
@@ -1213,9 +1213,10 @@ then who may call it:
   secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`app-start-env.ts` `spawnSpec`; test "receives its
   data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
-  run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
-  `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
-  name"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
+  run records (arguments, errors, kept failures), error bundles and the text of a failed start, which the list, a check
+  and a caller's refusal carry (`secrets.ts` `redactor`, `app-process.ts` `AppLog` and `AppProcess.start`; tests "stderr
+  goes to the app's own log, with secret values masked by name", "an app that fails to start with the value in its
+  error leaves only the name in the list, the bundles, the check and the refusal"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
   arguments as JSON, where a multi-line key or one with quotes is spelled differently, and each line of a
   multi-line value of 16 characters or more on its own, since the app's log is masked a line at a time. A run record's
   arguments and kept result are masked string by string before they become JSON, then as JSON (`runs.ts`
@@ -1350,10 +1351,13 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   stops there), matching checksums, no names that collide on a case-insensitive disk, no
   encrypted, split or ZIP64 archives. There are caps on files (2,000), bytes (64 MiB, 16 MiB per
   file), depth (16) and the archive (32 MiB). Every file is written under a path built from checked
-  segments and checked again to be inside the staging folder (`imports.ts`, `zip.ts`;
+  segments and checked again to be inside the staging folder. A file is written 0644, or 0755 when its source (a
+  folder's file, or a zip entry made on Unix) has any executable bit; no other mode bit (setuid) is carried over
+  (`execBits`) (`imports.ts`, `zip.ts`;
   `imports.test.ts` "a zip cannot write outside (zip slip)", "a link inside the folder that points
   outside is refused (stating what it points at), and a link pointing inside is never moved",
-  "caps: file count, one file, the total, depth, archive size").
+  "caps: file count, one file, the total, depth, archive size", "a file stays executable whether the app came as a
+  folder or as a zip").
 - **Dot-names are not copied.** A user-folder app's builder works in the app folder and reads the
   settings there (decision 3 trusts that folder), so `.claude/` or `.codex/` inside an archive
   would be hooks and settings nobody confirmed. `.git`, `.env` and the rest are left out too.

@@ -30,6 +30,21 @@ type Content = {
 }
 
 /**
+ * Whether a resource's `mimeType` makes it a view, read leniently about whitespace and case (see below). The one test:
+ * the app check (apps/external/check.ts) asks it too, so it never calls a screen broken that this side renders.
+ */
+export function isViewMimeType(mimeType: unknown): boolean {
+  return typeof mimeType === 'string' && mimeType.replace(/\s+/g, '').toLowerCase() === VIEW_MIME_TYPE
+}
+
+/** A view entry's HTML: its `text`, or its base64 `blob` decoded; null when it has neither */
+export function viewHtmlOf(item: Pick<Content, 'text' | 'blob'>): string | null {
+  if (typeof item.text === 'string') return item.text
+  if (typeof item.blob === 'string') return Buffer.from(item.blob, 'base64').toString('utf8')
+  return null
+}
+
+/**
  * Throws with a reason when the resource is not a view. That message is read by a person — the
  * one building the app.
  *
@@ -42,14 +57,11 @@ export function viewDocumentFromResource(result: unknown, uri: string): ViewDocu
   const contents = (result as { contents?: unknown } | null)?.contents
   if (!Array.isArray(contents) || contents.length === 0) throw new Error(`${uri}: the app returned no content for this view`)
   const item = (contents.find((c: Content) => c?.uri === uri) ?? contents[0]) as Content
-  const mime = typeof item.mimeType === 'string' ? item.mimeType.replace(/\s+/g, '').toLowerCase() : ''
-  if (mime !== VIEW_MIME_TYPE) {
+  if (!isViewMimeType(item.mimeType)) {
     throw new Error(`${uri}: not an app view (mimeType ${JSON.stringify(item.mimeType ?? null)}, expected ${VIEW_MIME_TYPE})`)
   }
-  let html: string
-  if (typeof item.text === 'string') html = item.text
-  else if (typeof item.blob === 'string') html = Buffer.from(item.blob, 'base64').toString('utf8')
-  else throw new Error(`${uri}: the view has neither text nor blob`)
+  const html = viewHtmlOf(item)
+  if (html === null) throw new Error(`${uri}: the view has neither text nor blob`)
   const ui = item._meta?.ui
   const csp = ui?.csp && typeof ui.csp === 'object' ? (ui.csp as ViewCspDomains) : undefined
   const permissions = ui?.permissions && typeof ui.permissions === 'object' ? (ui.permissions as ViewPermissions) : undefined

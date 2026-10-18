@@ -259,7 +259,7 @@ gives it back: it uses `Modal` or `useOpenLayer`, or `useFocusReturn` for a laye
 Reading back through a conversation lost rows for good when a page of older messages landed after
 a re-read had moved the cursor, and a re-read in the middle of reading threw away the pages already
 read (#79). Every test ran each read alone, so the pair was never seen. Hold one answer back (a
-gate in the mock, as the `#79` tests in `store.test.ts` do), run the other operation, then
+gate in the mock, as the `#79` tests in `store-history.test.ts` do), run the other operation, then
 release it, and assert that nothing is missing or repeated.
 
 If you touched Rust:

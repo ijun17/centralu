@@ -375,7 +375,6 @@ classDiagram
   휴지통에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 - `workspace`: UI의 스냅숏. 한 줄.
 - `commit_sessions`: 커밋 귀속.
-- `usage_facts`: 쓰이지 않음(위). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 
 ## 3. 세션 상태
 

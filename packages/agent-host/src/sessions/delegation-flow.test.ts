@@ -147,7 +147,7 @@ describe("a child's turn and the call waiting on it", () => {
     store.projects.addProject({ id: 'p1', path: root, name: 'P1', trusted: true })
     meta.set('child', session('child', { name: 'Child', askedBy: 'caller' }))
     // The child's row, which its conversation is stored under
-    store.upsertSession({
+    store.sessions.upsertSession({
       ...sessionLiveDefaults(),
       id: 'child', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Child', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
@@ -182,7 +182,7 @@ describe("a child's turn and the call waiting on it", () => {
   const event = (e: Record<string, unknown>) => agentRuns.get('child')!.onEvent({ sessionId: 'child', ...e } as NormalizedEvent)
   /** The child's turn writes its answer and ends */
   const finishes = (text: string) => {
-    store.appendMessages([{ sessionId: 'child', seq: 1, role: 'assistant', kind: 'text', payload: { text }, ts: 1 }])
+    store.messages.appendMessages([{ sessionId: 'child', seq: 1, role: 'assistant', kind: 'text', payload: { text }, ts: 1 }])
     event({ type: 'turn_complete' })
   }
   /** What an outcome's handlers start runs on resolved promises only */
@@ -203,7 +203,7 @@ describe("a child's turn and the call waiting on it", () => {
     expect(r).toMatchObject({ ok: true, state: 'done', sessionId: 'child', answer: expect.stringContaining('Done.'), readable: [inside], outside: [away], cleanUp: true })
     expect(readGrants.get('caller')).toEqual(new Set([inside]))
     await flush()
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(children.delegations.size).toBe(0)
     expect(children.turnOwners.has('child')).toBe(false)
     expect(agentRuns.size).toBe(0)
@@ -259,7 +259,7 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     expect(await flow.awaitAgent('caller>child', d, undefined, false, 1)).toMatchObject({ ok: true, state: 'working', reported: true })
-    expect(store.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
     expect(children.delegations.get('caller>child')).toBe(d)
   })
 
@@ -271,7 +271,7 @@ describe("a child's turn and the call waiting on it", () => {
     cards = [card]
     raiseCard()
     expect(await waiting).toMatchObject({ ok: true, state: 'asking', sessionId: 'child', cards: [card] })
-    expect(store.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
     expect(d.settled).toBe(false)
   })
 
@@ -307,8 +307,8 @@ describe("a child's turn and the call waiting on it", () => {
     expect(r).toMatchObject({ ok: true, state: 'done', answer: 'verify is running in the background', notice: expect.stringContaining('pnpm verify') })
     // No clean-up line: the work is not over
     expect(r).not.toHaveProperty('cleanUp')
-    expect(store.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
-    expect(JSON.parse(store.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
   })
 
   it("new work from the same caller ends its pause; another caller's pause stands", () => {
@@ -317,7 +317,7 @@ describe("a child's turn and the call waiting on it", () => {
     children.pauseReport('child', [{ id: 'bg-verify', description: 'pnpm verify' }])
     flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     expect(children.pausedReports.has('child')).toBe(false)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
 
     meta.set('other', session('other', { name: 'Other', askedBy: 'someone' }))
     children.markReport('other', 'someone')
@@ -369,7 +369,7 @@ describe("a child's turn and the call waiting on it", () => {
     children.markReport('child', 'caller')
     expect(await flow.agentSession('caller', { sessionId: 'child', action: 'stop' })).toEqual({ ok: true, state: 'stopped', sessionId: 'child', sessionName: 'Child', tool: 'claude' })
     expect(interrupted).toEqual(['child'])
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(children.delegations.size).toBe(0)
   })
 

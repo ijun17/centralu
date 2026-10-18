@@ -148,9 +148,9 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     b.mgr.respondApproval(parent, requestId, 'allow')
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await eventually(() => store.listReportMarks().length === 1)
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    expect(store.listAgentStartRequests()).toEqual([])
+    await eventually(() => store.children.listReportMarks().length === 1)
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.children.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
   })
 
@@ -241,9 +241,9 @@ describe('a start allowed but waiting for memory (#686)', () => {
     free = 4 * 1024 ** 3
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await eventually(() => store.listReportMarks().length === 1)
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    expect(store.listAgentStartRequests()).toEqual([])
+    await eventually(() => store.children.listReportMarks().length === 1)
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.children.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
   })
 })

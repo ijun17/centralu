@@ -2,8 +2,9 @@ import Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import { z } from 'zod'
 import { readJsonList } from './json.js'
-import { APP_SETTINGS_DDL, type MigrationStep } from './migrations/context.js'
+import { type MigrationStep } from './migrations/context.js'
 import { ReaderGate, storeTooNewMessage } from './reader-gate.js'
+import { readStoreKey, writeStoreKey } from './store-keys.js'
 import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
 
 /**
@@ -201,10 +202,7 @@ export abstract class MigrationRunner extends ReaderGate {
    * what the vacuum did when it ran.
    */
   protected vacuumAfterStep(report?: (done: VacuumDone) => void): void {
-    this.db.exec(APP_SETTINGS_DDL)
-    this.db
-      .prepare(`INSERT INTO app_settings (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run(VACUUM_OWED_KEY)
+    writeStoreKey(this.db, VACUUM_OWED_KEY, '1')
     this.afterStep(() => {
       const done = this.runOwedVacuum()
       if (done) report?.(done)
@@ -296,22 +294,10 @@ export abstract class MigrationRunner extends ReaderGate {
   }
 
   private storedDeferred(): number[] {
-    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
-    if (!table) return []
-    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(DEFERRED_KEY) as
-      | { value: string }
-      | undefined
-    return readJsonList(row?.value, z.number().int().positive())
+    return readJsonList(readStoreKey(this.db, DEFERRED_KEY), z.number().int().positive())
   }
 
   private writeDeferred(steps: number[]): void {
-    this.db.exec(APP_SETTINGS_DDL)
-    if (steps.length === 0) {
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(DEFERRED_KEY)
-      return
-    }
-    this.db
-      .prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run(DEFERRED_KEY, JSON.stringify([...steps].sort((a, b) => a - b)))
+    writeStoreKey(this.db, DEFERRED_KEY, steps.length === 0 ? null : JSON.stringify([...steps].sort((a, b) => a - b)))
   }
 }

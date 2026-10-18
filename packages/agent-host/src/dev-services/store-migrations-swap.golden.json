@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 55,
+  "version": 56,
   "deferred": [
    3,
    11,
@@ -8,11 +8,12 @@
    21,
    28,
    32,
-   40
+   40,
+   56
   ],
   "minReader": 0
  },
- "userVersion": 55,
+ "userVersion": 56,
  "master": [
   {
    "type": "index",
@@ -156,12 +157,6 @@
    "type": "index",
    "name": "sqlite_autoindex_subagent_messages_1",
    "tbl_name": "subagent_messages",
-   "sql": null
-  },
-  {
-   "type": "index",
-   "name": "sqlite_autoindex_usage_facts_1",
-   "tbl_name": "usage_facts",
    "sql": null
   },
   {
@@ -325,12 +320,6 @@
    "name": "subagent_messages",
    "tbl_name": "subagent_messages",
    "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
-  },
-  {
-   "type": "table",
-   "name": "usage_facts",
-   "tbl_name": "usage_facts",
-   "sql": "CREATE TABLE usage_facts (\n      date       TEXT NOT NULL,\n      tool       TEXT NOT NULL,\n      model      TEXT NOT NULL,\n      project_id TEXT,\n      input_tokens  INTEGER NOT NULL DEFAULT 0,\n      output_tokens INTEGER NOT NULL DEFAULT 0,\n      cache_tokens  INTEGER NOT NULL DEFAULT 0,\n      cost_est   REAL NOT NULL DEFAULT 0,\n      PRIMARY KEY (date, tool, model, project_id)\n    )"
   },
   {
    "type": "table",

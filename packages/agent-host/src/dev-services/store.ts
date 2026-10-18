@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { SessionInfo, StoredMessage } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -185,69 +184,6 @@ export class Store extends MigrationRunner {
   close() {
     this.checkpoint()
     this.db.close()
-  }
-
-  /*
-   * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: open
-   * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
-   */
-
-  // ── SessionRecords (store/sessions.ts) ──
-
-  upsertSession(s: SessionInfo): void {
-    return this.sessions.upsertSession(s)
-  }
-
-  // ── MessageRecords (store/messages.ts) ──
-
-  appendMessages(msgs: StoredMessage[]): void {
-    return this.messages.appendMessages(msgs)
-  }
-
-  loadMessages(sessionId: string, limit?: number, beforeSeq?: number, opts?: ReadOpts): StoredMessage[] {
-    return this.messages.loadMessages(sessionId, limit, beforeSeq, opts)
-  }
-
-  loadMessagesFrom(sessionId: string, afterSeq: number, limit?: number, opts?: ReadOpts): StoredMessage[] {
-    return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
-  }
-
-  upsertMessageNoIndex(m: StoredMessage): void {
-    return this.messages.upsertMessageNoIndex(m)
-  }
-
-  nextSeq(sessionId: string): number {
-    return this.messages.nextSeq(sessionId)
-  }
-
-  // ── SettingsRecords (store/settings.ts) ──
-
-  appSetting(key: string): string | null {
-    return this.settings.appSetting(key)
-  }
-
-  // ── PermissionRecords (store/permissions.ts) ──
-
-  setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
-  }
-
-  // ── ChildOwnershipRecords (store/child-ownership.ts) ──
-
-  listReportMarks(): { sessionId: string; callerSessionId: string }[] {
-    return this.children.listReportMarks()
-  }
-
-  listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
-    return this.children.listAgentStartRequests()
-  }
-
-  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
-    return this.children.listDelegatedTurns()
-  }
-
-  listQueuedRequests(): QueuedRequest[] {
-    return this.children.listQueuedRequests()
   }
 }
 

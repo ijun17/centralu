@@ -57,6 +57,21 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(second).toContain('1 other finished session you started remains: agent_session(action="list") shows them.')
   })
 
+  it("an orchestrator's report names the delete and the list as it calls them: through centralu_run (#850)", async () => {
+    const orch = (await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })).id
+    const one = await startRunning(orch, 'first job')
+    const two = await startRunning(orch, 'second job')
+    handleOf(one)!.answer('first done')
+    await w.until(() => reportOf(orch, one).length === 1)
+    handleOf(two)!.answer('second done')
+    await w.until(() => reportOf(orch, two).length === 1)
+    const told = reportOf(orch, two)[0]!
+    // The bare agent_session(...) is refused there as "Not a tool of this session"
+    expect(told).not.toContain('agent_session(')
+    expect(told).toContain(`delete it: centralu_run(command="agent_session", args={sessionId: "${two}", action: "delete"}).`)
+    expect(told).toContain('remains: centralu_run(command="agent_session", args={action: "list"}) shows them.')
+  })
+
   it("list shows the caller's own children with their state, and none of another session's", async () => {
     const s = await session()
     const other = await session()

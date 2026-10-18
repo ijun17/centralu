@@ -4,7 +4,7 @@ import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatIt
 import { mergePage } from './historyPages.js'
 
 /**
- * The transcript rules on their own — the same assertions store.test.ts makes through the store,
+ * The transcript rules on their own — the same assertions the store-*.test.ts files make through the store,
  * here without a platform or a session.
  */
 
