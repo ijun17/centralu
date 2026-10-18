@@ -26,7 +26,7 @@ export function SearchField() {
   const open = useStore((s) => s.paletteOpen)
   return (
     <button
-      className={`pointer-events-auto flex h-6 w-full min-w-0 items-center gap-2 rounded-md border px-2 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
+      className={`pointer-events-auto flex h-7 w-full min-w-0 items-center gap-2 rounded-full border px-3 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
         open ? 'border-line-strong text-ink' : 'border-line text-ink-faint'
       }`}
       onClick={() => useStore.getState().togglePalette(true)}
