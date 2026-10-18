@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, renameSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { VERSIONS_REL } from './versions.js'
@@ -23,6 +23,34 @@ export function carryAppFiles(dataRoot: string, fromKey: string, toKey: string):
   copyFolderOnce(join(dataRoot, 'app-data', fromKey), join(dataRoot, 'app-data', toKey))
   for (const suffix of ['.log', '.log.1']) copyFileOnce(join(dataRoot, 'app-logs', fromKey + suffix), join(dataRoot, 'app-logs', toKey + suffix))
   copyFolderOnce(join(dataRoot, VERSIONS_REL, fromKey), join(dataRoot, VERSIONS_REL, toKey))
+}
+
+/** A copy left beside its place by a host that stopped mid-carry: `<name>.carry-<uuid>` */
+const LEFTOVER = /\.carry-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * Removes the half copies an interrupted carry left (a host stopped between copying and renaming into place). Each is
+ * only ever beside a scope's folder (`app-data/<scope>/`, `app-logs/<scope>/`, `app-versions/<scope>/`), so those are
+ * the only places looked at; a carry under way in this host is not running when this is called
+ */
+export function sweepCarryLeftovers(dataRoot: string): void {
+  for (const area of ['app-data', 'app-logs', VERSIONS_REL]) {
+    let scopes: string[] = []
+    try {
+      scopes = readdirSync(join(dataRoot, area))
+    } catch {
+      continue
+    }
+    for (const scope of scopes) {
+      let names: string[] = []
+      try {
+        names = readdirSync(join(dataRoot, area, scope))
+      } catch {
+        continue
+      }
+      for (const name of names) if (LEFTOVER.test(name)) removeDataQuietly(join(dataRoot, area, scope, name), '[apps]')
+    }
+  }
 }
 
 function copyFolderOnce(from: string, to: string): void {

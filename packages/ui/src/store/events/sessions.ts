@@ -87,7 +87,21 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
   if (e.type === 'session_created') {
     // Read as the session list reads it (#384): a value a newer host invented costs that value, not the session
     const s = parseTolerant(SessionInfo, e.session) as SessionInfo | undefined
-    if (typeof s === 'object' && s !== null && typeof s.id === 'string' && !get().sessions[s.id]) {
+    const ok = typeof s === 'object' && s !== null && typeof s.id === 'string'
+    /*
+     * Said again for a session this window holds: the host moved it into a project (#1141, a user-folder app's builder
+     * and agents when its folder became a project). Only the project is taken; the rest of the row is this window's own
+     */
+    const held = ok ? get().sessions[s.id] : undefined
+    if (ok && held && held.projectId !== s.projectId) {
+      const projectId = s.projectId
+      set((st) => {
+        const cur = st.sessions[s.id]
+        return cur ? { sessions: { ...st.sessions, [cur.id]: { ...cur, projectId } } } : {}
+      })
+      return true
+    }
+    if (ok && !held) {
       set((st) => ({
         sessions: {
           ...st.sessions,

@@ -365,17 +365,15 @@ onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.useExternalApps(externalApps)
 /*
- * User-folder apps become projects in place (#1141), before any window or session asks for them: each one, once, with
- * what was kept under its old key carried to its new one. One that appears later (an approved MCP server) follows.
+ * User-folder apps become projects in place (#1141): each one, once, with what was kept under its old key carried to its
+ * new one, and the sessions this manager already loaded moved with it. It runs once this host is ready (below).
  */
 const userAppAdoption = new UserAppAdoption({
   rt: externalApps,
   store,
-  addProject: (path, opts) => mgr.addProject(path, opts),
+  sessionsMoved: (ids, projectId) => mgr.sessionsMovedToProject(ids, projectId),
   changed: () => events.push({ type: 'projects_changed' }),
 })
-await userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
-userAppAdoption.watch()
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
@@ -680,6 +678,15 @@ start.at('ready')
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 // What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
 if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
+/*
+ * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready, where the steps a
+ * swap left for later run: by then the host it replaced is gone, so a host failing before ready never leaves the
+ * previous build serving on copies already marked as moved. One that appears later (an approved MCP server) follows.
+ */
+setTimeout(() => {
+  userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
+  userAppAdoption.watch()
+}, 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a
  * stopped host left owed (#396). By the time this timer fires the ready line has gone out and the

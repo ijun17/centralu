@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { sessionLiveDefaults, type ProjectInfo, type ToolName } from '@cc/protocol'
+import { sessionLiveDefaults, type NormalizedEvent, type ProjectInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from './adapters/contract.js'
 import { ExternalApps, MANIFEST_FILE } from './apps/external/runtime.js'
 import { MANIFEST_VERSION } from './apps/external/manifest.js'
@@ -49,6 +49,8 @@ function session(id: string, over: Record<string, unknown> = {}): void {
 
 const grant = (capability: string) => ({ capability, text: `may ${capability}`, decision: 'allow' as const, stamp: 'uses-1', decidedAt: 5 })
 
+let emitted: NormalizedEvent[] = []
+
 function makeRuntime(): void {
   rt = new ExternalApps({
     projects: () => store.projects.projectRoots(),
@@ -57,8 +59,17 @@ function makeRuntime(): void {
     adoptedUserApp: (appId, dir) => adoptedUserApp(store, appId, dir),
   })
   rt.refresh()
+}
+
+/**
+ * As main.ts does it: the manager is made, and loads every session, before the adoption runs (once the host is ready).
+ * So what the adoption moves in the store, the loaded sessions have to follow (`sessionsMovedToProject`)
+ */
+function startHost(): void {
+  emitted = []
+  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>(), (e) => emitted.push(e))
   mgr.useExternalApps(rt)
-  adoption = new UserAppAdoption({ rt, store, addProject: (path, opts) => mgr.addProject(path, opts), changed: () => changed++ })
+  adoption = new UserAppAdoption({ rt, store, sessionsMoved: (ids, pid) => mgr.sessionsMovedToProject(ids, pid), changed: () => changed++ })
 }
 
 beforeEach(async () => {
@@ -66,7 +77,6 @@ beforeEach(async () => {
   dataRoot = join(root, 'data')
   mkdirSync(dataRoot)
   store = new Store()
-  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>(), () => {})
   changed = 0
   plantUserApp('notes', { secrets: ['TOKEN'] })
   plantUserApp('helper')
@@ -96,7 +106,10 @@ beforeEach(async () => {
   store.grid.setGridView([{ kind: 'app', projectId: null, appId: 'notes', span: { cols: 2, rows: 1 } }])
   store.settings.setAppSetting('apps.viewPorts', JSON.stringify({ assigned: { [OLD]: 21234 }, retired: [] }))
   store.settings.saveWorkspace({ appSpans: { [OLD]: { cols: 3, rows: 2 } }, focusedApp: { projectId: null, appId: 'notes' } })
+  // A half copy a host stopped mid-carry left beside its place
+  mkdirSync(join(dataRoot, 'app-data', '_user', 'helper.carry-0b7c2e4a-1f3d-4c5b-9a8e-123456789abc'), { recursive: true })
 
+  startHost()
   expect(await adoption.run()).toBe(2)
 })
 
@@ -148,13 +161,16 @@ describe('a user-folder app becomes a project in place', () => {
     expect(store.appRuns.listAppRuns(null, 'notes', 10)).toEqual([])
   })
 
-  it('moves its builder into the project, and the builder map names it under the new key; a session in the trash stays there', () => {
+  it('moves its builder into the project, and the builder map names it under the new key; a session in the trash stays there', async () => {
     expect(store.sessions.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
     expect(store.trash.isTrashed('trashed')).toBe(true)
-    // The next host start finds it as the app's builder, under the app's new key
-    const next = new SessionManager(store, new Map<ToolName, AgentAdapter>(), () => {})
-    expect(next.builderOf({ projectId: project()!.id, appId: 'notes' })?.id).toBe('builder')
-    void next.disposeAll()
+    // This same host, which loaded the session before the move, finds it as the app's builder under the new key
+    expect(mgr.builderOf({ projectId: project()!.id, appId: 'notes' })?.id).toBe('builder')
+    expect(mgr.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
+    // And the windows hear of the move
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'session_created', sessionId: 'builder', session: expect.objectContaining({ projectId: project()!.id }) }))
+    // So asking for its builder stands no second one up
+    expect(await mgr.createAppBuilder({ projectId: project()!.id, appId: 'notes' })).toMatchObject({ id: 'builder' })
     expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ [OLD]: 'builder', [newKey()]: 'builder' })
   })
 
@@ -204,6 +220,33 @@ describe('a user-folder app becomes a project in place', () => {
     adoption.watch()
     rt.installUserApp({ id: 'server-x', name: 'Server X', description: 'd', server: { command: 'npx', args: ['x'] } })
     await expect.poll(() => rt.list().find((a) => a.appId === 'server-x')?.root).toBe(true)
+  })
+})
+
+describe('what is not moved, and when', () => {
+  it('a folder whose manifest names another id (a backup copy) or does not pass stays in the user folder, listed with its reason, and the log says so', async () => {
+    plantUserApp('notes-copy', { id: 'notes' })
+    plantUserApp('broken', { name: '' })
+    rt.refresh()
+    expect(await adoption.run()).toBe(0)
+    expect(store.projects.listProjects().map((p) => p.name).sort()).toEqual(['helper', 'notes'])
+    const left = rt.list().filter((a) => a.projectId === null)
+    expect(left.map((a) => [a.appId, a.status])).toEqual([['broken', 'invalid'], ['notes-copy', 'invalid']])
+    // One runnable app of the id, the one adopted
+    expect(rt.list().filter((a) => a.appId === 'notes' && a.status !== 'invalid')).toHaveLength(1)
+  })
+
+  it('half copies an interrupted move left are swept', () => {
+    expect(existsSync(join(dataRoot, 'app-data', '_user', 'helper.carry-0b7c2e4a-1f3d-4c5b-9a8e-123456789abc'))).toBe(false)
+  })
+
+  it('runs once the host is ready, where the steps a swap left for later run, not while it starts', () => {
+    const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8')
+    const ready = main.indexOf('console.log(JSON.stringify({ ready: true')
+    expect(ready).toBeGreaterThan(0)
+    const runs = [...main.matchAll(/userAppAdoption\.run\(\)/g)].map((m) => m.index!)
+    expect(runs.length).toBeGreaterThan(0)
+    for (const at of runs) expect(at).toBeGreaterThan(ready)
   })
 })
 

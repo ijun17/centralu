@@ -490,6 +490,23 @@ describe('a child that changed owner (#693)', () => {
 })
 
 /*
+ * A session the host moved into a project (#1141: a user-folder app's builder, once its folder became a project) is
+ * said again with session_created; a window that holds it moves it, and keeps the rest of its row as it had it.
+ */
+describe('a session moved into a project (#1141)', () => {
+  it('session_created for a session this window holds takes its new project and nothing else', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/app-project')
+    await useStore.getState().attach(mock)
+    const s = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: s.id, session: { ...s, projectId: null } } as NormalizedEvent)
+    useStore.setState((st) => ({ sessions: { ...st.sessions, [s.id]: { ...st.sessions[s.id]!, projectId: null, name: 'Mine · builder' } } }))
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: s.id, session: { ...s, name: 'From the host' } } as NormalizedEvent)
+    expect(useStore.getState().sessions[s.id]).toMatchObject({ projectId: p.id, name: 'Mine · builder' })
+  })
+})
+
+/*
  * The trash (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
  * sidebar, and a project its restore registered again arrives with it — the screen has not heard of that project,
  * and a session row under a project the sidebar does not have is drawn nowhere.

@@ -42,13 +42,22 @@ export class UserAppAdoptionRecords {
   }
 
   /**
-   * Carries the store's part of one app from the user folder to `projectId`, and records the folder as adopted — one
-   * transaction, so the record never stands without what it says was carried.
+   * Registers the folder as a project (unless it already is one: its id and trust are then kept), carries the store's
+   * part of one app from the user folder to that project, and records the folder as adopted — one transaction, so the
+   * project never stands without its app's state, nor the record without what it says was carried. Returns the
+   * project's id and the ids of the sessions moved into it (the manager holds them in memory too).
    */
-  carry(appId: string, projectId: string, ino: string): void {
-    const from = appKeyOf(null, appId)
-    const to = appKeyOf(projectId, appId)
-    this.db.transaction(() => {
+  carry(appId: string, project: { path: string; name: string; trusted: boolean; newId: string }, ino: string): { projectId: string; sessions: string[] } {
+    return this.db.transaction(() => {
+      const known = this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(project.path) as { id: string } | undefined
+      const projectId = known?.id ?? project.newId
+      if (!known) {
+        this.db
+          .prepare(`INSERT INTO projects (id, path, name, created_at, trusted) VALUES (?, ?, ?, ?, ?)`)
+          .run(projectId, project.path, project.name, Date.now(), project.trusted ? 1 : 0)
+      }
+      const from = appKeyOf(null, appId)
+      const to = appKeyOf(projectId, appId)
       // Grants (app_permissions): the app's own answers, then other apps' answers about calling it
       this.db
         .prepare(
@@ -66,12 +75,9 @@ export class UserAppAdoptionRecords {
       this.db.prepare(`UPDATE app_runs SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
       this.db.prepare(`UPDATE app_run_failures SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
       // Its sessions (its builder, the agents it started): a user-folder app's had no project; the orchestrator and coordinators are not its
-      this.db
-        .prepare(
-          `UPDATE sessions SET project_id = ?
-            WHERE project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`,
-        )
-        .run(projectId, appId)
+      const mine = `project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`
+      const sessions = (this.db.prepare(`SELECT id FROM sessions WHERE ${mine}`).all(appId) as { id: string }[]).map((r) => r.id)
+      this.db.prepare(`UPDATE sessions SET project_id = ? WHERE ${mine}`).run(projectId, appId)
       // Grid panels: moved, unless the project's key already has one
       const has = this.db.prepare(`SELECT 1 FROM grid_layout WHERE panel_key = ?`).get(`app:${to}`)
       if (has) this.db.prepare(`DELETE FROM grid_layout WHERE panel_key = ?`).run(`app:${from}`)
@@ -124,6 +130,7 @@ export class UserAppAdoptionRecords {
       this.updateJson(ADOPTED_USER_APPS_KEY, (adopted) => {
         adopted[appId] = { projectId, ino, at: Date.now() }
       })
+      return { projectId, sessions }
     })()
   }
 

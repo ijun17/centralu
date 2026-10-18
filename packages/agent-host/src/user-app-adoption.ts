@@ -1,19 +1,30 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import type { ExternalAppInfo, ProjectInfo } from '@cc/protocol'
+import { basename, join, resolve } from 'node:path'
+import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
 
 /**
- * User-folder apps become projects (#1141, docs/plans/root-apps.md §4). Each `<data>/apps/<id>/` that holds a
- * manifest is registered as a project **in place**, and is that project's root app from then on; what was kept under
- * its old key (`_user/<id>`) is carried to the new one (`<project id>/<id>`): the files by the app runtime
- * (`ExternalApps.carryAppState`: data, logs, versions, secrets), the rest by the store (`store.adoption.carry`:
- * grants, runs, sessions, builder, attachments, grid panels, view port, the window's span and open app).
+ * User-folder apps become projects (#1141, docs/plans/root-apps.md §4). Each `<data>/apps/<id>/` whose manifest is
+ * valid and names its folder's id is registered as a project **in place**, and is that project's root app from then
+ * on; what was kept under its old key (`_user/<id>`) is carried to the new one (`<project id>/<id>`): the files by the
+ * app runtime (`ExternalApps.carryAppState`: data, logs, versions, secrets), the rest by the store, in the same
+ * transaction that registers the project (`store.adoption.carry`: grants, runs, sessions, builder, attachments, grid
+ * panels, view port, the window's span and open app).
  *
- * Runs when the host starts, and again whenever the user folder gains an app (an MCP server the person approved is
- * written there). Each folder once: the store records it, bound to the folder's file id, so a project the person later
- * deletes is not registered again, while a different folder made later under the same name is.
+ * **When**: once the host is ready (main.ts, where the steps a swap left for later run). A host that fails before ready
+ * hands back to the previous build without having moved anything, so the copies are taken from what that build last
+ * wrote. The manager has loaded its sessions by then, so the ones moved are handed to it (`sessionsMoved`), which
+ * updates them and tells the windows: the builder is found under the new key in this same run. It runs again whenever
+ * the user folder gains an app (an MCP server the person approved is written there).
+ *
+ * Each folder once: the store records it, bound to the folder's file id, so a project the person later deletes is not
+ * registered again, while a different folder made later under the same name is.
+ *
+ * Not adopted: a folder whose manifest does not pass, or names an id other than its folder (a backup copy such as
+ * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
+ * It stays in the user folder with its reason, and the log says so once.
  *
  * Trust: the project is trusted, as the user folder was, except for an imported app the person never enabled (or
  * whose command or uses changed since): its project starts untrusted, and trusting it is enabling it. A folder that is
@@ -23,8 +34,8 @@ import type { Store } from './dev-services/store.js'
 export type AdoptionDeps = {
   rt: ExternalApps
   store: Store
-  /** Registers a folder as a project (`ProjectCreation.addProject`); a folder already registered is returned as it is */
-  addProject(path: string, opts: { trusted?: boolean }): Promise<ProjectInfo>
+  /** Sessions now in the project (its builder, its agents): the manager updates the ones it holds and tells the windows */
+  sessionsMoved(sessionIds: readonly string[], projectId: string): void
   /** The project list changed — the windows re-read it */
   changed(): void
 }
@@ -44,11 +55,17 @@ export function adoptedUserApp(store: Pick<Store, 'adoption'>, appId: string, di
   return !!record && record.ino === folderFileId(dir)
 }
 
+/** A path spelled as a registered project's is: resolved, with a capital drive letter (`ProjectCreation.addProject`) */
+const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
+
 export class UserAppAdoption {
   private running: Promise<number> | null = null
   private again = false
   /** Apps whose adoption failed in this host's life — tried again at the next start, not on every list change */
   private failed = new Set<string>()
+  /** Apps left in the user folder, by their reason — said once, not on every list change */
+  private said = new Map<string, string>()
+  private swept = false
 
   constructor(private readonly deps: AdoptionDeps) {}
 
@@ -76,14 +93,30 @@ export class UserAppAdoption {
   }
 
   private waiting(): ExternalAppInfo[] {
-    return this.deps.rt.list().filter((a) => a.projectId === null && !a.machine && !this.failed.has(a.appId) && existsSync(join(a.dir, MANIFEST_FILE)))
+    return this.deps.rt.list().filter((a) => {
+      if (a.projectId !== null || a.machine || this.failed.has(a.appId) || !existsSync(join(a.dir, MANIFEST_FILE))) return false
+      if (a.status !== 'invalid') return true
+      if (this.said.get(a.appId) !== a.error) {
+        this.said.set(a.appId, a.error ?? '')
+        console.error(`[apps] user-folder app ${a.appId} stays in the user folder, not made a project: ${a.error ?? 'its manifest is invalid'}`)
+      }
+      return false
+    })
   }
 
   private async adoptAll(): Promise<number> {
+    if (!this.swept) {
+      this.swept = true
+      try {
+        this.deps.rt.sweepCarryLeftovers()
+      } catch (e) {
+        console.error(`[apps] could not sweep half copies an interrupted move left: ${(e as Error).message}`)
+      }
+    }
     let adopted = 0
     for (const app of this.waiting()) {
       try {
-        await this.adopt(app)
+        this.adopt(app)
         adopted++
       } catch (e) {
         this.failed.add(app.appId)
@@ -97,14 +130,18 @@ export class UserAppAdoption {
     return adopted
   }
 
-  private async adopt(app: ExternalAppInfo): Promise<void> {
+  private adopt(app: ExternalAppInfo): void {
     const ino = folderFileId(app.dir)
     if (ino === null) throw new Error('its folder cannot be read')
+    const path = spelled(app.dir)
     // An import the person has not enabled stays off: its project starts untrusted, and trusting it is enabling it
     const held = app.status === 'unconfirmed' || (app.imported !== undefined && app.imported.confirmedAt === null)
-    const project = await this.deps.addProject(app.dir, held ? {} : { trusted: true })
-    this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId: project.id, appId: app.appId })
-    this.deps.store.adoption.carry(app.appId, project.id, ino)
-    console.error(`[apps] user-folder app ${app.appId} is now the app of project ${project.id} (${app.dir})${held ? ', untrusted until enabled' : ''}`)
+    const known = this.deps.store.projects.findProjectByPath(path)?.id
+    const projectId = known ?? randomUUID()
+    // The files first: copies, made only where the new key has none, so an interrupted run repeats them harmlessly
+    this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
+    const moved = this.deps.store.adoption.carry(app.appId, { path, name: basename(path), trusted: !held, newId: projectId }, ino)
+    this.deps.sessionsMoved(moved.sessions, moved.projectId)
+    console.error(`[apps] user-folder app ${app.appId} is now the app of project ${moved.projectId} (${path})${held ? ', untrusted until enabled' : ''}`)
   }
 }

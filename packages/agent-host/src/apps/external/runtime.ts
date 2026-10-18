@@ -22,7 +22,7 @@ import { AppStartEnv } from './app-start-env.js'
 import { AppResources } from './app-resources.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
-import { carryAppFiles } from './carry.js'
+import { carryAppFiles, sweepCarryLeftovers } from './carry.js'
 import type { Snapshot } from './versions.js'
 import type { Audience } from './visibility.js'
 
@@ -585,6 +585,11 @@ export class ExternalApps {
   carryAppState(from: AppRef, to: AppRef): void {
     carryAppFiles(this.deps.dataRoot, this.startEnv.appKey(from), this.startEnv.appKey(to))
     this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
+  }
+
+  /** Removes the half copies a carry interrupted by a stopped host left beside their places (`carry.ts`) */
+  sweepCarryLeftovers(): void {
+    sweepCarryLeftovers(this.deps.dataRoot)
   }
 
   /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */

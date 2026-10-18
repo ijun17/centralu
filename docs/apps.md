@@ -78,14 +78,18 @@ visibility is not read as the default: the side that is wrong stays closed.
   subfolders such as `ui/`). Discovery only reads; it starts nothing.
 - Broken or untrusted apps are not hidden. They stand in the list with their reason (`invalid`,
   `untrusted`), so a person can see why an app does not run.
-- **User-folder apps become projects** (#1141): when the host starts, each `<data folder>/apps/<id>/`
-  holding a manifest is registered as a project **in place** and is that project's root app from then
-  on, once (`apps.adoptedUserApps`, bound to the folder's file id, so a project the person deletes is
+- **User-folder apps become projects** (#1141): once the host is ready (where the steps a swap left
+  for later run, so a host failing before then has moved nothing), each `<data folder>/apps/<id>/`
+  whose manifest is valid and names its folder's id is registered as a project **in place**, in the
+  same store transaction as the move below, and is that project's root app from then on, once (`apps.adoptedUserApps`, bound to the folder's file id, so a project the person deletes is
   not registered again). What was kept under `_user/<id>` is carried to `<project id>/<id>`: data,
   logs, kept versions and secrets are copied; grants are copied, and so are other apps' grants to
   call it; runs and the app's sessions move to the project; the builder map, attachments, grid panel,
   view origin port and the window's span and open app follow the new key. The project is trusted,
-  except an imported app the person never enabled. Copies leave the old key's state for a previous
+  except an imported app the person never enabled. Sessions the manager already loaded follow, and
+  windows hear them again (`session_created`), so the builder is found under the new key in the same
+  run. A folder whose manifest is invalid or names another id (a backup copy) is not moved: it stays
+  listed with its reason, as today. Copies leave the old key's state for a previous
   build during a swap (`user-app-adoption.ts`, [plans/root-apps.md](plans/root-apps.md) §4). One that
   appears later, such as an approved MCP server, is registered the same way while the host runs.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**

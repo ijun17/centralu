@@ -89,11 +89,11 @@ export type InlineViewKept = {
 export type AppResourceResult = { contents: ({ uri: string } & Record<string, unknown>)[] } & Record<string, unknown>
 
 /**
- * One new app (M4 C-1) — `projectId` null means a user-folder app. `tool` is the builder
- * session's tool; if absent the host picks one (the project's default tool, or the
- * orchestrator's tool for a user-folder app).
+ * One new app (M4 C-1) — `projectId` null means a new project of its own (#1141): a folder `<parent>/<id>`, in
+ * `~/Centralu` without `parent`, whose root is the app. `tool` is the builder session's tool; if absent the host picks
+ * one (the project's default tool, or the orchestrator's tool for a new app project).
  */
-export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string; tool?: ToolName }
+export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string; tool?: ToolName; parent?: string }
 
 /**
  * The created app and its builder session. If the session failed to start (no tool, or not
@@ -274,8 +274,12 @@ export interface AppsPort {
    * host states them.
    */
   importPrepare(source: string): Promise<{ token: string; review: AppReview }>
-  /** Admits the app from staging — disabled. With `enable`, also records confirmation using the key (`reviewKey`) from the window the person reviewed. Does not start it */
-  importCommit(token: string, opts: { enable: boolean; reviewKey?: string }): Promise<ExternalAppInfo>
+  /**
+   * Admits the app from staging as a project of its own (#1141): a folder `<parent>/<id>` (`~/Centralu` without
+   * `parent`), registered untrusted, or trusted with `enable`, which also needs the key (`reviewKey`) from the window
+   * the person reviewed. Does not start it
+   */
+  importCommit(token: string, opts: { enable: boolean; reviewKey?: string; parent?: string }): Promise<ExternalAppInfo>
   /** Cancels the import — clears the staging area */
   importCancel(token: string): Promise<void>
   /** The review window for an admitted app (M4 E-3) — an imported app not yet enabled, or one whose `server`/`uses` changed after being enabled. If it changed, `changed` is the declaration from when it was enabled */
