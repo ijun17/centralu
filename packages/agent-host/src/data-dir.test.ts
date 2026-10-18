@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { chooseDataDir, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 
 /**
  * This function moves **the folder holding the user's conversation history**.
@@ -150,5 +150,23 @@ describe('which data folder the host uses (#973)', () => {
       dir: join('/home/me', '.centralu-dev'),
       legacy: join('/home/me', '.control-center-dev'), // legacy-name
     })
+  })
+})
+
+describe('the root of the data folder', () => {
+  const saved = process.env.CC_DATA_DIR
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CC_DATA_DIR
+    else process.env.CC_DATA_DIR = saved
+  })
+
+  // The guard behind "never write to the real data folder": tests point CC_DATA_DIR at a temp folder
+  it('is CC_DATA_DIR when it is set, and the home folder otherwise', () => {
+    process.env.CC_DATA_DIR = join(root, 'chosen')
+    expect(dataRoot()).toBe(join(root, 'chosen'))
+    delete process.env.CC_DATA_DIR
+    expect(dataRoot()).toBe(join(homedir(), '.centralu'))
+    process.env.CC_DATA_DIR = ''
+    expect(dataRoot()).toBe(join(homedir(), '.centralu'))
   })
 })
