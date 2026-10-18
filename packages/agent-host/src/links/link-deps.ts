@@ -63,6 +63,12 @@ export type LinkDeps = {
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
   /**
+   * Whether a session here waits on a session of the machine (#1134): a report owed of a child there, whose turn runs
+   * or whose background work does (`SessionManager.linkedWorkOwed`). A machine that connects when needed stays up for
+   * it, and is connected at start for it after a restart. Absent: nothing waits
+   */
+  workOwed?: (machineId: string) => boolean
+  /**
    * For tests, a machine that connects when needed (#1134): how long it stays up after the last need, how often that
    * is looked at, and how long an agent's call waits for it to connect
    */

@@ -175,11 +175,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.record.connect ?? 'at_start'
   }
   /**
-   * Not connected, and connected when something needs it: what the mirror holds stands for it until then (#1134). A
-   * machine the person disconnected that connects at start is not: nothing but Connect brings it back
+   * Not connected now, and connected when something needs it (#1134): parked, connecting, or away between attempts.
+   * What the mirror holds stands for it until then, and what is asked of it waits on `need`. Not while its versions
+   * hold it or an operation runs there, which a need cannot end; and never a machine that connects at start, which the
+   * person disconnected or which is away: nothing but Connect or its backoff brings that one back
    */
   get onDemand(): boolean {
-    return this.parked && this.connectMode === 'when_needed'
+    if (this.connectMode !== 'when_needed' || this.reachable) return false
+    return this.status !== 'versions_differ' && this.status !== 'updating'
   }
 
   info(): MachineInfo {
@@ -365,6 +368,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private idle(): boolean {
     if (this.connectMode !== 'when_needed' || this.pinned || this.parked || this.stopped || this.operating()) return false
     if (Date.now() - this.neededAt < (this.deps.needHoldMs ?? NEED_HOLD_MS)) return false
+    // A child there whose report is owed: its turn runs, or its background work does after the turn ended
+    if (this.deps.workOwed?.(this.id)) return false
     return ![...this.states.values()].some((state) => isInTurn(state))
   }
 

@@ -103,11 +103,12 @@ export function linkedSessions(
     return null
   }
   /**
-   * The machine, connected first when it connects when needed and nothing had needed it (#1134): an agent started or
-   * sent work there, or read there, is such a need. Resolves when that attempt ended, connected or not
+   * An agent's work there is a need (#1134): started or sent work there, or read there. A machine that connects when
+   * needed is connected first, and resolves when that attempt ended, connected or not; one already up counts it too,
+   * so its hold runs from this work and not from when it connected
    */
   const needed = async (m: RoutedMachine): Promise<void> => {
-    if (!m.reachable) await m.need?.()
+    await m.need?.()
   }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {

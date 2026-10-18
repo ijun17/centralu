@@ -529,6 +529,8 @@ const links = new Links({
   log: (line) => console.error(line),
   // A child start_agent started on a machine hangs under the session here that started it (#1038)
   ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
+  // A machine that connects when needed stays up while a session here waits on a child there (#1134)
+  workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
 })
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)

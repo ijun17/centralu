@@ -25,9 +25,14 @@ export class Links {
 
   constructor(private readonly deps: LinkDeps) {}
 
-  /** Starts a link for every machine in the registry, but one that connects when needed (#1134) */
+  /**
+   * Starts a link for every machine in the registry, but one that connects when needed (#1134), unless a session here
+   * still waits on a child there: after a restart its report would otherwise not come until something needed the machine
+   */
   start(): void {
-    for (const record of this.deps.registry.list()) this.startOne(record, record.connect === 'when_needed')
+    for (const record of this.deps.registry.list()) {
+      this.startOne(record, record.connect === 'when_needed' && !this.deps.workOwed?.(record.id))
+    }
   }
 
   all(): LinkedMachine[] {

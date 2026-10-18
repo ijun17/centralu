@@ -82,6 +82,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   const events: NormalizedEvent[] = []
   const deps: LinkDeps = {
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+    workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
     broadcast: (e) => {
       events.push(e)
       server.broadcast(e)
@@ -434,7 +435,7 @@ describe("an agent's work on a machine that connects when needed connects it (#1
    * session h1 asks. The hub connected once, so its mirror knows the machine; then the machine is set to connect when
    * needed and disconnected, as it would stand after a restart of the hub
    */
-  async function rig() {
+  async function rig(o: { openMs?: number; deps?: Partial<LinkDeps> } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
     seedSession(remoteStore, 'p-app', 'w1', 'worker', 'ext-w1')
@@ -442,25 +443,32 @@ describe("an agent's work on a machine that connects when needed connects it (#1
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
-    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore })
+    seedSession(hubStore, 'p-hub', 'h2', 'worker', 'ext-h2')
+    // `openMs`: how long the link takes to open, as an ssh to a machine that has to start its host does
+    const slow = (line: () => ConnectionLine) => new CountingTunnel(async () => {
+      await new Promise((r) => setTimeout(r, o.openMs ?? 0))
+      return line()
+    })
+    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, tunnel: slow, ...(o.deps ? { deps: o.deps } : {}) })
     await hub.mgr.setProjectTrusted('p-hub', true)
     await eventually(() => hub.row().status === 'connected')
     await hub.call('machines.setConnect', { machineId: 'm1', connect: 'when_needed' })
     await hub.call('machines.disconnect', { machineId: 'm1' })
     const opens = hub.tunnel().opens
-    const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
+    const card = (caller: string) => hub.mgr.listSessions().find((x) => x.id === caller)?.pendingApproval
     /** Allows the card the call raises, and answers the call; a call refused before any card answers with its refusal */
-    const answered = async <T,>(call: Promise<T>): Promise<T> => {
+    const answered = async <T,>(call: Promise<T>, caller = 'h1'): Promise<T> => {
       const allowed = (async () => {
-        await eventually(() => !!card())
-        await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+        await eventually(() => !!card(caller))
+        await hub.mgr.respondApproval(caller, card(caller)!.requestId, 'allow')
         return call
       })()
       return Promise.race([call, allowed])
     }
     // As the machine names its project: the folder's name
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-app')!.name
-    return { remote, hub, opens, answered, name }
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    return { remote, hub, hubStore, opens, answered, name, reader }
   }
 
   it('start_agent with the machine connects it, starts the child there and gets its answer', async () => {
@@ -506,5 +514,60 @@ describe("an agent's work on a machine that connects when needed connects it (#1
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining(`${name} (on Laptop)`) })
     expect(hub.tunnel().opens).toBe(opens)
     expect(hub.row().status).toBe('disconnected')
+  })
+
+  // #1134 review H1: a machine still connecting was listed as away, and both calls were refused before they reached the need
+  it('ask_project and start_agent at once, while the window has it connecting, both wait for the link and succeed', async () => {
+    const { hub, answered, name } = await rig({ openMs: 1500 })
+    await hub.call('machines.need', { machineId: 'm1' })
+    expect(hub.row().status).toBe('connecting')
+    const [asked, started] = await Promise.all([
+      answered(hub.mgr.askProject('h1', { project: `Laptop/${name}`, task: 'say hello' }), 'h1'),
+      answered(hub.mgr.startAgent('h2', { task: 'say hello', machine: 'Laptop' }), 'h2'),
+    ])
+    expect(asked).toMatchObject({ ok: true, state: 'done' })
+    expect(started).toMatchObject({ ok: true, state: 'done' })
+    expect(hub.row().status).toBe('connected')
+  })
+
+  // #1134 review M1: the hold ran from when the link came up, not from the agent's work on it
+  it("an agent's work on the machine while it is connected starts its hold again", async () => {
+    const hold = 1000 * SLOW
+    const { hub, reader } = await rig({ deps: { needHoldMs: hold, idleCheckMs: 50 } })
+    await hub.call('machines.need', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    await new Promise((r) => setTimeout(r, hold * 0.7))
+    expect(await reader.read('m1.w1', 1)).toMatchObject({ ok: true })
+    // Past the hold from the window's need, within it from the read
+    await new Promise((r) => setTimeout(r, hold * 0.7))
+    expect(hub.row().status).toBe('connected')
+    await eventually(() => hub.row().status === 'disconnected')
+  })
+
+  // #1134 review M2: a child whose turn ended with its background work still running there owes its report
+  it('stays connected past the hold while a child there owes its report over its background work', async () => {
+    const { hub } = await rig({ deps: { needHoldMs: 100, idleCheckMs: 50 } })
+    const children = (hub.mgr as unknown as { children: { setLinkedReport(id: string, r: unknown): void; dropLinkedReport(id: string): void } }).children
+    await hub.call('machines.need', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    // Its turn ended there with its work still running, as the machine's events would leave it
+    children.setLinkedReport('m1.w1', { orchestratorId: 'h1', busy: false, paused: [{ id: 'bg1', kind: 'shell', description: 'npm test', status: 'running' }] })
+    await new Promise((r) => setTimeout(r, 600))
+    expect(hub.row().status).toBe('connected')
+    children.dropLinkedReport('m1.w1')
+    await eventually(() => hub.row().status === 'disconnected')
+  })
+
+  // #1134 review: a restart parked the machine, and the report of a child working there waited for the next need
+  it('a restarted hub connects it at start while a child there still owes its report', async () => {
+    const { hub, hubStore, answered, remote } = await rig()
+    // A turn that stops on an approval there: it runs on, and its report is owed
+    expect(await answered(hub.mgr.startAgent('h1', { task: 'please approve the command', machine: 'Laptop', wait: false }))).toMatchObject({ ok: true, state: 'working' })
+    await hub.links.stop()
+    await hub.mgr.disposeAll()
+
+    const again = await hubHost(() => lineFor(remote.port), { store: hubStore })
+    expect(again.row().connect).toBe('when_needed')
+    await eventually(() => again.row().status === 'connected')
   })
 })

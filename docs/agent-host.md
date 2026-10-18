@@ -2699,9 +2699,12 @@ made until something needs it. A need is the window opening one of its projects 
 again every 2 minutes while it stays open), or the orchestrator acting there: `start_agent` with the machine,
 `agent_session`, `ask_project` on one of its projects, `read_session` of one of its sessions (`linked-sessions.ts`
 waits up to 60 s for the link). Looking a name up is not a need: such a machine's projects stand as last listed, not as
-away. The link stays up for 10 minutes after the last need, and for as long as a session there is in a turn as the
-hub last heard it (followed event by event, so a turn open when the link dropped keeps it tried); then it closes
-(`disconnected`), also while it was away. Its sessions keep running there meanwhile; on the next connect the window
+away, also while it is connecting or between attempts, so the act that follows waits for the link instead of being
+refused. Each act there starts the hold again. The link stays up for 10 minutes after the last need, for as long as a
+session there is in a turn as the hub last heard it (followed event by event, so a turn open when the link dropped
+keeps it tried), and for as long as a session here waits on a child there (its report owed, over its turn or over its
+background work; `SessionManager.linkedWorkOwed`); then it closes (`disconnected`), also while it was away. A
+restarted hub connects such a machine at start while a report of a child there is owed. Its sessions keep running there meanwhile; on the next connect the window
 re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
 unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
 Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
