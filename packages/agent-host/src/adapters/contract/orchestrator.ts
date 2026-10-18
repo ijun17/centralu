@@ -112,6 +112,11 @@ export type LinkedSessions = {
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
+  /**
+   * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
+   * last thousand messages: whose turn it is running (#1038 review)
+   */
+  lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown } | null }>>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */

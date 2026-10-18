@@ -49,7 +49,15 @@ afterEach(async () => {
 async function remoteHost(
   port = 0,
   store = new Store(),
-  o: { version?: string; activity?: () => HostActivity; immediate?: boolean; without?: readonly string[]; elevated?: () => boolean | null } = {},
+  o: {
+    version?: string
+    activity?: () => HostActivity
+    immediate?: boolean
+    without?: readonly string[]
+    elevated?: () => boolean | null
+    /** What happens on the host before it listens: no hub can see it yet */
+    beforeListen?: (mgr: SessionManager) => Promise<void>
+  } = {},
 ) {
     const adapters = scriptedAdapters({ immediate: o.immediate })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
@@ -60,6 +68,7 @@ async function remoteHost(
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
     ...(o.elevated ? { elevated: o.elevated } : {}),
   })
+  await o.beforeListen?.(mgr)
   const p = await server.listen()
   let closed = false
   const close = async () => {
@@ -1842,6 +1851,52 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // Each once
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(reports()).toBe(2)
+  })
+
+  // #1038 review: after a missed end, a turn the person started there was taken for the caller's, and reported as its answer
+  it("does not take a turn the person started there while the link was down for the caller's, nor report its end", async () => {
+    const { remote, remoteStore, hub, answer, start, told, reports } = await rig()
+    // When the hub has read the child once the link is back: its last message, or (without that read) its state a while ago
+    const reader = (hub.mgr as unknown as { linkedReader: Record<string, (...a: unknown[]) => Promise<unknown>> }).linkedReader
+    let readAt = 0
+    let lastRead = false
+    const read = reader.read!.bind(reader)
+    const last = reader.lastUserMessage?.bind(reader)
+    reader.read = async (...a) => {
+      const r = await read(...a)
+      readAt ||= Date.now()
+      return r
+    }
+    if (last) reader.lastUserMessage = async (...a) => {
+      const r = await last(...a)
+      lastRead = true
+      return r
+    }
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    // The machine's host comes back, and before the hub can reach it the person asks the child a question there
+    const back = await remoteHost(remote.port, remoteStore, {
+      beforeListen: async (mgr) => {
+        await mgr.send(id, 'a question for you')
+        await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+      },
+    })
+    readAt = 0
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => lastRead || (readAt > 0 && Date.now() - readAt > 1_500))
+    // The person answers there: that turn's end is theirs, not the caller's report
+    const q = back.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
+    back.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    await eventually(() => ['idle', 'waiting_input'].includes(back.mgr.listSessions().find((s) => s.id === id)?.state ?? ''))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(reports()).toBe(0)
+    expect(told().some((t) => t.includes('began a turn there that you did not give it'))).toBe(true)
   })
 
   // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there

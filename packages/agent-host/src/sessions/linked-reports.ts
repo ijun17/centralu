@@ -35,7 +35,7 @@ export type LinkedReportsHost = {
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
-function fromHub(from: unknown): boolean {
+export function fromHub(from: unknown): boolean {
   const id = (from as { sessionId?: unknown } | null)?.sessionId
   return typeof id === 'string' && id.endsWith(`.${HUB_SENDER}`)
 }

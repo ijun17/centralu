@@ -2232,7 +2232,6 @@ export class SessionManager {
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
-      linkedReportRestored: (sessionId) => self.linkedReports.restored(sessionId),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

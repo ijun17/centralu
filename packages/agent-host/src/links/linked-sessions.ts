@@ -307,6 +307,27 @@ export function linkedSessions(
       })
     },
 
+    async lastUserMessage(sessionId) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => {
+        // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
+        let beforeSeq: number | undefined
+        for (let page = 0; page < 5; page++) {
+          const list = await route('messages.load', { sessionId, limit: 200, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
+          if (!Array.isArray(list) || list.length === 0) break
+          for (const raw of [...list].reverse()) {
+            if (!isObj(raw) || raw.role !== 'user' || raw.kind !== 'text' || !isObj(raw.payload)) continue
+            return { message: { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null } }
+          }
+          const first: unknown = list[0]
+          if (!isObj(first) || typeof first.seq !== 'number') break
+          beforeSeq = first.seq
+        }
+        return { message: null }
+      })
+    },
+
     machineLinked(machineId) {
       return !!machineById(machineId)
     },

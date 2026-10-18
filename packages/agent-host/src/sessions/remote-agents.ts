@@ -7,7 +7,8 @@ import { inTurn } from '../idle.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
 import type { DelegationHost } from './delegation-host.js'
-import type { LinkedEvent } from './linked-reports.js'
+import type { LinkedReport } from './child-ownership.js'
+import { fromHub, type LinkedEvent } from './linked-reports.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
@@ -36,6 +37,8 @@ export type RemoteAgent = {
    * restarted hub still reports it (`restore`); `paused`, the background work its report is held over there (#723)
    */
   owed?: { paused?: BackgroundTask[] }
+  /** The last instruction the hub sent it, as the machine records it: a turn that took it is the caller's (#1038 review) */
+  sent?: string
 }
 
 /** The record with nothing owed */
@@ -68,7 +71,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn' | 'linkedReportRestored'
+  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
 >
 
 /**
@@ -109,8 +112,10 @@ export class RemoteAgents {
    * At startup (#1038): what was owed of each child when the last host stopped is owed again, to a caller still here. A
    * call that waited on it is gone with that host, so its end is the caller's report now. The hub has not seen the
    * turn's end, nor whether it ended: once the machine's link is up the child is read (`caughtUp`), and a turn that
-   * ended meanwhile is reported then, one still running when it ends. A report held over the child's background work
-   * there waits for that work as before (`LinkedReports`), and settles if it ended unseen.
+   * ended meanwhile is reported then, one still running when it ends if it is the one its caller gave it. A report held
+   * over the child's background work there waits for that work as before: the link's resync reads the work whole and
+   * starts its settle wait (`LinkedReports.resync`). Not before (#1038 review): a link still connecting past the settle
+   * wait would have settled every task as ended.
    */
   restore(): void {
     for (const r of this.records()) {
@@ -120,8 +125,7 @@ export class RemoteAgents {
         continue
       }
       this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
-      if (r.owed.paused) this.host.linkedReportRestored(r.sessionId)
-      else this.toldDown.add(r.sessionId)
+      if (!r.owed.paused) this.toldDown.add(r.sessionId)
     }
   }
 
@@ -293,9 +297,11 @@ export class RemoteAgents {
       agentDepth: depthOf(this.host, callerId) + 1,
     })
     if (!made.ok) return { ok: false, error: `Could not start ${tool} on ${machine.name}: ${bare(made.error)}. ${ASK_THE_PERSON}` }
+    const label = labelOf(this.host.store.messages, caller)
+    const task = remoteAgentFrame(label, opts.task)
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
-      project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(),
+      project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task,
     }
     this.save([...this.records(), rec])
     // Its row came to the windows before the hub knew whose it is: now it hangs under the caller (#1038)
@@ -309,9 +315,8 @@ export class RemoteAgents {
     if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
     // It counts by itself now (`workingIn`)
     counted()
-    const label = labelOf(this.host.store.messages, caller)
     // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
-    const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label, { depth: depthOf(this.host, callerId) + 1 })
+    const sent = await reader.send(rec.sessionId, task, label, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (waiting && this.waits.get(rec.sessionId) === waiting) this.dropWait(rec.sessionId)
       if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
@@ -365,8 +370,10 @@ export class RemoteAgents {
         // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
         const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
         if (full) return { ok: false, error: full }
+        const framed = agentNoteFrame(label, text)
+        this.sentNow(rec.sessionId, framed)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
-        const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label, { depth: depthOf(this.host, callerId) + 1 })
+        const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
         if (!sent.ok) {
           if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
           return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
@@ -622,13 +629,45 @@ export class RemoteAgents {
       const now = await reader.read(rec.sessionId, 1)
       if (!now.ok) continue
       if (inTurn((now.state ?? 'idle') as SessionState)) {
-        // Seen working now (after a hub restart, say): the end of this turn is the report's, however the machine says it
-        if (this.host.children.linkedReports.get(rec.sessionId) === report) report.busy = true
+        await this.turnOnReturn(rec, report, reader)
         continue
       }
       // Read again: the turn's own end may have come in while the machine was asked
       if (this.host.children.linkedReports.get(rec.sessionId) === report) this.host.settleLinkedTurn(rec.sessionId)
     }
+  }
+
+  /**
+   * A turn running there when the link is back after the hub missed what happened (a drop, a restart): the caller's
+   * only if the last message the child took is the instruction the hub sent it (`sent`), from this hub (#1038 review).
+   * Then its end is the report's, however the machine says it. Otherwise the turn is someone else's, the person's on
+   * that machine most likely: the turn the caller gave it ended unseen, or was set aside, and nothing of the new one is
+   * the caller's. Its report is dropped and the caller is told, rather than handed another's turn as its answer. Not
+   * read (the machine did not answer), it stays as it is until the link's next resync.
+   */
+  private async turnOnReturn(rec: RemoteAgent, report: LinkedReport, reader: LinkedSessions): Promise<void> {
+    const last = await reader.lastUserMessage(rec.sessionId)
+    // Read again after asking: the turn's own end may have come in meanwhile
+    if (!last.ok || this.host.children.linkedReports.get(rec.sessionId) !== report) return
+    const sent = this.of(rec.sessionId)?.sent
+    if (last.message && sent !== undefined && last.message.text === sent && fromHub(last.message.from)) {
+      report.busy = true
+      return
+    }
+    this.host.children.dropLinkedReport(rec.sessionId)
+    void this.host.tellSession(
+      rec.callerId,
+      `[Centralu] While the link to ${rec.machine} was down, "${rec.name}" [${rec.sessionId}] began a turn there that you did not give it ` +
+        '(the person on that machine, most likely). What you gave it ended or was set aside unseen, and nothing more of it is reported. ' +
+        'agent_session status reads where it stands; send to it once it is at rest.',
+      { sessionId: rec.sessionId, name: rec.name },
+      true,
+    )
+  }
+
+  /** The instruction the hub is about to send the child, kept so its turn can be told from another's (`turnOnReturn`) */
+  private sentNow(sessionId: string, text: string): void {
+    this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...r, sent: text } : r)))
   }
 
   /**
