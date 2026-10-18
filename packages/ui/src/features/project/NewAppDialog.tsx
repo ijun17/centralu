@@ -3,14 +3,13 @@ import { newAppIdProblem } from '@cc/protocol'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { Button } from '../../components/Button.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { TextField } from '../../components/TextField.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
 import { useToolChoice } from './useToolChoice.js'
-
-/** What one field looks like — it has to match the new session dialog's shape to read as "the same kind of dialog" */
-const inputClass =
-  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * New app (M4 C-1) — asks for a name and the agent that builds it, and the host unpacks the app
@@ -97,62 +96,45 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
         </header>
 
         <div className="space-y-3 px-4 py-3">
-          <label className="block">
-            <span className="mb-1 block text-2xs text-ink-muted">Name</span>
-            <input
-              autoFocus
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Resource search"
-              maxLength={80}
-              spellCheck={false}
-              className={inputClass}
-              data-testid="new-app-name"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-2xs text-ink-muted">
-              Id <span className="text-ink-faint">· folder name, and how agents see it (app-{id || '…'})</span>
-            </span>
-            <input
-              type="text"
-              value={id}
-              onChange={(e) => setIdEdit(e.target.value)}
-              placeholder="resource-search"
-              spellCheck={false}
-              className={`${inputClass} font-mono text-xs`}
-              data-testid="new-app-id"
-              aria-invalid={problem !== null || undefined}
-            />
-            {problem !== null && (name.trim() !== '' || idEdit !== null) && (
-              <span className="mt-1 block text-xs leading-body text-ink-muted" data-testid="new-app-id-problem">
-                {appIdHint(id, problem)}
-              </span>
-            )}
-          </label>
+          <TextField
+            label="Name"
+            text="sm"
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Resource search"
+            maxLength={80}
+            spellCheck={false}
+            data-testid="new-app-name"
+          />
+          <TextField
+            label="Id"
+            hint={`folder name, and how agents see it (app-${id || '…'})`}
+            font="mono"
+            value={id}
+            onChange={(e) => setIdEdit(e.target.value)}
+            placeholder="resource-search"
+            spellCheck={false}
+            data-testid="new-app-id"
+            aria-invalid={problem !== null || undefined}
+            error={problem !== null && (name.trim() !== '' || idEdit !== null) ? appIdHint(id, problem) : undefined}
+            errorTestId="new-app-id-problem"
+          />
 
           <div>
             <p className="mb-1 text-2xs text-ink-muted">Built by</p>
-            <div className="flex gap-1.5">
-              {allTools.map((t) => (
-                <button
-                  key={t.name}
-                  type="button"
-                  onClick={() => setTool(t.name)}
-                  data-testid={`new-app-tool-${t.name}`}
-                  aria-pressed={tool === t.name}
-                  title={info(t.name)?.detail}
-                  className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
-                    tool === t.name
-                      ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                      : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
-                  } ${tools && !usable(t.name) ? 'opacity-50' : ''}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Built by"
+              value={tool}
+              onChange={setTool}
+              options={allTools.map((t) => ({
+                value: t.name,
+                label: t.label,
+                testId: `new-app-tool-${t.name}`,
+                title: info(t.name)?.detail,
+                dim: !!tools && !usable(t.name),
+              }))}
+            />
             {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
             {blocked && (
               <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid="new-app-tool-blocked">
@@ -176,14 +158,16 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
               <p className="text-xs leading-body text-ink-muted">
                 Apps only run in projects you trust. Trust {project.name} to make an app here.
               </p>
-              <button
-                type="button"
-                className="mt-1.5 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+              <Button
+                variant="primary"
+                onRaised
+                size="sm"
+                className="mt-1.5"
                 onClick={() => void setProjectTrusted(project.id, true)}
                 data-testid="new-app-trust"
               >
                 Trust this project
-              </button>
+              </Button>
             </div>
           )}
 
@@ -202,13 +186,9 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
           <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={onClose}>
             Cancel
           </button>
-          <button
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-            disabled={!canCreate}
-            data-testid="new-app-create"
-          >
+          <Button type="submit" variant="primary" disabled={!canCreate} data-testid="new-app-create">
             {busy ? 'Creating…' : 'Create'}
-          </button>
+          </Button>
         </footer>
       </form>
     </Modal>

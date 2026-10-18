@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import { SessionInfo, sessionLiveDefaults } from './commands.js'
+import { isRecord } from './tolerant.js'
 
 /**
  * Test-only helpers for the rule in docs/protocol.md §4: a field added to a host payload has a
@@ -19,7 +20,6 @@ type Def = {
 }
 
 const defOf = (s: z.ZodType) => s.def as unknown as Def
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /** The schema a value is read by once optional, nullable, default, catch, lazy and pipe wrappers are taken off */
 function core(schema: z.ZodType): z.ZodType {

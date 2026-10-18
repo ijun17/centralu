@@ -45,6 +45,14 @@ heights in pixels next to the code that depends on them. `tooling/styles.test.ts
 arbitrary size or line height outside a short list of exceptions, and on a corner written as a number
 outside the shared components, with a list of sites that can only shrink.
 
+**Shared looks.** A framed button, a pick-one toggle, a small uppercase label, a capsule and a framed
+text field are components in `packages/ui/src/components/`: `Button` (primary, secondary, quiet,
+subtle, danger, ghost; xs, sm, md), `Segmented` (a radio group with the arrow keys of one), `Badge`,
+`Pill` and `TextInput` / `TextField`. They used to be class strings copied from screen to screen,
+and the copies drifted in padding, hover and the disabled fade. `tooling/shared-components.test.ts`
+fails when a component outside that folder draws one of these looks by hand (the patterns are in
+`tooling/hand-made-looks.ts`); its list of sites not moved yet can only shrink.
+
 ## 2. Schema and validation (packages/protocol)
 
 | Area | Choice | Reasoning |

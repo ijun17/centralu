@@ -5,6 +5,7 @@ import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { Emit } from './event-bus.js'
 import type { RulesMock } from './rules.js'
+import { mockError } from './mock-error.js'
 
 /** Approval and question cards: the answers tests check, and the helpers that raise a request */
 export class ApprovalsMock {
@@ -36,10 +37,7 @@ export class ApprovalsMock {
        */
       if (held && !pending) {
         this.emit({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
-        throw Object.assign(
-          new Error('That approval request is already gone (the agent restarted). The command was not run.'),
-          { code: 'approval_gone' },
-        )
+        throw mockError('That approval request is already gone (the agent restarted). The command was not run.')
       }
       this.approvalAnswers.push({ sessionId, requestId, decision })
       this.approvalScopes.push(scope ?? null)
