@@ -14,7 +14,7 @@ import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
-import { callForm } from './tool-seats.js'
+import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
 import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 
@@ -292,8 +292,7 @@ export class ChildReports {
    * seat without the tool keeps the bare form the reports always named.
    */
   private agentCall(receiverId: string, args: Record<string, string>): string {
-    const bare = `agent_session(${Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`
-    return callForm(this.host.toolProfileOf(receiverId), 'agent_session', args) ?? bare
+    return namedCall(this.host.toolProfileOf(receiverId), 'agent_session', args)
   }
 
   /**

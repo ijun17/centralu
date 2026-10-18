@@ -44,6 +44,13 @@
 둔다. `tooling/styles.test.ts`는 짧은 예외 목록 밖의 임의 크기와 줄 높이에서 실패하고, 공유 컴포넌트
 밖에서 숫자로 쓴 모서리에서도 실패한다. 그 예외 목록은 줄어들 수만 있다.
 
+**공유 모양.** 테두리 있는 버튼, 여럿 중 하나를 고르는 토글, 작은 대문자 라벨, 캡슐, 테두리 있는 입력란은
+`packages/ui/src/components/`의 컴포넌트다: `Button`(primary, secondary, quiet, subtle, danger, ghost;
+xs, sm, md), `Segmented`(방향키로 움직이는 라디오 그룹), `Badge`, `Pill`, `TextInput` / `TextField`.
+전에는 화면마다 클래스 문자열을 복사했고, 복사본마다 여백, 호버, 비활성 흐림이 조금씩 달라졌다.
+`tooling/shared-components.test.ts`는 그 폴더 밖의 컴포넌트가 이 모양을 손으로 그리면 실패한다(판별
+규칙은 `tooling/hand-made-looks.ts`). 아직 옮기지 않은 자리의 목록은 줄어들 수만 있다.
+
 ## 2. 스키마와 검증 (packages/protocol)
 
 | 영역 | 선택 | 이유 |

@@ -3,6 +3,7 @@ import { APP_VERSION } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
 import { SettingToggle } from './SettingToggle.jsx'
+import { Button } from '../../components/Button.jsx'
 
 /**
  * Updates (issue #43).
@@ -63,32 +64,18 @@ export function UpdatesSection() {
       </p>
 
       <div className="mt-2 flex items-center gap-3">
-        <button
-          className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink disabled:opacity-50"
-          data-testid="update-check-now"
-          disabled={busy}
-          onClick={() => void checkUpdate(true)}
-        >
+        <Button variant="quiet" size="sm" data-testid="update-check-now" disabled={busy} onClick={() => void checkUpdate(true)}>
           Check now
-        </button>
+        </Button>
         {update?.newer && update.latest && update.phase !== 'restart_required' && (
-          <button
-            className="rounded-md border border-line px-2 py-1 text-xs text-ink transition-colors hover:bg-surface-hover/50 disabled:opacity-50"
-            data-testid="update-apply"
-            disabled={busy}
-            onClick={() => void applyUpdate()}
-          >
+          <Button variant="secondary" size="sm" data-testid="update-apply" disabled={busy} onClick={() => void applyUpdate()}>
             Update to {update.latest}
-          </button>
+          </Button>
         )}
         {offer?.kind === 'apply' && (
-          <button
-            className="rounded-md border border-line px-2 py-1 text-xs text-ink transition-colors hover:bg-surface-hover/50"
-            data-testid="update-apply-now-settings"
-            onClick={() => void applyUpdateNow()}
-          >
+          <Button variant="secondary" size="sm" data-testid="update-apply-now-settings" onClick={() => void applyUpdateNow()}>
             Apply now
-          </button>
+          </Button>
         )}
       </div>
 

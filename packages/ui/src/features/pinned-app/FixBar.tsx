@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { composingKey } from '../../app/keys.js'
+import { Button } from '../../components/Button.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -75,15 +76,17 @@ export function FixBar({
             </span>
           )}
         </p>
-        <button
-          type="button"
-          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-50"
+        <Button
+          variant="primary"
+          onRaised
+          className="shrink-0"
           onClick={() => void builder.start()}
-          disabled={builder.starting}
+          busy={builder.starting}
+          busyText="Starting…"
           data-testid="fix-bar-start-builder"
         >
-          {builder.starting ? 'Starting…' : 'Start builder'}
-        </button>
+          Start builder
+        </Button>
       </div>
     )
   }
