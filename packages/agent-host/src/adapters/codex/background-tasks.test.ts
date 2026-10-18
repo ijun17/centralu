@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { BACKGROUND_SUMMARY_CHARS } from '../background-events.js'
 
 /**
  * A Codex session's background work: its child agents (#290).
@@ -135,6 +136,16 @@ describe('a Codex session reports its child agents as background work (#290)', (
     expect(lastTasks(events)?.live.map((t) => t.id)).toEqual([CHILD])
     notify([['turn/completed', { threadId: CHILD, turn: { id: CHILD_TURN, status: 'failed', error: { message: 'stream disconnected' } } }]])
     expect(lastTasks(events)?.ended?.[0]).toMatchObject({ status: 'failed', summary: 'stream disconnected' })
+    await handle.dispose()
+  })
+
+  // #843: a Claude task's summary was cut at 300 characters and a Codex child's error went whole
+  it("a failed child's error is cut at the length a Claude task's summary is", async () => {
+    const { events, notify, handle } = await session()
+    notify(launched)
+    const message = `stream disconnected: ${'x'.repeat(5_000)}`
+    notify([['turn/completed', { threadId: CHILD, turn: { id: CHILD_TURN, status: 'failed', error: { message } } }]])
+    expect(lastTasks(events)?.ended?.[0]?.summary).toBe(message.slice(0, BACKGROUND_SUMMARY_CHARS))
     await handle.dispose()
   })
 
