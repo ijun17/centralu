@@ -387,7 +387,7 @@ function MachineGroup({
   const live = group.live
   return (
     <span
-      className="ml-1.5 flex items-center gap-0.5 rounded-full bg-surface-hover/30 pl-2 pr-0.5"
+      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -504,8 +504,12 @@ function Donut({
          * where a ring is drawn, whether the hand touched the donut or the panel behind it would
          * look mismatched — the shape that lights up has to be the shape of the button.
          */
-        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-surface-hover/50 ${
-          active ? 'bg-surface-hover/50' : ''
+        /*
+         * A linked machine's donuts sit in a capsule drawn by its outline only (owner, 2026-10-18): a filled capsule
+         * left the hover's fill nothing to stand out from. The hover is a full step, so it shows on either ground.
+         */
+        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-surface-hover ${
+          active ? 'bg-surface-hover' : ''
         }`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
