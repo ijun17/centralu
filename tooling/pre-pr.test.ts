@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { isTestFile, isVitestFile, nodeModulesDirs, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, vitestTests } from '../scripts/pre-pr.mjs'
+import { isTestFile, isVitestFile, nodeModulesDirs, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -17,15 +18,19 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'core
 
 type Report = { testResults: { name: string; assertionResults: { ancestorTitles: string[]; title: string; status: string }[] }[] }
 
-function fakeRunners(opts: { orphans?: string[] } = {}) {
-  const calls = { prepare: [] as string[], release: [] as string[], tsc: [] as string[], vitest: [] as string[][] }
+/**
+ * `linkTo`: each worktree gets a real link (a junction on Windows) at src/node_modules to that folder,
+ * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
+ */
+function fakeRunners(opts: { orphans?: string[]; linkTo?: string } = {}) {
+  const calls = { prepare: [] as string[], tsc: [] as string[], vitest: [] as string[][] }
   return {
     calls,
     runners: {
       prepare: (dir: string) => {
         const sha = git(dir, 'rev-parse', 'HEAD')
         calls.prepare.push(sha)
-        return () => calls.release.push(sha)
+        if (opts.linkTo) symlinkSync(opts.linkTo, join(dir, 'src', 'node_modules'), 'junction')
       },
       tsc: (dir: string) => {
         calls.tsc.push(git(dir, 'rev-parse', 'HEAD'))
@@ -100,7 +105,7 @@ describe('what pre-pr reads', () => {
   })
 
   it('links the checkout\'s dependencies into a worktree with the same lockfile, and unlinks them without touching the checkout', () => {
-    const base = mkdtempSync(join(tmpdir(), 'cc-pre-pr-deps-'))
+    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-deps-'))
     try {
       const root = join(base, 'checkout')
       const tree = join(base, 'worktree')
@@ -111,9 +116,9 @@ describe('what pre-pr reads', () => {
       writeFileSync(join(root, 'node_modules/.pnpm/lock.yaml'), 'lockfileVersion: 9\n')
       writeFileSync(join(tree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\r\n')
       expect(nodeModulesDirs(root)).toEqual(['node_modules', 'packages/ui/node_modules'])
-      const release = realRunners.prepare(tree, root)
+      realRunners.prepare(tree, root)
       expect(readFileSync(join(tree, 'packages/ui/node_modules/react/index.js'), 'utf8')).toBe('keep')
-      release()
+      expect(unlinkLinks(tree)).toBe(2)
       expect(existsSync(join(tree, 'node_modules'))).toBe(false)
       expect(existsSync(join(tree, 'packages/ui/node_modules'))).toBe(false)
       rmSync(tree, { recursive: true, force: true })
@@ -125,8 +130,12 @@ describe('what pre-pr reads', () => {
   })
 
   it('reads its arguments, and refuses one it does not know', () => {
-    expect(parseArgs(['--head', 'origin/x', '--base', 'origin/y', '--stack', 'a', '--stack', 'b', '--no-fetch', '--json'])).toEqual({ fetch: false, json: true, head: 'origin/x', base: 'origin/y', stack: ['a', 'b'] })
+    expect(parseArgs(['--head', 'origin/x', '--base', 'origin/y', '--stack', 'a', '--stack', 'b', '--exempt', 'revert=a=b', '--run-id', '12-3', '--no-fetch', '--json'])).toEqual({
+      fetch: false, json: true, head: 'origin/x', base: 'origin/y', stack: ['a', 'b'], exempt: { revert: 'a=b' }, runId: '12-3',
+    })
     expect(() => parseArgs(['--skip'])).toThrow(/Unknown argument --skip/)
+    expect(() => parseArgs(['--exempt', 'revert'])).toThrow(/Unknown argument --exempt/)
+    expect(() => parseArgs(['--cleanup', '../x'])).toThrow(/--cleanup takes a run id/)
   })
 })
 
@@ -147,7 +156,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   }
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-pre-pr-test-'))
+    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-'))
     git(repo, 'init', '-q', '-b', 'main')
     write('src/a.mjs', 'export const value = 1\n')
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\n')
@@ -172,8 +181,8 @@ describe('pre-pr on a stack of two pull requests', () => {
   it('reports each new test that passes with the other changes reverted, and none that fails or was there', () => {
     const r = run()
     expect(r.findings.filter((f: { check: string }) => f.check === 'revert').map((f: { message: string }) => f.message)).toEqual([
-      'src/a.test.mjs: "still exports" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or say in the pull request why it cannot.',
-      'src/b.test.mjs: "has a" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or say in the pull request why it cannot.',
+      'src/a.test.mjs: "still exports" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
+      'src/b.test.mjs: "has a" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
     ])
     // The changed file ran at the head's version, then at the base's to learn which tests were there
     expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs'], ['src/a.test.mjs']])
@@ -194,7 +203,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     git(repo, 'checkout', '-q', 'top')
     const r = run()
     expect(r.findings.filter((f: { check: string }) => f.check === 'revert').map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"', 'src/b.test.mjs: "has a"'])
-    expect(r.findings.some((f: { check: string }) => f.check === 'main')).toBe(true)
+    expect(r.warnings.some((f: { check: string }) => f.check === 'main')).toBe(true)
   })
 
   it('runs tsc at every head of the stack, and names the lower one that does not build alone', () => {
@@ -211,8 +220,6 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.heads.map((h: { names: string[] }) => h.names[0])).toEqual(['lower', 'top'])
     expect(r.calls.tsc).toEqual([lower, top])
     expect(r.calls.prepare).toEqual([lower, top])
-    // Every worktree's dependencies are undone before it goes
-    expect(r.calls.release).toEqual([lower, top])
     const tsc = r.findings.filter((f: { check: string }) => f.check === 'tsc')
     expect(tsc).toHaveLength(1)
     expect(tsc[0].message).toContain(`tsc fails at lower (${lower.slice(0, 10)})`)
@@ -236,20 +243,90 @@ describe('pre-pr on a stack of two pull requests', () => {
     ])
   })
 
-  it('says when the head does not contain main, and which files a merge would conflict on', () => {
-    expect(run().findings.some((f: { check: string }) => f.check === 'main')).toBe(false)
+  it('warns, without refusing, when the head does not contain main, naming the files a merge would conflict on', () => {
+    expect(run().warnings).toEqual([])
     git(repo, 'checkout', '-q', 'main')
     write('src/a.mjs', 'export const value = 3\n')
     commit('main moves on')
     git(repo, 'checkout', '-q', 'top')
-    const main = run().findings.filter((f: { check: string }) => f.check === 'main')
-    expect(main.map((f: { message: string }) => f.message)).toEqual(['top does not contain main: 1 commit(s) behind. Rebase on it or merge it, then check again. A merge conflicts in: src/a.mjs.'])
+    const r = run({ exempt: { revert: 'checked by hand' } })
+    expect(r.warnings.map((f: { message: string }) => f.message)).toEqual(['top does not contain main: 1 commit(s) behind. The merge queue merges it in; checked without it. A merge conflicts in: src/a.mjs: rebase or merge before it lands.'])
+    expect(r.findings).toEqual([])
+    expect(r.ok).toBe(true)
   })
 
-  it('leaves the checkout as it was, and no worktree behind', () => {
+  it('leaves out an exempted check, saying why, and runs the others', () => {
+    const r = run({ exempt: { revert: 'The new test guards a Windows path this branch only documents.' } }, ['src/lonely.mjs'])
+    expect(r.calls.vitest).toEqual([])
+    expect(r.exempted).toEqual([{ check: 'revert', reason: 'The new test guards a Windows path this branch only documents.' }])
+    expect(r.findings.map((f: { check: string }) => f.check)).toEqual(['orphans'])
+    const t = run({ exempt: { tsc: 'a generated file is missing here', orphans: 'moved in the next PR' } })
+    expect(t.calls.tsc).toEqual([])
+    expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert', 'revert'])
+    expect(() => run({ exempt: { revert: '  ' } })).toThrow('An exemption from revert needs its reason.')
+    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are tsc, orphans, revert.')
+  })
+
+  it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {
+    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    try {
+      writeFileSync(join(deps, 'keep.js'), 'keep')
+      let tscs = 0
+      const fake = fakeRunners({ linkTo: deps })
+      const runners = { ...fake.runners, tsc: (dir: string) => (tscs++, fake.runners.tsc(dir)) }
+      expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners, runId: 'interrupted-test', stopped: () => tscs > 0 })).toThrow('interrupted')
+      expect(tscs).toBe(1)
+      expect(existsSync(runDir('interrupted-test'))).toBe(false)
+      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+      expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
+    } finally {
+      rmSync(deps, { recursive: true, force: true })
+    }
+  })
+
+  it('cleans up after a run that was killed: by --cleanup, or by the next run once its process is gone', () => {
+    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    const root = git(repo, 'rev-parse', '--show-toplevel')
+    // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies
+    const leave = (id: string, pid: number) => {
+      const dir = runDir(id)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'owner.json'), JSON.stringify({ pid, root }))
+      git(repo, 'worktree', 'add', '--detach', '-q', join(dir, 'wt-1'), 'top')
+      symlinkSync(deps, join(dir, 'wt-1', 'src', 'node_modules'), 'junction')
+      return dir
+    }
+    try {
+      writeFileSync(join(deps, 'keep.js'), 'keep')
+      const killed = leave(`killed-${process.pid}`, 999_999)
+      execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
+      expect(existsSync(killed)).toBe(false)
+      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+      expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
+
+      const dead = leave(`dead-${process.pid}`, 999_998)
+      const living = leave(`living-${process.pid}`, process.pid)
+      const swept = sweepStale(root, { isAlive: (pid: number) => pid === process.pid })
+      expect(swept).toEqual([dead])
+      expect(existsSync(living)).toBe(true)
+      expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
+      expect(removeRun(living, root)).toEqual([])
+      expect(readdirSync(deps)).toEqual(['keep.js'])
+    } finally {
+      rmSync(deps, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves the checkout as it was, and no worktree, run folder or link target touched', () => {
+    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    writeFileSync(join(deps, 'keep.js'), 'keep')
     write('uncommitted.txt', 'mine\n')
     const before = git(repo, 'status', '--porcelain')
-    run()
+    const fake = fakeRunners({ linkTo: deps })
+    prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: fake.runners, runId: 'clean-test' })
+    expect(existsSync(runDir('clean-test'))).toBe(false)
+    expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
+    rmSync(deps, { recursive: true, force: true })
     expect(git(repo, 'status', '--porcelain')).toBe(before)
     expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('top')
     expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)

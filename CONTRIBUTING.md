@@ -303,13 +303,18 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 - dependency-cruiser's orphans as errors (`pnpm verify` only warns);
 - each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported;
-- that the branch contains main (rebased on it, or main merged in), and if not, what a merge would
-  conflict on.
+- and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
+  and what a merge would conflict on.
 
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
-checks a branch other than the one checked out. The board's `open_pr` runs it on the pushed branch
-and refuses with what it finds. When a finding stands for a reason (a test that cannot fail without
-the change, and why), give `open_pr` that reason as `skipPrePr`: it goes into **Verified**.
+checks a branch other than the one checked out. When one check's finding stands for a reason (a
+test that cannot fail without the change, and why), leave that check out with the reason:
+`--exempt revert="<why>"` (or `tsc`, `orphans`). The board's `open_pr` runs it on the pushed branch
+and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
+`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
+worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
+delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees link to your checkout's
+`node_modules`, and on Windows such a delete follows the links.
 
 Then ask these against your change. Put anything you could not check in **Not exercised**.
 

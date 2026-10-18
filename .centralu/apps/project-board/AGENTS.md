@@ -368,10 +368,17 @@ and refuses with every reason at once, sending nothing.
   When those rules pass, it runs the repository's `pnpm pre-pr` (`scripts/pre-pr.mjs`, or
   `rules.prePr` in project.json; #1181) in the checkout at `path` (default this app's), on the
   pushed head and the branches of the open pull requests under it, fetched under
-  `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`). Its findings refuse
-  the pull request and nothing is sent; when it passes, Verified says so. `skipPrePr` opens without
-  it, and its reason goes into Verified. It runs outside `oneAtATime`, with progress every minute, since a
-  stack takes minutes; a fork's branch cannot be fetched here and needs `skipPrePr`.
+  `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`); a ref it cannot remove
+  is a warning naming it. Its findings refuse the pull request and nothing is sent; its warnings (a
+  head behind main) do not, and go into Verified with the pass. `prePrExempt` leaves one check out
+  (`tsc`, `orphans`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
+  Verified. It runs outside `oneAtATime`, with progress every minute, since a stack takes minutes; a
+  fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
+  past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
+  process group), its `--cleanup` removes the worktrees and their links, and nothing is opened; a
+  call cancelled while waiting for its turn opens nothing either. A release bump (`release.mjs`)
+  calls `openPr` directly and does not run pre-pr: it changes version strings only, which the
+  release tool has checked itself.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.

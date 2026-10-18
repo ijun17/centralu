@@ -4,8 +4,8 @@
 // request opened, and most merge-queue trouble was a branch that no longer fit main. So, on the
 // commits a pull request carries (never the working tree, which a pull request does not carry):
 //
-//   main      the head contains main (rebased on it, or main merged in); if not, how far behind it is
-//             and which files would conflict. The head's own build below is then main's too.
+//   main      a warning, never a refusal: the head does not contain main (the merge queue merges it in),
+//             how far behind it is, and which files a merge would conflict on.
 //   tsc       `tsc --noEmit` at every pull request head of the stack, oldest first: each branch tip
 //             between main and the head, and the head. A lower pull request must build on its own,
 //             since it lands on its own.
@@ -15,19 +15,21 @@
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
 //             request count; one that was already there passing is no news.
 //
-// Each check runs in a temporary worktree of its own commit, with its own `pnpm install` (offline
-// when the store has it), so the person's checkout is never touched. The board's `open_pr` runs this
-// and refuses with its findings (.centralu/apps/project-board, contribute-tools.mjs).
+// Each check runs in a temporary worktree of its own commit, in one folder per run, so the person's
+// checkout is never touched. `--exempt <check>=<reason>` leaves one check out and says why. The
+// board's `open_pr` runs this and refuses with its findings (.centralu/apps/project-board, pre-pr.mjs).
 //
-//   node scripts/pre-pr.mjs [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--remote <name>] [--no-fetch] [--json]
+//   node scripts/pre-pr.mjs [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]...
+//                           [--remote <name>] [--no-fetch] [--json] [--run-id <id>]
+//   node scripts/pre-pr.mjs --cleanup <run-id>     removes what a run that was killed left behind
 //
 // --head defaults to HEAD, --main to <remote>/main, --base (what the pull request merges into: a lower
 // pull request's branch in a stack) to main. Unless --no-fetch, the remote is fetched first. The heads of
 // the stack are the local and remote branches between main and the head, and each --stack ref (the
 // board's open_pr fetches the stack under refs of its own and names them so).
-// Exit 0 when nothing was found, 1 with findings, 2 when it could not check.
+// Exit 0 when nothing was found, 1 with findings, 2 when it could not check, 130 when interrupted.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -140,25 +142,20 @@ function pnpm(args, dir) {
 /** The real tools. Each takes a worktree; tests replace them. */
 export const realRunners = {
   /**
-   * Gives a worktree its dependencies; answers what undoes it. When the worktree's lockfile is the one
-   * the checkout installed, its node_modules folders are linked in (seconds, no network); otherwise
-   * pnpm installs into the worktree. The links are removed before the worktree is: removing a
-   * worktree with a link still in it could reach through into the checkout's own dependencies.
+   * Gives a worktree its dependencies. When the worktree's lockfile is the one the checkout
+   * installed, its node_modules folders are linked in (seconds, no network); otherwise pnpm installs
+   * into the worktree. removeRun takes every link away before the worktree goes: a delete that
+   * followed one would reach the checkout's own dependencies.
    */
   prepare(dir, root) {
     if (!sameText(join(root, 'node_modules', '.pnpm', 'lock.yaml'), join(dir, 'pnpm-lock.yaml'))) {
       pnpm(['install', '--frozen-lockfile', '--prefer-offline', '--ignore-scripts'], dir)
-      return () => {}
+      return
     }
-    const links = []
     for (const rel of nodeModulesDirs(root)) {
       const at = join(dir, rel)
       if (!existsSync(join(at, '..')) || existsSync(at)) continue
       symlinkSync(join(root, rel), at, 'junction')
-      links.push(at)
-    }
-    return () => {
-      for (const at of links) unlinkSync(at)
     }
   },
   tsc(dir) {
@@ -171,8 +168,8 @@ export const realRunners = {
     return JSON.parse(r.out.slice(start))
   },
   vitest(dir, files) {
-    const out = join(mkdtempSync(join(tmpdir(), 'cc-pre-pr-vitest-')), 'report.json')
-    const data = mkdtempSync(join(tmpdir(), 'cc-pre-pr-data-'))
+    const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
+    const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
     try {
       // Failing tests exit non-zero, which is an answer here, not an error
       nodeBin(dir, 'vitest/vitest.mjs', ['run', '--reporter=json', `--outputFile=${out}`, ...files], { CC_DATA_DIR: data })
@@ -184,16 +181,124 @@ export const realRunners = {
   },
 }
 
+// --- Worktrees, and taking them away again ---------------------------------------------------------
+
+/** The checks a pull request can be exempted from, each with a reason. `main` is only ever a warning. */
+export const CHECKS = ['tsc', 'orphans', 'revert']
+
+/** Every run keeps its worktrees in one folder of the temporary folder, named after the run. */
+export const RUN_PREFIX = 'cc-pre-pr-'
+export const runDir = (id) => join(tmpdir(), `${RUN_PREFIX}${id}`)
+
+/**
+ * Removes every link (a symlink, or a junction on Windows) under `dir` down to `depth` levels,
+ * without ever following one. The dependency links a worktree gets lead into the checkout's own
+ * node_modules: a recursive delete that followed one would empty the checkout's dependencies.
+ */
+export function unlinkLinks(dir, depth = 3) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  let n = 0
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    let st
+    try {
+      st = lstatSync(p)
+    } catch {
+      continue
+    }
+    if (st.isSymbolicLink()) {
+      unlinkSync(p)
+      n++
+    } else if (st.isDirectory() && depth > 1 && e.name !== '.git') {
+      n += unlinkLinks(p, depth - 1)
+    }
+  }
+  return n
+}
+
+/**
+ * Takes a run's folder away: the links in each worktree first, then the worktree (through git, so
+ * the checkout forgets it), then the folder. Safe on a run that died halfway: it reads nothing but
+ * the folder. Answers what it could not remove.
+ */
+export function removeRun(dir, root) {
+  const left = []
+  if (!existsSync(dir)) return left
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || !e.name.startsWith('wt-')) continue
+    const wt = join(dir, e.name)
+    try {
+      unlinkLinks(wt)
+      // A second look finds nothing, or nothing is removed: never a recursive delete with a link inside
+      if (unlinkLinks(wt) !== 0) throw new Error('a link came back')
+    } catch (err) {
+      left.push(`${wt}: its dependency links could not be removed (${err.message}); remove the links, then the folder`)
+      continue
+    }
+    try {
+      git(root, ['worktree', 'remove', '--force', wt])
+    } catch {
+      rmSync(wt, { recursive: true, force: true })
+    }
+  }
+  if (!left.length) rmSync(dir, { recursive: true, force: true })
+  try {
+    git(root, ['worktree', 'prune'])
+  } catch {
+    // the checkout may be gone; nothing of it to forget then
+  }
+  return left
+}
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+/** Removes the folders of earlier runs on this checkout whose process is gone (killed, or the machine slept through a timeout). */
+export function sweepStale(root, { isAlive = alive } = {}) {
+  const swept = []
+  for (const name of readdirSync(tmpdir())) {
+    if (!name.startsWith(RUN_PREFIX)) continue
+    const dir = join(tmpdir(), name)
+    let owner
+    try {
+      owner = JSON.parse(readFileSync(join(dir, 'owner.json'), 'utf8'))
+    } catch {
+      continue
+    }
+    if (resolve(owner.root ?? '') !== resolve(root) || isAlive(owner.pid)) continue
+    if (!removeRun(dir, root).length) swept.push(dir)
+  }
+  return swept
+}
+
 // --- The checks ----------------------------------------------------------------------------------
 
 /**
- * Runs every check; answers { ok, findings: [{ check, message }], notes, heads }. `runners` replaces
- * the tools (tests); `log` hears progress.
+ * Runs every check; answers { ok, findings, warnings, exempted, notes, heads, head }. A finding fails
+ * the run; a warning does not. `exempt` maps a check of {@link CHECKS} to the reason it is not run.
+ * `runners` replaces the tools (tests); `log` hears progress; `stopped()` says the run was interrupted.
  */
-export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, runners = realRunners, log = () => {} } = {}) {
+export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false } = {}) {
   const root = resolve(git(cwd, ['rev-parse', '--show-toplevel']).trim())
+  for (const [check, why] of Object.entries(exempt)) {
+    if (!CHECKS.includes(check)) throw new Error(`No check is called ${check}; the checks are ${CHECKS.join(', ')}.`)
+    if (!String(why ?? '').trim()) throw new Error(`An exemption from ${check} needs its reason.`)
+  }
+  const skip = (check) => Object.hasOwn(exempt, check)
   main ??= `${remote}/main`
   base ??= main
+  for (const dir of sweepStale(root)) log(`Removed ${dir}, left by a run that did not finish`)
   if (fetch) {
     log(`Fetching ${remote}`)
     git(root, ['fetch', '--quiet', '--no-tags', remote])
@@ -207,10 +312,13 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   }
   const at = { head: sha(head), base: sha(base), main: sha(main) }
   const findings = []
+  const warnings = []
   const notes = []
+  const exempted = Object.entries(exempt).map(([check, reason]) => ({ check, reason: String(reason).trim() }))
   const short = (s) => s.slice(0, 10)
+  const answer = (heads) => ({ ok: findings.length === 0, findings, warnings, exempted, notes, heads: heads.map((h) => ({ sha: h.sha, names: h.names })), head: at.head })
 
-  // main: the head contains it, or the files a merge would conflict on
+  // main: a warning, not a finding. The merge queue merges main in anyway; what matters is that a merge would not conflict
   let containsMain = true
   try {
     git(root, ['merge-base', '--is-ancestor', at.main, at.head])
@@ -226,16 +334,16 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       // Exit 1: the tree's id, then one conflicted file a line
       conflicts = String(e.stdout ?? '').trim().split('\n').slice(1).filter(Boolean)
     }
-    findings.push({
+    warnings.push({
       check: 'main',
-      message: `${head} does not contain ${main}: ${behind} commit(s) behind. Rebase on it or merge it, then check again.${conflicts.length ? ` A merge conflicts in: ${conflicts.join(', ')}.` : ''}`,
+      message: `${head} does not contain ${main}: ${behind} commit(s) behind. The merge queue merges it in; checked without it.${conflicts.length ? ` A merge conflicts in: ${conflicts.join(', ')}: rebase or merge before it lands.` : ''}`,
     })
   }
 
   const commits = git(root, ['rev-list', '--reverse', `${at.main}..${at.head}`]).split('\n').filter(Boolean)
   if (!commits.length) {
     notes.push(`${head} has no commits over ${main}: nothing to check.`)
-    return { ok: findings.length === 0, findings, notes, heads: [] }
+    return answer([])
   }
   const refs = git(root, ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads', `refs/remotes/${remote}`])
     .split('\n')
@@ -245,49 +353,42 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   for (const name of stack) refs.push({ sha: sha(name), name })
   const heads = stackHeads({ commits, refs, head: { sha: at.head, name: head } })
 
-  // Each worktree: its directory, and what undoes its dependencies (links into the checkout)
-  const trees = []
+  // The run's folder, with who owns it, so a run that dies halfway is cleaned up by the next (sweepStale) or by --cleanup
+  const dir = runDir(runId)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'owner.json'), `${JSON.stringify({ pid: process.pid, root })}\n`)
+  let made = 0
   const worktree = (commit) => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-pre-pr-'))
-    git(root, ['worktree', 'add', '--detach', '--quiet', dir, commit])
-    const t = { dir, release: () => {} }
-    trees.push(t)
-    t.release = runners.prepare(dir, root)
-    return t
+    const wt = join(dir, `wt-${++made}`)
+    git(root, ['worktree', 'add', '--detach', '--quiet', wt, commit])
+    runners.prepare(wt, root)
+    return wt
   }
-  const removeTree = (t) => {
-    trees.splice(trees.indexOf(t), 1)
-    try {
-      t.release()
-    } catch (e) {
-      // Never remove a worktree a link may still be in: that could reach the checkout's own files
-      notes.push(`Left ${t.dir} in place: its dependency links could not be removed (${e.message}). Remove the links, then the folder.`)
-      return
-    }
-    try {
-      git(root, ['worktree', 'remove', '--force', t.dir])
-    } catch {
-      rmSync(t.dir, { recursive: true, force: true })
-    }
+  const check = () => {
+    if (stopped()) throw new Error('interrupted')
   }
   try {
-    let top = null
-    for (const h of heads) {
+    let top = ''
+    for (const h of skip('tsc') ? heads.filter((x) => x.sha === at.head) : heads) {
+      check()
       const label = `${h.names.join(', ')} (${short(h.sha)})`
+      const wt = worktree(h.sha)
+      if (h.sha === at.head) top = wt
+      if (skip('tsc')) continue
       log(`tsc at ${label}`)
-      const t = worktree(h.sha)
-      const r = runners.tsc(t.dir)
+      const r = runners.tsc(wt)
       if (!r.ok) findings.push({ check: 'tsc', message: `tsc fails at ${label}; each pull request of a stack lands on its own and must build:\n${tail(r.out)}` })
-      if (h.sha === at.head) top = t
-      else removeTree(t)
     }
 
-    log('dependency-cruiser, orphans as errors')
-    for (const file of orphansOf(runners.depcruise(top.dir))) {
-      findings.push({ check: 'orphans', message: `${file} is imported by nothing (no-orphans): delete it, import it, or list it in tooling/dependency-cruiser.cjs with why.` })
+    check()
+    if (!skip('orphans')) {
+      log('dependency-cruiser, orphans as errors')
+      for (const file of orphansOf(runners.depcruise(top))) {
+        findings.push({ check: 'orphans', message: `${file} is imported by nothing (no-orphans): delete it, import it, or list it in tooling/dependency-cruiser.cjs with why.` })
+      }
     }
 
-    // revert: the changed tests, at the head, with everything else the pull request changed put back
+    // revert: the changed tests, at the head, with everything else the pull request changed put back.
     // Against where the head left the base, not the base's tip: what the base gained since is not this pull request's
     const fork = git(root, ['merge-base', at.base, at.head]).trim()
     const changed = git(root, ['diff', '--name-status', '--no-renames', '-z', fork, at.head])
@@ -295,72 +396,95 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       .filter(Boolean)
       .reduce((acc, part, i, all) => (i % 2 === 0 ? [...acc, { status: part[0], path: all[i + 1] }] : acc), [])
     const tests = changed.filter((c) => c.status !== 'D' && isVitestFile(c.path))
-    if (!tests.length) {
+    if (skip('revert')) {
+      // nothing: the exemption and its reason are in the answer
+    } else if (!tests.length) {
       notes.push(`No new or changed vitest file against ${base}.`)
     } else {
+      check()
       const sources = changed.filter((c) => !isTestFile(c.path))
       log(`Running ${tests.length} test file(s) with ${sources.length} other change(s) reverted to ${base}`)
       for (const c of sources) {
-        if (c.status === 'A') rmSync(join(top.dir, c.path), { force: true })
-        else git(top.dir, ['checkout', fork, '--', c.path])
+        if (c.status === 'A') rmSync(join(top, c.path), { force: true })
+        else git(top, ['checkout', fork, '--', c.path])
       }
       // The dependencies changed: the base's, installed (the links go first, so nothing installs through them)
       if (sources.some((c) => /(?:^|\/)(?:package\.json|pnpm-lock\.yaml)$/.test(c.path))) {
-        top.release()
-        top.release = () => {}
-        top.release = runners.prepare(top.dir, root)
+        unlinkLinks(top)
+        runners.prepare(top, root)
       }
       const run = (files) => {
-        const report = runners.vitest(top.dir, files)
+        check()
+        const report = runners.vitest(top, files)
         if (!report) notes.push(`vitest gave no report for ${files.join(', ')}.`)
-        return vitestTests(report, top.dir)
+        return vitestTests(report, top)
       }
       const reverted = run(tests.map((t) => t.path))
       const existed = tests.filter((t) => t.status !== 'A').map((t) => t.path)
-      for (const p of existed) git(top.dir, ['checkout', fork, '--', p])
+      for (const p of existed) git(top, ['checkout', fork, '--', p])
       const before = existed.length ? run(existed) : []
       const loose = passingNewTests({ reverted, base: before })
       for (const t of loose) {
-        findings.push({ check: 'revert', message: `${t.file}: "${t.name}" passes with this pull request's other changes reverted to ${base}, so it protects nothing. Make it fail without the change, or say in the pull request why it cannot.` })
+        findings.push({ check: 'revert', message: `${t.file}: "${t.name}" passes with this pull request's other changes reverted to ${base}, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.` })
       }
       if (!loose.length) notes.push(`${reverted.filter((t) => t.status !== 'passed').length} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
     }
   } finally {
-    for (const t of [...trees]) removeTree(t)
-    git(root, ['worktree', 'prune'])
+    for (const left of removeRun(dir, root)) notes.push(`Left ${left}.`)
   }
-  return { ok: findings.length === 0, findings, notes, heads: heads.map((h) => ({ sha: h.sha, names: h.names })), head: at.head }
+  return answer(heads)
 }
 
 export function parseArgs(argv) {
-  const o = { fetch: true, json: false, stack: [] }
+  const o = { fetch: true, json: false, stack: [], exempt: {} }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
+    const value = argv[i + 1]
     if (a === '--json') o.json = true
     else if (a === '--no-fetch') o.fetch = false
-    else if (['--head', '--base', '--main', '--remote'].includes(a) && argv[i + 1] !== undefined) o[a.slice(2)] = argv[++i]
-    else if (a === '--stack' && argv[i + 1] !== undefined) o.stack.push(argv[++i])
-    else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--remote <name>] [--no-fetch] [--json]`)
+    else if (['--head', '--base', '--main', '--remote'].includes(a) && value !== undefined) o[a.slice(2)] = argv[++i]
+    else if (a === '--run-id' && value !== undefined) o.runId = argv[++i]
+    else if (a === '--cleanup' && value !== undefined) o.cleanup = argv[++i]
+    else if (a === '--stack' && value !== undefined) o.stack.push(argv[++i])
+    else if (a === '--exempt' && value !== undefined && value.includes('=')) {
+      const [check, ...why] = argv[++i].split('=')
+      o.exempt[check] = why.join('=')
+    } else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] | --cleanup <run-id>`)
   }
+  if (o.runId !== undefined && !/^[\w.-]+$/.test(o.runId)) throw new Error('--run-id takes letters, digits, ".", "_" and "-" only.')
+  if (o.cleanup !== undefined && !/^[\w.-]+$/.test(o.cleanup)) throw new Error('--cleanup takes a run id: letters, digits, ".", "_" and "-" only.')
   return o
 }
 
 function main() {
   let o
+  // Ctrl-C reaches the tool running now, which fails; then the run's folder is removed and it exits
+  let interrupted = false
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(signal, () => (interrupted = true))
   try {
     o = parseArgs(process.argv.slice(2))
-    const r = prePr({ ...o, log: (m) => process.stderr.write(`pre-pr: ${m}\n`) })
+    if (o.cleanup !== undefined) {
+      const root = resolve(git(process.cwd(), ['rev-parse', '--show-toplevel']).trim())
+      const left = removeRun(runDir(o.cleanup), root)
+      for (const l of left) console.error(`Left ${l}.`)
+      process.exitCode = left.length ? 2 : 0
+      return
+    }
+    const r = prePr({ ...o, log: (m) => process.stderr.write(`pre-pr: ${m}\n`), stopped: () => interrupted })
     if (o.json) process.stdout.write(`${JSON.stringify(r)}\n`)
     else {
       for (const n of r.notes) console.log(n)
+      for (const x of r.exempted) console.log(`- [${x.check}] not run: ${x.reason}`)
+      for (const w of r.warnings) console.log(`! [${w.check}] ${w.message}`)
       for (const f of r.findings) console.log(`✗ [${f.check}] ${f.message}`)
       console.log(r.ok ? `pre-pr: nothing found (${r.heads.length} head(s) checked).` : `pre-pr: ${r.findings.length} finding(s).`)
     }
     process.exitCode = r.ok ? 0 : 1
   } catch (e) {
-    if (o?.json) process.stdout.write(`${JSON.stringify({ ok: false, error: e.message })}\n`)
-    else console.error(`pre-pr could not check: ${e.message}`)
-    process.exitCode = 2
+    const message = interrupted ? 'interrupted' : e.message
+    if (o?.json) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`)
+    else console.error(`pre-pr could not check: ${message}`)
+    process.exitCode = interrupted ? 130 : 2
   }
 }
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -748,11 +748,18 @@ function prePrCheckout() {
   writeFileSync(
     join(work, 'scripts/pre-pr.mjs'),
     [
-      "import { appendFileSync, existsSync, readFileSync } from 'node:fs'",
-      "import { execFileSync } from 'node:child_process'",
+      "import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'",
+      "import { execFileSync, spawn } from 'node:child_process'",
       "const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/centralu-pre-pr'], { encoding: 'utf8' }).trim().split('\\n')",
       "appendFileSync(new URL('../../pre-pr-calls.jsonl', import.meta.url), JSON.stringify({ args: process.argv.slice(2), refs }) + '\\n')",
       "const answer = new URL('../../pre-pr-answer.json', import.meta.url)",
+      "const hang = existsSync(answer) ? JSON.parse(readFileSync(answer, 'utf8')).hangMs : 0",
+      "if (hang && !process.argv.includes('--cleanup')) {",
+      "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })",
+      "  writeFileSync(new URL('../../pre-pr-grandchild.pid', import.meta.url), String(child.pid))",
+      "  await new Promise((r) => setTimeout(r, hang))",
+      "  child.kill()",
+      "}",
       "process.stdout.write('progress on stdout\\n' + (existsSync(answer) ? readFileSync(answer, 'utf8') : 'not json') + '\\n')",
     ].join('\n'),
   )
@@ -783,13 +790,13 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
     expect(r.isError).toBe(true)
     expect(r.text).toBe(
-      'Not opened: pnpm pre-pr found 2 problem(s) on feat/tools; nothing was sent to GitHub. Fix them and push, or give skipPrePr with the reason they stand.\n' +
+      'Not opened: pnpm pre-pr found 2 problem(s) on feat/tools; nothing was sent to GitHub. Fix them and push, or give prePrExempt (one check) or skipPrePr (all) with the reason they stand.\n' +
         '[revert] a.test.ts: "x" passes without the change\n[tsc] tsc fails at feat/low\nNotes:\n1 test fails without the change',
     )
     expect(writes()).toEqual([])
     const [run] = prePrCalls()
     const ns = spaceOf(run!.args)
-    expect(run!.args).toEqual(['--json', '--no-fetch', '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/main`, '--main', `${ns}/main`])
+    expect(run!.args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/main`, '--main', `${ns}/main`])
     expect(run!.refs).toContain(`${ns}/feat/tools ${c.tools}`)
     // A second call fetches under another name: one call's clean-up never deletes what the other reads
     await call('open_pr', { ...PR_PLAIN, path: c.work })
@@ -808,8 +815,8 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(r.isError, r.text).toBe(false)
     const args = prePrCalls()[0]!.args
     const ns = spaceOf(args)
-    expect(args).toEqual(['--json', '--no-fetch', '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
-    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, feat/tools contains main, and no new test passes without the change.`)
+    expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
   })
 
   it('opens without it only with a stated reason, which goes into Verified', async () => {
@@ -837,5 +844,95 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     const fork = await call('open_pr', { ...PR_PLAIN, head: 'someone:feat/tools', path: c.work })
     expect(fork.text).toMatch(/^Not opened: pnpm pre-pr cannot fetch a fork's branch \(someone:feat\/tools\) here/)
     expect(writes()).toEqual([])
+  })
+})
+
+describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { timeout: 120_000 * SLOW }, () => {
+  const grandchild = () => (existsSync(join(root, 'pre-pr-grandchild.pid')) ? Number(readFileSync(join(root, 'pre-pr-grandchild.pid'), 'utf8')) : 0)
+  const isAlive = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const until = async (what: string, ok: () => boolean, ms = 30_000 * SLOW) => {
+    const end = Date.now() + ms
+    while (!ok()) {
+      if (Date.now() > end) throw new Error(`still waiting for ${what}`)
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  afterEach(() => {
+    // A grandchild a failed test left running is the test's own process: stop it by its id
+    const pid = grandchild()
+    if (pid && isAlive(pid)) process.kill(pid)
+  })
+
+  it('leaves out one check with its reason, and opens with a warning instead of refusing a branch behind main', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({
+      ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools,
+      warnings: [{ check: 'main', message: 'feat/tools does not contain main: 1 commit(s) behind.' }],
+      exempted: [{ check: 'revert', reason: 'The new test guards a Windows path this branch only documents.' }],
+    })
+    runtime()
+    const blank = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { revert: ' ' } })
+    expect(blank.text).toBe('Not opened: prePrExempt.revert needs the reason that check is left out; it goes into the description.')
+    const unknown = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { main: 'x' } })
+    expect(unknown.isError).toBe(true)
+    expect(prePrCalls()).toEqual([])
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { revert: 'The new test guards a Windows path this branch only documents.' } })
+    expect(r.isError, r.text).toBe(false)
+    expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'revert=The new test guards a Windows path this branch only documents.'])
+    expect(r.data.warnings).toEqual(['[main] feat/tools does not contain main: 1 commit(s) behind.'])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(
+      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 1 head(s), no orphans.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
+    )
+  })
+
+  it('opens nothing when the call is cancelled, and stops pre-pr\'s whole process tree and cleans up after it', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 60_000 })
+    runtime()
+    const abort = new AbortController()
+    const outcome = rt!.call(ref, 'open_pr', { ...PR_PLAIN, path: c.work }, agent, { signal: abort.signal })
+    await until('pre-pr to start its own child', () => grandchild() > 0)
+    abort.abort()
+    await outcome
+    await until('the clean-up run', () => prePrCalls().some((x) => x.args[0] === '--cleanup'))
+    const [run, cleanup] = prePrCalls()
+    expect(cleanup!.args).toEqual(['--cleanup', run!.args[run!.args.indexOf('--run-id') + 1]])
+    await until('the grandchild to be stopped', () => !isAlive(grandchild()))
+    // Long after pre-pr would have answered "passed", still nothing was opened
+    await new Promise((r) => setTimeout(r, 1_500))
+    expect(writes()).toEqual([])
+    await until('the refs to go', () => g(c.work, 'for-each-ref', 'refs/centralu-pre-pr') === '')
+  })
+
+  it('stops pre-pr when it runs out of time, and says a ref it could not remove instead of swallowing it', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 60_000 })
+    const late = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', limitMs: 3_000 })
+    expect(late.ran).toBe(false)
+    expect(late.why).toBe('it was stopped: it did not finish within 3 s.')
+    await until('the grandchild to be stopped', () => !isAlive(grandchild()))
+    expect(prePrCalls().at(-1)!.args[0]).toBe('--cleanup')
+
+    // A ref locked while pre-pr runs cannot be deleted after: the answer names it
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 2_000 })
+    const answered = runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main' })
+    await until('pre-pr to start', () => prePrCalls().length === 3)
+    const head = prePrCalls()[2]!.args[prePrCalls()[2]!.args.indexOf('--head') + 1]!
+    const lock = join(c.work, '.git', `${head}.lock`)
+    writeFileSync(lock, '')
+    const r = await answered
+    rmSync(lock)
+    expect(r.ran).toBe(true)
+    expect(r.refsLeft).toHaveLength(1)
+    expect(r.refsLeft[0]).toMatch(new RegExp(`^${head.replace(/[/-]/g, '\\$&')} \\(.*\\); remove it with git update-ref -d `))
   })
 })
