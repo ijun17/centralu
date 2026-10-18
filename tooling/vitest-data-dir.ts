@@ -12,7 +12,7 @@ import { afterAll } from 'vitest'
  * sweeps it when it comes up: every handoff note no session of *its* store owns is deleted
  * (`sweepOrphanHandoffNotes`). With files running in parallel, one file's managers deleted the
  * note another file had just written. CI (2026-10-09, run 37885918963, ubuntu) failed
- * `manager.test.ts` "the dead-agent handoff record" with ENOENT reading the note it had written a
+ * `manager-handoff.test.ts` "the dead-agent handoff record" with ENOENT reading the note it had written a
  * moment before. Reproduced with one file writing a note while another started managers: 5 of 5
  * runs lost the note with the shared folder, 0 of 20 with a folder per file.
  *

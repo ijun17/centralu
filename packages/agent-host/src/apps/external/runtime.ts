@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import type { ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
-import { USER_APP_SCOPE, appKeyOf, appLabel, type AppReview, type ExternalAppInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, appLabel, noSuchAppText, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import type { AppProcess } from './app-process.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed } from './desk.js'
@@ -686,7 +686,7 @@ export class ExternalApps {
 
   private require(ref: AppRef): AppEntry {
     const e = this.find(ref)
-    if (!e) throw new AppUnavailableError(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`)
+    if (!e) throw new AppUnavailableError(noSuchAppText(ref))
     return e
   }
 

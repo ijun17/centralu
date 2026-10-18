@@ -15,7 +15,7 @@ import { HOST_CAPABILITIES } from '../apps/external/capabilities.js'
 /**
  * The trash beyond one session (#204): deleting a project, restoring into a project that is gone, and who can
  * delete for good. The one-session round trip and the guard across the listing paths are in manager.test.ts
- * ("deleting a session"); the store's side is in store.test.ts ("the trash").
+ * ("deleting a session"); the store's side is in the UI's store-sessions.test.ts ("the trash").
  */
 
 class EchoHandle implements SessionHandle {

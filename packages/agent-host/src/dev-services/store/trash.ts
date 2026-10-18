@@ -3,7 +3,7 @@ import type { WorktreeRecovery } from '../worktree-recovery.js'
 import type { SessionInfo } from '@cc/protocol'
 import { indexedText } from './search-index.js'
 import { type SessionRecords } from './sessions.js'
-import { asObj } from '../../json-value.js'
+import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 
 /**
@@ -42,14 +42,13 @@ export type TrashedRow = {
 function parseTrashRecord(json: string | null): TrashRecord {
   // Unreadable, or JSON that is not an object (#850): the defaults below keep the files
   const r: Partial<Record<keyof TrashRecord, unknown>> = asObj(parseJson(json))
-  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
   return {
-    projectId: str(r.projectId),
-    projectName: str(r.projectName),
-    projectPath: str(r.projectPath),
+    projectId: filled(r.projectId),
+    projectName: filled(r.projectName),
+    projectPath: filled(r.projectPath),
     removeExternal: r.removeExternal === true,
     removeWorktree: r.removeWorktree === true,
-    ...(r.recovery && typeof r.recovery === 'object' &&
+    ...(isObj(r.recovery) &&
       typeof (r.recovery as WorktreeRecovery).snapshot === 'string' &&
       typeof (r.recovery as WorktreeRecovery).tip === 'string' &&
       typeof (r.recovery as WorktreeRecovery).changedFiles === 'number' &&

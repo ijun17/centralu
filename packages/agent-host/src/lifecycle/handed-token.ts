@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream'
+import { asObj } from '../json-value.js'
 
 /**
  * The host token handed over on stdin (#538): the first line a keeper or `centralu serve` writes to the host's
@@ -28,7 +29,7 @@ export async function readHandedToken(input: Readable, waitMs: number = HANDED_T
   } catch {
     throw new Error('the token line on stdin is not JSON')
   }
-  const token = typeof parsed === 'object' && parsed !== null ? (parsed as { token?: unknown }).token : undefined
+  const token = asObj(parsed).token
   if (typeof token !== 'string' || token.trim() === '') throw new Error('the token line on stdin has no token')
   return token
 }

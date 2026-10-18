@@ -598,6 +598,22 @@ describe.each([
       expect(await rules()).toEqual([['npm test', 'allow']])
     })
 
+    it("a change to a project's trust, commands, worktree setup or trunk tells every window; the same value does not", async () => {
+      const p = await h.platform.projects.add(repo)
+      const told = async (change: () => Promise<unknown>) => {
+        events.length = 0
+        await change()
+        return events.filter((e) => e.type === 'projects_changed').length
+      }
+      expect(await told(() => h.platform.projects.setTrusted(p.id, true))).toBe(1)
+      expect(await told(() => h.platform.projects.setTrusted(p.id, true))).toBe(0)
+      expect(await told(() => h.platform.projects.setCommands(p.id, [{ command: 'pnpm test' }]))).toBe(1)
+      expect(await told(() => h.platform.projects.setCommands(p.id, [{ command: ' pnpm test ' }, { command: '' }]))).toBe(0)
+      expect(await told(() => h.platform.projects.setWorktreeSetup(p.id, { command: 'pnpm i', copyFiles: [] }))).toBe(1)
+      expect(await told(() => h.platform.projects.setWorktreeSetup(p.id, { command: 'pnpm i', copyFiles: [''] }))).toBe(0)
+      expect(await told(() => h.platform.projects.setWorktreeTrunk(p.id, 'main'))).toBe(1)
+    })
+
     it("a model chosen for a session becomes the project's default for that tool, and windows hear of it", async () => {
       const p = await aProject()
       const s = await session(p.id)

@@ -1,4 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
+import { asObj } from '../json-value.js'
 
 type PlanStep = { text: string; status: 'pending' | 'inProgress' | 'completed' }
 
@@ -18,7 +19,7 @@ function stepStatus(raw: unknown): PlanStep['status'] {
  */
 export function planUpdate(sessionId: string, raw: unknown, textField: string): NormalizedEvent {
   const steps = (Array.isArray(raw) ? raw : []).map((s): PlanStep => {
-    const it = (typeof s === 'object' && s !== null ? s : {}) as Record<string, unknown>
+    const it = asObj(s)
     const text = it[textField]
     return { text: typeof text === 'string' ? text : '', status: stepStatus(it.status) }
   })
@@ -32,6 +33,6 @@ export function planUpdate(sessionId: string, raw: unknown, textField: string): 
  */
 export function todoWritePlan(sessionId: string, name: string, input: unknown): NormalizedEvent[] {
   if (name !== 'TodoWrite') return []
-  const todos = (typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}).todos
+  const todos = asObj(input).todos
   return Array.isArray(todos) ? [planUpdate(sessionId, todos, 'content')] : []
 }

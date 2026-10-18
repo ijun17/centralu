@@ -92,6 +92,22 @@ test('a tool that is not logged in gets no donut', async ({ page }) => {
   await expect(page.getByTestId('usage-no-agent')).toBeVisible()
 })
 
+test('a tool check that fails is not "no agent": the strip keeps what it said last (#850)', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro')).toBeVisible()
+  await page.getByTestId('intro-card-claude').click()
+  await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
+
+  await page.evaluate(() => {
+    const m = (window as never as { __mock: any }).__mock
+    m.agents.detect = () => Promise.reject(new Error('detect did not answer'))
+  })
+  // Opening the details asks again, and that ask fails
+  await page.getByTestId('usage-donut-claude').click()
+  await expect(page.getByTestId('usage-no-agent')).toHaveCount(0)
+  await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
+})
+
 /**
  * The unknown is not drawn as 0%.
  *

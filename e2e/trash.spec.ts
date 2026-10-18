@@ -131,7 +131,7 @@ test('restoring a worktree session offers its recovery patch and bundle in the c
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'keep the local work')
   await deleteSession(page, id)
-  // The host's restore and recovery are covered with real git in manager.test.ts. Here the
+  // The host's restore and recovery are covered with real git in manager-worktree.test.ts. Here the
   // port returns the same notice so the path from Settings to the offered files is exercised.
   await page.evaluate(() => {
     const mock = (window as any).__mock
