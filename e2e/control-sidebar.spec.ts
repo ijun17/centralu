@@ -34,6 +34,30 @@ test('The Add project button sits inside the sidebar, below the project list', a
 })
 
 /**
+ * An app is made like a project (#1141), so New app stands with the other two ways a project comes to be, and the
+ * "Your apps" section that crowded the bottom is gone (#732). The row has to hold all three at the sidebar's narrowest.
+ */
+test('New app stands on the Add project row, inside the sidebar at its default and narrowest widths, and no apps section stands below the list', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await expect(page.getByTestId('user-apps')).toHaveCount(0)
+  for (const width of [240, 180]) {
+    await page.evaluate((w) => (window as any).__store.getState().setSidebarWidth(w), width)
+    await expect.poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width)).toBe(width)
+    const sidebar = (await page.getByTestId('sidebar').boundingBox())!
+    const add = (await page.getByTestId('add-project').boundingBox())!
+    const create = (await page.getByTestId('create-project').boundingBox())!
+    const app = (await page.getByTestId('create-app').boundingBox())!
+    expect(Math.abs(app.y + app.height / 2 - (add.y + add.height / 2)), `${width}px`).toBeLessThanOrEqual(1)
+    expect(app.x, `${width}px`).toBeGreaterThan(create.x + create.width - 1)
+    expect(app.x + app.width, `${width}px`).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
+    // Add project keeps room to be pressed
+    expect(add.width, `${width}px`).toBeGreaterThanOrEqual(24)
+  }
+  await page.getByTestId('create-app').click()
+  await expect(page.getByTestId('new-app-dialog')).toBeVisible()
+})
+
+/**
  * The menu appears **right next to the button that opened it**.
  *
  * It used to be fixed at one spot in the top right of the sidebar (with no positioned ancestor,

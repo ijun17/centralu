@@ -3,7 +3,9 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, PlusIcon } from '../../components/icons.jsx'
+import { IconButton } from '../../components/IconButton.jsx'
+import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { SIDEBAR_VARS } from './layout.js'
 import { OrchestratorButton } from './OrchestratorButton.jsx'
@@ -38,6 +40,7 @@ export function Sidebar() {
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [creatingApp, setCreatingApp] = useState(false)
   const pickHere = async () => {
     setAdding(true)
     try {
@@ -100,9 +103,10 @@ export function Sidebar() {
         )}
       </div>
       {/*
-        The bottom area stands still under the list (#988). Capped, so many apps cannot push the list off the screen:
-        past the cap it scrolls on its own, and in a window too short for both it shrinks before the list does. How this
-        area is laid out is #732's to decide.
+        The bottom area stands still under the list (#988). Capped, so a long leftover list cannot push the list off the
+        screen: past the cap it scrolls on its own, and in a window too short for both it shrinks before the list does.
+        Since #1141 it holds the three ways a project comes to be, and only above them the user-folder apps still listed
+        (none on this computer once its host has moved them into projects).
       */}
       <div
         className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line/70"
@@ -163,6 +167,20 @@ export function Sidebar() {
           >
             New folder
           </button>
+          {/*
+            An app is made like a project (#1141): a new folder, in ~/Centralu unless another is chosen, that joins this
+            list as a project whose root is the app. So its door stands with the other two ways a project comes to be,
+            where the result appears. An icon, so the row still fits the narrowest sidebar.
+          */}
+          <IconButton
+            label="New app, in a folder of its own"
+            onClick={() => setCreatingApp(true)}
+            testId="create-app"
+            className="shrink-0 self-stretch border border-line px-2 hover:border-line-strong"
+            align="right"
+          >
+            <AppIcon />
+          </IconButton>
         </div>
       </div>
       {choosing && (
@@ -179,6 +197,7 @@ export function Sidebar() {
       )}
       {addingOn && <AddRemoteProjectDialog machine={addingOn} onClose={() => setAddingOn(null)} />}
       {creating && <CreateProjectDialog onClose={() => setCreating(false)} />}
+      {creatingApp && <NewAppDialog projectId={null} onClose={() => setCreatingApp(false)} />}
     </aside>
   )
 }

@@ -447,7 +447,7 @@ export function gridAppTests(): void {
       const [a, b] = sessions as [string, string]
       await setApps(page, [slider(pid), slider(null, { appId: 'notes', name: 'Notes' })])
       await openGrid(page, [a, b])
-      // A user-folder app, from its row under "Your apps", and the project's app between the two sessions
+      // A user-folder app, from its row under "Other apps", and the project's app between the two sessions
       await dragRowToGrid(page, page.getByTestId('app-row-_user/notes'), { panel: a, side: 'before' })
       await expect.poll(() => gridOrder(page)).toEqual(['app:_user/notes', a, b])
       await dragRowToGrid(page, page.getByTestId(`app-row-${pid}/slider`), { panel: a, side: 'after' })

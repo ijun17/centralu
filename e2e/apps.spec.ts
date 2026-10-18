@@ -23,6 +23,7 @@ type AppInfo = {
   status: 'invalid' | 'untrusted' | 'stopped' | 'starting' | 'running' | 'crashed' | 'failed'
   error: string | null
   warnings: string[]
+  root?: boolean
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -80,9 +81,9 @@ test('the settings app list: every app shows in one list, and status and reason 
   await expect(page.locator('[data-testid^="app-toggle-"]')).toHaveCount(0)
   await expect(page.getByTestId('settings-apps-empty')).toHaveCount(0)
   const list = page.getByTestId('settings-external-apps')
-  // That project's apps under the project name, user-folder apps in their own group
+  // That project's apps under the project name, user-folder apps still listed in their own group
   await expect(list).toContainText('alpha')
-  await expect(list).toContainText('Your apps')
+  await expect(list).toContainText('Other apps')
   const notes = page.getByTestId(`external-app-${pid}/notes`)
   await expect(notes).toHaveAttribute('data-status', 'running')
   await expect(notes.getByTestId('external-app-status')).toHaveText('Running')
@@ -746,14 +747,59 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(pinned).toBeVisible()
   })
 
-  test('a user-folder app has its own group outside any project', async ({ page }) => {
+  test('a user-folder app still listed (a linked machine on an older build, #1141) stands under Other apps, outside any project', async ({ page }) => {
     await addProject(page, '/tmp/alpha')
+    await expect(page.getByTestId('user-apps')).toHaveCount(0)
     await setApps(page, [app('timer', null, { name: 'Timer' })])
     const group = page.getByTestId('user-apps')
-    await expect(group).toContainText('Your apps')
+    await expect(group).toContainText('Other apps')
+    // Its New app and Import buttons are gone with "Your apps": those stand at the bottom and in the palette
+    await expect(group.getByRole('button', { name: /New app|Import/ })).toHaveCount(0)
     await group.getByTestId('app-row-_user/timer').click()
     const pinned = page.getByTestId('pinned-app-_user/timer')
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     expect(await opened(page)).toEqual([{ appId: 'timer', projectId: null }])
+  })
+
+  test('a project whose folder has the manifest at its root is an app (#1141): its line carries the app mark, the mark and the menu open it, and it is not a row under itself', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    // The test view this harness serves is the timer's; the project's folder is named as the person likes
+    await setApps(page, [
+      app('timer', pid, { name: 'Board', dir: '/tmp/board', root: true }),
+      app('notes', pid, { name: 'Notes' }),
+    ])
+    const block = page.getByTestId('project-board')
+    const mark = block.getByTestId('project-app-mark-board')
+    await expect(mark).toHaveAttribute('data-status', 'stopped')
+    // The inner app keeps its row; the root app has none, the project is it
+    await expect(block.getByTestId(`app-row-${pid}/notes`)).toBeVisible()
+    await expect(block.getByTestId(`app-row-${pid}/timer`)).toHaveCount(0)
+
+    await block.getByTestId('project-app-board').click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/timer`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    expect(await opened(page)).toEqual([{ appId: 'timer', projectId: pid }])
+    await expect(block.getByTestId('project-app-board')).toHaveAttribute('aria-label', 'Open the app Board')
+
+    // The same from the project's menu, by name
+    await block.getByTestId('project-menu-board').click()
+    await expect(page.getByTestId('open-app-board')).toHaveText('Open as app')
+    await page.keyboard.press('Escape')
+    // A plain project has neither
+    await addProject(page, '/tmp/plain')
+    await expect(page.getByTestId('project-plain')).toBeVisible()
+    await expect(page.getByTestId('project-app-mark-plain')).toHaveCount(0)
+  })
+
+  test('a root app that cannot run says why on its mark, dimmed, and the manifest going takes the mark away', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('board', pid, { name: 'Board', dir: '/tmp/board', root: true, status: 'invalid', error: 'centralu.app.json is not JSON' })])
+    const mark = page.getByTestId('project-app-mark-board')
+    await expect(mark).toHaveAttribute('data-status', 'invalid')
+    await expect(mark).toHaveClass(/opacity-50/)
+    await expect(page.getByTestId('project-app-board')).toHaveAttribute('aria-label', 'Open the app Board — invalid: centralu.app.json is not JSON')
+    await setApps(page, [])
+    await expect(page.getByTestId('project-app-mark-board')).toHaveCount(0)
+    await expect(page.getByTestId('project-board')).toBeVisible()
   })
 })

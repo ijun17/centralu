@@ -35,7 +35,7 @@ export const SIDEBAR_VARS = {
   '--color-line': 'var(--color-line-side)',
 } as CSSProperties
 export const GUTTER_WIDTH = 'w-(--sidebar-gutter)'
-/** The project name's own column, which "Your apps" title shares: the 2px bar, 2px of padding, then the gutter */
+/** The project name's own column, which the leftover "Other apps" title shares: the 2px bar, 2px of padding, then the gutter */
 export const NAME_PAD = 'pl-[calc(var(--sidebar-gutter)+4px)]'
 /**
  * What a row with a hover menu keeps clear at its right: the ⋯ button (22px) and its 12px margin (right-3) is 34px,

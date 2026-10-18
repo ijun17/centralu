@@ -134,7 +134,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const release = useStore((s) => s.releasePinnedView)
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
-  const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
+  const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Other apps'))
   // The Runs panel (B-7) opens independently per view — a person watching one app's runs moving to another app sees that app's own panel state first
   const [runsOpen, setRunsOpen] = useState(false)
   // The Secrets panel (M4 E) — only exists for an app that declares secrets. If any are unset, the header's button states the count

@@ -115,6 +115,8 @@ export function CommandPalette() {
       // room by a floor plan it no longer has (issue #7)
       sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
+      // Import (#1141): its sidebar door went with "Your apps"; an imported app lands as a project of its own
+      { kind: 'action', id: 'import-app', label: 'Import an app', sub: 'From a folder, a .zip or a link', run: () => useStore.getState().openImport() },
       { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · Git · files`, run: () => togglePanel() },
       /*
         The two waiting-list shortcuts are here because they stopped being printed on the
@@ -170,7 +172,7 @@ export function CommandPalette() {
                 ? (projects[a.projectId]?.name ?? '')
                 : machine
                   ? (machines[machine]?.name ?? machine)
-                  : 'Your apps'
+                  : 'Other apps'
               return { kind: 'app', id: a.key, label: a.title, sub, projectId: a.projectId, appId: a.appId, machine }
             })
         : []),

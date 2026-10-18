@@ -327,7 +327,13 @@ ext-apps examples here, from their published npm packages, with a minimal manife
 
 ### 6.2 Pinned, in the main area (Centralu's way, within the standard)
 
-Apps stand in the sidebar under their project; user-folder apps under "Your apps". Opening one
+Apps stand in the sidebar under their project. A **root app** is its project (#1141): it has no row of
+its own; the project's line carries an app mark (dimmed, with the reason in its label, when the app
+cannot run; lit while its screen shows or its view asks something), and the mark and "Open as app" in
+the project's menu open it. Its sessions (its builder, its agents) are the project's sessions. The
+"Your apps" section is gone, which also settles #732's crowded bottom; a user-folder app still listed
+(a linked machine on a build from before #1141, or one this host could not move into a project)
+stands in "Other apps" above the bottom row, which is drawn only while there is one. Opening one
 makes the host call the manifest's `home` tool, as a `view` caller, and show the result's view in
 the main area. A host calling a tool is within the standard, and the view is still born from a tool
 call.
@@ -335,7 +341,7 @@ call.
 A project app's sessions (its builder, the agents its `run_agent` started) belong to the
 project and stand indented under the app's row, with their session menus and badges (#591).
 Sessions of a removed project app return to the project's ordinary session list. A user-folder
-app's sessions have no project and stand indented under its row in "Your apps". An app row says
+app's sessions have no project and stand indented under its row in "Other apps". An app row says
 "asks you" for an approval or a pending question, including a question from its view; a completed
 turn awaiting another message does not set that mark. A session with no project that no listed
 app claims (a coordinator the control app left behind, #372; a session of a user-folder app since
@@ -636,9 +642,12 @@ and "Send to builder".
   The builder works in that project, at its root. The orchestrator's `create_app` without `project`
   raises create_project's card for the folder first, since it is the one thing it makes outside a
   project.
-- **New app** (the UI's door to the same function): "New app…" in each project's menu, and a + on
-  the "Your apps" group, which now always stands so the first user-folder app has somewhere to be
-  made. The dialog asks for a name and the agent that builds it. It derives the id from the name
+- **New app** (the UI's door to the same function): "New app…" in each project's menu, and the app
+  button beside Add project and New folder at the bottom of the sidebar, for an app that is a project
+  of its own (#1141). The dialog asks for a name and the agent that builds it; without a project it
+  also shows the folder it will make, in `~/Centralu` unless the person changes it (Choose… is the
+  folder picker), judged as the new project dialog judges it (`projects.createPreview`), and offers
+  "Import one…". It derives the id from the name
   (editable) and judges it by the host's own rule, which lives in `@cc/protocol` (`app-id.ts`) so
   both halves share one copy. What only the host can know (an existing id, trust, the template)
   comes back as the host's refusal, shown word for word. The picked agent is always sent. One that
@@ -1021,8 +1030,9 @@ next plan. Code: `apps/external/handover.ts` (staging, confirmation, versions), 
 
 ### 12.1 Import (E-3)
 
-"Import" on the **Your apps** group opens one dialog for a folder, a `.zip` file, or an https
-link to a `.zip`. It takes two steps.
+"Import one…" in the New app dialog, or "Import an app" in the command palette, opens one dialog for
+a folder, a `.zip` file, or an https link to a `.zip` (the "Your apps" group that had the button is
+gone, #1141). It takes two steps.
 
 1. **Review.** `apps.importPrepare` copies the source into a staging folder in the data folder
    (`app-staging/`, which discovery never scans, so nothing there can start or attach), judges it,

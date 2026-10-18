@@ -429,7 +429,7 @@ function AppsSettings() {
           {catalog.user.length > 0 && (
             <div className="mb-4">
               <Badge as="p" readout>
-                Your apps
+                Other apps
               </Badge>
               <ul className="mt-2 space-y-2">
                 {catalog.user.map((a) => (
