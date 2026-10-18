@@ -68,6 +68,11 @@ export function adoptedUserApp(store: Pick<Store, 'adoption'>, appId: string, di
   return !!record && adoptionMark(dir) === record.mark
 }
 
+/** The runtime's `adoptedProjectOf`: the project a user-folder app of this id became, for its old key */
+export function adoptedProjectOf(store: Pick<Store, 'adoption'>, appId: string): string | undefined {
+  return store.adoption.adopted()[appId]?.projectId
+}
+
 /** A path spelled as a registered project's is: resolved, with a capital drive letter (`ProjectCreation.addProject`) */
 const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
 
