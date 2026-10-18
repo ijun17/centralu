@@ -570,8 +570,8 @@ with no way back.
   it did is kept as the run's record: the app's request, the answer and the whole conversation, tool
   calls included (owner decision, 2026-10-06). An app calling `run_agent` a few dozen times a day filled
   the sidebar with sessions nobody would talk to. It stays a session, as before, when the run failed,
-  was stopped or cancelled, when a card was shown during it, or when the person opened it or wrote to it
-  while it ran. The records wait in Settings → Trash, grouped by app, next to trashed sessions: each
+  was stopped or cancelled, when a card was shown during it, when the person opened it or wrote to it
+  before the delete was final, when it is in use again, or when it holds attachments. The records wait in Settings → Trash, grouped by app, next to trashed sessions: each
   reads (request, answer, status, tokens, conversation) and is deleted for good there, one, an app's
   all, or with the trash emptied. They go on their own only with the run log's 30-day retention.
 - Schema v39 adds `sessions.deleted_at` (NULL for a live session) and `sessions.trash` (JSON: where it
