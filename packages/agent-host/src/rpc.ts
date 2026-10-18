@@ -810,7 +810,10 @@ export function createRpcHandler(
     'machines.sshHosts': async () => requireMachines().sshHosts(),
     'machines.probe': async (p) => requireMachines().probe(RpcMethods['machines.probe'].params.parse(p).sshTarget),
     'machines.remove': async (p) => {
-      await requireMachines().remove(RpcMethods['machines.remove'].params.parse(p).machineId)
+      const { machineId } = RpcMethods['machines.remove'].params.parse(p)
+      await requireMachines().remove(machineId)
+      // Its asks' cards close with it (#550 review)
+      mgr.closeMachineAskCards(machineId)
       return { ok: true as const }
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
@@ -826,7 +829,10 @@ export function createRpcHandler(
     // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
     'machines.setAsks': async (p) => {
       const { machineId, on } = RpcMethods['machines.setAsks'].params.parse(p)
-      return requireMachines().setAsks(machineId, on)
+      const machine = await requireMachines().setAsks(machineId, on)
+      // Off closes what still stands: the card would only be refused once answered (#550 review)
+      if (!on) mgr.closeMachineAskCards(machineId)
+      return machine
     },
     'machines.askConsents': async () => {
       const names = new Map((machines?.list() ?? []).map((m) => [m.id, m.name]))

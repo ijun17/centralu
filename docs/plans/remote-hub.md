@@ -1096,7 +1096,7 @@ A linked machine's session asks a project of the hub, as it would ask one of its
 hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the hub is reachable from the machine.
 
 - **The switch** (question 2). Per machine in Settings → Machines, off by default, stored on the machine's row
-  (`linked_machines.asks`, store v57) so removing the machine removes it, and a machine linked again under the same id
+  (`linked_machines.asks`, store v60) so removing the machine removes it, and a machine linked again under the same id
   starts with it off. Turning it on asks once and says what it allows. Turning it off refuses the next call at once and
   forgets every pair approved for that machine: turning it on again is a new consent.
 - **The link carries it.** The hub tells the machine who it is at every connect and when the switch moves
@@ -1110,9 +1110,11 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   machine is the link's own, never what the call says. At most 16 calls run at once; a withdrawn call or a dropped
   link aborts the call's work.
 - **The pair's card** (the owner's addition). The card is the hub's, raised in the hub's session that would get the
-  task, so only the hub's windows can answer it. It names the machine and the asking session there (`ProjectAccess.from
+  task, so only the hub's windows can answer it. It is raised whatever that session's preset: `auto` there does not
+  answer it (`alwaysAsk`, as start_agent on another computer, #1038), since `auto` is that session's own, not a
+  consent for another machine to reach it. Turning the switch off closes a card still standing. It names the machine and the asking session there (`ProjectAccess.from
   .machine`, `.session`, additive). Approving it is remembered for the pair (that session of that machine, this
-  project; `machine_ask_consents`, store v57) until withdrawn in Settings → Machines, the switch going off, or the
+  project; `machine_ask_consents`, store v60) until withdrawn in Settings → Machines, the switch going off, or the
   machine or project being removed; a remembered pair passes with no card. Deny is not remembered. The switch and the
   project are read again once the card is answered.
 - **What runs** (`MachineAsks`, sessions/machine-asks.ts). An existing ordinary session of the project, chosen as an ask
@@ -1137,6 +1139,8 @@ machine reads its gates before it asks, the hub reads its own after.
 Tested: `links/reverse-asks.test.ts` (real hosts: off by default and a call that comes anyway refused, the card naming
 the machine and the session, an approved pair with no card, withdrawing, another session of the machine as another
 pair, the switch off forgetting the pairs and refusing an approval given after it, a cancelled call withdrawing the
-card, a busy session, two hubs by name and one away, a machine and a hub from before it), `transport/server.test.ts`
+card, a call that runs out of time closing the card, the switch going off closing a standing card, a hub session under
+`auto` still asked, removing the machine, a busy session, two hubs by name and one away, a machine and a hub from
+before it), `transport/server.test.ts`
 and `links/remote-client.test.ts` (the calls on the socket), `dev-services/store-machine-asks.test.ts` (the switch and
 pairs, removed with the machine by an older build and with the project). No live model, no real ssh link.

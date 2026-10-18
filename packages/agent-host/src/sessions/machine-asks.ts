@@ -52,6 +52,8 @@ const UNREAD_KEPT_MS = 60 * 60_000
  */
 export class MachineAsks {
   private readonly given = new Map<string, Given>()
+  /** What closes the cards standing for each machine (#550 review): turning its switch off, or removing it */
+  private readonly standing = new Map<string, Set<AbortController>>()
 
   constructor(
     private readonly host: MachineAsksHost,
@@ -133,6 +135,13 @@ export class MachineAsks {
 
     // The pair's card (owner decision 2026-10-18): asked once, then remembered until withdrawn
     if (!this.host.store.machines.machineAskConsent(machine.id, p.caller.sessionId, target.id)) {
+      const closing = new AbortController()
+      const onAbort = () => closing.abort()
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) closing.abort()
+      let mine = this.standing.get(machine.id)
+      if (!mine) this.standing.set(machine.id, (mine = new Set()))
+      mine.add(closing)
       const decision = await this.host.askHost(
         chosen.id,
         {
@@ -148,8 +157,17 @@ export class MachineAsks {
           text: taskLine(p.task),
           session: { id: chosen.id, name: chosen.name },
         },
-        signal,
-      )
+        closing.signal,
+        /*
+         * Raised whatever the target session's preset (#550 review): its `auto` is its own, and answers no card of another
+         * machine, as start_agent's on another computer is asked every time (#1038)
+         */
+        { alwaysAsk: true },
+      ).finally(() => {
+        signal?.removeEventListener('abort', onAbort)
+        mine.delete(closing)
+        if (!mine.size && this.standing.get(machine.id) === mine) this.standing.delete(machine.id)
+      })
       // The card may have stood a while: the switch and the project are read again, and their reason comes first
       const after = this.gate(machine) ?? (this.host.store.projects.listProjects().some((x) => x.id === target.id) ? null : `${target.name} was removed from ${here}, so it was not reached.`)
       if (after) return { ok: false, error: after }
@@ -218,6 +236,14 @@ export class MachineAsks {
       return { ok: false, error: `Could not hand the task to ${target.name} on ${this.selfName()}: ${(e as Error).message}` }
     }
     return this.awaitGiven(given, signal)
+  }
+
+  /**
+   * Closes every card still standing for a machine (#550 review): its switch went off, or it was removed. The asks
+   * answer with the switch's refusal; nothing is delivered and nothing is remembered
+   */
+  closeCards(machineId: string): void {
+    for (const c of [...(this.standing.get(machineId) ?? [])]) c.abort()
   }
 
   /** Waits for a given task up to the bound, as `awaitDelegation` does; its answer is read once */

@@ -881,6 +881,11 @@ export class SessionManager {
     }))
   }
 
+  /** Closes the cards standing for a machine's asks (#550 review): its switch went off, or it was removed */
+  closeMachineAskCards(machineId: string): void {
+    this.machineAsks.closeCards(machineId)
+  }
+
   /** Withdraws one approved pair (#550): that session's next ask into that project raises the card again */
   withdrawMachineAsk(machineId: string, sessionId: string, projectId: string): void {
     if (this.store.machines.forgetMachineAskConsent(machineId, sessionId, projectId)) this.emit({ type: 'project_consents_changed' })
