@@ -292,7 +292,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
       handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
     })
     expect(store.children.listQueuedRequests()).toEqual([])
-    await eventually(() => store.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
+    await eventually(() => store.messages.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
     h.claude.handles.get(other)!.answer('person answer')
     await eventually(() => h.mgr.listSessions().find((s) => s.id === other)?.state !== 'working')
     expect(h.claude.handles.get(other)!.sent).toEqual(['person work'])

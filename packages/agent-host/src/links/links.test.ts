@@ -1252,8 +1252,8 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
       text: 'Sent: m1.w1 (I will let you know once it is done)',
     })
     // Recorded there as an instruction from this orchestrator, named with this computer
-    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
-    const there = remote.store.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
+    await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
+    const there = remote.store.messages.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
     expect(there.payload).toMatchObject({ from: { name: 'hub-orch on Hub mac' } })
     await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
     const report = told(hub).find((t) => t.startsWith('[Centralu]'))!
@@ -1281,7 +1281,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const { tool, remote } = await rig({ worktreeChild: true })
     expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'merge the branch' })
-    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
+    await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
   })
 
   it('changes a machine’s session’s settings there, and says so to the hub’s windows (step 2)', async () => {
@@ -1298,7 +1298,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(made.text).toMatch(/^Created: Backups \[m1\.[0-9a-f-]+\] — sent the first instruction$/)
     const s = remote.mgr.listSessions().find((x) => x.name === 'Backups')!
     expect(s).toMatchObject({ projectId: 'p-remote', permissionPreset: 'normal' })
-    await eventually(() => remote.store.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
+    await eventually(() => remote.store.messages.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
 
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name

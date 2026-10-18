@@ -194,24 +194,12 @@ export class Store extends MigrationRunner {
 
   // ── MessageRecords (store/messages.ts) ──
 
-  appendMessages(msgs: StoredMessage[]): void {
-    return this.messages.appendMessages(msgs)
-  }
-
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessages(sessionId, limit, beforeSeq, opts)
   }
 
   loadMessagesFrom(sessionId: string, afterSeq: number, limit?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
-  }
-
-  upsertMessageNoIndex(m: StoredMessage): void {
-    return this.messages.upsertMessageNoIndex(m)
-  }
-
-  nextSeq(sessionId: string): number {
-    return this.messages.nextSeq(sessionId)
   }
 
   // ── SettingsRecords (store/settings.ts) ──

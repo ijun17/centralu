@@ -234,12 +234,12 @@ export class SessionRecord {
    */
   persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): number {
     const ts = Date.now()
-    const seq = this.host.store.nextSeq(m.id)
+    const seq = this.host.store.messages.nextSeq(m.id)
     const row = (path: string | undefined, note: string | undefined): StoredMessage => ({
       sessionId: m.id, seq, role: 'system', kind: 'image', ts,
       payload: { type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path, note } satisfies NormalizedEvent,
     })
-    this.host.store.appendMessages([row(e.path, e.note)])
+    this.host.store.messages.appendMessages([row(e.path, e.note)])
     m.lastSeq = seq
     if (e.data) void this.saveImage(e, m, row)
     return seq
@@ -262,7 +262,7 @@ export class SessionRecord {
       note = `Could not save the image: ${(err as Error).message}`
     }
     try {
-      this.host.store.upsertMessageNoIndex(row(stored ?? e.path, note))
+      this.host.store.messages.upsertMessageNoIndex(row(stored ?? e.path, note))
     } catch {
       // The store is closed (the host is leaving): the row keeps what it was written with
     }

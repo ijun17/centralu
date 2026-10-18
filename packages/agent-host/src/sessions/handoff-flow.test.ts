@@ -216,7 +216,7 @@ describe('the checks and the card', () => {
 describe('from a note the session writes', () => {
   beforeEach(() => {
     auto = true
-    store.appendMessages([{ sessionId: 't1', seq: 7, role: 'assistant', kind: 'text', payload: { text: 'earlier work' }, ts: 7 }])
+    store.messages.appendMessages([{ sessionId: 't1', seq: 7, role: 'assistant', kind: 'text', payload: { text: 'earlier work' }, ts: 7 }])
   })
 
   it("asks the session as the orchestrator, reads the note written after the ask, and stops reading the session's turn", async () => {

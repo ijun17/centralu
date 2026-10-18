@@ -336,7 +336,7 @@ export function orchestratorToolsFor(
       const remote = readLinks()?.recall(query, limit)
       for (const h of dedupeNearbyHits(mine)) {
         const s = host.meta.get(h.sessionId)!
-        const context = contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined)
+        const context = contextAt(host.store.messages, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined)
         out.push({
           sessionId: s.id,
           session: s.id === orchestratorId ? `${labelOf(host.store.messages, s)} (this session, before compaction)` : labelOf(host.store.messages, s),

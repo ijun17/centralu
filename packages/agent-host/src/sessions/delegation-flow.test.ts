@@ -182,7 +182,7 @@ describe("a child's turn and the call waiting on it", () => {
   const event = (e: Record<string, unknown>) => agentRuns.get('child')!.onEvent({ sessionId: 'child', ...e } as NormalizedEvent)
   /** The child's turn writes its answer and ends */
   const finishes = (text: string) => {
-    store.appendMessages([{ sessionId: 'child', seq: 1, role: 'assistant', kind: 'text', payload: { text }, ts: 1 }])
+    store.messages.appendMessages([{ sessionId: 'child', seq: 1, role: 'assistant', kind: 'text', payload: { text }, ts: 1 }])
     event({ type: 'turn_complete' })
   }
   /** What an outcome's handlers start runs on resolved promises only */
