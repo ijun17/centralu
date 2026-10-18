@@ -97,7 +97,10 @@ const NO_LEVELS: string[] = []
 export function useVerbosities(tool: ToolName, machine: string | null = null): string[] {
   const platform = usePlatform()
   // The menu must still render even if capabilities cannot be read — it just loses one row
-  return useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data?.verbosities ?? NO_LEVELS
+  return (
+    useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data?.verbosities ??
+    NO_LEVELS
+  )
 }
 
 /**
@@ -131,8 +134,10 @@ function MenuRow({
       data-testid={testId}
       title={title}
       onClick={onPick}
-      className={`flex w-full items-baseline gap-2 px-2.5 py-1 text-left transition-colors ${
-        selected ? 'text-ink' : 'text-ink-muted hover:bg-surface-hover/25'
+      className={`flex w-full items-baseline gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors ${
+        selected
+          ? 'text-ink hover:bg-surface-hover/50'
+          : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink'
       }`}
     >
       <span className="w-2 shrink-0 text-2xs leading-none text-ink-muted" aria-hidden>
@@ -146,18 +151,22 @@ function MenuRow({
         (min-w-0 truncate is unchanged).
       */}
       <span className="min-w-0 shrink-[0.2] truncate text-sm">{label}</span>
-      {hint && <span className="readout ml-auto min-w-0 truncate text-2xs text-ink-faint">{hint}</span>}
+      {hint && <span className="ml-auto min-w-0 truncate text-2xs text-ink-faint">{hint}</span>}
     </button>
   )
 }
 
+/*
+ * The menu in the conversation's shapes (owner, 2026-10-18): a 14px card, rows on an 8px rounded hover inside its
+ * 4px inset, the chosen row marked by its check and brighter ink (a fill would read as the hover); group names in sentence case, not small capitals; hints in the UI face.
+ */
 function MenuSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
-    <div className="border-t border-line py-1 first:border-t-0">
-      <p className="readout px-2.5 py-0.5 text-2xs uppercase text-ink-faint">{label}</p>
+    <div className="border-t border-line/60 p-1 first:border-t-0">
+      <p className="px-2 pb-0.5 pt-1 text-2xs text-ink-faint">{label}</p>
       {/* Why this group is different is written at the top of the group — repeating it on
       every row would make the list unreadable */}
-      {note && <p className="px-2.5 pb-1 text-2xs leading-body text-ink-faint">{note}</p>}
+      {note && <p className="px-2 pb-1 text-2xs leading-body text-ink-faint">{note}</p>}
       {children}
     </div>
   )
@@ -216,7 +225,10 @@ export function SessionSettings({
   const current = models.find((m) => m.id === model)
   // A model not in the list (set directly, or fetched while the list could not be read) is kept
   // so it is not lost
-  const options = model && !current ? [...models, { id: model, label: model, efforts: [], defaultEffort: null, tiers: [] }] : models
+  const options =
+    model && !current
+      ? [...models, { id: model, label: model, efforts: [], defaultEffort: null, tiers: [] }]
+      : models
 
   /*
    * Closes on an outside click or Esc.
@@ -260,7 +272,9 @@ export function SessionSettings({
   // verbosity shares level names with effort (low/medium/high), so shown bare it would be
   // ambiguous which is which — this labels it
   const summary = [
-    modelLabel, effort, verbosity && `${verbosity} verbosity`,
+    modelLabel,
+    effort,
+    verbosity && `${verbosity} verbosity`,
     // Shows the tier's name (Fast), not its id (priority) — exactly the word the person picked
     serviceTier && (current?.tiers.find((t) => t.id === serviceTier)?.name ?? serviceTier),
     PRESETS.find((p) => p.value === preset)?.label,
@@ -282,7 +296,7 @@ export function SessionSettings({
             ? `Could not load models: ${reason}`
             : 'Model, effort, permissions — applies from the next turn'
         }
-        className="flex min-w-0 cursor-pointer items-center gap-1 rounded-md border border-line bg-surface-raised px-1.5 py-0.5 text-xs text-ink-muted transition-colors hover:text-ink"
+        className="flex min-w-0 cursor-pointer items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
       >
         <span className="min-w-0 truncate">{summary}</span>
         <ChevronIcon open={open} size={10} />
@@ -301,7 +315,7 @@ export function SessionSettings({
           onAnimationEnd={() => {
             if (!open) setClosing(false)
           }}
-          className={`absolute bottom-full left-0 z-30 mb-1 max-h-72 w-56 overflow-y-auto overflow-x-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
+          className={`absolute bottom-full left-0 z-30 mb-1 max-h-80 w-60 overflow-y-auto overflow-x-hidden rounded-[14px] border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
             open ? 'cc-hang' : 'cc-hang-out pointer-events-none'
           }`}
         >
@@ -439,7 +453,6 @@ export function SessionSettings({
           */}
         </div>
       )}
-
     </span>
   )
 }
