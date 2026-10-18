@@ -282,4 +282,21 @@ describe('the value is left nowhere inside the host', () => {
     expect(failure?.message).not.toContain(VALUE)
     expect(failure?.stack).not.toContain(VALUE)
   })
+  // #1142: a long stderr line is cut at 8192 characters; a value across the cut was masked in neither piece
+  it('a value straddling the cut of a long stderr line does not reach the app log', async () => {
+    plant(['--leak-straddle'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    await envSeen()
+    const logFile = join(dataRoot, 'app-logs', 'p1', 'keys.log')
+    // The second half is written 300 ms after the first; the line ends with it
+    const half = Math.floor(VALUE.length / 2)
+    // Unmasked, the text is in the log as two pieces; masked, as the name once the line ends (a full line of x's comes first)
+    const text = await until(
+      () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : ''),
+      (t) => t.includes('[redacted:API_KEY]') || t.includes(VALUE.slice(half)),
+    )
+    expect(text).not.toContain(VALUE.slice(0, half))
+    expect(text).not.toContain(VALUE.slice(half))
+  })
 })

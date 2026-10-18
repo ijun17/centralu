@@ -12,6 +12,7 @@
  *                starts (an app that cannot start because a key is missing)
  * --leak         an app that leaks the value it received: writes it to stderr on startup, and
  *                `leak_fail` carries it in the failure message
+ * --leak-straddle  writes a long line to stderr whose last characters are the first half of the value, and the other half in a later write (a secret across the cut of a long line)
  * --leak-list    an app whose tool list fails with the value it received in the error, so it never starts
  * --leak-list-later  an app whose tool list is fine the first time (it starts) and fails with the value in the error the next time (a check asks again)
  * --leak-read    an app with a screen whose `resources/read` fails with the value it received in the error
@@ -39,6 +40,12 @@ if (flag('require-env') && !value) {
   process.exit(4)
 }
 if (flag('leak')) process.stderr.write(`env-app: starting with ${NAME}=${value ?? '(none)'}\n`)
+
+if (flag('leak-straddle') && value) {
+  const half = Math.floor(value.length / 2)
+  process.stderr.write('x'.repeat(8190) + value.slice(0, half))
+  setTimeout(() => process.stderr.write(value.slice(half) + String.fromCharCode(10)), 300)
+}
 
 const say = (text, isError = false) => ({ content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) })
 

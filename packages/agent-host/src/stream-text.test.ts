@@ -54,6 +54,14 @@ describe('lineSplitter', () => {
     expect(split(['x'.repeat(10), 'y'], { maxLine: 10 }).lines).toEqual(['x'.repeat(10) + 'y'])
     expect(split(['x'.repeat(100_000)]).lines).toEqual([])
   })
+
+  it('lets `cut` keep the end of an unfinished line back for the next chunk', () => {
+    const lines: string[] = []
+    const s = lineSplitter((l) => lines.push(l), { maxLine: 10, cut: (p) => ({ line: p.slice(0, -3), keep: p.slice(-3) }) })
+    s.push('abcdefghijkl')
+    s.push('mn\n')
+    expect(lines).toEqual(['abcdefghi', 'jklmn'])
+  })
 })
 
 describe('LineTail', () => {
