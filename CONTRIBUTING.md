@@ -309,6 +309,12 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 - `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
   so it must build on its own;
 - dependency-cruiser's orphans as errors (`pnpm verify` only warns);
+- a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
+  that main already has or another open pull request adds (#1203): two parallel changes picking the
+  same number each pass CI alone and clash when the second lands. It reads the open pull requests
+  with `gh pr list` and `gh pr diff`, leaves out your stack's own, and names the one it clashes with.
+  The numbers themselves come from the brief that gave you the work; a session whose brief names
+  none and that finds it needs a step stops and asks (this check is only the backstop);
 - each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported;
 - and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
@@ -317,7 +323,7 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
 checks a branch other than the one checked out. When one check's finding stands for a reason (a
 test that cannot fail without the change, and why), leave that check out with the reason:
-`--exempt revert="<why>"` (or `tsc`, `orphans`). The board's `open_pr` runs it on the pushed branch
+`--exempt revert="<why>"` (or `tsc`, `orphans`, `store-step`). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
 worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not

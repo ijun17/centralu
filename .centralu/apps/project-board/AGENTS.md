@@ -468,7 +468,7 @@ and refuses with every reason at once, sending nothing.
   `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`); a ref it cannot remove
   is a warning naming it. Its findings refuse the pull request and nothing is sent; its warnings (a
   head behind main) do not, and go into Verified with the pass. `prePrExempt` leaves one check out
-  (`tsc`, `orphans`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
+  (`tsc`, `orphans`, `store-step`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
   Verified. It runs outside `oneAtATime`, with progress every minute, since a stack takes minutes; a
   fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
   past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
