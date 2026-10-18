@@ -34,6 +34,11 @@ export class AgentRunWait {
   stoppedByPerson = false
   /** The person deleted that session — there is no session left to conclude */
   deleted = false
+  /**
+   * How the person took part in this turn, if they did (#378): a card was shown to them, or they opened the session or
+   * wrote to it. An app's agent session they took part in has become theirs, and stays when its run ends.
+   */
+  personTookPart: 'card' | 'opened' | 'wrote' | null = null
   readonly done: Promise<{ output?: unknown; answer?: string }>
   private settle!: { resolve: (v: { output?: unknown; answer?: string }) => void; reject: (e: Error) => void }
   private settled = false
@@ -112,8 +117,10 @@ export class AgentRunWait {
         if (e.state !== 'waiting_input' || (e.reason !== 'interrupted' && e.reason !== INTERRUPTED_BY_TOOL)) return
         return this.fail(new Error(e.reason === INTERRUPTED_BY_TOOL ? 'its tool interrupted the turn before it finished' : 'the turn was stopped before it finished'))
       case 'approval_request':
+        this.personTookPart ??= 'card'
         return this.notify(`waiting for the person to approve a step in "${this.sessionName()}"`)
       case 'question_request':
+        this.personTookPart ??= 'card'
         return this.notify(`waiting for the person to answer a question in "${this.sessionName()}"`)
     }
   }

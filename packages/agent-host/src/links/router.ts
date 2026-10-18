@@ -422,9 +422,12 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
     case 'trash.list': {
       const a = isObj(acc) ? acc : { sessions: [], bytes: 0 }
       const b = isObj(r) ? r : { sessions: [], bytes: 0 }
+      // A machine's app-agent run records (#378) are listed with its sessions, named by machine for reading and deleting there
+      const runs = [...list(a.runs), ...list(b.runs).map((t) => q.trashedRun(t))]
       return {
         ...a,
         sessions: [...list(a.sessions), ...list(b.sessions).map((t) => q.trashed(t))],
+        ...(runs.length ? { runs } : {}),
         bytes: (typeof a.bytes === 'number' ? a.bytes : 0) + (typeof b.bytes === 'number' ? b.bytes : 0),
       }
     }

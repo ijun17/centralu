@@ -225,6 +225,10 @@ export function trackWorkingSince(
  * weight nobody reads any more. The conversation's views go too — the host has already closed the instance — and
  * the read position goes with the session (#61). An id can come back: restoring a session from the trash brings
  * it back under the same id, and it then opens like a session read for the first time.
+ *
+ * A draft with words in it is the exception (#378 review): what the person was writing is theirs, not the session's,
+ * and a session can go without them asking (the host deletes an app's agent session once its run is over). Its text
+ * moves to `keptDrafts`, which offers to copy it.
  */
 export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<AppState> {
   if (gone.size === 0) return {}
@@ -235,7 +239,12 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
   }
   // Events parked for a session that will now never register would wait forever
   for (const id of gone) pendingEvents.delete(id)
+  const lost = [...gone]
+    .filter((id) => s.drafts[id]?.text.trim())
+    .map((id) => ({ sessionId: id, name: s.sessions[id]?.name ?? null, text: s.drafts[id]!.text }))
   return {
+    // A session restored and deleted again keeps its newer text
+    ...(lost.length ? { keptDrafts: [...s.keptDrafts.filter((d) => !gone.has(d.sessionId)), ...lost] } : {}),
     chat: keep(s.chat),
     inlineViews: keep(s.inlineViews),
     scrollAnchor: keep(s.scrollAnchor),
