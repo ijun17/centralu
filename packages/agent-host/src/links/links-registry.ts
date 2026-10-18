@@ -112,7 +112,7 @@ export class Links {
     const m = this.need(id)
     const op = m.info().operation
     if (op) throw rpcError(`${m.name} is busy with ${op.kind}; disconnect it once that is done`)
-    await m.disconnect('disconnected by the person')
+    await m.disconnect('disconnected by the person', true)
     return m.info()
   }
 
@@ -124,10 +124,13 @@ export class Links {
     return m.info()
   }
 
-  /** The window needs the machine now (`machines.need`, #1134); answers at once, the link comes up meanwhile */
-  needs(id: string): MachineInfo {
+  /**
+   * The window needs the machine now (`machines.need`, #1134); answers at once, the link comes up meanwhile. `repeat`:
+   * said again while the same thing stays open, which leaves a machine the person disconnected as it is
+   */
+  needs(id: string, repeat = false): MachineInfo {
     const m = this.need(id)
-    void m.need()
+    void m.need({ repeat })
     return m.info()
   }
 
@@ -172,11 +175,12 @@ export class Links {
 
   /**
    * The machine, connected first when it was disconnected (#1134): what the person asks of it runs over its ssh, which
-   * the link closed, and an update waits for the new host's hello on the link. Asking is connecting, as Connect is
+   * the link closed, and an update waits for the new host's hello on the link. Not pinned: once the job is done, a
+   * machine that connects when needed lets go after its hold, as after any need
    */
   private active(id: string): LinkedMachine {
     const m = this.need(id)
-    if (m.info().status === 'disconnected') m.connect()
+    m.openForOperation()
     return m
   }
 

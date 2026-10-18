@@ -71,7 +71,7 @@ export class StepsV55 extends MigrationRange {
         },
       },
       {
-        to: 57,
+        to: 59,
         breaksOlderReaders: false,
         /**
          * When the hub opens a linked machine's link (#1134): `linked_machines.connect` is `when_needed` for a machine
@@ -81,6 +81,9 @@ export class StepsV55 extends MigrationRange {
          * **Expand only (#292's rule).** A nullable column. An older host names its columns in every read and insert,
          * so it neither reads this one nor fails on it, and connects every machine at start as it always did; a machine
          * it adds gets null, which is `at_start`. `IF` because a store from a test's partial schema has no such table.
+         *
+         * Numbered 59: v57 is #1121's step and v58 #418's (#1183), which land before this one. A store this step has
+         * moved to 59 would never run a 57 or 58 that came later.
          */
         run: () => {
           const cols = new Set((this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]).map((c) => c.name))

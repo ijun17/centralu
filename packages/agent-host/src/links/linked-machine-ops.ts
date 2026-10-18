@@ -199,6 +199,8 @@ export class LinkedMachine extends LinkedMachineConnection {
     return (then) => {
       this.busy = null
       this.operation = null
+      // The hold of a machine that connects when needed runs from the end of what the person asked (#1134)
+      this.noteNeeded()
       then?.()
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }

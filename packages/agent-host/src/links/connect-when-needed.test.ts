@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,7 +11,7 @@ import { HostServer } from '../transport/server.js'
 import { Links, type LinkDeps } from './links.js'
 import { linkedSessions } from './linked-sessions.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine, type Tunnel } from './tunnel.js'
+import { DirectTunnel, type ConnectionLine, type Endpoint, type Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
@@ -317,11 +317,86 @@ describe('a machine that connects when needed (#1134)', () => {
     expect(at.length).toBe(tried)
   })
 
-  it('an operation the person asks of a disconnected machine connects it first', async () => {
+  it('an operation the person asks of a disconnected machine connects it first, and lets go after the hold once done', async () => {
     const remote = await remoteHost()
-    const hub = await hubHost(() => lineFor(remote.port), { connect: 'when_needed' })
+    const hub = await hubHost(() => lineFor(remote.port), { connect: 'when_needed', deps: { needHoldMs: 300, idleCheckMs: 50 } })
     // A direct tunnel has no shell, so the operation is refused; the link is up anyway, as it would be for ssh
     await expect(hub.call('machines.autostart', { machineId: 'm1' })).rejects.toThrow(/no shell/)
+    await eventually(() => hub.row().status === 'connected')
+    // Not pinned as Connect pins it: nothing needs it after the job
+    await eventually(() => hub.row().status === 'disconnected')
+  })
+
+  it("the person's Disconnect holds against the window saying again that it is open; opening something again connects", async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), { connect: 'when_needed' })
+    await hub.call('machines.need', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    const opens = hub.tunnel().opens
+
+    // The window's repeat while the same project stays open
+    await hub.call('machines.need', { machineId: 'm1', repeat: true })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(hub.row().status).toBe('disconnected')
+    expect(hub.tunnel().opens).toBe(opens)
+
+    // The window opening one of its projects or sessions again
+    await hub.call('machines.need', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+  })
+
+  it('a link the idle rule closed comes back with the window\'s repeat', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), { connect: 'when_needed', deps: { needHoldMs: 200, idleCheckMs: 50 } })
+    await hub.call('machines.need', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    await eventually(() => hub.row().status === 'disconnected')
+    await hub.call('machines.need', { machineId: 'm1', repeat: true })
+    await eventually(() => hub.row().status === 'connected')
+  })
+})
+
+/** A tunnel that fails its first openings, then reaches the host; `drop` ends the transport, as an ssh that exits does */
+class FlakyTunnel implements Tunnel {
+  private down: ((reason: string) => void) | undefined
+  constructor(
+    private readonly line: () => ConnectionLine,
+    private fails: number,
+  ) {}
+  async open(): Promise<Endpoint> {
+    if (this.fails-- > 0) throw new Error('ssh: connect to host laptop port 22: Operation timed out')
+    const line = this.line()
+    return { url: `ws://127.0.0.1:${line.port}`, token: line.token, line, localPort: line.port }
+  }
+  onDown(listener: (reason: string) => void): void {
+    this.down = listener
+  }
+  drop(): void {
+    this.down?.('ssh exited')
+  }
+  async close(): Promise<void> {}
+}
+
+describe('the backoff after a good connection (#1134)', () => {
+  // With a cap of 5 minutes, a link that kept its count after connecting would wait minutes after its next drop
+  it('starts again from its first step once a connection said hello', async () => {
+    const remote = await remoteHost()
+    let tunnel: FlakyTunnel | undefined
+    const hub = await hubHost(() => lineFor(remote.port), {
+      tunnel: (line) => (tunnel = new FlakyTunnel(line, 5)),
+      deps: { retryMs: [10, 60_000] },
+    })
+    await eventually(() => hub.row().status === 'connected')
+    // The drop schedules the next attempt at once (`transportDown`); its delay is the last timer set
+    const timers = vi.spyOn(globalThis, 'setTimeout')
+    try {
+      tunnel!.drop()
+      const delays = timers.mock.calls.map((c) => c[1])
+      expect(delays.at(-1)).toBe(10)
+    } finally {
+      timers.mockRestore()
+    }
     await eventually(() => hub.row().status === 'connected')
   })
 })

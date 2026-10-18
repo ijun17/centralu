@@ -132,10 +132,11 @@ export const hostMethods = {
   /**
    * The window needs the machine now: one of its projects is open, or one of its sessions is focused (#1134). A machine
    * that connects when needed is connected, and kept so for a while after the last of these; the window says it again
-   * while that project or session stays open. Answers at once, not when the link is up. Any other machine is left as
-   * it is. Additive: a window ignores an older host's refusal
+   * while that project or session stays open, with `repeat`, which does not bring back a machine the person
+   * disconnected. Answers at once, not when the link is up. Any other machine is left as it is. Additive: a window
+   * ignores an older host's refusal
    */
-  'machines.need': { params: z.object({ machineId: MachineId }), result: MachineInfo },
+  'machines.need': { params: z.object({ machineId: MachineId, repeat: z.boolean().optional() }), result: MachineInfo },
   /**
    * Connects although the two sides run different versions of one protocol: the person declined to
    * align them (plan §4). Remembered for this pair of versions only; when either side moves, the

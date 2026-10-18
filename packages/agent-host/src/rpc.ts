@@ -95,7 +95,7 @@ export type MachinesPort = {
   disconnect(id: string): Promise<MachineInfo>
   setConnect(id: string, connect: MachineConnect): MachineInfo
   /** The window needs the machine now (#1134) */
-  needs(id: string): MachineInfo
+  needs(id: string, repeat?: boolean): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
   update(id: string): Promise<MachineInstallResult>
@@ -817,7 +817,10 @@ export function createRpcHandler(
       const { machineId, connect } = RpcMethods['machines.setConnect'].params.parse(p)
       return requireMachines().setConnect(machineId, connect)
     },
-    'machines.need': async (p) => requireMachines().needs(RpcMethods['machines.need'].params.parse(p).machineId),
+    'machines.need': async (p) => {
+      const { machineId, repeat } = RpcMethods['machines.need'].params.parse(p)
+      return requireMachines().needs(machineId, repeat === true)
+    },
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
