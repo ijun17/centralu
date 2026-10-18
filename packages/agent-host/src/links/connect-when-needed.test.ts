@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APP_VERSION, MachineInfo, PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, MachineInfo, PROTOCOL_VERSION, sessionLiveDefaults, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links, type LinkDeps } from './links.js'
+import { linkedSessions } from './linked-sessions.js'
 import { Router } from './router.js'
 import { DirectTunnel, type ConnectionLine, type Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -100,6 +102,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   // The links read these as they go: a test can shorten the hold once its setup is done
   const links = new Links(deps)
   mgr.useLinkedSessions((id) => links.knowsSession(id))
+  mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()
@@ -114,6 +117,45 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   return { links, deps, store, mgr, call, row, events, tunnel: () => tunnels[0] as CountingTunnel }
 }
 
+function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
+  store.sessions.upsertSession({
+    id,
+    projectId,
+    kind,
+    tool: 'claude',
+    externalId,
+    name: id,
+    autoNamed: false,
+    state: 'idle',
+    lastReadSeq: 0,
+    lastSeq: 0,
+    createdAt: Date.now(),
+    waitingSince: null,
+    live: false,
+    model: null,
+    effort: null,
+    verbosity: null,
+    serviceTier: null,
+    permissionPreset: 'normal',
+    importedFrom: null,
+    worktree: null,
+    parentSessionId: null,
+    scopeSessionIds: null,
+    roleAppend: null,
+    appId: null,
+    ...sessionLiveDefaults(),
+  })
+}
+
+/** A git folder whose `origin` is `url`, with one commit */
+function checkout(url: string): string {
+  const dir = folder()
+  const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' })
+  git('init', '-q')
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'first')
+  git('remote', 'add', 'origin', url)
+  return dir
+}
 
 describe('a machine that connects when needed (#1134)', () => {
   it('keeps the setting with the machine: a restarted hub reads it, and the row says it', async () => {
@@ -308,5 +350,86 @@ describe('the connect setting across builds (#1134)', () => {
     store.machines.setLinkedMachineConnect('m1', 'at_start')
     expect(store.machines.listLinkedMachines()[0]!.connect).toBe('at_start')
     store.close()
+  })
+})
+
+describe("an agent's work on a machine that connects when needed connects it (#1134)", () => {
+  /**
+   * A remote with a checkout of the hub's repository and a worker that can resume, and a hub whose trusted project's
+   * session h1 asks. The hub connected once, so its mirror knows the machine; then the machine is set to connect when
+   * needed and disconnected, as it would stand after a restart of the hub
+   */
+  async function rig() {
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    seedSession(remoteStore, 'p-app', 'w1', 'worker', 'ext-w1')
+    const remote = await remoteHost(remoteStore)
+    const hubStore = new Store()
+    hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore })
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    await eventually(() => hub.row().status === 'connected')
+    await hub.call('machines.setConnect', { machineId: 'm1', connect: 'when_needed' })
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    const opens = hub.tunnel().opens
+    const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
+    /** Allows the card the call raises, and answers the call; a call refused before any card answers with its refusal */
+    const answered = async <T,>(call: Promise<T>): Promise<T> => {
+      const allowed = (async () => {
+        await eventually(() => !!card())
+        await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+        return call
+      })()
+      return Promise.race([call, allowed])
+    }
+    // As the machine names its project: the folder's name
+    const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-app')!.name
+    return { remote, hub, opens, answered, name }
+  }
+
+  it('start_agent with the machine connects it, starts the child there and gets its answer', async () => {
+    const { remote, hub, opens, answered } = await rig()
+    expect(await answered(hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' }))).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('echo:') })
+    expect(hub.row().status).toBe('connected')
+    expect(hub.tunnel().opens).toBeGreaterThan(opens)
+    expect(remote.mgr.listSessions().some((x) => x.projectId === 'p-app' && x.id !== 'w1')).toBe(true)
+  })
+
+  it('ask_project names its project as last listed, connects it, and the answer comes back', async () => {
+    const { hub, answered, name } = await rig()
+    expect(await answered(hub.mgr.askProject('h1', { project: `Laptop/${name}`, task: 'say hello' }))).toMatchObject({ ok: true, state: 'done', sessionId: 'm1.w1', answer: expect.stringContaining('say hello') })
+    expect(hub.row().status).toBe('connected')
+  })
+
+  it('agent_session on a child there connects it to read where the child stands', async () => {
+    const { hub, answered } = await rig()
+    // Started while the person had it connected
+    await hub.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    const r = await answered(hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' }))
+    if (!r.ok) throw new Error(r.error)
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    expect(await hub.mgr.agentSession('h1', { sessionId: r.sessionId, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest' })
+    expect(hub.row().status).toBe('connected')
+  })
+
+  it('a machine that connects at start and was disconnected is not connected by an agent: it is said to be away', async () => {
+    const { hub } = await rig()
+    await hub.call('machines.setConnect', { machineId: 'm1', connect: 'at_start' })
+    await eventually(() => hub.row().status === 'connected')
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    const opens = hub.tunnel().opens
+    const r = await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('cannot be reached') })
+    expect(hub.tunnel().opens).toBe(opens)
+  })
+
+  it('looking a project name up does not connect it', async () => {
+    const { hub, opens, name } = await rig()
+    const r = await hub.mgr.askProject('h1', { project: 'no-such-project' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining(`${name} (on Laptop)`) })
+    expect(hub.tunnel().opens).toBe(opens)
+    expect(hub.row().status).toBe('disconnected')
   })
 })

@@ -102,8 +102,16 @@ export function linkedSessions(
     for (const m of machines()) if (m.id === id) return m
     return null
   }
+  /**
+   * The machine, connected first when it connects when needed and nothing had needed it (#1134): an agent started or
+   * sent work there, or read there, is such a need. Resolves when that attempt ended, connected or not
+   */
+  const needed = async (m: RoutedMachine): Promise<void> => {
+    if (!m.reachable) await m.need?.()
+  }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
+    await needed(m)
     if (!m.reachable) return { ok: false, error: `${m.name} is ${NOT_REACHABLE}; try again once its link is back` }
     try {
       return { ok: true, ...(await run()) }
@@ -127,6 +135,10 @@ export function linkedSessions(
       ...(typeof p.trusted === 'boolean' ? { trusted: p.trusted } : {}),
     }
   }
+
+  /** A machine's projects as the headers mirror last held them, in the hub's terms */
+  const lastProjects = (m: RoutedMachine): LinkedProject[] =>
+    (m.lastKnown('projects') ?? []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
 
   /** The machine's rows as it answered them, in the hub's terms. A row that does not parse, or whose id is not an id, is left out */
   const rows = (m: RoutedMachine, answer: unknown): OrchestratedSession[] => {
@@ -196,6 +208,8 @@ export function linkedSessions(
       const wanted = ref.trim()
       const found = await Promise.all(
         [...machines()].map(async (m) => {
+          // Matched on what it last listed (#1134): looking a name up is no need to connect, acting on the project is
+          if (!m.reachable && m.onDemand) return lastProjects(m).filter((p) => p.id === wanted || p.name === wanted)
           if (!m.reachable) return []
           try {
             const list = await m.call('projects.list', {})
@@ -219,6 +233,8 @@ export function linkedSessions(
             away.push({ machine: m.name, machineId: m.id, why })
             return (m.lastKnown('projects') ?? []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null).map((p) => ({ ...p, away: why }))
           }
+          // Not away (#1134): its projects stand as last listed, and what is asked of one connects the machine
+          if (!m.reachable && m.onDemand) return lastProjects(m)
           if (!m.reachable) return mirrored(NOT_REACHABLE)
           try {
             const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
@@ -444,7 +460,7 @@ export function linkedSessions(
     async list() {
       const perMachine = await Promise.all(
         [...machines()].map(async (m) => {
-          if (!m.reachable) return lastKnown(m, 'not reachable right now')
+          if (!m.reachable) return lastKnown(m, m.onDemand ? 'not connected now; it connects when needed' : 'not reachable right now')
           try {
             // Bounded like a lookup (#984): every session's list waits on the slowest machine otherwise
             const answer = await raceTimeout(m.call('host.sessions', {}), lookupMs, TIMED_OUT)
@@ -465,6 +481,7 @@ export function linkedSessions(
     async read(sessionId, limit, opts) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      await needed(m)
       if (!m.reachable) return { ok: false, error: `${m.name} is not reachable right now; read it again once its link is back` }
       try {
         const answer = await m.call('host.readSession', {
