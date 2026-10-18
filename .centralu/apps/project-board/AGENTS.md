@@ -277,6 +277,10 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   attention event names the author session and carries that instruction for the queuing session to
   relay; with no author recorded it says so, and that a session started on the branch needs that
   instruction. Once per head; queued again, the merge is tried again (main may have moved).
+- **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
+  conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes
+  first: batches take it before older items, and `merge_queue` lists it first in its state
+  (`queueOrder`), instead of behind everything queued while it was fixed.
 - **Events with durations**: every step is an event of kind `conflict` (not a session's news) with
   `step` and `ms`: `merge` (the files), `regenerate` (the commands), `push` (`by: 'queue'`), `handoff`
   (`by: 'session'`, `relay`), and `fixed` once a new head no longer conflicts (`ms` since the conflict

@@ -9,7 +9,7 @@ import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packag
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -195,6 +195,18 @@ describe('what the merge queue decides for one poll', () => {
     expect(q.items[0]).toMatchObject({ state: 'waiting', owner: 'first', noCiSince: null, missingSince: null, uncleanSince: null, errors: 0, reruns: spent })
   })
 
+  it('puts a pull request queued again after a conflict at the front, and only then (#1182)', () => {
+    const q = emptyQueue()
+    enqueue(q, { repo: R, pr: 80, at: '2026-10-17T09:00:00Z' }, ref)
+    const { item } = enqueue(q, { repo: R, pr: 81, at: '2026-10-17T09:05:00Z' }, ref)
+    enqueue(q, { repo: R, pr: 80, at: '2026-10-17T09:10:00Z' }, ref)
+    expect(q.items.map((i: any) => i.front ?? null)).toEqual([null, null])
+    Object.assign(item, { state: 'attention', conflict: { head: SHA, at: '2026-10-17T09:06:00Z', outcome: 'handoff', files: ['a.ts'], reason: { kind: 'conflict', text: 'x' } } })
+    enqueue(q, { repo: R, pr: 81, at: '2026-10-17T09:20:00Z' }, ref)
+    expect(item).toMatchObject({ front: '2026-10-17T09:20:00Z', conflict: { at: '2026-10-17T09:06:00Z', outcome: 'again', reason: null } })
+    expect([...q.items].sort(queueOrder).map((i: any) => i.pr)).toEqual([81, 80])
+  })
+
   it("records the PR's author session, and keeps it when queued again without one (#1182)", () => {
     const q = emptyQueue()
     const { item } = enqueue(q, { repo: R, pr: 80, owner: 'integrator', author: 'writer', at: 'x' }, ref)
@@ -311,6 +323,12 @@ describe('what the merge queue decides for a batch (#962)', () => {
     q.items[3].head = '9'.repeat(40)
     q.items[3].ci.head = q.items[3].head
     expect(batchCandidates(q, { max: 6 }).map((i: any) => i.pr)).toEqual([1, 3, 4])
+  })
+
+  it('batches a pull request fixed after a conflict first, before the older ones (#1182)', () => {
+    const q = queueOf(waitingItem(1, A), waitingItem(2, B), waitingItem(3, C, 'queued', { front: '2026-10-17T11:00:00Z' }), waitingItem(4, 'd'.repeat(40), 'queued', { front: '2026-10-17T10:00:00Z' }))
+    expect(batchCandidates(q, { max: 6 }).map((i: any) => i.pr)).toEqual([4, 3, 1, 2])
+    expect(batchCandidates(q, { max: 1, tiers: true }).map((i: any) => i.pr)).toEqual([4])
   })
 
   it('takes batch members out of the items the queue polls on their own, and gives them back when it ends', () => {
@@ -953,7 +971,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await morePolls()
     expect(writes()).toEqual([])
     expect(notices().map((e) => e.text)).toEqual([
-      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. Author session: tester. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself. Or take it out with unqueue.',
+      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. Author session: tester. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself, at the front of the queue. Or take it out with unqueue.',
     ])
     const listed = await call('merge_queue')
     expect(listed.text).toContain('Merge queue: 1 need attention.')
@@ -1331,6 +1349,31 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     })
     await until((x) => stateOf(x) === 'merged', 'the fixed head to land')
     expect(conflictSteps().at(-1)).toMatchObject({ step: 'fixed', by: 'session' })
+  })
+
+  it('lists a pull request fixed after a conflict and queued again first, before one queued before it', async () => {
+    const repo = conflictRepo({ 77: ['src/app.ts'] })
+    conflictRuntime(repo, [77])
+    // Queued first, its own CI running
+    patchGh((s) => {
+      s.prs['78'] = ghPr(78, { headRefOid: SHA })
+      s.checks[SHA] = [ghCheck('verify', null, 11)]
+      s.runs[SHA] = [ghRun(null)]
+    })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until((x) => stateOf(x, 77) === 'attention', 'the hand-off')
+    // The author pushes a fix, and it is queued again: first in line, not behind the one queued before it
+    patchGh((s) => {
+      Object.assign(s.prs['77'], { headRefOid: SHA2, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[SHA2] = [ghCheck('verify', null, 11)]
+      s.runs[SHA2] = [ghRun(null, 1, SHA2)]
+    })
+    await call('queue_merge', { pr: 77 })
+    const q = await until((x) => stateOf(x, 77) === 'ci' && stateOf(x, 78) === 'ci', 'both in CI')
+    expect(q.queue.map((i: any) => i.pr)).toEqual([77, 78])
+    expect(q.queue[0].front).toEqual(expect.any(String))
+    expect(q.queue[1].front).toBeNull()
   })
 
   it('hands off a conflict in the UX baseline or a store migration step even beside mechanical files, and says when no author session is recorded', async () => {

@@ -10,7 +10,7 @@ import { APP_DIR } from './config.mjs'
 import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
-import { ACTIVE, dequeue, enqueue, findItem, itemLine } from './queue.mjs'
+import { ACTIVE, dequeue, enqueue, findItem, itemLine, queueOrder } from './queue.mjs'
 import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
@@ -54,7 +54,7 @@ const COUNTS = [
 
 /**
  * The queue for agents and the screen: one line per item, attention first. Within a state the items waiting or acting
- * are in the order they were queued, which a poll does not change (it sets `updatedAt` on every read, so by that the
+ * are in the queue's order (those fixed after a conflict first, then as they were queued: queueOrder), which a poll does not change (it sets `updatedAt` on every read, so by that the
  * order followed whichever was read last); those ended come newest first.
  */
 export function queueView({ all = false } = {}) {
@@ -62,7 +62,7 @@ export function queueView({ all = false } = {}) {
   const order = ['attention', 'ci', 'waiting', 'merged', 'closed']
   const items = q.items
     .filter((i) => all || ACTIVE.has(i.state) || Date.now() - Date.parse(i.updatedAt) < 24 * 3600_000)
-    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (ACTIVE.has(a.state) ? String(a.queuedAt).localeCompare(String(b.queuedAt)) : String(b.updatedAt).localeCompare(String(a.updatedAt))))
+    .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (ACTIVE.has(a.state) ? queueOrder(a, b) : String(b.updatedAt).localeCompare(String(a.updatedAt))))
   const counts = Object.fromEntries(COUNTS.map(([s]) => [s, items.filter((i) => i.state === s).length]))
   const parts = COUNTS.filter(([s]) => counts[s]).map(([s, words]) => `${counts[s]} ${words}`)
   const summary = `Merge queue: ${parts.length ? parts.join(', ') : 'empty'}. ${driverLine(q)}`
@@ -99,6 +99,7 @@ export function queueView({ all = false } = {}) {
       head: i.head,
       commit: i.commit ?? null,
       queuedAt: i.queuedAt,
+      front: i.front ?? null,
       updatedAt: i.updatedAt,
       lastError: i.lastError ?? null,
       batch: i.batch != null && byId.has(i.batch) ? { id: i.batch, branch: byId.get(i.batch).branch, state: byId.get(i.batch).state } : null,

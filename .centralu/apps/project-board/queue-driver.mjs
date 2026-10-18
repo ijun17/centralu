@@ -418,8 +418,10 @@ async function pollItem(item, { now, ref, renew, save }) {
     // Fixed: a new head that no longer conflicts, pushed by the queue or by a session (#1182)
     const by = item.conflict.outcome === 'pushed' && item.conflict.sha === pr.headRefOid ? 'queue' : 'session'
     const ms = now - Date.parse(item.conflict.at)
-    events.push(conflictEvent(`${ref(repo, item.pr)}: the conflict found at ${item.conflict.at.slice(11, 16)} UTC is fixed ${by === 'queue' ? 'by the queue' : 'by a push'} after ${span(ms)}.`, { step: 'fixed', ms, by }))
+    events.push(conflictEvent(`${ref(repo, item.pr)}: the conflict found at ${item.conflict.at.slice(11, 16)} UTC is fixed ${by === 'queue' ? 'by the queue' : 'by a push'} after ${span(ms)}; it goes to the front of the queue.`, { step: 'fixed', ms, by }))
     base.conflict = null
+    // Not behind everything queued while it was fixed (#1182): batches and the list take it first
+    base.front = item.front ?? at
   }
   // The latest CI run of each workflow on the head, once read: what proved it, if it lands
   let runs = []

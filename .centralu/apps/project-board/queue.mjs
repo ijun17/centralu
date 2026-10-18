@@ -71,6 +71,13 @@ export function normalize(q) {
   }
 }
 
+/**
+ * The queue's order (#1182): items fixed after a conflict first (`front`, when they were fixed, the
+ * earliest first), then the rest as they were queued. Without it a pull request fixed after a
+ * conflict waited again behind everything queued since.
+ */
+export const queueOrder = (a, b) => (a.front ? 0 : 1) - (b.front ? 0 : 1) || String(a.front ?? a.queuedAt).localeCompare(String(b.front ?? b.queuedAt))
+
 export const keyOf = (repo, pr) => `${String(repo).toLowerCase()}#${pr}`
 export const itemKey = (item) => keyOf(item.repo, item.pr)
 export const findItem = (q, repo, pr) => q.items.find((i) => itemKey(i) === keyOf(repo, pr) && ACTIVE.has(i.state)) ?? null
@@ -120,8 +127,12 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null,
       updatedAt: at,
       nextAt: at,
     })
-    // A conflict on this head is merged again (main may have moved); when it was found stays known
-    if (mine.conflict) mine.conflict = { ...mine.conflict, outcome: 'again', reason: null }
+    // A conflict on this head is merged again (main may have moved); when it was found stays known.
+    // Queued again after a conflict, it goes to the front, not behind everything queued since
+    if (mine.conflict) {
+      mine.conflict = { ...mine.conflict, outcome: 'again', reason: null }
+      mine.front = mine.front ?? at
+    }
     // Out of any batch it was in (the batch sees it gone and carries on without it)
     delete mine.batch
     delete mine.batchless
@@ -206,7 +217,7 @@ export function decideBefore({ item, permissions, pr, defaultBranch, ref }) {
  */
 export function cannotMergeBase(pr, defaultBranch) {
   if (pr.isCrossRepository) return `It is a fork's branch, which the queue does not push to.`
-  if (pr.baseRefName !== defaultBranch) return `It is based on ${pr.baseRefName}, not ${defaultBranch}; rebase it onto ${pr.baseRefName} (rebase_stack once the PR under it has merged).`
+  if (pr.baseRefName !== defaultBranch) return `It is based on ${pr.baseRefName}, not ${defaultBranch}, so the queue leaves it to its stack (rebase_stack, once the PR under it has merged).`
   return null
 }
 
@@ -233,7 +244,7 @@ export function handoffReason({ item, pr, files = [], why, ref }) {
     : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
   return {
     state: 'attention',
-    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself.`, files, relay: { to: author, branch, text } },
+    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: author, branch, text } },
   }
 }
 

@@ -176,6 +176,14 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**A conflict with main in the queue** (#1182): the queue merges main into your branch itself. When
+only files a command regenerates conflict (the lockfile, the schema doc, the migration goldens,
+Tauri's generated permissions: `queue.conflicts` in the board app's `project.json`), it regenerates
+them and pushes the merge, which runs CI again. Anything else, the UX baseline and store migration
+steps always, comes back to the session that opened the pull request (`queue_merge` `author`) as
+"merge main and push again; conflicted files: …". Merge main and push; the fixed pull request goes
+to the front of the queue.
+
 **A stack's lower pull requests are drafts** (#1066). The merge queue lands a stack through its top
 (`queue_merge` with `lowers`), on the top's run and its batch, which test the whole stack; a lower's
 own run only waits in line for runners. A draft runs no CI but the `changes` job. So open every
