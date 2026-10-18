@@ -178,6 +178,11 @@ export const AppRun = z.object({
   /** The tokens for a run_agent row (M4 D-5) — the input/output the tool reported. Null for other rows, and for a run the tool never reported */
   tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
   failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
+  /**
+   * A run_agent row whose session was deleted once the run ended cleanly (#378): its request, answer and conversation
+   * are kept in Settings → Trash. Absent from a host older than #378.
+   */
+  kept: z.boolean().optional(),
 })
 export type AppRun = z.infer<typeof AppRun>
 

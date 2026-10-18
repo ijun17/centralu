@@ -6,7 +6,7 @@
  * broke it outright, and dropping the grid's old-named table (v13) silently lost the grid placements. The store now records the
  * lowest version that can read it, and a host below that refuses to start.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -23,6 +23,7 @@ function storeFile(): string {
   return join(d, 'store.db')
 }
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
@@ -156,6 +157,49 @@ describe('which builds can still read the store (#292)', () => {
       const cols = (db.pragma('table_info(projects)') as { name: string }[]).map((c) => c.name)
       expect(cols).toEqual(expect.arrayContaining(['default_model', 'default_effort']))
     })
+  })
+
+  /*
+   * A record that is not a version (#384): only a hand edit or a write cut short leaves one. It used to read as no
+   * record at all, so the gate let any host open the store, and the open wrote a floor worked out from the steps this
+   * host knows over it: on a store a newer host wrote, that opened what this host may not read and lowered the record
+   * for good. Nothing says which builds can read such a store, so a host older than it refuses, naming the row.
+   */
+  it('a record that is not a version, on a store newer than this host, is refused naming the row, and left untouched', () => {
+    const file = currentStore()
+    raw(file, (db) => {
+      db.pragma(`user_version = ${KNOWN + 2}`)
+      db.prepare(`UPDATE app_settings SET value = 'v9' WHERE key = 'min_reader_version'`).run()
+    })
+
+    expect(() => new Store(file)).toThrow(StoreTooNewError)
+    let message = ''
+    try {
+      new Store(file)
+    } catch (e) {
+      message = (e as Error).message
+    }
+    // The phrase the desktop supervisor matches, so it shows this at once instead of retrying
+    expect(message).toContain('This data was written by a newer Centralu')
+    expect(message).toContain('app_settings.min_reader_version')
+    expect(message).toContain(`Store: ${file}`)
+    expect(Store.inspect(file).tooNew).toBe(message)
+    raw(file, (db) => {
+      expect(db.pragma('user_version', { simple: true })).toBe(KNOWN + 2)
+      expect(floorOf(db)).toBe('v9')
+    })
+  })
+
+  it('a record that is not a version, on a store this host knows, is worked out again and said on stderr', () => {
+    const file = currentStore()
+    raw(file, (db) => db.prepare(`UPDATE app_settings SET value = 'v9' WHERE key = 'min_reader_version'`).run())
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const s = new Store(file)
+    expect(s.minReaderVersion).toBe(FLOOR)
+    s.close()
+    raw(file, (db) => expect(floorOf(db)).toBe(String(FLOOR)))
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.min_reader_version .*"v9"/)
   })
 
   it('a store from before the record gets it computed once from the steps it has already run', () => {

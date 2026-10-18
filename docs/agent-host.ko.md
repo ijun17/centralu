@@ -1517,7 +1517,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 | 빚진 보고가 없으면(보고 표시도, 지금 그 턴을 기다리는 호출도 없음), 턴을 맡긴 세션이 `network`, `interrupted`, `quit` 중단을 한 번 듣는다(`tellAskerOfInterruption`): 지금 아무도 기다리지 않는 위임의 호출자(한도를 넘긴 `ask_project`나 `start_agent`), 없으면 그 세션을 시작한 세션(`askedBy`). 아직 기다리는 호출은 자기 답에서 중단을 읽는다 | 2026-10-15 사례, 그리고 `askedBy`가 없는 `ask_project` 턴. 멈춘 턴마다 보고는 하나이고, 다음 보고에는 다음 턴이 필요하므로 두 세션이 서로를 깨우는 고리가 생기지 않는다 |
 | 모든 보고와, 요청에 대해 Centralu가 세션에 하는 말(시작하지 못한 요청, 전하지 못한 메모나 대기열 요청)은 `tellSession`을 지난다(#428): 호스트가 넘겨주거나 종료하는 동안에는 말하지 않고, 사라진 세션에도 말하지 않는다 | 예전에는 종료가 돌던 자식마다 부르는 세션에 "failed: Centralu is shutting down"이라고 보고했고, 다음 시작이 그것을 `quit` 중단으로 다시 알렸다. 나가는 길에 보고가 잠든 세션을 깨울 수도 있었다 |
 | `quit`은 다음 시작 때 하위 세션마다 한 번 알린다. 대상은 보고를 받을 세션, 턴을 맡긴 세션(`delegated_turns`), `askedBy` 가운데 아직 있는 첫 세션이다(`quitNotices`, 키퍼가 쥔 세션이면 넘겨받은 뒤). 키퍼가 쥔 프로세스를 다시 붙이지 못하면 그 보고도 같은 식으로 정리한다. **스스로 종료로 멈춘 요청 세션에는** 시작 때든 그 뒤든 알리지 않는다: 그 세션은 사람의 Continue를 기다린다 | 기다리지 않고 위임한 세션은 잘린 것이 아니라 쉬고 있었고, 그 보고 표시는 버려졌다: 아무것도 듣지 못했다. 한 번 깨우는 비용은 턴 하나이고, 듣지 못하는 비용은 그 일 전체다. 같은 종료로 잘린 오케스트레이터를 깨우면 아무도 없는 시작 시점에 턴이 돌고, 그 턴이 사람이 보기 전에 자기 "멈춤" 표시를 지운다. 사람이 그 세션을 이어 가면 하위 세션들의 줄이 멈췄다고 말한다 |
-| 오케스트레이터의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session`의 목록(#690)은 아직 없다 |
+| 오케스트레이터의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session list`(#690)는 그런 자식을 `stopped`라고만 하고 이유는 `status`에 맡긴다. 정리하려고 보는 목록이라, 자식의 일이 끝나지 않았다는 것이 중요하다 |
 | 화면은 상태 옆에 그것을 보여 준다: 인박스 행의 말과 **Continue**, 사이드바 표시의 테두리와 툴팁, 입력창 위의 줄(product-spec FR-15) | 상태만으로는 멈춘 턴과 끝난 턴이 똑같이 보인다. Continue는 일을 이어 가는 메시지 하나다 |
 | `CLAUDE_CODE_MAX_RETRIES`는 CLI가 정한 대로 둔다 | 3분이면 대부분의 끊김을 넘긴다. 예산을 늘리면 긴 장애 동안 턴을 붙잡아 둔다 |
 
@@ -1771,7 +1771,9 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
    가장 새 단계가 이 기록보다 낮은 호스트는 시작을 거절한다: "This data was written by a newer Centralu"("이 데이터는
    더 새 Centralu가 썼다")와 두 버전을 stderr와 stdout에 내고 1로 끝난다. 락 충돌과 같은 길이다. 데스크톱 감독자는
    재시도하지 않고 곧바로 그 문장을 보여 준다. 스토어보다 오래되었지만 기록 이상인 호스트는 스토어를 열고, 자기가
-   모르는 단계는 실행하지 않는다.
+   모르는 단계는 실행하지 않는다. 기록이 버전이 아니면(손으로 고쳤거나 쓰다 끊긴 경우), 스토어가 실행한 단계를 모두
+   아는 호스트는 다시 계산하고 그렇다고 말한다. 스토어보다 오래된 호스트는 그 행을 밝히며 같은 식으로 거절한다. 더 적은
+   단계로 계산한 기록은 자기가 읽지 못하는 스토어를 열 수 있기 때문이다(#384).
 4. **무거운 단계는 `heavy: true`로 표시한다:** 모든 메시지를 고쳐 쓰거나 다시 색인하거나 `VACUUM`하는 단계(지금까지
    v3, v11, v21, v40; v40은 메시지 137,722개에서 시작을 1.9초 붙잡았다). 교체는 이 단계들을 전환 도중이 아니라
    전환 뒤에 돌린다.
@@ -1794,7 +1796,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | 열 추가 (45: 이 세션을 요청한 세션인 `sessions.asked_by_session_id`, #371. 그 뜻은 #561과 #614에서 옮겨 갔다, 48과 55 참고; 47: 링크된 기기의 앱 패널을 적는 `grid_layout.remote_app_id`와 `app_machine`, #82; 53: 마지막 턴이 끝나지 못한 이유인 `sessions.interruption`, #698; 54: `auto`만으로 통과한 대기 ask를 표시하는 `queued_requests.opened_by_auto`) | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306; 47: 이전 host는 `app_id`가 있는 앱 줄만 읽고, 그 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 앱 패널을 버린다; 53: 이전 host는 `sessions.interruption`을 읽지도 쓰지도 않으므로, 그 host가 맡은 줄은 마지막 값을 그대로 둔다, #698; 54: 이전 host는 `opened_by_auto`를 읽지도 쓰지도 않는다. 그 host가 넣은 줄은 null이고, 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | 테이블 추가 (3은 색인도 채운다: 무거움; 44는 한 프로젝트가 다른 프로젝트에 닿도록 받은 "항상"을 적는 `project_consents`를 더한다, #371; 46은 허브의 링크와 각 기기에서 마지막으로 들은 것을 적는 `linked_machines`와 `machine_headers`, 그리고 nullable `grid_layout.remote_session_id`를 더한다, #82; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다; 46: 이전 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 세션 패널을 버린다) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | 테이블 추가 (3은 색인도 채운다: 무거움; 44는 한 프로젝트가 다른 프로젝트에 닿도록 받은 "항상"을 적는 `project_consents`를 더한다, #371; 46은 허브의 링크와 각 기기에서 마지막으로 들은 것을 적는 `linked_machines`와 `machine_headers`, 그리고 nullable `grid_layout.remote_session_id`를 더한다, #82; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677; 57은 지운 앱 에이전트 세션의 기록인 `app_run_records`, `app_run_messages`, `app_run_subagent_messages`, 그리고 nullable `app_runs.request`, `answer`, `output`을 더한다, #378) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다; 46: 이전 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 세션 패널을 버린다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48, 55 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561. 55는 다른 프로젝트의 세션을 가리키는 `askedBy`, 곧 #614 이전 ask_project의 뜻을 비운다. #844 전까지는 host가 시작할 때마다 하던 일이다) | 읽는다, 되돌릴 수 없다 (55: beta.20 이하의 빌드는 아직 옛 뜻으로 쓰고, 이 단계 뒤에 그 빌드가 쓴 줄은 그 뜻을 그대로 지닌다. 그 빌드가 보이던 대로다) |
 | **13, 28, 32, 56** | **테이블이나 열 삭제** (56: 아무도 쓴 적 없는 `usage_facts`, #423) | **깨진다: `min_reader_version`을 올린다** (56: 옛 host는 그 테이블을 빈 채로 다시 만들 뿐, 해가 없다) |
@@ -1806,46 +1808,16 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 ### 5.2 다른 빌드가 읽는 저장 모양 (#384)
 
 저장소의 테이블은 두 빌드가 나눠 쓰는 모양 하나이고, §5.1이 다룬다. 다른 모양도 많이 같은 식으로 저장되거나 오간다.
-`app_settings`의 JSON 행, 데이터 폴더의 파일, 사람이나 다른 빌드가 쓰는 파일, 프로세스 사이의 줄과 프레임이다. 호스트
-교체 중에, 사람이 이전 릴리스로 돌아간 뒤에, 서로 다른 릴리스의 두 기계 사이에서 옛 빌드와 새 빌드가 그 각각을 읽는다.
+`app_settings`의 JSON 행, JSON 열, 데이터 폴더의 파일, 사람이나 다른 빌드가 쓰는 파일, 프로세스 사이의 줄과 프레임이다.
+호스트 교체 중에, 사람이 이전 릴리스로 돌아간 뒤에, 서로 다른 릴리스의 두 기계 사이에서 옛 빌드와 새 빌드가 그 각각을
+읽는다.
 
-세션 하나를 위해 남기는 `app_settings` 행의 키는 `<이름>:<sessionId>`이다(`agent_depth:`, `report_paused:`,
-`tool_prefix:`, …). 세션을 영구 삭제하면 그 모양의 키를 모두 지운다(`SESSION_SETTING_OF`, `purgeSession`). 그래서
-세션별 키를 새로 더해도 영구 삭제에 줄을 더할 필요가 없다.
+모든 모양의 규칙: 더해진 필드는 옛 읽는 쪽이 무시하고, 기록을 다시 쓰는 곳이라면 남긴다. 빠진 필드는 새 읽는 쪽이 기본값을
+쓴다. 이 빌드가 읽지 못하는 값은 그 값만 기본값이 되고, 읽지 못하는 권한은 거절이다. 깨진 파일이나 행은 그것을 밝히는 분명한
+메시지를 내고, 앱을 멈추지도, 말없이 설정을 되돌리지도 않는다.
 
-모든 모양의 규칙:
-
-- **필드가 더해지면:** 옛 읽는 쪽은 무시하고, 기록을 다시 쓰는 곳이라면 그 필드를 남긴다.
-- **필드가 빠졌거나 아직 쓰이지 않았으면:** 새 읽는 쪽은 기본값을 쓴다.
-- **이 빌드가 못 읽는 값**(새 열거형의 단어): 그 값만 기본값이 되고, 기록의 나머지는 그대로 읽힌다. 못 읽는 권한은
-  거절이지 허락이 아니다.
-- **깨진 파일:** 파일이나 행 이름을 대는 분명한 말. 멈추지 않고, 말 없이 설정이 초기화되지도 않는다.
-
-| 모양 | 위치 | 읽는 곳 / 쓰는 곳 | 옛 모양 | 새 모양 | 깨짐 | 테스트 |
-|---|---|---|---|---|---|---|
-| 화면 설정 (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | 빠진 필드마다 기본값 | 못 읽는 값은 기본값으로 보이고, 이 빌드가 변경을 쓸 때 모르는 필드와 못 읽는 값은 남는다 | 기본값, 행 이름을 댄 stderr 한 줄. 다음 변경이 덮어쓴다 | `theme.test.ts`, `ui-preferences.test.ts` |
-| 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store-layout.test.ts` (ui), `notify.test.ts` |
-| 테마·글꼴 캐시 | 페이지의 `localStorage` | `applyCachedTheme`, `applyCachedTypography` | 값마다 확인 | 무시 | 캐시 없음과 같다. 첫 프레임만이고 호스트의 답이 뒤따른다 | (캐시뿐) |
-| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` / `save_background` (키퍼) | `background` 기본값은 꺼짐 | 모르는 필드는 그대로 두었다가 다시 쓴다. `background`가 참·거짓이 아니면 그 값만 꺼짐으로 읽고 stderr에 한 줄 남긴다 | 꺼짐으로 읽고 파일 이름을 밝힌 stderr 한 줄을 남긴다. 다음 저장이 덮어쓴다 | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
-| 그리드 배치 | `grid_layout` | `Store.listGridView` / `setGridView` | 스팬 없는 행은 고른 것 없음으로 읽힌다 (v43) | `kind`에 CHECK가 있어 새 패널 종류는 테이블 재구성, 곧 §5.1의 깨는 단계다. 범위 밖 스팬은 없음으로 읽힌다 | (행) | `store.test.ts` (v42, v43) |
-| 프로젝트 사이의 동의 (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (행) | 이 빌드가 모르는 종류는 저장소에 남고 목록에는 안 나온다 (#384) | (행) | `store.test.ts` |
-| 세션의 앱 동의 | `app_settings.session_apps:<id>` | `sessions/app-access.ts`의 `parse` | (목록) | 모르는 동의의 원소는 버린다 | 빈 목록 | |
-| 앱 권한 | `app_permissions` | `desk.ts` | 옛 `uses`에 대해 기록된 결정은 다시 묻는다 | `allow`가 아닌 결정은 모두 거절 | (행) | `app-capabilities.test.ts` |
-| 앱 매니페스트 | `centralu.app.json` | `parseManifest` | 선택 필드는 기본값 (`view.origin` opaque, `uses` 비어 있음) | 모르는 필드는 경고, 모르는 `uses.host` 능력은 경고하고 거절, 다른 `manifestVersion`은 두 버전을 대는 오류 | 파일 이름을 댄 오류가 앱 목록에 보인다 | `manifest.test.ts` |
-| 앱 비밀 값 | `app-secrets.json` | `AppSecrets` | (맵) | 남는 키 무시 | 앱은 비밀 값 없이 시작, stderr에 말한다 | `app-secrets.test.ts` (깨진 파일은 아님) |
-| 가져온 앱 표시 | `app-imports.json` | `ImportBook` | (맵) | 남는 키 유지 | `.unreadable-<시각>`으로 옮겨 두고 알린다. 가져온 앱은 다시 묻는다 | |
-| 앱 버전 | `app-versions/<app>/<id>/meta.json` | `AppVersions.list` | | 남는 필드 유지 | `id`와 `at`이 없는 기록은 반쯤 지워진 것처럼 건너뛴다 (#384) | `versions.test.ts` |
-| 테마 파일 | `<data>/themes/*.json` | `parseThemeFile` (protocol) | 빠진 토큰은 바탕 테마로 | 모르는 키나 토큰은 문제로 적고 무시 | 이유와 함께 깨진 것으로 목록에 | `theme.test.ts`, `themes.test.ts` |
-| 오케스트레이터 제안과 스킬 | `app_settings.orchestrator_*` | `OrchestratorProposals` | | 원소는 남는 필드를 지킨다 | 목록이 아니면 빈 목록, 이름이나 내용이 없는 원소는 건너뛴다 (#384) | `orchestrator-proposals.test.ts` |
-| 뷰 넘겨주기 | `app_settings.views.handover` | `restoreViewHandover` | | 뷰가 아닌 원소는 건너뛴다 (#384) | 아무것도 다시 열지 않고, 행은 그래도 지운다 | `view-handover.test.ts` |
-| 뷰 출처 포트, 본 에이전트 버전, 프로젝트 JSON 열 | `app_settings.apps.viewPorts`, `agents.versionsSeen`, `projects.*` | `readBook`, `readSeen`, `Store` | 값마다 확인 | 무시 | 없음으로 읽힌다 | |
-| 호스트 빌드 기록 | `CC_HOST_SOURCE` (키퍼에서 호스트로) | `hostBuild` (`keeper-link.ts`) | 빠진 키는 빠진 채로 | 무시 | 호스트 자신의 커밋만 | `keeper-link.test.ts` |
-| 시작 상태 | `shell-status.json` | 창의 `start.rs`, 필드마다, nonce로 맞춘다 | | 무시 | 아직 상태 없음으로 다룬다 | `start.rs` 테스트 |
-| 키퍼 기록 | `keeper.json` | 사람이 보라고 쓴다. 읽는 빌드는 없다 | | | | |
-| 원격 연결 줄 | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version`과 `dataDir`는 기본값 | 다른 `v`는 어느 쪽을 업데이트할지 말하는 오류, 포트나 토큰이 없으면 오류 | JSON이 아닌 줄은 건너뛴다 | `tunnel.test.ts` |
-| 호스트 ↔ UI 페이로드 | RPC 결과, 이벤트, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | 기본값 적용 | 선언 안 된 필드는 버리고, 못 읽는 값은 그 값만 온 그대로 둔다 | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
-
-아직 덮지 못한 것: 이전 릴리스의 호스트로 새 저장소를 여는 e2e. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
+그런 모양 하나하나와 그 주인, 그 파서, 오늘 각 경우에 하는 일, 다른 빌드의 모양을 먹여 보는 테스트:
+[stored-shapes.md](stored-shapes.md)(영어로만 둔다). 새 저장 모양이나 그 안의 새 필드는 같은 PR에서 거기에 줄을 얻는다.
 
 ## 6. 사용량과 한도 (FR-9)
 

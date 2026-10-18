@@ -212,8 +212,11 @@ export class QueuedRequests {
       if (!presetWithin(target.permissionPreset, caller.permissionPreset)) {
         return `"${target.name}" now has more permissions (${target.permissionPreset}) than the session that queued the request (${caller.permissionPreset}).`
       }
+      return null
     }
-    return null
+    if (r.via === 'send_to_session') return null
+    // A tool this build does not know (#384): `restoreQueued` leaves such a row in the store, so this is the guard behind it
+    return `The request was queued through ${JSON.stringify(r.via)}, which this version of Centralu cannot deliver.`
   }
 
   /** A remembered "always" for the caller's project to ask the target's (#371), read now */

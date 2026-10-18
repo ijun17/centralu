@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ExternalApps } from '../apps/external/runtime.js'
 import { OrchestratorProposals } from './orchestrator-proposals.js'
 
@@ -34,6 +34,39 @@ describe('orchestrator proposals read from a row another build wrote', () => {
     })
     expect(proposals.orchestratorSkills()).toEqual([newer])
     expect(proposals.mcpProposals().map((p) => p.name)).toEqual(['db'])
+  })
+})
+
+/*
+ * What a change writes back (#384). An approval rewrites the skills row whole, so an approved skill a newer build
+ * stored in a shape this one cannot read was dropped by the next approval, and a row that was not a list was replaced
+ * by it with no word: the approved skills were gone.
+ */
+describe('a change written over a row another build wrote', () => {
+  it('approving a skill keeps an approved skill this build cannot read', () => {
+    const newer = { name: 'review', steps: ['read the diff', 'run the tests'] }
+    const { proposals, rows } = withRows({
+      orchestrator_skills: JSON.stringify([{ name: 'tidy', content: 'Keep it short.' }, newer]),
+      orchestrator_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
+    })
+    expect(proposals.orchestratorSkills().map((x) => x.name)).toEqual(['tidy'])
+    expect(proposals.resolveSkillProposal('cite', true).ok).toBe(true)
+    expect(JSON.parse(rows.orchestrator_skills!)).toEqual([{ name: 'tidy', content: 'Keep it short.' }, { name: 'cite', content: 'Name the file.' }, newer])
+  })
+
+  it('a skills row that is not a list is said, and set aside when the next approval replaces it', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cut = '[{"name":"tidy","content":"Keep it short."},{"name":"rev'
+    const { proposals, rows } = withRows({
+      orchestrator_skills: cut,
+      orchestrator_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
+    })
+    expect(proposals.orchestratorSkills()).toEqual([])
+    expect(proposals.resolveSkillProposal('cite', true).ok).toBe(true)
+    expect(JSON.parse(rows.orchestrator_skills!)).toEqual([{ name: 'cite', content: 'Name the file.' }])
+    expect(rows['orchestrator_skills.unreadable']).toBe(cut)
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('app_settings.orchestrator_skills is not a JSON list')
+    said.mockRestore()
   })
 })
 

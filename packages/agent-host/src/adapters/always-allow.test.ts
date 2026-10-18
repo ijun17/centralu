@@ -33,6 +33,14 @@ describe('AlwaysAllowRules', () => {
     expect(rules.allows('npm * test')).toBe(true)
   })
 
+  // An empty matcher is no rule: it must never match every key (mutation A3)
+  it('allows nothing because of an empty rule', () => {
+    const rules = new AlwaysAllowRules()
+    rules.add('')
+    expect(rules.allows('x')).toBe(false)
+    expect(rules.allows('npm test')).toBe(false)
+  })
+
   it('allows a key matching any one of the rules added with addAll', () => {
     const rules = new AlwaysAllowRules()
     rules.addAll(['git status', '/repo/src/a.ts'])
@@ -50,6 +58,11 @@ describe('alwaysAllowKey', () => {
 
   it('gives other kinds no key', () => {
     expect(alwaysAllowKey({ kind: 'other', raw: '{}' })).toBe('')
+  })
+
+  it('gives no key to a file edit whose path is blank', () => {
+    expect(alwaysAllowKey({ kind: 'file_edit', path: '   ', diffPreview: '', multi: false })).toBe('')
+    expect(alwaysAllowKey({ kind: 'file_edit', path: '', diffPreview: '', multi: false })).toBe('')
   })
 
   it('gives no key to a file edit whose path is unknown', () => {

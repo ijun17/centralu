@@ -1,8 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { chooseDataDir, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 
 /**
  * This function moves **the folder holding the user's conversation history**.
@@ -150,5 +150,16 @@ describe('which data folder the host uses (#973)', () => {
       dir: join('/home/me', '.centralu-dev'),
       legacy: join('/home/me', '.control-center-dev'), // legacy-name
     })
+  })
+})
+
+describe('the root of the data folder', () => {
+  // The guard behind "never write to the real data folder": tests point CC_DATA_DIR at a temp folder.
+  // The variable is stubbed, and vitest undoes the stub (#845)
+  it('is CC_DATA_DIR when it is set, and the home folder otherwise', () => {
+    vi.stubEnv('CC_DATA_DIR', join(root, 'chosen'))
+    expect(dataRoot()).toBe(join(root, 'chosen'))
+    vi.stubEnv('CC_DATA_DIR', '')
+    expect(dataRoot()).toBe(join(homedir(), '.centralu'))
   })
 })

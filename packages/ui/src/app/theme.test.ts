@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
-import { ACCENT_TOKENS, accentTokens, activeSide, contrast, resolveSide, urgencyBreaks, type Rgba } from './theme.js'
+import { ACCENT_TOKENS, accentTokens, activeSide, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -36,6 +36,31 @@ describe('resolving a side', () => {
 
   it('does not apply a broken file (the store hands over its last clean version instead)', () => {
     expect(resolveSide('light', 'mine', [file({ broken: true, tokens: { ink: '#000' } })], null).tokens).toEqual({})
+  })
+})
+
+/*
+ * A theme file a person or another build wrote (#384): the host lists unknown keys as problems and passes every value
+ * on as text, so a colour this window cannot use is caught here, alone. It is never applied, and Settings says which.
+ */
+describe('a value a theme file holds that this window cannot use', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('is listed alone, by key, and the usable ones are not', () => {
+    vi.stubGlobal('CSS', { supports: (_property: string, value: string) => !value.startsWith('not-') })
+    const entry = file({ tokens: { 'surface-floor': '#101010', 'surface-side': 'not-a-colour', 'surface-hover': '   ', 'surface-raised': `#${'0'.repeat(401)}` } })
+    expect(unusableValues(entry)).toEqual([
+      '"not-a-colour" is not a usable value for surface-side; it is ignored.',
+      '"   " is not a usable value for surface-hover; it is ignored.',
+      `"#${'0'.repeat(401)}" is not a usable value for surface-raised; it is ignored.`,
+    ])
+  })
+
+  it('is applied for none of the tokens it names, and the rest still are', () => {
+    vi.stubGlobal('CSS', { supports: (_property: string, value: string) => !value.startsWith('not-') })
+    const r = resolveSide('light', 'mine', [file({ tokens: { 'surface-floor': '#101010', 'surface-side': 'not-a-colour' } })], null)
+    expect(r.tokens['--color-surface-floor']).toBe('#101010')
+    expect(r.tokens).not.toHaveProperty('--color-surface-side')
   })
 })
 
