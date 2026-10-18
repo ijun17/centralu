@@ -185,17 +185,6 @@ export class Store extends MigrationRunner {
     this.checkpoint()
     this.db.close()
   }
-
-  /*
-   * Everything below only passes the call on to the module named in its heading. It is the last pass-through: #1099,
-   * in the merge queue, still calls it on `Store` (#428), and it goes once it lands. New code names the module.
-   */
-
-  // ── SettingsRecords (store/settings.ts) ──
-
-  appSetting(key: string): string | null {
-    return this.settings.appSetting(key)
-  }
 }
 
 /** What a reset WAL is cut back to (`journal_size_limit`) */
