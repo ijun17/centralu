@@ -176,8 +176,8 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     get().saveWorkspace()
   },
 
-  openFile(path, projectId) {
-    set({ viewerPath: path, viewerProjectId: projectId ?? null, overlay: { kind: 'viewer' } })
+  openFile(path, projectId, sessionId) {
+    set({ viewerPath: path, viewerProjectId: projectId ?? null, viewerSessionId: sessionId ?? null, overlay: { kind: 'viewer' } })
   },
 
   /*
@@ -185,7 +185,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
    * (relative to the currently viewed session's project), and goes through the same port as the file
    * tree's reveal — a failure is loud with the same wording as the tree's.
    */
-  async revealFile(path, from) {
+  async revealFile(path, from, sessionId) {
     const s = get()
     const projectId = from ?? (s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null)
     if (!projectId || !s.platform) return
@@ -196,7 +196,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
       return
     }
     try {
-      const res = await s.platform.fs.reveal(projectId, path)
+      const res = await s.platform.fs.reveal(projectId, path, sessionId ?? undefined)
       if (!res.supported) set({ toast: res.reason ?? 'Showing files is not available here' })
     } catch (e) {
       set({ toast: `Could not show ${path}: ${(e as Error).message}` })

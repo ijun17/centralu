@@ -4,7 +4,12 @@ import { MemoryFs } from './memory-fs.js'
 /** The `fs` port over MemoryFs, with the records tests read (reads, watches, trashed and revealed paths) */
 export class FilesMock {
   /** For tests: which project a file was read from and shown for — an eye on whether the grid's neighboring-panel link goes to its own project (#182) */
-  readonly fileOps: { op: 'read' | 'reveal'; projectId: string; path: string }[] = []
+  readonly fileOps: { op: 'read' | 'reveal'; projectId: string; path: string; sessionId?: string }[] = []
+  /**
+   * For tests: what a session's own folder (its worktree) holds where it differs from the project's, by session and
+   * path (#1209). A read through that session finds these first, as the host reads the worktree's copy.
+   */
+  readonly sessionFiles = new Map<string, Record<string, string>>()
   readonly memoryFs = new MemoryFs()
   /** The set of watched paths registered via fs.watch (#34) — tests check what the screen asked to watch */
   watchedDirs = new Map<string, string[]>()
@@ -23,11 +28,13 @@ export class FilesMock {
       this.watchedDirs.set(projectId, [...paths])
       return { watched: paths.length }
     },
-    readFile: async (projectId: string, path: string): Promise<FsFile> => {
-      this.fileOps.push({ op: 'read', projectId, path })
+    readFile: async (projectId: string, path: string, sessionId?: string): Promise<FsFile> => {
+      this.fileOps.push({ op: 'read', projectId, path, ...(sessionId ? { sessionId } : {}) })
+      const own = sessionId ? this.sessionFiles.get(sessionId)?.[path] : undefined
+      if (own !== undefined) return { text: own, truncated: false, binary: false, bytes: own.length }
       return this.memoryFs.readFile(path)
     },
-    resolve: async (_projectId: string, path: string) => this.memoryFs.resolve(path),
+    resolve: async (_projectId: string, path: string, _sessionId?: string) => this.memoryFs.resolve(path),
     move: async (_projectId: string, from: string, toDir: string) => this.memoryFs.move(from, toDir),
     importFile: async (_projectId: string, toDir: string, name: string, dataBase64: string) =>
       this.memoryFs.importFile(toDir, name, dataBase64),
@@ -45,10 +52,10 @@ export class FilesMock {
       this.revealedImages.push(file)
       return { supported: true }
     },
-    reveal: async (projectId: string, path: string) => {
+    reveal: async (projectId: string, path: string, sessionId?: string) => {
       this.memoryFs.requireInside(path)
       this.revealed.push(path)
-      this.fileOps.push({ op: 'reveal', projectId, path })
+      this.fileOps.push({ op: 'reveal', projectId, path, ...(sessionId ? { sessionId } : {}) })
       return { supported: true }
     },
   }

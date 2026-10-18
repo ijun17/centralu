@@ -193,6 +193,23 @@ export function projectLabelOf(projects: Readonly<Record<string, { name: string 
   return (projectId ? projects[projectId]?.name : 'Orchestrator') ?? ''
 }
 
+/**
+ * The folder a session works in, which every path its conversation names is relative to (#1209): its worktree when it
+ * has one, its project's folder otherwise, and null for a session with no project (the orchestrator), whose words then
+ * link nowhere (`parseFileRef`). One answer for the conversation's links and the approval rows: the conversation used
+ * the project's folder while the rows used the worktree, so a worktree session's link opened the main checkout's file.
+ */
+export function sessionFolderOf(state: Pick<AppState, 'sessions' | 'projects'>, sessionId: string): string | null {
+  const s = state.sessions[sessionId]
+  if (!s) return null
+  return s.worktree?.path ?? (s.projectId ? state.projects[s.projectId]?.path : undefined) ?? null
+}
+
+/** `sessionFolderOf` for a component: a string, so the selector is stable */
+export function useSessionFolder(sessionId: string): string | null {
+  return useStore((s) => sessionFolderOf(s, sessionId))
+}
+
 /** A machine's name as the person gave it, or its id until the machine list arrives; null for this computer */
 export function useMachineName(machine: string | null | undefined): string | null {
   return useStore((s) => (machine ? (s.machines[machine]?.name ?? machine) : null))

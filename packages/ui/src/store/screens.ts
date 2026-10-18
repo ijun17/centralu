@@ -174,13 +174,14 @@ export function screenOf(
     | 'overlay'
     | 'viewerPath'
     | 'viewerProjectId'
+    | 'viewerSessionId'
   >,
 ): Screen | null {
   if (s.settingsOpen) return { kind: 'settings' }
   const under = screenUnder(s)
   const o = s.overlay
   if (o?.kind === 'viewer' && s.viewerPath)
-    return { kind: 'file', path: s.viewerPath, projectId: s.viewerProjectId ?? null, under }
+    return { kind: 'file', path: s.viewerPath, projectId: s.viewerProjectId ?? null, sessionId: s.viewerSessionId ?? null, under }
   if (o?.kind === 'git') {
     return {
       kind: 'git',

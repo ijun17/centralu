@@ -29,7 +29,7 @@ function navigate(get: () => AppState, set: (partial: Partial<AppState>) => void
     // A file or the git screen: the screen it was opened over first, then the page over it
     if (screen.kind === 'file' || screen.kind === 'git') {
       if (screen.under) show(st, screen.under)
-      if (screen.kind === 'file') st.openFile(screen.path, screen.projectId)
+      if (screen.kind === 'file') st.openFile(screen.path, screen.projectId, screen.sessionId)
       else if (screen.sub === 'history' && screen.sha) st.openCommit(screen.sha)
       else if (screen.sub === 'branches') st.openBranches()
       else st.openGit(screen.path ?? undefined, screen.staged ?? undefined)
@@ -84,6 +84,7 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
       view: 'focus',
       viewerPath: null,
       viewerProjectId: null,
+      viewerSessionId: null,
       overlay: null,
     }))
     get().saveWorkspace()

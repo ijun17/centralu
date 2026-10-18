@@ -26,7 +26,8 @@ import { suffixMatches } from './resolve.js'
  *     brightness) reads well enough instead.
  *   - If precise highlighting is needed, "Open in IDE" is one click away.
  */
-export function CodeViewer({ projectId }: { projectId: string }) {
+/** `sessionId`: the session whose folder the file is in (#1209), read from its worktree; null for the project's own */
+export function CodeViewer({ projectId, sessionId = null }: { projectId: string; sessionId?: string | null }) {
   // An IDE on this computer cannot open another machine's file (#82); VS Code over Remote-SSH can, where it reaches
   const remote = useProjectMachine(projectId) !== null
   const remoteIde = useRemoteIde(projectId)
@@ -93,7 +94,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     // While switching files or projects, a late response must never be drawn as **another file's content**
     let alive = true
     void platform.fs
-      .readFile(projectId, path)
+      .readFile(projectId, path, sessionId ?? undefined)
       .then((f) => alive && setFile(f))
       .catch((e: Error) => {
         if (!alive) return
@@ -119,7 +120,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
               // The line number was requested under the old path, so it has to be requested again under the new one to survive
               const jumpNow = currentViewerJump()
               if (jumpNow?.path === path) requestViewerJump(target, jumpNow.line)
-              useStore.getState().openFile(target)
+              useStore.getState().openFile(target, projectId, sessionId)
               return
             }
             setCandidates(found.slice(0, 8))
@@ -131,7 +132,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
     return () => {
       alive = false
     }
-  }, [platform, projectId, path, setToast])
+  }, [platform, projectId, sessionId, path, setToast])
 
   const image = file?.image && isViewerImage(file.image) ? file.image : null
   const isSvg = image?.mime === 'image/svg+xml'
@@ -288,7 +289,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             className="ml-auto shrink-0 text-xs text-ink-faint hover:text-ink"
             onClick={() => {
               void platform.fs
-                .resolve(projectId, path)
+                .resolve(projectId, path, sessionId ?? undefined)
                 .then(({ path: abs }) => platform.system.openInIde(abs))
                 .catch((e) => setToast(`Could not open in IDE: ${(e as Error).message}`))
             }}
@@ -328,7 +329,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                       onClick={() => {
                         const jumpNow = currentViewerJump()
                         if (jumpNow?.path === path) requestViewerJump(c, jumpNow.line)
-                        useStore.getState().openFile(c)
+                        useStore.getState().openFile(c, projectId, sessionId)
                       }}
                       className="readout rounded-md px-1 py-0.5 text-left text-xs text-ink underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
                     >

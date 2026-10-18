@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { projectLabelOf, sidebarProjectOf } from './selectors.js'
+import { projectLabelOf, sessionFolderOf, sidebarProjectOf } from './selectors.js'
 
 describe('sidebarProjectOf (#1038)', () => {
   const s = (id: string, projectId: string | null, over: Partial<SessionSummary> = {}) => ({ id, projectId, askedBy: null, machine: null, ...over }) as SessionSummary
@@ -43,5 +43,24 @@ describe('projectLabelOf', () => {
 
   it('says nothing for a project the list does not hold yet', () => {
     expect(projectLabelOf(projects, 'gone')).toBe('')
+  })
+})
+
+describe('sessionFolderOf (#1209)', () => {
+  const projects = { p1: { path: '/repo' } } as never
+  const sessions = {
+    plain: { id: 'plain', projectId: 'p1', worktree: null },
+    wt: { id: 'wt', projectId: 'p1', worktree: { path: '/wt/s1', branch: 'centralu/s1' } },
+    orch: { id: 'orch', projectId: null, worktree: null },
+  } as never
+
+  it("is a worktree session's worktree, and the project's folder for a session without one", () => {
+    expect(sessionFolderOf({ sessions, projects }, 'wt')).toBe('/wt/s1')
+    expect(sessionFolderOf({ sessions, projects }, 'plain')).toBe('/repo')
+  })
+
+  it('is null for a session with no project, and for one not in the list', () => {
+    expect(sessionFolderOf({ sessions, projects }, 'orch')).toBeNull()
+    expect(sessionFolderOf({ sessions, projects }, 'gone')).toBeNull()
   })
 })

@@ -353,6 +353,7 @@ export class MockPlatform implements Platform {
 
   // files.ts
   get fileOps() { return this.filesMock.fileOps }
+  get sessionFiles() { return this.filesMock.sessionFiles }
   get watchedDirs() { return this.filesMock.watchedDirs }
   set watchedDirs(value: FilesMock['watchedDirs']) { this.filesMock.watchedDirs = value }
   get trashed() { return this.filesMock.trashed }
