@@ -216,12 +216,12 @@ describe('v58 — trashed_at on subagent steps (#418)', () => {
     old.close()
     const raw = new Database(file)
     raw.exec(`DROP INDEX subagent_messages_trash; ALTER TABLE subagent_messages DROP COLUMN trashed_at`)
-    // The version just before this step, whichever step that is (v57 is #1121's)
-    raw.pragma(`user_version = ${new Store().latestKnownVersion - 1}`)
+    // The version just before this step (v57 is #1121's)
+    raw.pragma('user_version = 57')
     raw.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(1)
+    expect(s.migrationsRun).toBe(2) // v58, then v59 (#1134)
     expect(seqs(s.messages.loadSubagentMessages('s1', A))).toEqual([1, 2])
     s.close()
     // What the build before v58 writes names no trashed_at: such a step is under its card
