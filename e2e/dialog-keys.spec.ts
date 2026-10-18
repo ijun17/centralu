@@ -39,6 +39,31 @@ test('global shortcuts do not reach the screen under settings or a modal (#842 i
   await expect(page.getByTestId('command-palette')).toHaveCount(0)
 })
 
+/*
+ * A popover left open under the palette or the inbox claimed Escape on the window before they heard it, so ⌘K and then
+ * Esc closed the hidden popover and left the palette up. A window that opens over the screen now takes the popover with it.
+ */
+test('Esc closes the palette or inbox opened over a popover, not the popover under it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-menu')).toBeVisible()
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  await expect(page.getByTestId('settings-menu')).toHaveCount(0)
+
+  await page.getByTestId('settings-open').click()
+  await expect(page.getByTestId('settings-menu')).toBeVisible()
+  await page.keyboard.press('Meta+i')
+  await expect(page.getByTestId('inbox')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('inbox')).toHaveCount(0)
+  await expect(page.getByTestId('settings-menu')).toHaveCount(0)
+})
+
 test('Esc closes Settings from a field of the add-machine form (#842 item 8)', async ({ page }) => {
   await page.goto('/?demo')
   await expect(page.getByTestId('session-name')).toBeVisible()
