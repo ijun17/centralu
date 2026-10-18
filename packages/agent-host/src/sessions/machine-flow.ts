@@ -1,6 +1,6 @@
 import { MACHINE_CHANGE, type MachineConnect, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
-import type { DelegationHost } from './delegation-flow.js'
+import type { HostCards } from './host-cards.js'
 import { trustedJsonText } from './tool-answers.js'
 
 /**
@@ -27,7 +27,7 @@ export type { MachineRequest }
 export type MachineAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the machine commands reach of the session manager: its cards */
-export type MachineFlowHost = Pick<DelegationHost, 'askHost'>
+export type MachineFlowHost = Pick<HostCards, 'askHost'>
 
 /** A linked machine's status in words (#1220); a status this build does not name reads as itself */
 const MACHINE_STATUS: Record<string, string> = {
