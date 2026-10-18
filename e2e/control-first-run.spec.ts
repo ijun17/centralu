@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setup } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on the first run: the intro screen, its tool cards, and registering the first project. Moved out of control-loop.spec.ts by subject (#845); the
@@ -207,8 +208,7 @@ test('When a tool cannot be used, the reason is shown (M2.5: the start button us
     ]
     m.agents.detect = async () => list
   })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // If even one tool is usable, open with that one (#11) — do not put up a wall first
   await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
   await expect(page.getByTestId('tool-blocked')).toHaveCount(0)
@@ -235,8 +235,7 @@ test('An unauthenticated tool is described differently from an uninstalled one (
     ]
     m.agents.detect = async () => list
   })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // With neither usable there is nowhere else to move to — instead, state exactly what claude needs
   await expect(page.getByTestId('tool-blocked')).toContainText('needs a login')
   await expect(page.getByTestId('tool-blocked')).toContainText('claude auth login')

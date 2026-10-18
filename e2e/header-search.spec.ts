@@ -54,8 +54,11 @@ test('the field shrinks as the window narrows and stays centred', async ({ page 
   await page.setViewportSize({ width: 900, height: 900 })
   await expect.poll(async () => (await box(page.getByTestId('search-button'))).width).toBeLessThanOrEqual(wide)
   await expectCentredAndClear(page)
-  // Narrower than the desktop window can get: it gives way, still no overlap, nothing negative
-  await page.setViewportSize({ width: 760, height: 900 })
+  /*
+   * Narrower than the desktop window can get: it gives way, still no overlap, nothing negative. The bar's other things
+   * are smaller capsules now (owner, 2026-10-18), so 760px still holds the whole field; 600px does not.
+   */
+  await page.setViewportSize({ width: 600, height: 900 })
   await expect.poll(async () => (await box(page.getByTestId('search-button'))).width).toBeLessThan(wide)
   await expectCentredAndClear(page)
 })
@@ -127,7 +130,9 @@ test('the bar around the field and the gaps inside it are the native drag region
   await demo(page)
   await expect(page.getByTestId('app-header')).toHaveAttribute('data-tauri-drag-region', 'true')
   // The wrapper of the right-hand controls: its own gaps are part of the region too
-  await expect(page.getByTestId('open-settings').locator('xpath=..')).toHaveAttribute('data-tauri-drag-region', 'true')
+  // (the settings gear sits in its tooltip's wrapper, so the row is its nearest marked ancestor)
+  await expect(page.getByTestId('open-settings').locator('xpath=ancestor::*[@data-tauri-drag-region][1]')).toHaveAttribute('data-tauri-drag-region', 'true')
+  await expect(page.getByTestId('open-settings').locator('xpath=ancestor::*[@data-tauri-drag-region][1]')).not.toHaveAttribute('data-testid', 'app-header')
   // The field's slot lets presses through, so the strip around the field belongs to the bar
   await expect(page.getByTestId('search-slot')).toHaveCSS('pointer-events', 'none')
   await expect(page.getByTestId('search-button')).toHaveCSS('pointer-events', 'auto')
@@ -139,6 +144,8 @@ test('the palette hangs under the bar, centred, and ⌘K puts the keyboard in it
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByTestId('palette-input')).toBeFocused()
   const bar = await box(page.getByTestId('app-header'))
+  // Read once the panel has come down (it drops in from 8px up, cbb5ad8e)
+  await expect.poll(async () => (await box(page.getByTestId('palette-panel'))).y).toBeGreaterThanOrEqual(bar.y + bar.height)
   const panel = await box(page.getByTestId('palette-panel'))
   const win = page.viewportSize()!
   expect(panel.y).toBeGreaterThanOrEqual(bar.y + bar.height)

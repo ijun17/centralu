@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
-import { APP_SETTINGS_DDL, type MigrationStep } from './migrations/context.js'
+import { type MigrationStep } from './migrations/context.js'
+import { readStoreKey, writeStoreKey } from './store-keys.js'
 
 /**
  * The `app_settings` key that holds the lowest schema version that can still read this store (#292). A row, not a
@@ -71,21 +72,14 @@ export abstract class ReaderGate {
 
   /** null when nothing is recorded yet: a new store, or one last opened by a host from before #292 */
   protected storedMinReader(): number | null {
-    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
-    if (!table) return null
-    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(MIN_READER_KEY) as
-      | { value: string }
-      | undefined
-    const n = row ? Number(row.value) : NaN
+    const raw = readStoreKey(this.db, MIN_READER_KEY)
+    const n = raw !== null ? Number(raw) : NaN
     // Only a hand-edited store holds something else here; computing it again is better than trusting it
     return Number.isInteger(n) && n >= 0 ? n : null
   }
 
   protected writeMinReader(version: number): void {
-    // v13 raises it before v16 has made the table; the DDL is the same, so v16 then finds it in place
-    this.db.exec(APP_SETTINGS_DDL)
-    this.db
-      .prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run(MIN_READER_KEY, String(version))
+    // v13 raises it before v16 has made the table (`writeStoreKey` makes it)
+    writeStoreKey(this.db, MIN_READER_KEY, String(version))
   }
 }

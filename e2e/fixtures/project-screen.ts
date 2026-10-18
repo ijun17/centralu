@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
+import { startSession } from './new-session.js'
 
 /**
  * Helpers for the project screen's scenarios (#203), and the scenarios that run in two engines.
@@ -29,9 +30,7 @@ export async function setup(page: Page, projects: string[]) {
 }
 
 export async function newSession(page: Page, projectName: string): Promise<string> {
-  await page.getByTestId(`project-menu-${projectName}`).click()
-  await page.getByTestId(`new-session-${projectName}`).click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, projectName)
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }

@@ -54,43 +54,60 @@ export function CentraluCallHeader({
   const title = centraluCallTitle(item, call)
   const named = useNamedSession(item, call, sessionId)
   const focus = useStore((s) => s.focusSession)
+  const running = item.result === undefined && item.ok === undefined
   return (
-    <div className="flex w-full items-center">
+    <div className="flex w-full items-center gap-2 py-2 pl-2.5 pr-2">
       <button
-        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2.5 pr-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
         onClick={onToggle}
         aria-expanded={open}
         data-testid="tool-card-toggle"
       >
-        <span className="shrink-0 text-ink-faint">
-          <ChevronIcon open={open} />
+        {/* The mark on its own small tile: Centralu's, or the app's window for an app's tool */}
+        <span
+          className="flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-hover/60 text-ink"
+          data-testid="centralu-call-mark"
+          data-mark={call.app ? 'app' : 'centralu'}
+        >
+          {call.app ? <AppIcon size={13} /> : <CentraluMarkIcon size={13} />}
         </span>
-        <span className="shrink-0 text-ink-muted" data-testid="centralu-call-mark" data-mark={call.app ? 'app' : 'centralu'}>
-          {call.app ? <AppIcon size={12} /> : <CentraluMarkIcon size={12} />}
-        </span>
-        <span className="shrink-0 text-xs text-ink-muted" data-testid="centralu-call-label">
-          {label}
-        </span>
-        {title && (
-          <span className="min-w-0 truncate text-xs text-ink-faint" data-testid="tool-card-title">
-            {title}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-1.5">
+            <span className="shrink-0 text-sm font-medium text-ink" data-testid="centralu-call-label">
+              {label}
+            </span>
+            {running && <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="centralu-call-running">running…</span>}
+            {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted" data-testid="centralu-call-failed">failed</span>}
           </span>
-        )}
+          {title && (
+            <span className="mt-0.5 block truncate text-xs text-ink-muted" data-testid="tool-card-title">
+              {title}
+            </span>
+          )}
+        </span>
       </button>
-      <div className="flex shrink-0 items-center gap-2 px-2.5">
-        {named && (
-          <button
-            type="button"
-            className="text-xs text-ink-faint hover:text-ink"
-            onClick={() => focus(named.id)}
-            data-testid="centralu-call-open"
-            title={named.name}
-          >
-            Open session →
-          </button>
-        )}
-        {item.ok === false && <span className="text-xs text-ink">Failed</span>}
-      </div>
+      {named && (
+        /* The session it reached, as a chip that opens it: where the person most wants to go from here */
+        <button
+          type="button"
+          className="flex h-6 max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-line bg-surface-hover/30 px-2.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+          onClick={() => focus(named.id)}
+          data-testid="centralu-call-open"
+          title={`Open ${named.name}`}
+        >
+          <span className="truncate">{named.name}</span>
+          <span aria-hidden>→</span>
+        </button>
+      )}
+      <button
+        type="button"
+        className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:text-ink"
+        onClick={onToggle}
+        aria-label={open ? 'Hide the answer' : 'Show the answer'}
+        tabIndex={-1}
+      >
+        <ChevronIcon open={open} />
+      </button>
     </div>
   )
 }

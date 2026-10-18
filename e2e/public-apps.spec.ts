@@ -6,6 +6,7 @@ import {
   type PublicAppsHost,
   type ToolResult,
 } from './fixtures/public-apps.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Compatibility: public MCP Apps built for other hosts render inline, unmodified (M4 F-3).
@@ -96,9 +97,7 @@ async function sessionWithPublicApps(page: Page): Promise<{ pid: string; sid: st
   )
   fx.useProject(pid)
   await page.evaluate((list) => (window as any).__mock.setExternalApps(list), fx.list())
-  await page.getByTestId('project-menu-compat').click()
-  await page.getByTestId('new-session-compat').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'compat')
   const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
   return { pid, sid }
 }

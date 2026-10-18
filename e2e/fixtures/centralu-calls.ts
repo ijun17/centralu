@@ -43,9 +43,20 @@ export function centraluCallTests(): void {
       await expect(ordinary.getByTestId('centralu-call-mark')).toHaveCount(0)
       await expect(ordinary).toContainText('mcp__browser__list_tabs')
 
-      // The edge is the strong hairline, not the signal's white (urgency is told by brightness)
-      const edge = await centralu.evaluate((el) => getComputedStyle(el).borderLeftWidth)
-      expect(edge).toBe('2px')
+      /*
+       * A rounder card on its own tint with a stronger hairline (owner, 2026-10-18), not the signal's white (urgency is
+       * told by brightness)
+       */
+      const look = (el: Element) => {
+        const st = getComputedStyle(el)
+        return { width: st.borderTopWidth, edge: st.borderTopColor, tint: st.backgroundColor }
+      }
+      const mine = await centralu.evaluate(look)
+      const theirs = await ordinary.evaluate(look)
+      expect(mine.width).toBe('1px')
+      expect(mine.edge).not.toBe(theirs.edge)
+      expect(mine.tint).not.toBe(theirs.tint)
+      expect(mine.edge).not.toBe('rgb(255, 255, 255)')
 
       await centralu.getByTestId('centralu-call-open').click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(child)

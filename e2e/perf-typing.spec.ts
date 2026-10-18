@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Measured input latency (dogfooding finding: "the composer feels a bit laggy").
@@ -75,10 +76,7 @@ async function boot(page: Page): Promise<string> {
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('project-alpha')).toBeVisible()
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   await page.getByTestId('prompt-input').fill('start')
   await page.getByTestId('prompt-input').press('Enter')

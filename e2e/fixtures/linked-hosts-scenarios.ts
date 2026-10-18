@@ -43,10 +43,10 @@ export function linkedHostsTests(): void {
       await expect(page.getByTestId('project-remote-project')).toBeVisible()
 
       await test.step('create a session in the remote project', async () => {
+        // The menu's New session starts it at once (owner, 2026-10-18); the real UI exposes no store to read it from
         await page.getByTestId('project-menu-remote-project').click()
         await page.getByTestId('new-session-remote-project').click()
-        await page.getByTestId('create-session-confirm').click()
-        await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+        await expect(page.getByTestId('new-session-dialog')).toHaveCount(0)
         await expect.poll(() => remoteSessionIds(pair)).toHaveLength(1)
       })
       const [id] = await remoteSessionIds(pair)

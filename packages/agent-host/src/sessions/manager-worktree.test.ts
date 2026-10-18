@@ -376,6 +376,19 @@ describe('worktree sessions', () => {
     expect(wtMgr.listSessions().filter((x) => x.worktree).length).toBe(0)
   })
 
+  // Review of #1118: reading the fork point now throws git's own error, which escaped without saying what failed
+  it('a repository git refuses to read fails the worktree with that reason, said as a worktree failure (#841)', async () => {
+    execFileSync('git', ['config', 'core.repositoryformatversion', '99'], { cwd: repo })
+    try {
+      await expect(wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true })).rejects.toThrow(
+        /^Could not create the worktree: .*repo version/,
+      )
+      expect(wtMgr.listSessions().filter((x) => x.worktree).length).toBe(0)
+    } finally {
+      execFileSync('git', ['config', '--file', join(repo, '.git', 'config'), 'core.repositoryformatversion', '0'])
+    }
+  })
+
   it("the name is the branch even when unspecified — 'New session' is a blank, not a name", async () => {
     const s = await create(true)
     expect(s.name).toBe(s.worktree!.branch)

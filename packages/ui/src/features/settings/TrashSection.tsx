@@ -17,10 +17,23 @@ import { Markdown } from '../session/Markdown.jsx'
  *
  * Deleting for good is only here. Nothing empties the trash on its own, which is why the total is in the first line.
  */
+/**
+ * The linked machines whose trash was not read (#841 item 4): without this line the list read as the whole trash,
+ * and what a machine still holds looked deleted
+ */
+export function TrashUnreached({ unreached }: { unreached?: readonly { name: string }[] }) {
+  if (!unreached?.length) return null
+  return (
+    <p className="mt-2 text-sm text-ink" data-testid="trash-unreached">
+      Not listed: the trash on {unreached.map((m) => m.name).join(', ')}, which could not be reached just now.
+    </p>
+  )
+}
+
 export function TrashSection() {
   const platform = usePlatform()
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
-  const [trash, setTrash] = useState<{ sessions: TrashedSession[]; bytes: number } | null>(null)
+  const [trash, setTrash] = useState<Awaited<ReturnType<typeof platform.trash.list>> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reading, setReading] = useState<TrashedSession | null>(null)
   /** The one confirmation open: a session, or the whole trash */
@@ -89,6 +102,7 @@ export function TrashSection() {
           Could not read the trash: {loadError}
         </p>
       )}
+      <TrashUnreached unreached={trash?.unreached} />
 
       <div className="mt-3 flex items-baseline gap-3">
         <span className="readout text-sm text-ink-muted" data-testid="trash-total">
@@ -98,7 +112,7 @@ export function TrashSection() {
         </span>
         <button
           type="button"
-          className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-40 disabled:hover:text-ink-faint"
+          className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-50 disabled:hover:text-ink-faint"
           disabled={sessions.length === 0 || busy}
           onClick={() => setConfirming('all')}
           data-testid="trash-empty"
@@ -154,7 +168,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-ink-faint hover:text-ink disabled:opacity-40"
+                  className="text-ink-faint hover:text-ink disabled:opacity-50"
                   disabled={busy}
                   onClick={() => void act(s.id, () => restoreFromTrash(s.id))}
                   data-testid={`trash-restore-${s.id}`}
@@ -163,7 +177,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-ink-faint hover:text-danger disabled:opacity-40"
+                  className="text-ink-faint hover:text-danger disabled:opacity-50"
                   disabled={busy}
                   onClick={() => setConfirming(s)}
                   data-testid={`trash-purge-${s.id}`}

@@ -91,7 +91,7 @@ export function OlderSentinel({
         type="button"
         onClick={() => void loadOlder(sessionId)}
         disabled={loading}
-        className="readout rounded-md border border-line px-2 py-0.5 text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
+        className="readout rounded-md border border-line px-2 py-0.5 text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
       >
         {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>

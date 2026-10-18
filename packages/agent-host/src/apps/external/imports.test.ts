@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -10,6 +10,7 @@ import { STAGING_REL, type HandoverOptions } from './handover.js'
 import { IMPORTS_FILE, ImportBook, reviewKey } from './import-book.js'
 import { until } from './test-helpers.js'
 import { makeZip } from './zip.test-helpers.js'
+import { readZipEntries } from './zip.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 const fileIds = vi.hoisted(() => new Map<string, bigint>())
@@ -612,5 +613,41 @@ describe('a zip received over https', () => {
     expect(rt.commitImport(token, { enable: false }).status).toBe('unconfirmed')
     // The downloaded bundle was deleted from the temp folder
     expect(readdirSync(tmpdir()).filter((n) => n.startsWith('centralu-import-'))).toEqual([])
+  })
+})
+
+// #850 round 4: a folder import kept the executable bit (`execBits`), a zip import wrote every file 0644
+describe('a file stays executable whether the app came as a folder or as a zip', () => {
+  const zip = () =>
+    makeZip([
+      { name: MANIFEST_FILE, data: JSON.stringify(manifest('runner')), mode: 0o100644 },
+      { name: 'start.sh', data: '#!/bin/sh\nexec node server.mjs\n', mode: 0o100755 },
+      { name: 'lib.mjs', data: '// lib', mode: 0o100644 },
+      { name: 'plain.txt', data: 'made on another system' },
+    ])
+
+  it('a zip entry carries the Unix mode its archive was made with, and none from another system', () => {
+    expect(readZipEntries(zip(), 10).map((e) => [e.name, e.mode & 0o7777])).toEqual([
+      [MANIFEST_FILE, 0o644],
+      ['start.sh', 0o755],
+      ['lib.mjs', 0o644],
+      ['plain.txt', 0],
+    ])
+  })
+
+  // Windows has no mode bits to carry (Node reports 0o666 for every file)
+  it.skipIf(process.platform === 'win32')('an executable entry is written 0755, as a folder import writes it, and the rest 0644', async () => {
+    make()
+    const file = join(src, 'runner.zip')
+    writeFileSync(file, zip())
+    await importApp(file)
+    const mode = (rel: string) => statSync(join(dataRoot, 'apps', 'runner', rel)).mode & 0o777
+    expect([mode('start.sh'), mode('lib.mjs'), mode('plain.txt')]).toEqual([0o755, 0o644, 0o644])
+
+    const dir = plantSource('runner-src', 'folder-runner', { 'start.sh': '#!/bin/sh\n', 'lib.mjs': '// lib' })
+    chmodSync(join(dir, 'start.sh'), 0o755)
+    await importApp(dir)
+    const folderMode = (rel: string) => statSync(join(dataRoot, 'apps', 'folder-runner', rel)).mode & 0o777
+    expect([folderMode('start.sh'), folderMode('lib.mjs')]).toEqual([0o755, 0o644])
   })
 })

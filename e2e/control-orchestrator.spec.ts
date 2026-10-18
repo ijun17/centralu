@@ -322,9 +322,8 @@ test("An instructed message is not absorbed even when the person's identical sen
  * evidence lane along with it** (the orchestrator has no repository to show), and the sidebar
  * button looked unpressed.
  *
- * The notice card uses the same door (focusSession), so this pins that down too — if there is
- * one cause, there should be only one symptom, and that claim is only proven by clicking through
- * both entrances.
+ * The notice card used the same door (focusSession); it is gone (owner, 2026-10-18), and the inbox is
+ * where a finished turn is opened from.
  */
 test('The orchestrator is still the orchestrator screen when entered via the inbox', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -359,21 +358,9 @@ test('The orchestrator is still the orchestrator screen when entered via the inb
   expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('orchestrator')
 
   /*
-    The second door: the card that reports a reply has finished (asked about together during
-    dogfooding). Since it calls the same focusSession, there is one cause, but "there was one
-    cause" only becomes fact by clicking through both entrances.
+    The card that reported a finished reply was a second door through the same focusSession. The cards are gone
+    (owner, 2026-10-18): a finished turn is written out in the inbox's capsule and opened from the inbox, the door above.
   */
-  // Switch back over to the session screen — the card only appears for a session not being watched
-  await page.locator('[data-testid^="session-row-"]').first().click()
-  await expect(page.getByTestId('evidence-panel')).toBeVisible()
-  await page.evaluate((id: string) => {
-    const m = (window as any).__mock
-    m.emit({ type: 'state_change', sessionId: id, state: 'working' })
-    m.emit({ type: 'turn_complete', sessionId: id })
-  }, orc)
-  await page.getByTestId('notice-open').click()
-  await expect(page.getByTestId('evidence-panel')).toHaveCount(0)
-  await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
 })
 
 /**

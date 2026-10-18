@@ -1,6 +1,7 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
 import { expectOutOfSight } from './fixtures/project-screen.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Where external apps show up in the UI (M4 A-8, B-2, B-4, B-6, B-7) — real UI on a mock platform.
@@ -130,9 +131,7 @@ test('registering a project asks to trust it once — "Later" sends nothing, and
   // No session is running, so there is nothing extra to say
   await expect(page.getByTestId('toast')).toHaveCount(0)
   // With a session running: it states in one line that the changed trust applies once that session restarts or resumes
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('toggle-trust-alpha').click()
   await expect(page.getByTestId('toast')).toHaveText('Running sessions here pick up the new trust when they restart or resume.')
@@ -278,9 +277,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
 
     // Go to the session — the pinned view only hides, it does not go down
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     await expect(page.getByTestId('session-view')).toBeVisible()
     await expectOutOfSight(pinned)
     await expect(row).not.toHaveAttribute('aria-current', 'page')
@@ -302,9 +299,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
      * A session to go back to. Without one the focus lane is the project's screen (#203), where the app is a panel
      * and × only leaves — project-screen.spec.ts covers that way back.
      */
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     await expect(page.getByTestId('session-view')).toBeVisible()
     const sessionId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
     await page.getByTestId(`app-row-${pid}/slider`).click()
@@ -548,9 +543,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid)])
     // Create a session to check that the calling session's name shows in the row
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     const session = await page.evaluate(() => {
       const st = (window as any).__store.getState()
       return { id: st.focusedSessionId as string, name: st.sessions[st.focusedSessionId].name as string }
@@ -609,9 +602,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid), app('helper', pid)])
     // The agent session the app asked for — on the mock, this usually shows as a plain session
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     const agentSession = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
     const t0 = Date.UTC(2026, 8, 25, 3, 4, 5)
     const mk = (id: string, appId: string, kind: 'tool' | 'broker', tool: string, parentRunId: string | null, at: number, over: Record<string, unknown> = {}) => ({
@@ -722,9 +713,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
   test('B-4: a pinned view\'s ui/message asks which session to send to, sends nothing before one is picked, and the view receives a refusal if it is cancelled', async ({ page }) => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid, { name: 'Slider' })])
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
     const name = await page.evaluate((id) => (window as any).__store.getState().sessions[id].name as string, sid)
 

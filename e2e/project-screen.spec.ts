@@ -172,7 +172,7 @@ test('a trashed session leaves its screen and a removed panel returns only when 
   await expect(page.getByTestId('project-hidden')).toHaveCount(0)
 })
 
-test('a session that finishes on the project screen gets no card — the person is watching its panel', async ({
+test('a session that finishes on the project screen gets the breeze and is done with — the person is watching its panel', async ({
   page,
 }) => {
   await setup(page, ['/tmp/alpha'])
@@ -181,14 +181,17 @@ test('a session that finishes on the project screen gets no card — the person 
   await addSessionPanels(page, [a])
   await expect(page.getByTestId(`project-panel-session:${a}`)).toBeVisible()
 
+  const done = () =>
+    page.evaluate((id) => ((window as any).__store.getState().notices as { sessionId: string }[]).some((n) => n.sessionId === id), a)
   await page.evaluate((id) => (window as any).__mock.emit({ type: 'turn_complete', sessionId: id }), a)
   await expect(page.getByTestId('gust')).toHaveCount(1)
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  // A notice either way (owner, 2026-10-18), written out in the capsule; on screen it is done with once its line folds
+  await expect.poll(done, { timeout: 15_000 }).toBe(false)
 
-  // Removed, it is off screen again, and the card comes back
+  // Removed, it is off screen again, and its notice stays
   await page.getByTestId(`project-remove-session:${a}`).click()
   await page.evaluate((id) => (window as any).__mock.emit({ type: 'turn_complete', sessionId: id }), a)
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(done).toBe(true)
 })
 
 /*

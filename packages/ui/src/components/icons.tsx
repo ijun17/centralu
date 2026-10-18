@@ -16,6 +16,102 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/**
+ * A gear — settings. Eight even teeth around a hollow centre (computed, so every tooth is the same), drawn with the
+ * magnifier's stroke weight beside it in the top bar.
+ */
+export function GearIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M6.53 2.70 L6.78 1.11 L9.22 1.11 L9.47 2.70 L10.71 3.21 L12.02 2.27 L13.73 3.98 L12.79 5.29 L13.30 6.53 L14.89 6.78 L14.89 9.22 L13.30 9.47 L12.79 10.71 L13.73 12.02 L12.02 13.73 L10.71 12.79 L9.47 13.30 L9.22 14.89 L6.78 14.89 L6.53 13.30 L5.29 12.79 L3.98 13.73 L2.27 12.02 L3.21 10.71 L2.70 9.47 L1.11 9.22 L1.11 6.78 L2.70 6.53 L3.21 5.29 L2.27 3.98 L3.98 2.27 L5.29 3.21Z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.25" />
+    </svg>
+  )
+}
+
+/** The window's own controls where the top bar draws them (Windows): minimize, maximize, restore. Thin, as the OS draws them */
+export function WindowMinIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+export function WindowMaxIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+export function WindowCloseIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" aria-hidden className="shrink-0">
+      <path d="m0.5 0.5 9 9M9.5 0.5l-9 9" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  )
+}
+
+/** A filled square — stop, as on any player */
+export function StopIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" aria-hidden className="shrink-0">
+      <rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** Two cards, one behind the other — work going on behind the conversation (background tasks) */
+export function BackgroundIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect
+        x="5"
+        y="2.5"
+        width="9"
+        height="7.5"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        opacity="0.55"
+      />
+      <rect
+        x="2"
+        y="6"
+        width="9"
+        height="7.5"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        fill="var(--color-surface-side, transparent)"
+      />
+    </svg>
+  )
+}
+
+/** An envelope — the inbox: what waits for the person */
+export function MailIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="2" y="3.5" width="12" height="9" rx="1.6" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="m2.6 4.6 5.4 4 5.4-4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 /** A magnifier — search (#529) */
 export function SearchIcon({ size = 13 }: { size?: number }) {
   return (
@@ -81,7 +177,12 @@ export function CentraluMarkIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
       <circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
-      <path d="M8 2.4 A5.6 5.6 0 1 1 3.7 11.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M8 2.4 A5.6 5.6 0 1 1 3.7 11.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
       <circle cx="8" cy="8" r="1.7" fill="currentColor" />
     </svg>
   )
@@ -131,8 +232,21 @@ export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number 
 /** Back or forward between screens (#374): the same chevron as the fold's, pointing the way it goes */
 export function StepIcon({ dir, size = 14 }: { dir: -1 | 1; size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" className={`shrink-0 ${dir < 0 ? 'rotate-180' : ''}`} aria-hidden>
-      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className={`shrink-0 ${dir < 0 ? 'rotate-180' : ''}`}
+      aria-hidden
+    >
+      <path
+        d="M6 3.5L10.5 8L6 12.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -260,14 +374,48 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
+ * Uncommitted changes — a page with a plus over a minus, the diff's two signs (owner, 2026-10-18: the sidebar's bare
+ * count read as "what is this number"). The page says files, the signs say changed.
+ */
+export function ChangesIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 2.5h6l3 3v8a1 1 0 01-1 1h-8a1 1 0 01-1-1v-10a1 1 0 011-1z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 5.6v3.6M6.2 7.4h3.6M6.2 11.4h3.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * Import — an arrow descending onto a tray (M4 E-3). It stands next to "new app" (+), so it is
  * told apart by shape: creating is a plus, bringing something in is the shape of a download.
  */
 export function ImportIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M8 2.5v7M5 6.8 8 9.8l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2.8 10.5v1.6c0 .8.6 1.4 1.4 1.4h7.6c.8 0 1.4-.6 1.4-1.4v-1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M8 2.5v7M5 6.8 8 9.8l3-3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.8 10.5v1.6c0 .8.6 1.4 1.4 1.4h7.6c.8 0 1.4-.6 1.4-1.4v-1.6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   )
 }

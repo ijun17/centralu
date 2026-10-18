@@ -100,9 +100,11 @@ export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<str
 
 /**
  * A linked machine's session an orchestrator asked to hear about (#82 phase 4). `paused`: the session's own background
- * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left
+ * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left.
+ * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
+ * (#1082); until then nothing it relays is about that instruction's turn
  */
-export type LinkedReport = { orchestratorId: string; busy: boolean; paused?: BackgroundTask[] }
+export type LinkedReport = { orchestratorId: string; busy: boolean; paused?: BackgroundTask[]; instruction?: string }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
 export type OwnerMove = {

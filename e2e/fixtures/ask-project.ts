@@ -265,41 +265,53 @@ export function askProjectTests(): void {
       await expect(page.getByTestId('orchestrator-child-row-orc-child-2')).toContainText('An older lookup')
     })
 
-    // #673: the person was looking at another session and never saw the card, so the session worked alone
-    test('a card raised in a session off screen leaves a card in the top right that opens it', async ({ page }) => {
+    /*
+     * #673: the person was looking at another session and never saw the card, so the session worked alone. The cards in
+     * the top right are gone (owner, 2026-10-18): the request is written out in the inbox's capsule and stands in the
+     * inbox, on screen or not, until it is answered.
+     */
+    const agentNotice = (page: Page, id: string) =>
+      page.evaluate(
+        (sid) => ((window as any).__store.getState().notices as { sessionId: string; kind: string }[]).some((n) => n.sessionId === sid && n.kind === 'agent_start'),
+        id,
+      )
+    const nameOf = (page: Page, id: string) => page.evaluate((sid) => (window as any).__store.getState().sessions[sid].name as string, id)
+
+    test('a card raised in a session off screen is told in the inbox capsule, and the inbox opens it', async ({ page }) => {
       const { caller, consumer } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })
       // The person moves on to another session
       const other = await newSession(page, 'consumer')
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(other)
       await agentCard(page, caller, consumer, 'ag-off')
-      const toast = page.locator(`[data-testid="notice"][data-kind="agent_start"][data-session="${caller}"]`)
-      await expect(toast).toBeVisible()
-      await expect(toast).toContainText('Wants to start an agent')
-      await toast.getByTestId('notice-open').click()
+      await expect(page.getByTestId('inbox-peek')).toHaveText(`${await nameOf(page, caller)} wants to start an agent`)
+      await expect(page.getByTestId('notice')).toHaveCount(0)
+      await page.getByTestId('counter').click()
+      await page.getByTestId(`inbox-item-${caller}`).click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(caller)
       await expect(page.locator('[data-testid="approval-card"][data-kind="agent_start"]')).toBeVisible()
-      await expect(toast).toHaveCount(0)
+      // Opening it does not answer it: the notice stands until the card is answered
+      expect(await agentNotice(page, caller)).toBe(true)
     })
 
-    test('a card answered elsewhere takes its card in the top right away', async ({ page }) => {
+    test('a card answered elsewhere takes its notice away', async ({ page }) => {
       const { caller, consumer } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })
       await newSession(page, 'consumer')
       await agentCard(page, caller, consumer, 'ag-else')
-      const toast = page.locator(`[data-testid="notice"][data-kind="agent_start"][data-session="${caller}"]`)
-      await expect(toast).toBeVisible()
+      await expect.poll(() => agentNotice(page, caller)).toBe(true)
       // Another window answered it, or the session withdrew it
       await emit(page, caller, { type: 'approval_resolved', requestId: 'ag-else', decision: 'allow' })
-      await expect(toast).toHaveCount(0)
+      await expect.poll(() => agentNotice(page, caller)).toBe(false)
     })
 
-    test('a card raised in the session on screen leaves no card in the top right', async ({ page }) => {
+    test('a card raised in the session on screen is told in the capsule too, in its own words', async ({ page }) => {
       const { caller, consumer } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })
       await agentCard(page, caller, consumer, 'ag-on')
       await expect(page.locator('[data-testid="approval-card"][data-kind="agent_start"]')).toBeVisible()
-      await expect(page.locator('[data-testid="notice"][data-kind="agent_start"]')).toHaveCount(0)
+      await expect(page.getByTestId('inbox-peek')).toHaveText(`${await nameOf(page, caller)} wants to start an agent`)
+      await expect(page.getByTestId('notice')).toHaveCount(0)
     })
 
     test('a request that ended without an agent leaves a line in the session for the person', async ({ page }) => {

@@ -88,9 +88,9 @@ export function FileTree({ projectId }: { projectId: string }) {
   const hostResyncs = useStore((s) => s.hostResyncs)
   useEffect(() => {
     if (!connected) return
-    // A failed watch registration must not break the tree — watching is a side glance, not the main job
-    void platform.fs.watch(projectId, ['', ...(expanded ?? [])]).catch(() => {})
-  }, [platform, projectId, expanded, connected, hostResyncs])
+    // A failed watch registration must not break the tree — watching is a side glance, not the main job. It is said (#841)
+    void useStore.getState().watchProjectDirs(projectId, ['', ...(expanded ?? [])])
+  }, [projectId, expanded, connected, hostResyncs])
   const resyncsSeen = useRef(hostResyncs)
   useEffect(() => {
     if (resyncsSeen.current === hostResyncs) return

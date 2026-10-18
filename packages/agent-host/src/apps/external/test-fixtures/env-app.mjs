@@ -4,7 +4,7 @@
  * the broker (D) side is also edited, and if the secrets, imports and version tests leaned on it
  * too, two lines of change would collide in the same file.
  *
- *   node env-app.mjs [--env <name>] [--require-env] [--leak]
+ *   node env-app.mjs [--env <name>] [--require-env] [--leak] [--leak-list]
  *
  * --env          the `env` tool returns the environment variable of this name — the test sees the
  *                value the app **actually received** (not what the host claims it sent)
@@ -12,6 +12,7 @@
  *                starts (an app that cannot start because a key is missing)
  * --leak         an app that leaks the value it received: writes it to stderr on startup, and
  *                `leak_fail` carries it in the failure message
+ * --leak-list    an app whose tool list fails with the value it received in the error, so it never starts
  *
  * The `version` tool returns the value it read from the app folder's (cwd) version.txt **once, at
  * startup** — a rollback test uses this to see "which code it started with" (the server code is
@@ -52,5 +53,10 @@ serveStdio(() => {
     process.stderr.write(`env-app: about to fail holding ${value ?? '(none)'}\n`)
     return say(`could not use ${NAME}=${value ?? '(none)'}`, true)
   })
+  if (flag('leak-list')) {
+    server.server.setRequestHandler('tools/list', async () => {
+      throw new Error(`could not list tools with ${NAME}=${value ?? '(none)'}`)
+    })
+  }
   return server
 })

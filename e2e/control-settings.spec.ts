@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession, pickSetting } from './fixtures/control.js'
 import { columnsThrough } from './fixtures/columns.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on settings and the session settings menu: send key, models, effort, presets and their tabs. Moved out of control-loop.spec.ts by subject (#845); the
@@ -426,8 +427,7 @@ test('Speed (Fast) only appears for models that offer a tier, and the chosen val
   await newSession(page, 'alpha', 'task')
 
   // Tier belongs to codex — create a codex session (the session menu has no way to switch tools)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('tool-option-codex').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -612,8 +612,7 @@ test("Switching sessions does not leave the previous tool's model list behind", 
   )
 
   // Create a codex session and open its menu to populate the list
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('tool-option-codex').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

@@ -1,6 +1,18 @@
 import { formatCount } from '../app/format.js'
-import { subagentStepRow, type Attachment, type NormalizedEvent, type StoredMessage, type SubagentStep, type ToolSummary } from '@cc/protocol'
-import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import {
+  subagentStepRow,
+  type Attachment,
+  type NormalizedEvent,
+  type StoredMessage,
+  type SubagentStep,
+  type ToolSummary,
+} from '@cc/protocol'
+import {
+  agentStartQuestion,
+  centraluUpdateQuestion,
+  projectAccessQuestion,
+  projectCreateQuestion,
+} from '@cc/core'
 
 /**
  * The conversation transcript — the rows a session's conversation draws, and the pure rules that
@@ -18,7 +30,7 @@ import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, proj
  */
 export type ChatAttachment = Attachment & { data?: string }
 
-export type ChatItem = (
+export type ChatItem =
   /**
    * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
    * (`user_message`).
@@ -30,69 +42,77 @@ export type ChatItem = (
    * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
    * could differ, causing a double render, #75).
    */
-  | {
-      kind: 'user'
-      seq: number
-      text: string
-      attachments?: ChatAttachment[]
-      pending?: boolean
-      from?: { sessionId: string; name: string }
-      /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
-      fromApp?: { appId: string; projectId: string | null; name: string }
-    }
-  | { kind: 'assistant'; seq: number; text: string }
-  /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
-  | { kind: 'reasoning'; seq: number; text: string }
-  /*
-   * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
-   * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
-   */
-  | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
-  /**
-   * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
-   * in — the full output lives in `result`.
-   * callId: the name by which the result/output finds its own row (#98) — falls back to the old
-   * positional rule (`ownerOf`) when absent.
-   */
-  | {
-      kind: 'tool'
-      seq: number
-      tool: string
-      title: string
-      /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
-      paths?: string[]
-      /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
-      centralu?: ToolSummary['centralu']
-      callId?: string
-      result?: string
-      ok?: boolean
-      live?: string
-    }
-  | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
-  /**
-   * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
-   * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
-   */
-  | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
-) & {
-  /**
-   * The **number within the session** the host assigned when it stored this row (the store's
-   * `messages.seq`, #79).
-   *
-   * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
-   * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
-   * merge of history with live items go **only by this number**. If the render key were to leak
-   * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
-   * session for an app's requested agent was opened, a stored 8-line session ended up with a
-   * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
-   *
-   * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
-   * from a host that sends no number. An agent's image carries its row's number since #868, as every
-   * recorded row does. A merged message carries the number of its first chunk — the same rule the
-   * host's `loadMessages` uses.
-   */
-  storedSeq?: number
-}
+  (
+    | {
+        kind: 'user'
+        seq: number
+        text: string
+        attachments?: ChatAttachment[]
+        pending?: boolean
+        from?: { sessionId: string; name: string }
+        /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
+        fromApp?: { appId: string; projectId: string | null; name: string }
+      }
+    | { kind: 'assistant'; seq: number; text: string }
+    /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
+    | { kind: 'reasoning'; seq: number; text: string }
+    /*
+     * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
+     * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
+     */
+    | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
+    /**
+     * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
+     * in — the full output lives in `result`.
+     * callId: the name by which the result/output finds its own row (#98) — falls back to the old
+     * positional rule (`ownerOf`) when absent.
+     */
+    | {
+        kind: 'tool'
+        seq: number
+        tool: string
+        title: string
+        /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
+        paths?: string[]
+        /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
+        centralu?: ToolSummary['centralu']
+        callId?: string
+        result?: string
+        ok?: boolean
+        live?: string
+      }
+    | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
+    /**
+     * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
+     * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
+     */
+    | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
+  ) & {
+    /**
+     * The **number within the session** the host assigned when it stored this row (the store's
+     * `messages.seq`, #79).
+     *
+     * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
+     * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
+     * merge of history with live items go **only by this number**. If the render key were to leak
+     * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
+     * session for an app's requested agent was opened, a stored 8-line session ended up with a
+     * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
+     *
+     * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
+     * from a host that sends no number. An agent's image carries its row's number since #868, as every
+     * recorded row does. A merged message carries the number of its first chunk — the same rule the
+     * host's `loadMessages` uses.
+     */
+    storedSeq?: number
+    /**
+     * When it was said or happened (epoch ms; owner, 2026-10-18): the stored row's `ts` for history, the moment
+     * the window received it for a live row. Shown under a bubble (the person's message, the end of the agent's
+     * answer), and read on every row for where a day begins (the conversation's day dividers). A live answer's time
+     * moves with each chunk, so it reads as when the answer was finished.
+     */
+    at?: number
+  }
 
 /**
  * The render key counter for live conversation items. ONE counter shared by every session — see
@@ -131,14 +151,16 @@ function ownerOf(items: ChatItem[], callId: string, fallback: 'oldest' | 'latest
     const mine = items.findIndex((i) => i.kind === 'tool' && i.callId === callId)
     if (mine !== -1) return mine
   }
-  const open = (i: ChatItem | undefined) => i?.kind === 'tool' && i.callId === undefined && i.result === undefined
+  const open = (i: ChatItem | undefined) =>
+    i?.kind === 'tool' && i.callId === undefined && i.result === undefined
   if (fallback === 'oldest') return items.findIndex(open)
   for (let i = items.length - 1; i >= 0; i--) if (open(items[i])) return i
   return -1
 }
 
 /** Carries the stored number the host sent along onto the item (#79) — omitted when there is none */
-const stored = (seq: number | undefined): { storedSeq?: number } => (seq === undefined ? {} : { storedSeq: seq })
+const stored = (seq: number | undefined): { storedSeq?: number } =>
+  seq === undefined ? {} : { storedSeq: seq }
 
 /**
  * Does this hold a row with this stored number already (#79)?
@@ -195,7 +217,11 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       const last = items[items.length - 1]
       if (continues(last, 'assistant', e.seq)) {
         // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
-        return replaceAt(items, items.length - 1, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) })
+        return replaceAt(items, items.length - 1, {
+          ...last,
+          text: last.text + e.text,
+          ...(last.storedSeq === undefined ? stored(e.seq) : {}),
+        })
       }
       return [...items, { kind: 'assistant', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
@@ -204,7 +230,11 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (!e.text) return items
       const last = items[items.length - 1]
       if (continues(last, 'reasoning', e.seq)) {
-        return replaceAt(items, items.length - 1, { ...last, text: last.text + e.text, ...(last.storedSeq === undefined ? stored(e.seq) : {}) })
+        return replaceAt(items, items.length - 1, {
+          ...last,
+          text: last.text + e.text,
+          ...(last.storedSeq === undefined ? stored(e.seq) : {}),
+        })
       }
       return [...items, { kind: 'reasoning', seq: ++chatSeq, ...stored(e.seq), text: e.text }]
     }
@@ -231,7 +261,15 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (holds(items, e.seq)) return items
       return [
         ...items,
-        { kind: 'image', seq: ++chatSeq, ...stored(e.seq), mime: e.mime, data: e.data, path: e.path, note: e.note },
+        {
+          kind: 'image',
+          seq: ++chatSeq,
+          ...stored(e.seq),
+          mime: e.mime,
+          data: e.data,
+          path: e.path,
+          note: e.note,
+        },
       ]
     case 'tool_result': {
       /*
@@ -267,7 +305,12 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * after whatever other card was covering it closes. The conversation already has one row for
        * it: this never draws a second one.
        */
-      if (items.some((it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined)) return items
+      if (
+        items.some(
+          (it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined,
+        )
+      )
+        return items
       if (holds(items, e.seq)) return items
       return [
         ...items,
@@ -291,7 +334,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
                         ? agentStartQuestion(e.detail)
                         : e.detail.kind === 'centralu_update'
                           ? centraluUpdateQuestion(e.detail)
-                        : e.detail.raw,
+                          : e.detail.raw,
         },
       ]
     case 'approval_resolved':
@@ -319,7 +362,8 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // A message sent by an app (M4 B-1) is also excluded from the human message's confirmation match — its origin marker must never be absorbed into a human bubble
       // Already confirmed by the merge with history (#79) — a history page arrived before this event
       if (holds(items, e.seq)) return items
-      const idx = e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      const idx =
+        e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1)
         return [
           ...items,
@@ -409,10 +453,18 @@ export function resetText(e: Extract<NormalizedEvent, { type: 'conversation_rese
 }
 
 /** The stored marker kinds this build can word (`markerText`) */
-const KNOWN_MARKERS: ReadonlySet<string> = new Set(['compaction', 'handoff', 'error', 'conversation_reset', 'notice'])
+const KNOWN_MARKERS: ReadonlySet<string> = new Set([
+  'compaction',
+  'handoff',
+  'error',
+  'conversation_reset',
+  'notice',
+])
 
 /** One stored or live marker's line — the live and restored paths must never word the same marker differently */
-export function markerText(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): string {
+export function markerText(
+  e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
+): string {
   switch (e.type) {
     case 'handoff':
       return handoffText(e)
@@ -424,7 +476,10 @@ export function markerText(e: Extract<NormalizedEvent, { type: 'compaction' | 'h
     case 'notice': {
       const line = noticeLine(e)
       if (!line) return e.text
-      return [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') + ` — ${line.body}`
+      return (
+        [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') +
+        ` — ${line.body}`
+      )
     }
     default:
       return compactionText(e)
@@ -473,7 +528,9 @@ export function audienceText(a: 'you' | 'centralu'): string {
 }
 
 /** A marker's text, and for a readable notice its parts — the live and restored paths build the row the same way */
-function markerParts(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): {
+function markerParts(
+  e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
+): {
   text: string
   notice?: NoticeLine
 } {
@@ -497,6 +554,20 @@ export function subagentRow(sessionId: string, seq: number, step: SubagentStep):
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
+    const before = items.length
+    pushStored(items, m)
+    for (let k = before; k < items.length; k++) items[k] = stampSaid(items[k]!, m.ts)
+  }
+  return items
+}
+
+/** Marks a row with when it was said or happened (see `ChatItem.at`) */
+export function stampSaid(item: ChatItem, at: number): ChatItem {
+  return { ...item, at }
+}
+
+function pushStored(items: ChatItem[], m: StoredMessage): void {
+  {
     if (m.kind === 'text' && m.role === 'user') {
       const p = m.payload as {
         text?: string
@@ -517,19 +588,30 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
     } else if (m.kind === 'text' || m.kind === 'reasoning') {
       // One row is one message (#77) — neighboring rows are different replies and are never merged (the same rule as live's `continues`)
       const e = m.payload as { text?: string }
-      items.push({ kind: m.kind === 'text' ? 'assistant' : 'reasoning', seq: m.seq, storedSeq: m.seq, text: e.text ?? '' })
+      items.push({
+        kind: m.kind === 'text' ? 'assistant' : 'reasoning',
+        seq: m.seq,
+        storedSeq: m.seq,
+        text: e.text ?? '',
+      })
     } else if (m.kind === 'marker') {
       // The stored payload is the event itself — live and restored paths must never produce different wording
-      const e = m.payload as Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>
+      const e = m.payload as Extract<
+        NormalizedEvent,
+        { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }
+      >
       /*
        * A marker kind this build does not know (one a newer host stored) is left out. It used to be drawn as a
        * compaction, the only marker there was at first — so a #304 notice read back by an older window would have said
        * "Earlier messages were compacted here".
        */
-      if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) continue
+      if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) return
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
-      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; paths?: string[]; centralu?: ToolSummary['centralu'] } }
+      const e = m.payload as {
+        callId?: string
+        summary?: { tool: string; title: string; paths?: string[]; centralu?: ToolSummary['centralu'] }
+      }
       if (e.summary)
         items.push({
           kind: 'tool',
@@ -574,5 +656,4 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       })
     }
   }
-  return items
 }

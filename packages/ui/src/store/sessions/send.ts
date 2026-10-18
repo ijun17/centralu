@@ -45,7 +45,10 @@ function toBase64(bytes: Uint8Array): string {
  *    the question is dropped.
  *  - `none`: no open question.
  */
-export function composerTarget(open: SessionSummary['pendingQuestions'], hasAttachments: boolean): 'answer' | 'drops' | 'none' {
+export function composerTarget(
+  open: SessionSummary['pendingQuestions'],
+  hasAttachments: boolean,
+): 'answer' | 'drops' | 'none' {
   if (open.length === 0) return 'none'
   return open.length === 1 && open[0]!.questions.length === 1 && !hasAttachments ? 'answer' : 'drops'
 }
@@ -59,7 +62,13 @@ export function droppedQuestionsText(questions: string[]): string {
 }
 
 /** A message of unknown send status (#173) — bubble render key → what is needed to undo it. Cleared against the store after reconnecting */
-type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state']; prevInterruption?: SessionSummary['interruption'] }
+type UnsureSend = {
+  sessionId: string
+  text: string
+  attachments?: ChatAttachment[]
+  prevState?: SessionSummary['state']
+  prevInterruption?: SessionSummary['interruption']
+}
 const unsureSends = new Map<number, UnsureSend>()
 
 /**
@@ -79,7 +88,14 @@ function unsend(
   set((s) => {
     const sessions =
       s.sessions[u.sessionId] && u.prevState
-        ? { ...s.sessions, [u.sessionId]: { ...s.sessions[u.sessionId]!, state: u.prevState, interruption: u.prevInterruption ?? null } }
+        ? {
+            ...s.sessions,
+            [u.sessionId]: {
+              ...s.sessions[u.sessionId]!,
+              state: u.prevState,
+              interruption: u.prevInterruption ?? null,
+            },
+          }
         : s.sessions
     const drafts = draftsWith(s.drafts, u.sessionId, u.text, u.attachments)
     return {
@@ -95,7 +111,12 @@ function unsend(
 }
 
 /** Prepends unsent text and attachments to that session's draft — text written in the meantime is not overwritten (in order, the failed message came first) */
-function draftsWith(drafts: Record<string, Draft>, sessionId: string, text: string, attachments?: ChatAttachment[]): Record<string, Draft> {
+function draftsWith(
+  drafts: Record<string, Draft>,
+  sessionId: string,
+  text: string,
+  attachments?: ChatAttachment[],
+): Record<string, Draft> {
   const cur = drafts[sessionId] ?? EMPTY_DRAFT
   return {
     ...drafts,
@@ -125,7 +146,10 @@ function restoreDraft(
  * The remaining gap: if the host is in the middle of reviving a sleeping session and has not yet
  * stored the message, it arrives only after this has already undone it here.
  */
-export async function settleUnsureSends(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
+export async function settleUnsureSends(
+  get: () => AppState,
+  set: (fn: (s: AppState) => Partial<AppState>) => void,
+): Promise<void> {
   const mine = [...unsureSends].filter(([, u]) => get().sessions[u.sessionId])
   for (const [seq] of [...unsureSends]) if (!mine.some(([s]) => s === seq)) unsureSends.delete(seq)
   for (const id of new Set(mine.map(([, u]) => u.sessionId))) await get().loadHistory(id)
@@ -137,12 +161,7 @@ export async function settleUnsureSends(get: () => AppState, set: (fn: (s: AppSt
 }
 
 /** The store's actions for what the composer sends */
-type SendActions = Pick<
-  AppState,
-  | 'setDraft'
-  | 'attachFile'
-  | 'send'
->
+type SendActions = Pick<AppState, 'setDraft' | 'attachFile' | 'send'>
 
 export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
   setDraft(sessionId, draft) {
@@ -252,7 +271,10 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
     const prevInterruption = get().sessions[sessionId]?.interruption ?? null
     set((s) => {
       const sessions = s.sessions[sessionId]
-        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const, interruption: null } }
+        ? {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const, interruption: null },
+          }
         : s.sessions
       return {
         /*
@@ -267,7 +289,14 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
             // Attachments are never mixed into `text` as a label (a 📎 name) — an image is drawn as a
             // real thumbnail, a file as a separate chip. `text` stays exactly what was sent, so
             // matching it against the `user_message` confirmation also relies on this (#75).
-            { kind: 'user', seq, text, ...(attachments?.length ? { attachments } : {}), pending: true },
+            {
+              kind: 'user',
+              seq,
+              text,
+              ...(attachments?.length ? { attachments } : {}),
+              pending: true,
+              at: Date.now(),
+            },
           ],
         },
         sessions,
@@ -297,7 +326,9 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
         set((s) => {
           const items = s.chat[sessionId] ?? []
           const at = items.findIndex((i) => i.seq === seq)
-          return at < 0 ? {} : { chat: { ...s.chat, [sessionId]: [...items.slice(0, at), mark, ...items.slice(at)] } }
+          return at < 0
+            ? {}
+            : { chat: { ...s.chat, [sessionId]: [...items.slice(0, at), mark, ...items.slice(at)] } }
         })
       }
       // A successful send means the sleeping session was revived (the host resumes it on its own)

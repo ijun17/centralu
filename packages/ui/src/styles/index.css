@@ -258,15 +258,29 @@
   --leading-code: 1.5;
 
   /*
-   * Four radii. sm for small marks (14px chips, checkboxes, inline code), md for controls and
-   * cards, lg for panels and bubbles, full for pills and dots. A shape inside a bordered shape
-   * takes the outer radius minus the border (the folded composer's bottom corners), so it is
-   * written as a calc on the token rather than as its own step.
+   * The corners (docs/design-system.md, Shape). Each step is named for what takes it:
+   *   sm      3px   small marks: checkboxes, inline code
+   *   md      4px   controls, keycaps, tool tiles, a session's mark
+   *   lg      8px   panels, menus, dialogs, tool cards
+   *   field  10px   what is typed into or picked from: the top bar's search field, a question's options and its
+   *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
+   *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
+   *                 approval and question cards, and the conversation's own cards (a new session's past
+   *                 conversations) (owner, 2026-10-18: rounder than the panels, so a message reads as speech, not
+   *                 as a box)
+   *   full          capsules (the top bar's) and dots
+   * `field-key` is the keycap inside a field: the field's corner less the 5px gap around the key, so the two
+   * curves run parallel (the search field's ⌘K). Any other shape inside a bordered shape takes the outer radius
+   * minus the border, written as a calc on the token at its call site (the folded composer's bottom corners).
+   * tooling/styles.test.ts fails on a corner written as a number outside components/ and styles/.
    */
   --radius-*: initial;
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 8px;
+  --radius-field: 10px;
+  --radius-field-key: calc(var(--radius-field) - 5px);
+  --radius-bubble: 14px;
   --radius-full: calc(infinity * 1px);
 
   --font-weight-*: initial;
@@ -710,6 +724,11 @@
     background-clip: content-box;
     border-radius: var(--scrollbar-radius);
   }
+  /* A scroller whose bar is drawn over its content by OverlayScrollbar: its own bar takes no width */
+  .cc-scroll-overlay::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-scrollbar-thumb-hover);
     background-clip: content-box;
@@ -813,6 +832,14 @@
 }
 .cc-skeleton {
   animation: cc-skeleton-in 200ms ease-out 150ms both;
+}
+/*
+ * The conversation's cover (ChatStream) waits longer (owner, 2026-10-18): a conversation usually arrives in
+ * 150-300ms, and a skeleton that half rose and was then swapped for the rows read as a flicker. Below 600ms the rows
+ * simply fade in; only a slow read (a linked machine, a very long history) shows the skeleton.
+ */
+.cc-skeleton.cc-skeleton-late {
+  animation-delay: 600ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .cc-skeleton {
@@ -946,6 +973,39 @@
 
 /* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
    the run-command dropdown) */
+/*
+ * A layer's backdrop (the palette's and settings' scrim) fades with the panel it sits under (usePresence,
+ * components/presence.ts). Same lengths as cc-drop and cc-drop-out, so the two move as one.
+ */
+@keyframes cc-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-fade {
+  animation: cc-fade 160ms ease-out;
+}
+@keyframes cc-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.cc-fade-out {
+  animation: cc-fade-out 150ms ease-in forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-fade,
+  .cc-fade-out {
+    animation: none;
+  }
+}
+
 @keyframes cc-drop-out {
   from {
     opacity: 1;
@@ -1091,13 +1151,22 @@
     border-collapse: collapse;
     font-size: 0.95em;
   }
+  /*
+   * A table's lines are `line-strong`, not the hairline (owner, 2026-10-18): the answer now sits in a bubble on
+   * `surface-raised` with a `line` border, so hairline cells and a raised header faded into the bubble itself. The
+   * header takes half a hover step over whatever it stands on, so it reads as a header on the bubble and off it.
+   */
   .cc-md th,
   .cc-md td {
-    border: 1px solid var(--color-line);
+    border: 1px solid var(--color-line-strong);
     padding: 0.3em 0.6em;
     text-align: left;
   }
-  .cc-md th { color: var(--color-ink); font-weight: var(--font-weight-semibold); background: var(--color-surface-raised); }
+  .cc-md th {
+    color: var(--color-ink);
+    font-weight: var(--font-weight-semibold);
+    background: color-mix(in oklab, var(--color-surface-hover) 50%, transparent);
+  }
   .cc-md td { color: var(--color-ink-muted); }
   /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
@@ -1110,45 +1179,57 @@
  * in the tooltip. `lookOf` (features/session/look.ts) maps a session to one of them, and writes it
  * as `data-look`.
  *
- *   idle       nothing around the chip (the chip's own thin grey border)
- *   answering  a light grey ring (`ink-muted`, the ring the orbit left with the spin turned off): it is
- *              working, nothing to do; white stays for what calls the person
- *   stopped    a white dashed ring on a grey chip: the turn broke off (error, interruption, limit)
- *   waiting    a white ring on a grey chip: the person has to act (approval, a question)
+ *   idle       the chip's thin grey border
+ *   answering  a light grey border (`ink-muted`): it is working, nothing to do; white stays for what calls
+ *              the person
+ *   stopped    a white dashed border on a grey chip: the turn broke off (error, interruption, limit)
+ *   waiting    a white border on a grey chip: the person has to act (approval, a question)
  *
- * The mark keeps the structure it had with the orbit: a 1.5px ring painted as the background behind a
- * 14px chip, 17px in all. A background cannot be dashed, so the stopped look draws the same 1.5px as a
- * dashed border instead of padding, which keeps the size.
+ * The mark is one 17px chip whose own border is the look (below, 2026-10-18).
  */
 .cc-mark {
   /*
-   * A fixed box: a border is snapped to whole device pixels (1.5px is drawn as 1px at 1x) while padding is
-   * not, so the dashed look would otherwise be smaller than the others. The chip sits centred inside.
+   * One edge, not three (owner, 2026-10-18: the mark read blurry). It used to be a 1.5px ring painted as a background
+   * behind a 14px chip that had its own 1px border and the keycap's inset light and drop shadow: three edges a pixel
+   * apart, the shadow making the bottom heavier than the top, and the ring's corner not following the chip's.
+   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 2px when it says
+   * something. No shadow: the border alone separates it from the sidebar.
    */
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  height: 17px;
+  min-width: 17px;
+}
+.cc-mark > .cc-chip {
   box-sizing: border-box;
   height: 17px;
   min-width: 17px;
-  padding: 1.5px;
-}
-.cc-mark[data-look='answering'] {
-  background: var(--color-ink-muted);
-}
-.cc-mark[data-look='waiting'] {
-  background: var(--color-ink-signal);
-}
-.cc-mark[data-look='stopped'] {
-  padding: 0;
-  border: 1.5px dashed var(--color-ink-signal);
-}
-.cc-mark > .cc-chip {
+  width: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-line-strong);
   background-color: var(--color-surface-floor);
+  box-shadow: none;
+  /* The letter sits high in the readout font's line box (measured at 4x: its middle up to 0.75px above the chip's);
+     1px on top brings every look within a quarter pixel of the middle */
+  padding-top: 1px;
 }
-/* The grey chip of the two looks that stopped or wait */
-.cc-mark[data-look='stopped'] > .cc-chip,
+/* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
+   the 1px goes under it (measured at 4x) */
+.cc-mark > .cc-chip.cc-chip-letter {
+  font-family: var(--font-sans);
+  padding-top: 0;
+  padding-bottom: 1px;
+}
+.cc-mark[data-look='answering'] > .cc-chip {
+  border: 2px solid var(--color-ink-muted);
+}
 .cc-mark[data-look='waiting'] > .cc-chip {
+  border: 2px solid var(--color-ink-signal);
+  background-color: var(--color-surface-selected);
+}
+.cc-mark[data-look='stopped'] > .cc-chip {
+  border: 2px dashed var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
 

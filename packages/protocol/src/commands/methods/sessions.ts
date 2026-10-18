@@ -434,10 +434,16 @@ export const sessionMethods = {
    * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
    *
    * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own.
+   * `unreached`: the linked machines whose trash could not be read this time (#841 item 4), so the list says it is
+   * not the whole trash. Absent when every machine answered, and from a host before it.
    */
   'trash.list': {
     params: z.object({}),
-    result: z.object({ sessions: z.array(TrashedSession), bytes: z.number() }),
+    result: z.object({
+      sessions: z.array(TrashedSession),
+      bytes: z.number(),
+      unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+    }),
   },
   /** A trashed conversation, read-only — the same page shape as `messages.load` */
   'trash.read': {

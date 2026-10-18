@@ -24,7 +24,9 @@ import { EMPTY_CHAT } from './empty.js'
 const COMPOSER_REACH = 54
 
 /** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
-const CommandRunnerOverlay = lazyComponent(() => import('./CommandRunner.jsx').then((m) => m.CommandRunnerOverlay))
+const CommandRunnerOverlay = lazyComponent(() =>
+  import('./CommandRunner.jsx').then((m) => m.CommandRunnerOverlay),
+)
 
 /**
  * The focus view — one chosen session at full width.
@@ -35,12 +37,16 @@ const CommandRunnerOverlay = lazyComponent(() => import('./CommandRunner.jsx').t
  */
 export function SessionView() {
   const session = useFocusedSession()
+  // Until the host's first lists arrive nothing is said here (owner, 2026-10-18): the session being restored may be
+  // about to open, so "Select a project or session" would flash first. Once known, the line fades in.
+  const listed = useStore((s) => s.connection === 'connected' || Object.keys(s.sessions).length > 0)
 
   if (!session) {
+    if (!listed) return <div className="flex-1" data-testid="empty-focus-waiting" />
     // With a project picked and no session, App shows the project screen (ProjectView, #203) instead of this
     return (
       <div
-        className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+        className="cc-fade flex flex-1 flex-col items-center justify-center gap-3 text-center"
         data-testid="empty-focus"
       >
         <p className="text-md text-ink-muted">Select a project or session</p>
@@ -231,7 +237,8 @@ export function SessionPane({
     const t = setTimeout(() => {
       const el = scrollRef.current
       const atBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight < 40 : true
-      if (shouldMarkRead({ focused: useStore.getState().appFocused, atBottom, focusedForMs: 3000 })) void markRead(session.id)
+      if (shouldMarkRead({ focused: useStore.getState().appFocused, atBottom, focusedForMs: 3000 }))
+        void markRead(session.id)
     }, 3000)
     return () => clearTimeout(t)
   }, [session, chat.length, markRead, appFocused])
@@ -241,6 +248,15 @@ export function SessionPane({
 
   // Avoid rendering even at the moment the session disappears (deleted, archived)
   if (!session) return null
+
+  // A brand-new session (nothing said, nothing stored) offers the other tool, and the past conversations to resume
+  const starting =
+    !!session &&
+    session.kind === 'worker' &&
+    !!session.projectId &&
+    !session.appId &&
+    session.lastSeq === 0 &&
+    chat.length === 0
 
   return (
     /*
@@ -362,11 +378,11 @@ export function SessionPane({
         headerDrag={headerDrag}
       />
 
-      {/* A brand-new session (nothing said, nothing stored) offers the other tool, and the past conversations to resume */}
-      {session && session.kind === 'worker' && session.projectId && !session.appId && session.lastSeq === 0 && chat.length === 0 && (
+      {starting && session?.projectId && (
         <SessionStart sessionId={sessionId} projectId={session.projectId} tool={session.tool} />
       )}
       <ChatStream
+        yieldSpace={starting}
         bottomPeek={fold}
         /*
          * The card's full height is reserved **always** — it is never resized on rise
@@ -398,7 +414,11 @@ export function SessionPane({
         can be read. This tells the person it can be continued before they say anything to it —
         better than reporting failure after they have already sent something (FR-10).
       */}
-      {away ? <AwayNote machine={session.machine ?? null} /> : !session.live && <DormantNote sessionId={session.id} />}
+      {away ? (
+        <AwayNote machine={session.machine ?? null} />
+      ) : (
+        !session.live && <DormantNote sessionId={session.id} />
+      )}
 
       {/*
         The last turn stopped before it finished, and nobody here chose that (#698): the network, a quit, or the tool's

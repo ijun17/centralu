@@ -49,20 +49,26 @@ export function RowApproval({
     const x = s.sessions[sessionId]
     return x?.worktree?.path ?? (x?.projectId ? s.projects[x.projectId]?.path : undefined) ?? null
   })
-  const busy = useStore((s) => (pending ? !!s.approvalsInFlight[inFlightKey(sessionId, pending.requestId)] : false))
+  const busy = useStore((s) =>
+    pending ? !!s.approvalsInFlight[inFlightKey(sessionId, pending.requestId)] : false,
+  )
   const respond = useStore((s) => s.respondApproval)
   const settledHere = useRowsSettled()
   const view = pending ? rowView(pending.detail, root, others) : null
-  const [fitRef, fits] = useFitsWhole(view ? `${pending!.requestId}|${view.verb}|${view.line}|${view.dir ?? ''}` : '')
+  const [fitRef, fits] = useFitsWhole(
+    view ? `${pending!.requestId}|${view.verb}|${view.line}|${view.dir ?? ''}` : '',
+  )
   if (!pending || !view) return null
   // Allow and Deny while the line is not yet measured stay disabled, as before the rows settle
   const answerable = view.inPlace && fits !== false
   const ready = (settled ?? settledHere) && !busy && fits === true
   const answer = (decision: 'allow' | 'deny') => void respond(sessionId, pending.requestId, decision)
   const id = (part: string) => `${place}-${part}-${sessionId}`
-  const why = !view.inPlace ? view.openWhy : 'The line is longer than the row: open the session to read it whole on its card'
+  const why = !view.inPlace
+    ? view.openWhy
+    : 'The line is longer than the row: open the session to read it whole on its card'
   const button =
-    'flex shrink-0 items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40'
+    'flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50'
 
   /*
    * The waiting list is wide enough for the line and its buttons side by side; their slot has one width whether it
@@ -79,23 +85,37 @@ export function RowApproval({
       <Tooltip
         className={place === 'inbox' ? 'min-w-0 flex-1' : 'min-w-0 basis-full'}
         testId={id('approval-tip')}
-        content={<span className="block max-h-72 overflow-hidden whitespace-pre-wrap break-words font-mono">{tooltipText(pending.detail)}</span>}
+        content={
+          <span className="block max-h-72 overflow-hidden whitespace-pre-wrap break-words font-mono">
+            {tooltipText(pending.detail)}
+          </span>
+        }
       >
         {view.dir === undefined ? (
           <span className="flex min-w-0 items-baseline gap-1.5 text-xs" data-testid={id('approval-what')}>
             <span className="signal shrink-0 text-2xs font-medium">{view.verb}</span>
-            <span ref={view.inPlace ? fitRef : undefined} className="truncate font-mono text-ink">{view.line}</span>
+            <span ref={view.inPlace ? fitRef : undefined} className="truncate font-mono text-ink">
+              {view.line}
+            </span>
           </span>
         ) : (
           // An edit: the file's name never shrinks, its folder gives way first; the whole must show the name
-          <span ref={view.inPlace ? fitRef : undefined} className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-xs" data-testid={id('approval-what')}>
+          <span
+            ref={view.inPlace ? fitRef : undefined}
+            className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-xs"
+            data-testid={id('approval-what')}
+          >
             <span className="signal shrink-0 text-2xs font-medium">{view.verb}</span>
-            <span className="shrink-0 font-mono text-ink" data-testid={id('approval-file')}>{view.line}</span>
+            <span className="shrink-0 font-mono text-ink" data-testid={id('approval-file')}>
+              {view.line}
+            </span>
             {view.dir && <span className="min-w-0 truncate font-mono text-ink-faint">{view.dir}</span>}
           </span>
         )}
       </Tooltip>
-      <span className={`flex shrink-0 items-center gap-1.5 ${place === 'inbox' ? 'w-[8.5rem] justify-end' : ''}`}>
+      <span
+        className={`flex shrink-0 items-center gap-1.5 ${place === 'inbox' ? 'w-[8.5rem] justify-end' : ''}`}
+      >
         {answerable ? (
           <>
             <button
@@ -186,30 +206,54 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
     return lines.length > 1 ? `${lines[0]} …` : t
   }
   const policy = answersInPlace(d, otherPending)
-  const more = otherPending > 0 ? 'Something else is pending in this session too: open it to answer both' : 'This approval offers more than allow and deny, or says more than one line can: open the session to answer it on its card'
+  const more =
+    otherPending > 0
+      ? 'Something else is pending in this session too: open it to answer both'
+      : 'This approval offers more than allow and deny, or says more than one line can: open the session to answer it on its card'
   if (d.kind === 'command') {
-    const line = d.command.trim() === '' ? (d.network ? `network access to ${d.network.host}` : '(no command)') : first(d.command)
+    const line =
+      d.command.trim() === ''
+        ? d.network
+          ? `network access to ${d.network.host}`
+          : '(no command)'
+        : first(d.command)
     return { verb: d.stdin ? 'Type' : 'Run', line, inPlace: policy, openWhy: more }
   }
   if (d.kind === 'file_edit' && !d.multi) {
     const p = pathParts(d.path, root)
     const inside = p.inside
     return {
-      verb: d.change === 'add' ? 'Create' : d.change === 'delete' ? 'Delete' : d.change === 'move' ? 'Move' : 'Edit',
+      verb:
+        d.change === 'add'
+          ? 'Create'
+          : d.change === 'delete'
+            ? 'Delete'
+            : d.change === 'move'
+              ? 'Move'
+              : 'Edit',
       line: p.name,
       dir: p.dir,
       inPlace: policy && inside,
-      openWhy: policy && !inside ? "The file is outside this session's folder: open the session to read the whole path on its card" : more,
+      openWhy:
+        policy && !inside
+          ? "The file is outside this session's folder: open the session to read the whole path on its card"
+          : more,
     }
   }
   const verb =
-    d.kind === 'file_edit' ? 'Edit files'
-    : d.kind === 'agent_start' ? 'Start agent'
-    : d.kind === 'project_access' ? 'Reach project'
-    : d.kind === 'capability' ? 'App permission'
-    : d.kind === 'project_create' ? 'New project'
-    : d.kind === 'centralu_update' ? 'Update'
-    : 'Approve'
+    d.kind === 'file_edit'
+      ? 'Edit files'
+      : d.kind === 'agent_start'
+        ? 'Start agent'
+        : d.kind === 'project_access'
+          ? 'Reach project'
+          : d.kind === 'capability'
+            ? 'App permission'
+            : d.kind === 'project_create'
+              ? 'New project'
+              : d.kind === 'centralu_update'
+                ? 'Update'
+                : 'Approve'
   return { verb, line: first(d.kind === 'file_edit' ? d.path : detailText(d)), inPlace: false, openWhy: more }
 }
 
@@ -231,7 +275,13 @@ export function pathParts(path: string, root: string | null): { name: string; di
     const r = root === null ? null : normalizePath(root)
     // Drive letters and Windows paths compare without case
     const fold = (x: string) => (/^[a-z]:\/$/i.test(p.prefix) ? x.toLowerCase() : x)
-    if (r && r.prefix !== '' && fold(r.prefix) === fold(p.prefix) && p.segs.length > r.segs.length && r.segs.every((seg, i) => fold(seg) === fold(p.segs[i]!))) {
+    if (
+      r &&
+      r.prefix !== '' &&
+      fold(r.prefix) === fold(p.prefix) &&
+      p.segs.length > r.segs.length &&
+      r.segs.every((seg, i) => fold(seg) === fold(p.segs[i]!))
+    ) {
       rel = p.segs.slice(r.segs.length)
       inside = true
     }

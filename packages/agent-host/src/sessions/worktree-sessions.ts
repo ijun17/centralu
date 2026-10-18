@@ -193,8 +193,9 @@ export class WorktreeSessions {
     // The baseline for merge detection (#69): the point where the branch forked off. Without it, a
     // freshly created branch would read as "merged" for no reason other than being an ancestor of
     // the trunk.
-    const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
     try {
+      // Inside: a repository git refuses to read throws here first (`isRepo`, #841), and is a worktree that could not be made
+      const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
       worktree = await gitWorktreeAdd(params.cwd, path, branch, from ?? undefined, { trusted: true })
       if (baseSha) worktree = { ...worktree, base: baseSha }
     } catch (err) {

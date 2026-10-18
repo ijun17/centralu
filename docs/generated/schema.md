@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 55, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 56, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -229,16 +229,6 @@ erDiagram
     TEXT kind
     TEXT payload
     INTEGER ts
-  }
-  usage_facts {
-    TEXT date PK
-    TEXT tool PK
-    TEXT model PK
-    TEXT project_id PK
-    INTEGER input_tokens
-    INTEGER output_tokens
-    INTEGER cache_tokens
-    REAL cost_est
   }
   workspace {
     INTEGER id PK
@@ -564,21 +554,6 @@ Added in v41.
 | `kind` | TEXT | no |  |  | v41 |
 | `payload` | TEXT | no |  |  | v41 |
 | `ts` | INTEGER | no |  |  | v41 |
-
-### `usage_facts`
-
-Added in schema.sql.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `date` | TEXT | no |  | PK 1 | schema.sql |
-| `tool` | TEXT | no |  | PK 2 | schema.sql |
-| `model` | TEXT | no |  | PK 3 | schema.sql |
-| `project_id` | TEXT | yes |  | PK 4 | schema.sql |
-| `input_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `output_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `cache_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `cost_est` | REAL | no | `0` |  | schema.sql |
 
 ### `workspace`
 

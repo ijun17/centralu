@@ -399,7 +399,8 @@ export function stageZip(buf: Buffer, dest: string, limits: ImportLimits): Stage
     } catch (err) {
       throw new ImportRefused(err instanceof ZipError ? err.message : `Could not unpack ${wireJoin(...parts)}: ${(err as Error).message}`)
     }
-    writeFileSync(out, data, { mode: 0o644 })
+    // The executable bit carried over as a folder import carries it (`execBits`); an archive not made on Unix has none
+    writeFileSync(out, data, { mode: execBits(e.mode) })
   }
   t.out.files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   return t.out

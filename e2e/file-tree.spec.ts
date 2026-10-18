@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { setup } from './fixtures/control.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The side of the file tree that **changes** files (#18, #19).
@@ -32,9 +33,7 @@ async function seedTree(page: Page, entries: Record<string, { name: string; isDi
 }
 
 async function openTree(page: Page, prompt = 'work') {
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill(prompt)
@@ -270,6 +269,23 @@ test('after a host resync the tree registers its watches again and re-reads what
   })
   await expect.poll(() => page.evaluate((id) => (window as any).__mock.watchedDirs.get(id) as string[] | undefined, projectId)).toEqual([''])
   await expect(page.getByTestId('file-b.ts')).toBeVisible()
+})
+
+/*
+ * #841: a watch the host refused was swallowed in the tree, which then stopped following what an agent or Finder
+ * changed with no word. The tree goes on reading, and says once that it is not following outside changes.
+ */
+test('a watch the host refuses is said, and the tree still shows what it read (#841)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedTree(page, { '': [{ name: 'a.ts' }] })
+  await page.evaluate(() => {
+    ;(window as any).__mock.fs.watch = async () => {
+      throw new Error('too many open files')
+    }
+  })
+  await openTree(page)
+  await expect(page.getByTestId('file-a.ts')).toBeVisible()
+  await expect(page.getByTestId('toast')).toHaveText('The file tree will not follow changes made outside it: too many open files')
 })
 
 /*

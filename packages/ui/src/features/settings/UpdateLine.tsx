@@ -30,18 +30,36 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   if (!update) return null
 
-  const tone = 'text-xs leading-none'
+  /*
+   * One small capsule that says "Update" (owner, 2026-10-18), in the inbox capsule's shape; the version and what a
+   * press does are in its tooltip, not written across the top bar. The words change only where they must: while it
+   * installs, and when it failed.
+   */
+  const pill =
+    'flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs leading-none transition-colors [text-shadow:none]'
+  const quiet = `${pill} border-line bg-surface-hover/30 text-ink-muted`
+  const live = `${pill} border-line-strong bg-surface-hover/30 text-ink hover:bg-surface-hover/60`
 
   if (update.phase === 'updating') {
     return (
-      <span className={`${tone} text-ink-faint`} data-testid="update-line" role="status">
-        Updating to {update.latest ?? 'the new version'}…{update.error && ` ${update.error}`}
-      </span>
+      <Tooltip content={`Installing ${update.latest ?? 'the new version'}. Nothing restarts until you apply it.`} align="right">
+        <span className={quiet} data-testid="update-line" role="status">
+          <UpdateIcon />
+          Updating…{update.error && ` ${update.error}`}
+        </span>
+      </Tooltip>
     )
   }
 
   if (update.phase === 'waiting_for_npm') {
-    return <span className={`${tone} text-ink-faint`} data-testid="update-line" role="status">{update.error ?? 'Waiting for npm…'}</span>
+    return (
+      <Tooltip content={update.error ?? 'The new version is published, and npm is not serving it yet. It installs once npm does.'} align="right">
+        <span className={quiet} data-testid="update-line" role="status">
+          <UpdateIcon />
+          Update
+        </span>
+      </Tooltip>
+    )
   }
 
   if (update.phase === 'restart_required') {
@@ -50,48 +68,41 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
     if (offer.kind === 'current') return null
     if (offer.kind === 'apply') {
       return (
-        <span className={`${tone} flex items-center gap-1.5 text-ink-muted`} data-testid="update-line" role="status">
-          {update.latest ? `${update.latest} installed` : 'Update installed'}
-          {update.error && <span>{update.error}</span>}
-          {waiting && <span className="text-ink-faint" data-testid="update-waiting">· applies when idle</span>}
-          <button
-            type="button"
-            className="rounded-md px-1.5 py-1 text-ink transition-colors hover:bg-surface-hover/50"
-            data-testid="update-apply-now"
-            onClick={() => void applyUpdateNow()}
-            title={
-              waiting
-                ? `Waiting because ${waiting}. Apply now relaunches Centralu; running agents and terminals keep going.`
-                : 'Relaunches Centralu into the new version; running agents and terminals keep going.'
-            }
-          >
-            Apply now
-          </button>
-        </span>
+        <Tooltip
+          align="right"
+          content={
+            <span className="flex flex-col gap-1">
+              <span>{update.latest ? `${update.latest} is installed` : 'An update is installed'} (this is {APP_VERSION}).</span>
+              <span>Press to relaunch into it; running agents and terminals keep going.</span>
+              {waiting && <span data-testid="update-waiting">It applies by itself once idle: waiting because {waiting}.</span>}
+              {update.error && <span>{update.error}</span>}
+            </span>
+          }
+        >
+          <span className="flex" data-testid="update-line" role="status">
+            <button type="button" className={live} data-testid="update-apply-now" onClick={() => void applyUpdateNow()}>
+              <UpdateIcon />
+              Update
+            </button>
+          </span>
+        </Tooltip>
       )
     }
     return (
-      // ink-muted, not ink-faint: this one is asking for something. Not ink-signal either — nothing is
-      // blocked, and the brightest thing on screen stays reserved for what waits on me.
-      <span className={`${tone} text-ink-muted`} data-testid="update-line" role="status" title={offer.reason}>
-        Restart Centralu to finish updating{update.latest ? ` to ${update.latest}` : ''}
-        {update.error && ` ${update.error}`}
-      </span>
+      <Tooltip content={`${offer.reason ?? ''} Restart Centralu to finish updating${update.latest ? ` to ${update.latest}` : ''}.${update.error ? ` ${update.error}` : ''}`} align="right">
+        <span className={quiet} data-testid="update-line" role="status">
+          <UpdateIcon />
+          Restart to update
+        </span>
+      </Tooltip>
     )
   }
 
   if (update.phase === 'failed') {
-    /*
-     * A failed install is not passed over quietly — it is not the same as a failed check.
-     *
-     * Nobody asked for the check, so it is fine for it to fail quietly, but the install is
-     * something the person started by clicking. If it reverts with no explanation, it becomes
-     * "I clicked and nothing happened," and then the person clicks it again next time. The
-     * reason can be long, so it only unfolds when asked.
-     */
     return (
       <Tooltip content={update.error ?? 'Something went wrong'} testId="update-error" align="right">
-        <span className={`${tone} text-ink-signal`} data-testid="update-line">
+        <span className={`${pill} border-dashed border-ink text-ink-signal`} data-testid="update-line">
+          <UpdateIcon />
           Update failed
         </span>
       </Tooltip>
@@ -101,14 +112,20 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   if (!update.newer || !update.latest) return null
 
   return (
-    <button
-      type="button"
-      className={`rounded-md px-2 py-1 ${tone} text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink`}
-      data-testid="update-line"
-      onClick={() => void applyUpdate()}
-      title={`Install ${update.latest}. Nothing restarts until you apply it.`}
-    >
-      Update to {update.latest}
-    </button>
+    <Tooltip content={`${update.latest} is out (this is ${APP_VERSION}). Press to install it; nothing restarts until you apply it.`} align="right">
+      <button type="button" className={live} data-testid="update-line" onClick={() => void applyUpdate()}>
+        <UpdateIcon />
+        Update
+      </button>
+    </Tooltip>
+  )
+}
+
+/** An arrow up out of a line: a new version to take */
+function UpdateIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden className="shrink-0">
+      <path d="M6 8.5V2M3.2 4.8 6 2l2.8 2.8M2 10.5h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }

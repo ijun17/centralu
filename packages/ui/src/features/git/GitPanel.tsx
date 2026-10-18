@@ -151,18 +151,24 @@ function Changes({
          * was clicked into, not from a `diff --git` inside the diff itself. That is why only
          * `line` is used and `file` is not.
          */
-        onOpenInIde={remote ? remoteIde ? async ({ line }) => {
-          if (selected) await remoteIde.open(selected.path, { line })
-        } : undefined : async ({ line }) => {
-          if (selected) {
-            try {
-              const { path } = await platform.fs.resolve(projectId, selected.path)
-              await platform.system.openInIde(path, line)
-            } catch (e) {
-              setToast(`Could not open in IDE: ${(e as Error).message}`)
-            }
-          }
-        }}
+        onOpenInIde={
+          remote
+            ? remoteIde
+              ? async ({ line }) => {
+                  if (selected) await remoteIde.open(selected.path, { line })
+                }
+              : undefined
+            : async ({ line }) => {
+                if (selected) {
+                  try {
+                    const { path } = await platform.fs.resolve(projectId, selected.path)
+                    await platform.system.openInIde(path, line)
+                  } catch (e) {
+                    setToast(`Could not open in IDE: ${(e as Error).message}`)
+                  }
+                }
+              }
+        }
         onOpenViewer={selected ? () => openFile(selected.path) : undefined}
         ide={remoteIde ?? undefined}
       />
@@ -270,7 +276,8 @@ function DiffView({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="diff-view">
-      <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+      {/* The panel's tab row height (31px, PanelTabs), so this bar's line meets the tabs' line beside it */}
+      <header className="flex h-[31px] shrink-0 items-center gap-2 border-b border-line px-3">
         <span className="readout truncate text-xs text-ink-muted">{path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {onOpenViewer && (
@@ -469,21 +476,27 @@ function History({
          * based on the commit's new side, so it can drift if there have been edits since, but
          * it lands closer than dropping the person on line 1.
          */
-        onOpenInIde={remote ? remoteIde ? async ({ file, line }) => {
-          if (!file) return setToast('Could not tell which file this line belongs to')
-          await remoteIde.open(file, { line })
-        } : undefined : async ({ file, line }) => {
-          if (!file) {
-            setToast('Could not tell which file this line belongs to')
-            return
-          }
-          try {
-            const { path } = await platform.fs.resolve(projectId, file)
-            await platform.system.openInIde(path, line)
-          } catch (e) {
-            setToast(`Could not open in IDE: ${(e as Error).message}`)
-          }
-        }}
+        onOpenInIde={
+          remote
+            ? remoteIde
+              ? async ({ file, line }) => {
+                  if (!file) return setToast('Could not tell which file this line belongs to')
+                  await remoteIde.open(file, { line })
+                }
+              : undefined
+            : async ({ file, line }) => {
+                if (!file) {
+                  setToast('Could not tell which file this line belongs to')
+                  return
+                }
+                try {
+                  const { path } = await platform.fs.resolve(projectId, file)
+                  await platform.system.openInIde(path, line)
+                } catch (e) {
+                  setToast(`Could not open in IDE: ${(e as Error).message}`)
+                }
+              }
+        }
         ide={remoteIde ?? undefined}
       />
     </div>
@@ -534,9 +547,7 @@ function Branches({ projectId }: { projectId: string }) {
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="git-branches">
       {pending && (
         <div className="border-b border-line bg-surface-raised p-3" data-testid="checkout-warning">
-          <p className="text-sm text-ink">
-            Switching to {pending.branch} may affect the changes below.
-          </p>
+          <p className="text-sm text-ink">Switching to {pending.branch} may affect the changes below.</p>
           <ul className="readout mt-1.5 max-h-24 overflow-y-auto text-xs text-ink-muted">
             {pending.conflicts.slice(0, 10).map((p) => (
               <li key={p}>{p}</li>
@@ -591,7 +602,9 @@ function BranchList({
               onClick={() => !b.current && onPick(b.name)}
               data-testid={`branch-${b.name}`}
             >
-              <span className="w-2.5 shrink-0 text-center text-2xs text-ink-faint">{b.current ? '●' : ''}</span>
+              <span className="w-2.5 shrink-0 text-center text-2xs text-ink-faint">
+                {b.current ? '●' : ''}
+              </span>
               <span className="truncate">{b.name}</span>
               {b.upstream && (
                 <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">→ {b.upstream}</span>

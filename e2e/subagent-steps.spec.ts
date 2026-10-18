@@ -42,7 +42,9 @@ test('a subagent\'s steps stay out of the conversation and open under its launch
   await expect(card).toBeVisible()
   await expect(page.getByTestId('tool-card')).toHaveCount(1)
   await expect(page.getByText('The boundaries test holds.')).toHaveCount(0)
-  // The running agent's one line per step is still on the card
+  // The running agent's one line per step is on the card once it is opened (owner, 2026-10-18: output only when open)
+  await expect(card.getByTestId('tool-card-live')).toHaveCount(0)
+  await card.getByTestId('tool-card-toggle').first().click()
   await expect(card.getByTestId('tool-card-live')).toContainText('Bash: rg boundaries')
 
   // Collapsed, and nothing read until it is opened
@@ -56,6 +58,8 @@ test('a subagent\'s steps stay out of the conversation and open under its launch
   await expect(list.getByTestId('msg-reasoning')).toContainText('Start from the test file.')
   const sub = list.getByTestId('tool-card').filter({ hasText: 'rg boundaries' })
   await expect(sub).toBeVisible()
+  await expect(sub.getByTestId('tool-card-output')).toHaveCount(0)
+  await sub.getByTestId('tool-card-toggle').click()
   await expect(sub.getByTestId('tool-card-output')).toContainText('tooling/boundaries.test.ts')
   await expect(list.getByTestId('msg-assistant')).toContainText('The boundaries test holds.')
   expect(await page.evaluate(() => (window as any).__mock.subagentReads)).toBe(1)

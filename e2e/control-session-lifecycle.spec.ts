@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { tokenColor } from './fixtures/tokens.js'
 import { setup, newSession, pickSetting } from './fixtures/control.js'
+import { openSessionDialog, startSession } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on a session from creation to deletion: names, waking, restarts, handoff, disconnects and the palette. Moved out of control-loop.spec.ts by subject (#845); the
@@ -17,18 +18,14 @@ import { setup, newSession, pickSetting } from './fixtures/control.js'
 test('The app remembers the last tool used — the next session starts from there', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('tool-option-codex').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   // The second window opens with codex (checked via the actual creation parameters, not
   // aria-pressed)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   const params = await page.evaluate(() => (window as any).__mock.lastCreateParams)
   expect(params.tool).toBe('codex')
@@ -77,8 +74,9 @@ test('A dormant session automatically resumes when spoken to (C-1, FR-10)', asyn
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  // It does not block. It only announces that the session is dormant, and input stays open
-  await expect(page.getByTestId('dormant-note')).toBeVisible()
+  // It does not block, and says nothing about sleep (owner, 2026-10-18): input stays open
+  await expect(page.locator('[data-asleep]')).toHaveCount(1)
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await expect(page.getByTestId('prompt-input')).toBeEnabled()
 
   await page.getByTestId('prompt-input').fill('keep going')
@@ -140,8 +138,7 @@ test('Creating a session: only the tool is picked — model and permission are s
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // The dialog only lets the person pick the tool and resumption — no model input, no prompt field (#8)
   await expect(page.getByTestId('model-input')).toHaveCount(0)
   await expect(page.getByTestId('initial-prompt')).toHaveCount(0)
@@ -169,8 +166,7 @@ test('Creating a session: only the tool is picked — model and permission are s
 test('The create-session dialog warns about concurrent sessions (FR-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'the task that started first')
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('concurrent-warning')).toContainText('lose')
 })
 
@@ -403,8 +399,11 @@ test('When session creation fails, the reason stays in the modal (M2.5: used to 
       throw new Error('Could not start claude session: Native CLI binary not found')
     }
   })
+  // The menu's New session starts at once (owner, 2026-10-18); when that fails, the dialog opens and a toast says why
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
+  await expect(page.getByTestId('toast')).toContainText('Could not start a session')
   await page.getByTestId('create-session-confirm').click()
 
   // The toast disappears, but this stays
@@ -547,7 +546,8 @@ test('When a session cannot be woken, the reason is shown right there with a way
   // reason remains
   await page.getByTestId('project-header-alpha').click()
   await page.getByTestId(`session-row-${id}`).click()
-  await expect(page.getByTestId('dormant-note')).toContainText('Asleep')
+  await expect(page.getByTestId('chat-stream')).toBeVisible()
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await page.getByTestId('prompt-input').click()
   await expect(page.getByTestId('dormant-note')).toContainText('Could not resume')
   await expect(page.getByTestId('dormant-note')).toContainText('cannot be resumed')
@@ -566,9 +566,7 @@ test('When a session cannot be woken, the reason is shown right there with a way
 test("The session list and header show each session's own tool", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('tool-option-claude').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -576,9 +574,7 @@ test("The session list and header show each session's own tool", async ({ page }
   await page.getByTestId('prompt-input').fill("Claude's task")
   await page.getByTestId('prompt-input').press('Enter')
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('tool-option-codex').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

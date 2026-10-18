@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { startSession } from './new-session.js'
 
 /**
  * Another project's app tools, on demand (#371 part A) — what a person sees and clicks: the per-app
@@ -51,9 +52,7 @@ async function addProject(page: Page, path: string): Promise<string> {
 }
 
 async function newSession(page: Page, project: string): Promise<string> {
-  await page.getByTestId(`project-menu-${project}`).click()
-  await page.getByTestId(`new-session-${project}`).click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, project)
   await expect(page.getByTestId('session-view')).toBeVisible()
   return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }

@@ -152,7 +152,8 @@ writeSync(1, 'survived\\n')
 
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const s = new Store(file, { swap: true })
-    expect(s.deferredSteps).toEqual([])
+    // v40 ran before the kill; the one step after it that breaks older readers (v56, #423) is still left for later
+    expect(s.deferredSteps).toEqual([56])
     expect(s.vacuumOwed).toBe(true)
     expect(freePages(file)).toBeGreaterThan(0)
 
@@ -168,7 +169,7 @@ describe('the WAL', () => {
     const file = storeFile()
     raw(file, (db) => db.pragma('user_version = 38'))
     const s = new Store(file, { swap: true })
-    expect(s.deferredSteps).toEqual([40])
+    expect(s.deferredSteps).toEqual([40, 56])
 
     s.runDeferred()
 

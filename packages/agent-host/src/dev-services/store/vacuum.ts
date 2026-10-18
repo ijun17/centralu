@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { readStoreKey, writeStoreKey } from './store-keys.js'
 
 /**
  * How much free space in the file is worth a vacuum at startup (v40). Below this the pages stay in the file for later
@@ -25,8 +26,7 @@ export class OwedVacuum {
 
   /** A `VACUUM` a step queued has not run yet: the host was stopped during it (#396) */
   get vacuumOwed(): boolean {
-    const table = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
-    return !!table && !!this.db.prepare(`SELECT 1 FROM app_settings WHERE key = ?`).get(VACUUM_OWED_KEY)
+    return readStoreKey(this.db, VACUUM_OWED_KEY) !== null
   }
 
   /**
@@ -48,7 +48,7 @@ export class OwedVacuum {
       console.error(`[store] could not vacuum; ${mb(free)} stay free in the file: ${(err as Error).message}`)
       return null
     } finally {
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(VACUUM_OWED_KEY)
+      writeStoreKey(this.db, VACUUM_OWED_KEY, null)
     }
     const done = { before, after: size(), ms: Date.now() - t0 }
     if (why) console.error(`[store] vacuumed ${mb(done.before)} -> ${mb(done.after)} (${done.ms}ms): ${why}`)

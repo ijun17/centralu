@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The UI side of the build loop (M4 C) — real UI on a mock platform, a real ViewHost, and a test
@@ -349,12 +350,13 @@ const builderSaid = (page: Page, id: string) =>
   )
 
 /*
- * A card for a finished turn (M4 C-5) — the card stands at the top right and stays until
- * dismissed, and on the pinned view it covered the header's Builder, Runs, and close buttons plus
- * Runs' Refresh, hijacking clicks. Most cards that stayed up while fixing an app belonged to the
- * builder session opened alongside — a conversation the person was already watching.
+ * A card for a finished turn (M4 C-5) — the card stood at the top right and stayed until dismissed, and on the pinned
+ * view it covered the header's Builder, Runs, and close buttons plus Runs' Refresh, hijacking clicks. The cards are gone
+ * (owner, 2026-10-18): a finished turn is written out in the inbox's capsule, which covers nothing. What stays is the
+ * difference between watched and not: the builder's conversation open beside the view gets the breeze and its notice
+ * is done with once its line folds; closed, the notice stays in the inbox.
  */
-test('a turn ending in a builder session whose conversation is open beside the pinned view gets a breeze, not a card — closed, it gets a card', async ({ page }) => {
+test('a turn ending in a builder session whose conversation is open beside the pinned view gets a breeze and is done with — closed, it stays in the inbox', async ({ page }) => {
   const pid = await addProject(page, '/tmp/alpha')
   const builderId = await madeApp(page, pid, 'notes', 'Team notes')
   await page.evaluate(() => (window as any).__store.getState().setAppFocused(true))
@@ -365,6 +367,11 @@ test('a turn ending in a builder session whose conversation is open beside the p
       await new Promise((r) => setTimeout(r, 50))
       m.emit({ type: 'turn_complete', sessionId: sid })
     }, builderId)
+  const doneNotice = () =>
+    page.evaluate(
+      (sid) => ((window as any).__store.getState().notices as { sessionId: string; kind: string }[]).some((n) => n.sessionId === sid && n.kind === 'done'),
+      builderId,
+    )
   await page.getByTestId(`app-row-${pid}/notes`).click()
   const pinned = page.getByTestId(`pinned-app-${pid}/notes`)
   await pinned.getByTestId('pinned-builder-toggle').click()
@@ -373,11 +380,16 @@ test('a turn ending in a builder session whose conversation is open beside the p
   await finish()
   await expect.poll(() => page.evaluate(() => (window as any).__store.getState().completion?.sessionId)).toBe(builderId)
   await expect(page.getByTestId('notice')).toHaveCount(0)
+  // Seen: done with once the capsule's line has folded (4 s)
+  await expect.poll(doneNotice, { timeout: 15_000 }).toBe(false)
 
   // The conversation was closed — it is now a session that is not being watched
   await pinned.getByTestId('pinned-builder-toggle').click()
+  const before = await page.evaluate(() => (window as any).__store.getState().completion?.at)
   await finish()
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(doneNotice).toBe(true)
+  expect(await page.evaluate(() => (window as any).__store.getState().completion?.at)).toBe(before)
+  await expect(page.getByTestId('notice')).toHaveCount(0)
 })
 
 test.describe('C-6: errors reach the builder', () => {
@@ -549,9 +561,7 @@ test.describe('C-4: when an app relaunches with new code, its open views refresh
 
   /** One session and one view inline in its conversation — holding the input and result the way the host would */
   async function inlineView(page: Page, pid: string): Promise<{ sid: string; first: string }> {
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
     await emit(page, toolCall(sid, 'toolu_r', 'mcp__app-reloader__show'))
     const first = fx.open({ projectId: pid, appId: 'reloader' }, 'ui://reloader/main')
@@ -647,9 +657,7 @@ test.describe('B-4: a pinned view\'s ui/message', () => {
   test('shows in the picked session as a message sent by the app — going through the same path as an inline view, wrapped by the host as the app\'s words', async ({ page }) => {
     const pid = await addProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid, { name: 'Slider', status: 'running' })])
-    await page.getByTestId('project-menu-alpha').click()
-    await page.getByTestId('new-session-alpha').click()
-    await page.getByTestId('create-session-confirm').click()
+    await startSession(page, 'alpha')
     const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 
     await page.getByTestId(`app-row-${pid}/slider`).click()

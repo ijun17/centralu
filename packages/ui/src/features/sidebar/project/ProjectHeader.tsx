@@ -5,7 +5,7 @@ import { useStore } from '../../../store/store.js'
 import { useIsProjectSelected } from '../../../store/selectors.js'
 import { Tooltip } from '../../../components/primitives.jsx'
 import { IconButton } from '../../../components/IconButton.jsx'
-import { ChevronIcon, DotsIcon, PlusIcon } from '../../../components/icons.jsx'
+import { ChevronIcon, DotsIcon } from '../../../components/icons.jsx'
 import { MachineBadge } from '../../machines/MachineTag.jsx'
 import { useRemoteIde } from '../../machines/remoteIde.js'
 import { PROJECT_MIME } from '../reorder.js'
@@ -20,7 +20,6 @@ export function ProjectHeader({
   project,
   projectId,
   folded,
-  open,
   sessions,
   setNewAppOpen,
   setDeleting,
@@ -28,7 +27,6 @@ export function ProjectHeader({
   project: ProjectInfo
   projectId: string
   folded: boolean
-  open: boolean
   sessions: SessionSummary[]
   setNewAppOpen: (open: boolean) => void
   setDeleting: (deleting: boolean) => void
@@ -39,7 +37,7 @@ export function ProjectHeader({
   const openNewSession = useStore((s) => s.openNewSession)
   const startSessionNow = useStore((s) => s.startSessionNow)
   const selected = useIsProjectSelected(projectId)
-  // Does the manager's worktree proposal point at this project (#69)? The + button lights up
+  // Does the manager's worktree proposal point at this project (#69)? The ⋯ menu button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [menuOpen, setMenuOpen] = useState(false)
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
@@ -106,10 +104,7 @@ export function ProjectHeader({
         stack up and push out the session list that actually needs to be seen. Instead, it is
         answered by a tooltip when asked for (hover, focus).
       */}
-      <Tooltip
-        content={<ProjectDetail project={project} />}
-        testId={`project-tip-${project.name}`}
-      >
+      <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
         <button
           className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${
             selected ? '' : 'hover:text-ink-signal'
@@ -122,7 +117,9 @@ export function ProjectHeader({
         </button>
       </Tooltip>
       {/* Which linked machine it is on (#734), right of its name; this computer's projects carry none */}
-      {project.machine && <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} />}
+      {project.machine && (
+        <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} />
+      )}
 
       {/*
         Only marks that claim no new space stay on the name line.
@@ -132,53 +129,18 @@ export function ProjectHeader({
       <ProjectMarks project={project} />
       {summary.length > 0 && <FoldSummary name={project.name} counts={summary} />}
       {/*
-        Every action on this row sits behind one button (a dogfooding request).
+        Every action on this row sits behind one button, the menu (owner, 2026-10-18). The `+` that started a session
+        on the open project (#529) is gone: it took the line's width, and on a folded project it slid in on hover and
+        pushed the fold's marks aside. The menu's first row starts a session at once, as `+` did.
 
-        `+` (new session) used to be **always visible.** The reason at the time was "new session
-        is the most frequent action, so it must not stay invisible until it suddenly appears,"
-        and that reason is still right — except that in the meantime this row picked up three
-        actions (new session, worktree trunk, delete project). Lining up all three as icons
-        would make the button row longer than the project name. So they are folded into one, and
-        **it stays hidden by default** instead: a folded button that is always on screen only
-        gets in the way of eyes reading the list.
-
-        Hidden, but not made unreachable — keyboard focus (focus-within) and a worktree
-        proposal (#69) surface the button without hovering. The proposal case especially:
-        making a hidden button breathe is useless if nobody can see it.
-
-        **`+` is back, on the project the person is in** (#529). With it folded into the menu,
-        starting a session took three clicks behind a button nobody sees until they hover, and that
-        is the task-cost baseline's most expensive everyday task (docs/ux-metrics.md). The project
-        that is open is where a new session is most often wanted, and only that one shows `+` all
-        the time: one icon on one row, not a row of icons on every project. Elsewhere it appears
-        with the menu, on hover or focus.
+        The menu's button is hidden until hover or focus but keeps its width (opacity only), so nothing on the line
+        moves when the pointer arrives. Keyboard focus and a worktree proposal (#69) surface it without hovering.
       */}
-      {/*
-        While it is hidden it takes no width either (#734): a transparent pair still took 44px of the line, and with a
-        machine badge on the line a short name was cut ("notes…") beside empty space. It comes back on hover or focus,
-        where the name gives way to it if the line is full.
-      */}
-      <span
-        className={`-my-1 flex shrink-0 items-center transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
-          summary.length > 0 ? '' : 'ml-auto'
-        } ${open ? 'opacity-100' : 'max-w-0 overflow-hidden opacity-0 focus-within:max-w-none group-hover:max-w-none'}`}
-      >
-        {/*
-          The `+` starts a session at once, with what the project remembers (its last tool and that tool's
-          model and effort; #543). Its empty screen offers the past conversations to resume (PastConversations),
-          and the project menu's "New session…" still opens the window that chooses a tool or a worktree.
-        */}
-        <IconButton
-          label={`New session in ${project.name}`}
-          onClick={() => void startSessionNow(projectId)}
-          testId={`project-new-session-${project.name}`}
-        >
-          <PlusIcon size={14} />
-        </IconButton>
-      </span>
       <span
         ref={menuAnchor}
         className={`-my-1 shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
+          summary.length > 0 ? '' : 'ml-auto'
+        } ${
           menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
         } ${proposalHere ? 'breathe rounded-md text-ink' : ''}`}
         data-testid={`project-actions-${project.name}`}
@@ -204,7 +166,8 @@ export function ProjectHeader({
           project={project}
           anchorEl={menuAnchor.current}
           onClose={() => setMenuOpen(false)}
-          onNewSession={() => openNewSession(projectId)}
+          // A worktree proposal (#69) waits in the new-session window with its branch filled in; otherwise start at once
+          onNewSession={() => (proposalHere ? openNewSession(projectId) : void startSessionNow(projectId))}
           // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
           onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
           onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}

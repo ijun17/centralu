@@ -229,4 +229,27 @@ describe('the value is left nowhere inside the host', () => {
     // Windows has no mode bits (Node reports 0o666); the file is guarded by the profile folder's ACL there
     if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
   })
+  // #850 round 4: stderr and a tool's failure were masked, the text of a failed start was not
+  it('an app that fails to start with the value in its error leaves only the name in the list, the bundles, the check and the refusal', async () => {
+    plant(['--leak-list'])
+    make({ maxFailures: 1 })
+    await setSecret('API_KEY', VALUE)
+    const refused = await rt.call(ref, 'env', {}, { kind: 'session', sessionId: 's1' })
+    expect(refused.status).toBe('error')
+    const bundles = await until(() => rt.errors(ref).latest, (b) => !!b && b.kind === 'start')
+    const check = await rt.check(ref)
+
+    const places: Record<string, string> = {
+      refusal: JSON.stringify(refused),
+      'error bundles': JSON.stringify(await rpc('apps.errors', { appId: 'keys', projectId: 'p1' })) + JSON.stringify(bundles),
+      'app list': JSON.stringify(await rpc('apps.list', {})),
+      check: check.text,
+      broadcasts: JSON.stringify(events),
+      'host console': consoleText.join('\n'),
+    }
+    for (const [where, text] of Object.entries(places)) expect(text, where).not.toContain(VALUE)
+    expect(places['error bundles']).toContain('could not list tools with API_KEY=[redacted:API_KEY]')
+    expect(places['app list']).toContain('[redacted:API_KEY]')
+    expect(places.check).toContain('[redacted:API_KEY]')
+  })
 })

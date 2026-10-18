@@ -34,7 +34,8 @@ export const formatBytes = (n: number): string => scaled(n, 1024, BYTE_UNITS)
 export const formatCount = (n: number): string => scaled(n, 1000, COUNT_UNITS)
 
 /** A count of changed files, "10k+" when the host stopped counting at its cap (`more`, #850 review) */
-export const formatChangedCount = (n: number, more?: boolean): string => (more ? `${formatCount(n)}+` : String(n))
+export const formatChangedCount = (n: number, more?: boolean): string =>
+  more ? `${formatCount(n)}+` : String(n)
 
 /**
  * A length of time, in one style: the two largest units that matter, no space before a unit ("1.5s", "3m 20s", "2h 5m",
@@ -58,4 +59,29 @@ export function formatDuration(ms: number, { coarse = false }: { coarse?: boolea
   if (m < 60) return `${m}m`
   if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`
   return `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h`
+}
+
+/**
+ * The time under a message's bubble (owner, 2026-10-18), as a chat app writes it: the clock time only ("3:42 PM"),
+ * since a divider in the conversation says the day (`formatDayLong`). In English whatever the system's language: the
+ * app's words are English.
+ */
+export function formatSaidAt(at: number): string {
+  return new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
+/** The day a divider in the conversation names ("Saturday, October 18, 2026") */
+export function formatDayLong(at: number): string {
+  return new Date(at).toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+/** The local calendar day a moment falls on, for comparing two moments */
+export function dayKey(at: number): string {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }

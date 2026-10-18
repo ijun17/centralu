@@ -1,3 +1,4 @@
+import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
@@ -177,7 +178,6 @@ type Category = (typeof CATEGORIES)[number]['id']
 export function Settings() {
   const open = useStore((s) => s.settingsOpen)
   // Closing gives the keyboard back to where it was, the composer included (#115)
-  useFocusReturn(open)
   const toggle = useStore((s) => s.toggleSettings)
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)
@@ -205,20 +205,30 @@ export function Settings() {
 
   // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
   const panelRef = useRef<HTMLDivElement>(null)
+  // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
+  useFocusReturn(open, panelRef)
   const dialog = useDialogFocus(panelRef, open)
 
-  if (!open) return null
+  // Comes down and fades in, and goes the same way (usePresence keeps it for its exit)
+  const { shown, leaving } = usePresence(open)
+  if (!shown) return null
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px]"
+      className={`absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px] ${
+        leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'
+      }`}
       onClick={() => toggle(false)}
       data-testid="settings"
+      // Leaving, it takes no keys and no focus (focusReturn.ts)
+      inert={leaving}
     >
       <div
         ref={panelRef}
         {...dialog}
-        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none"
+        className={`flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none ${
+          leaving ? 'cc-drop-out' : 'cc-drop'
+        }`}
         onClick={(e) => e.stopPropagation()}
         data-testid="settings-panel"
       >

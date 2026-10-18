@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
 import { ChatSkeleton } from '../../../components/Skeleton.jsx'
+import { OverlayScrollbar } from '../../../components/OverlayScrollbar.jsx'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
-import { ChatRow } from '../chat-rows/ChatRow.jsx'
+import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
 import { useChatScroll } from './useChatScroll.js'
+import { answerEnds as answerEndsOf, bubbleOf, dayBreaks as dayBreaksOf, joinsNext, type BubblePart } from './answerBubble.js'
 import { forgetUnlistedSizes, rowKeys, writeScroll } from '../scroll.js'
 
 /*
@@ -42,6 +44,7 @@ export function ChatStream({
   activity,
   bottomPeek = false,
   bottomPad,
+  yieldSpace = false,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>
   chat: ChatItem[]
@@ -56,6 +59,11 @@ export function ChatStream({
    * never permanently hidden under it
    */
   bottomPeek?: boolean
+  /**
+   * The conversation is empty and the new session's start screen takes the space (owner, 2026-10-18: centred in it):
+   * the list stays mounted (its scroller and measurements are kept) but takes no height.
+   */
+  yieldSpace?: boolean
   /**
    * The height (px) of the raised input card. When set, the margin below grows by **exactly
    * that card's height**.
@@ -116,7 +124,13 @@ export function ChatStream({
       const last = base[base.length - 1] ?? -1
       const held: number[] = []
       chat.forEach((item, i) => {
-        if ((i < first || i > last) && item.kind === 'tool' && item.callId && inlineFrameShown(sessionId, item.callId)) held.push(i)
+        if (
+          (i < first || i > last) &&
+          item.kind === 'tool' &&
+          item.callId &&
+          inlineFrameShown(sessionId, item.callId)
+        )
+          held.push(i)
       })
       return held.length ? [...base, ...held].sort((a, b) => a - b) : base
     },
@@ -177,77 +191,112 @@ export function ChatStream({
     bottomPad,
   })
 
+  /*
+   * The conversation fades in as it opens (owner, 2026-10-18), started by hand when the list stops hiding. A CSS
+   * transition on the class was not enough: when the list settled within one frame (already at the bottom), the hidden
+   * state was never painted, so there was nothing to transition from, and some opens (the orchestrator's, often) just
+   * appeared.
+   */
+  const wasSettling = useRef(false)
+  const fadeIn = useCallback(() => {
+    const el = scrollRef.current
+    if (el && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' })
+    }
+  }, [scrollRef])
+  useLayoutEffect(() => {
+    if (wasSettling.current && !settling) fadeIn()
+    wasSettling.current = settling
+  }, [settling, fadeIn])
+  /*
+   * An open that never settles (nothing to land on, or a screen such as the orchestrator's that shows a conversation
+   * already in place) fades in too: one frame after it opens, unless a landing has started by then, whose end fades it.
+   */
+  useLayoutEffect(() => {
+    const f = requestAnimationFrame(() => {
+      if (!wasSettling.current) fadeIn()
+    })
+    return () => cancelAnimationFrame(f)
+  }, [sessionId, fadeIn])
+
+  // Where a new day begins, and which bubble ends an answer and carries its time (answerBubble.ts)
+  const dayBreaks = useMemo(() => dayBreaksOf(chat), [chat])
+  const answerEnds = useMemo(() => answerEndsOf(chat), [chat])
+
   return (
+    /* The box the overlay scrollbar is placed in: the scroller's own size, so the thumb floats over its right edge */
     <div
-      ref={scrollRef}
-      onScroll={onScroll}
-      /*
+      className={`relative flex min-h-0 flex-col ${yieldSpace ? 'h-0 flex-none overflow-hidden' : 'flex-1'}`}
+    >
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        /*
         The moment a person touches the conversation, "settling at the bottom" ends right there
         (#31). The same touch is what lets the follow effect read a drop as theirs — a wheel only
         when it turns upward, a pointer (the scrollbar) or a finger for as long as it is held;
         keys are watched on the window, in useChatScroll.ts.
       */
-      onWheel={(e) => {
-        endLanding()
-        if (e.deltaY !== 0) noteInput()
-      }}
-      onPointerDown={() => {
-        endLanding()
-        held.current = true
-        noteInput()
-      }}
-      onTouchStart={() => {
-        held.current = true
-      }}
-      onKeyDown={endLanding}
-      /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
-      /*
-       * invisible (visibility:hidden) is only for while it settles into position (see the
-       * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
-       * not the layout.
-       */
-      className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
-        bottomPeek ? 'pb-14' : 'pb-4'
-      } ${settling ? 'invisible' : ''}`}
-      /* The empty space the card will settle onto. Follows size, not state, so there is no
+        onWheel={(e) => {
+          endLanding()
+          if (e.deltaY !== 0) noteInput()
+        }}
+        onPointerDown={() => {
+          endLanding()
+          held.current = true
+          noteInput()
+        }}
+        onTouchStart={() => {
+          held.current = true
+        }}
+        onKeyDown={endLanding}
+        /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
+        /*
+         * invisible (visibility:hidden) is only for while it settles into position (see the
+         * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
+         * not the layout.
+         */
+        className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
+          bottomPeek ? 'pb-14' : 'pb-4'
+        } ${settling ? 'invisible' : ''}`}
+        /* The empty space the card will settle onto. Follows size, not state, so there is no
       transition or animation */
-      style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
-      data-testid="chat-stream"
-      data-settling={settling || undefined}
-    >
-      {/*
+        style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
+        data-testid="chat-stream"
+        data-settling={settling || undefined}
+      >
+        {/*
         Which question the turn being viewed answers — left as a single line so reading a long
         response never requires scrolling back up to check.
       */}
-      <StickyUser sticky={sticky} />
+        <StickyUser sticky={sticky} />
 
-      <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
-      {reading && !gaveUp && <ChatSkeleton />}
+        <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
 
-      {/*
+        {/*
         No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll
         anchoring sees, while a transform it did not; the virtualizer already keeps the view in
         place when a row above changes size, and anchoring on top of it would move it twice.
       */}
-      {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
-      <div
-        className="relative w-full [overflow-anchor:none]"
-        style={{ height: `${virtualizer.getTotalSize()}px` }}
-        data-sized-rows={virtualizer.itemSizeCache.size}
-      >
-        {virtualizer.getVirtualItems().map((v) => (
-          <div
-            key={v.key}
-            ref={virtualizer.measureElement}
-            data-index={v.index}
-            /*
+        {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
+        <div
+          className="relative w-full [overflow-anchor:none]"
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+          data-sized-rows={virtualizer.itemSizeCache.size}
+        >
+          {virtualizer.getVirtualItems().map((v) => (
+            <div
+              key={v.key}
+              ref={virtualizer.measureElement}
+              data-index={v.index}
+              /*
               More margin is added at turn boundaries. If every row had the same spacing, my
               message and the model's answer would look like a single block, making it
               impossible to find where my turn started after a long response. There is generous
               space before my message (separating it from the previous turn) and only a little
               after it (grouping it with the answer that follows).
             */
-            /*
+              /*
               Since the banner takes up space in the flow and pushes the rest of the list down
               by its own height, the original message that was judged to have "fully passed"
               gets pushed back down below the banner, and the same text shows up twice. The
@@ -255,13 +304,19 @@ export function ChatStream({
               visibility, so its position and size stay the same and the virtual scroller's
               measurements are undisturbed.
             */
-            className={`absolute left-0 w-full min-w-0 ${
-              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
-            } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
-              chat[v.index]?.storedSeq === searchTarget?.seq ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70' : ''
-            }`}
-            data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
-            /*
+              className={`absolute left-0 w-full min-w-0 ${
+                chat[v.index]?.kind === 'user'
+                  ? 'pb-4 pt-6'
+                  : joinsNext(bubbleOf(chat, v.index))
+                    ? ''
+                    : 'pb-3'
+              } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
+                chat[v.index]?.storedSeq === searchTarget?.seq
+                  ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
+                  : ''
+              }`}
+              data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
+              /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller
               of its own), WebKit composited nearly every later row for overlap: six idle grid
@@ -269,29 +324,102 @@ export function ChatStream({
               as anything repaints (docs/spikes/2026-10-memory-heavy-store.md §10). Rows only move when
               a size is measured, so `top` costs one positioned layout then, nothing on scroll.
             */
-            style={{ top: v.start }}
-          >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
-          </div>
-        ))}
-      </div>
+              style={{ top: v.start }}
+            >
+              {dayBreaks.has(v.index) && <DayDivider label={dayBreaks.get(v.index)!} />}
+              <AnswerBubble
+                part={bubbleOf(chat, v.index)}
+                at={answerEnds.has(v.index) ? chat[v.index]?.at : undefined}
+              >
+                <ChatRow
+                  item={chat[v.index]!}
+                  projectRoot={projectRoot}
+                  projectId={projectId}
+                  sessionId={sessionId}
+                  leaving={isLeaving(virtualizer.range, v.index)}
+                />
+              </AnswerBubble>
+            </div>
+          ))}
+        </div>
 
-      {pending && (
-        <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
-      )}
+        {pending && (
+          <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
+        )}
 
-      {/* Several question cards can stack up — rendering only one leaves the rest with no way
+        {/* Several question cards can stack up — rendering only one leaves the rest with no way
       to be answered */}
-      {questions.map((q) => (
-        <QuestionCard
-          key={q.requestId}
-          sessionId={sessionId}
-          requestId={q.requestId}
-          questions={q.questions}
-        />
-      ))}
+        {questions.map((q) => (
+          <QuestionCard
+            key={q.requestId}
+            sessionId={sessionId}
+            requestId={q.requestId}
+            questions={q.questions}
+          />
+        ))}
 
-      {working && <ActivityRow sessionId={sessionId} activity={activity} />}
+        {working && <ActivityRow sessionId={sessionId} activity={activity} />}
+      </div>
+      {/*
+        The skeleton stands over the list, not in it, from the moment history is asked for until the list has settled
+        where it opens (owner, 2026-10-18). In the list it vanished as the rows arrived, and the list then stayed hidden
+        while it settled (#61), so the pane went blank for a moment between the two; one overlay covers both. It shows
+        only after 600ms (cc-skeleton-late); a quicker open is the rows fading in as the list stops hiding.
+      */}
+      {((reading && !gaveUp) || settling) && (
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-4"
+          data-testid="chat-skeleton-cover"
+        >
+          <ChatSkeleton late />
+        </div>
+      )}
+      {/* Pressing the thumb is a person taking over, as a press on the native bar was */}
+      <OverlayScrollbar
+        scrollRef={scrollRef}
+        onGrab={() => {
+          endLanding()
+          held.current = true
+          noteInput()
+        }}
+        testId="chat-scrollbar"
+      />
+    </div>
+  )
+}
+
+const BUBBLE_EDGE: Record<BubblePart, string> = {
+  solo: 'rounded-bubble border pt-3 pb-3',
+  first: 'rounded-t-bubble border border-b-0 pt-3 pb-3',
+  mid: 'border-x pb-3',
+  last: 'rounded-b-bubble border border-t-0 pb-3',
+}
+
+function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: number; children: ReactNode }) {
+  if (!part) return <>{children}</>
+  const ends = part === 'last' || part === 'solo'
+  return (
+    <>
+      <div className={`min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
+        {children}
+      </div>
+      {/* When the answer was said, under its last bubble only (`answerEnds`), as a chat app writes it */}
+      {ends && at !== undefined && <SaidAt at={at} className="pl-2 pt-1" />}
+    </>
+  )
+}
+
+/** A day's name across the conversation, between two hairlines, where that day begins */
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div
+      className="flex items-center gap-3 pb-4 pt-2 text-2xs text-ink-faint"
+      data-testid="day-divider"
+      role="separator"
+    >
+      <span className="h-px flex-1 bg-line" />
+      <span className="shrink-0">{label}</span>
+      <span className="h-px flex-1 bg-line" />
     </div>
   )
 }

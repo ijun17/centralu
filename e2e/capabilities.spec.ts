@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Where capability approval shows up (M4 D-4) — real UI on a mock platform.
@@ -62,9 +63,7 @@ async function trustedProject(page: Page, path: string): Promise<string> {
 }
 
 async function newSession(page: Page, project: string): Promise<string> {
-  await page.getByTestId(`project-menu-${project}`).click()
-  await page.getByTestId(`new-session-${project}`).click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, project)
   await expect(page.getByTestId('session-view')).toBeVisible()
   return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }

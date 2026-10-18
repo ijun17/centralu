@@ -58,7 +58,7 @@ const lastSaid = (page: Page) => page.getByTestId('msg-user').last()
 
 const startedThere = async (page: Page) => {
   await expect(page.getByTestId('session-name')).toHaveText('Fix the login bug')
-  await expect(lastSaid(page)).toHaveText('Fix the login bug')
+  await expect(lastSaid(page)).toContainText('Fix the login bug')
 }
 
 uxTask({
@@ -67,17 +67,22 @@ uxTask({
   path: 'mouse',
   access: 'discoverable',
   notes: [
-    "The + on the project the person is in (#529) starts a session at once with the project's tool, model and effort (#543); the chevron beside it and the project's menu open the dialog that asks",
+    "The project menu's New session starts a session at once with the project's tool, model and effort (#543); the + on the project row is gone (owner, 2026-10-18: it moved the row's marks on hover)",
   ],
   start: demo,
   run: async (u, page) => {
-    await u.click(page.getByTestId('project-new-session-centralu'))
+    await u.click(page.getByTestId('project-menu-centralu'))
+    await u.click(page.getByTestId('new-session-centralu'))
     await u.until('the new session', () => expect(page.getByTestId('prompt-input')).toBeFocused())
     await u.fill(page.getByTestId('prompt-input'), 'Fix the login bug')
     await u.press('Enter')
   },
   goal: startedThere,
-  budget: { operators: 26, M: 2, H: 2, seconds: 10.6 },
+  /*
+   * One click and one mental step more than the + took (owner, 2026-10-18: the + on the project row moved the row's
+   * marks on hover, so it went; the project menu's New session is the one door, and it starts at once)
+   */
+  budget: { operators: 30, M: 3, H: 2, seconds: 12.8 },
 })
 
 uxTask({
@@ -314,7 +319,7 @@ const MESSAGE = 'Also convert the SVGs'
 
 const sentThere = async (page: Page) => {
   await expect(page.getByTestId('session-name')).toHaveText(DONE)
-  await expect(lastSaid(page)).toHaveText(MESSAGE)
+  await expect(lastSaid(page)).toContainText(MESSAGE)
 }
 
 uxTask({

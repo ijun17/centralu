@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession, emitEvent } from './fixtures/control.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on how an agent's output is drawn: markdown, tool cards, reasoning, plans, images and waiting looks. Moved out of control-loop.spec.ts by subject (#845); the
@@ -63,14 +64,18 @@ test('Two replies with no human message between them render as two chunks — li
     return info.id as string
   })
   await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), id)
-  await expect(page.getByTestId('msg-user')).toHaveText('Imported question')
+  await expect(page.getByTestId('msg-user')).toContainText('Imported question')
   await expect(page.getByTestId('msg-assistant')).toHaveText([
     'First imported reply.',
     'Second imported reply.',
   ])
 })
 
-test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-3)', async ({ page }) => {
+/*
+ * A tool card shows its output only once it is opened (owner, 2026-10-18: the preview lines were rarely read and made
+ * every call a block). Closed, a card is its title row; no preview, no "N more lines" or "Show all".
+ */
+test('Tool card: closed, it is its title row; opened, it shows the whole output (T5-3)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'x')
   await emitEvent(page, 0, {
@@ -84,12 +89,32 @@ test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-
     ok: true,
     summary: `line one\nline two\nline three\nline four\n200 lines of file content`,
   })
-  // Read-only tools start collapsed — only a preview shows, the rest stays hidden
-  await expect(page.getByTestId('tool-card')).toBeVisible()
-  await expect(page.getByTestId('tool-card-output')).toContainText('line one')
-  await expect(page.getByTestId('tool-card-output')).not.toContainText('200 lines of file content')
+  const card = page.getByTestId('tool-card')
+  await expect(card).toBeVisible()
+  await expect(card).not.toContainText('line one')
+  await expect(page.getByTestId('tool-card-output')).toHaveCount(0)
+  await expect(page.getByTestId('tool-card-more')).toHaveCount(0)
   await page.getByTestId('tool-card-toggle').click()
+  await expect(page.getByTestId('tool-card-output')).toContainText('line one')
   await expect(page.getByTestId('tool-card-output')).toContainText('200 lines of file content')
+  // A short title says all the input there is: no Input block, so the output is not named either
+  await expect(page.getByTestId('tool-card-input')).toHaveCount(0)
+  await expect(card).not.toContainText('Output')
+})
+
+test('An opened card shows a long input whole above its output, each named, a shell command after a prompt sign', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'x')
+  const command = `pnpm exec vitest run ${Array.from({ length: 6 }, (_, i) => `packages/ui/src/file-${i}.test.ts`).join(' ')}`
+  await emitEvent(page, 0, { type: 'tool_call', callId: 'c2', summary: { tool: 'Bash', title: command, paths: [] } })
+  await emitEvent(page, 0, { type: 'tool_result', callId: 'c2', ok: true, summary: 'Tests 6 passed' })
+  await expect(page.getByTestId('tool-card-input')).toHaveCount(0)
+  await page.getByTestId('tool-card-toggle').click()
+  const input = page.getByTestId('tool-card-input')
+  await expect(input).toContainText('Input')
+  await expect(input).toContainText(`$ ${command}`)
+  await expect(page.getByTestId('tool-card')).toContainText('Output')
+  await expect(page.getByTestId('tool-card-output')).toHaveText('Tests 6 passed')
 })
 
 test('Agent replies render as markdown (M2.5)', async ({ page }) => {
@@ -106,7 +131,7 @@ test('Agent replies render as markdown (M2.5)', async ({ page }) => {
   await expect(md.locator('pre code')).toContainText('const x = 1')
 })
 
-test('Tool cards collapse and expand without an inner scrollbar', async ({ page }) => {
+test('Tool cards open and close without an inner scrollbar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -128,35 +153,32 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
     })
   }, id)
 
+  // Closed: the title row alone
+  await expect(page.getByTestId('tool-card')).toBeVisible()
   const output = page.getByTestId('tool-card-output')
-  await expect(output).toBeVisible()
+  await expect(output).toHaveCount(0)
+  await expect(page.getByTestId('tool-card-more')).toHaveCount(0)
 
-  // Read-only tools start collapsed, showing only a preview
+  // Opened: the whole output, and no inner scroller to intercept the conversation's scroll
+  await page.getByTestId('tool-card-toggle').click()
   await expect(output).toContainText('output 1')
-  await expect(output).not.toContainText('output 40')
-  await expect(page.getByTestId('tool-card-more')).toContainText('37 more lines')
-
-  // There is no inner scroller to intercept the conversation's scroll
+  await expect(output).toContainText('output 40')
   const scrollable = await output.evaluate((el) => {
     const s = getComputedStyle(el)
     return s.overflowY === 'auto' || s.overflowY === 'scroll' || el.scrollHeight > el.clientHeight + 1
   })
   expect(scrollable).toBe(false)
 
-  await page.getByTestId('tool-card-more').click()
-  await expect(output).toContainText('output 40')
-  const stillScrollable = await output.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
-  expect(stillScrollable).toBe(false)
+  await page.getByTestId('tool-card-toggle').click()
+  await expect(output).toHaveCount(0)
 })
 
 /**
- * The preview counts by **visible lines** (pointed out by the person, 2026-09-12).
- *
- * A single blob of JSON with no newlines (a resource-upload response) counted as 1 line by
- * counting newlines, so nothing got truncated, and on screen it wrapped into dozens of lines,
- * with the "collapsed" card covering the entire conversation.
+ * A single blob with no newlines (a resource-upload response) wrapped into dozens of lines on screen, and the "collapsed"
+ * card covered the conversation (pointed out by the person, 2026-09-12). A closed card has no output now; opened, the
+ * blob wraps whole, with no inner scroller.
  */
-test('A single blob with no newlines still stops at three lines when collapsed', async ({ page }) => {
+test('A single blob with no newlines adds nothing to a closed card, and wraps whole once it is opened', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -180,29 +202,24 @@ test('A single blob with no newlines still stops at three lines when collapsed',
     m.emit({ type: 'tool_result', sessionId: sid, callId: 'c1', ok: true, summary: blob })
   }, id)
 
+  const card = page.getByTestId('tool-card')
+  const toggle = page.getByTestId('tool-card-toggle')
+  await expect(card).toBeVisible()
+  // Closed, the card is its title row: no taller than the toggle and its border
+  const closed = (await card.boundingBox())!.height
+  expect(closed).toBeLessThanOrEqual((await toggle.boundingBox())!.height + 2)
+
+  await toggle.click()
   const output = page.getByTestId('tool-card-output')
   await expect(output).toBeVisible()
-
-  const collapsed = await output.evaluate((el) => ({
-    height: el.getBoundingClientRect().height,
-    line: parseFloat(getComputedStyle(el).lineHeight),
-    full: el.scrollHeight,
-  }))
-  // Never taller than three lines (1px accounts for rounding)
-  expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1)
-  // Also record that it was far taller before collapsing — proof the cap is actually doing something
-  expect(collapsed.full).toBeGreaterThan(collapsed.line * 10)
-
-  // Line counting cannot say "how many more lines" (hidden === 0) — it must still say there is more to expand
-  await expect(page.getByTestId('tool-card-more')).toContainText('Show all')
-
-  await page.getByTestId('tool-card-more').click()
   const opened = await output.evaluate((el) => ({
     height: el.getBoundingClientRect().height,
+    line: parseFloat(getComputedStyle(el).lineHeight),
     scrollable: el.scrollHeight > el.clientHeight + 1,
   }))
-  expect(opened.height).toBeGreaterThan(collapsed.line * 10)
+  expect(opened.height).toBeGreaterThan(opened.line * 10)
   expect(opened.scrollable).toBe(false)
+  await expect(page.getByTestId('tool-card-more')).toHaveCount(0)
 })
 
 test('A long URL or path does not push the conversation panel sideways', async ({ page }) => {
@@ -242,9 +259,7 @@ test('A long URL or path does not push the conversation panel sideways', async (
  */
 test('An indicator shows while waiting for a response, with a way to stop from there', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
   // The first instruction goes in the composer, not the modal — the dialog has no prompt field (#8)
   await page.getByTestId('prompt-input').fill('something that takes a while')
@@ -632,9 +647,9 @@ test("codex's plan shows as a checklist, updates replace the snapshot, and it di
  * Live execution output is visible (measured for #58, codex's item/commandExecution/outputDelta).
  * The sum of the chunks is not the whole thing (measured: the first chunk gets lost) — so while
  * running, only the tail is shown, and once complete, a result carrying the full output replaces
- * the chunks.
+ * the chunks. Since the output shows only in an open card (owner, 2026-10-18), the tail does too.
  */
-test('Live tool output streams as a tail, and switches to the result once complete', async ({ page }) => {
+test('Live tool output streams as a tail in an open card, and switches to the result once complete', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
@@ -649,6 +664,10 @@ test('Live tool output streams as a tail, and switches to the result once comple
   })
   await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 2\n' })
   await emitEvent(page, 0, { type: 'tool_output_delta', callId: 'exec-1', text: 'tick 3\n' })
+  // Closed, a running card says it runs and shows none of its output
+  await expect(page.getByTestId('tool-card-toggle').getByLabel('running')).toBeVisible()
+  await expect(page.getByTestId('tool-card-live')).toHaveCount(0)
+  await page.getByTestId('tool-card-toggle').click()
   await expect(page.getByTestId('tool-card-live')).toContainText('tick 3')
 
   // Completion: the full output arrives as a result, and the live tail, its job done, disappears
@@ -660,6 +679,7 @@ test('Live tool output streams as a tail, and switches to the result once comple
   })
   await expect(page.getByTestId('tool-card-live')).toHaveCount(0)
   await expect(page.getByTestId('tool-card-output')).toContainText('tick 1')
+  await expect(page.getByTestId('tool-card-toggle').getByLabel('running')).toHaveCount(0)
 })
 
 test('My own sent message does not render twice', async ({ page }) => {

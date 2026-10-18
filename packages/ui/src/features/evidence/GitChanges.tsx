@@ -166,7 +166,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
           />
           <div className="mt-1.5 flex gap-1.5">
             <button
-              className="flex-1 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+              className="flex-1 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
               disabled={busy || !message.trim() || staged.length === 0}
               data-testid="evidence-commit"
               onClick={() =>
@@ -180,7 +180,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               Commit
             </button>
             <button
-              className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+              className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
               disabled={busy}
               data-testid="evidence-push"
               onClick={() =>
@@ -194,7 +194,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
             </button>
             {busy && (
               <button
-                className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+                className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
                 disabled={cancelling}
                 data-testid="evidence-git-cancel"
                 onClick={() => void cancel()}
@@ -230,7 +230,7 @@ function ChangeGroup({
         <h4 className="text-2xs uppercase text-ink-faint">{title}</h4>
         <span className="readout text-2xs text-ink-faint">{files.length}</span>
         <button
-          className="ml-auto text-2xs text-ink-faint transition-colors hover:text-ink disabled:opacity-40"
+          className="ml-auto text-2xs text-ink-faint transition-colors hover:text-ink disabled:opacity-50"
           disabled={busy}
           onClick={() => void action.run(files.map((f) => f.path))}
           data-testid={`evidence-${action.id}-all`}
@@ -290,7 +290,7 @@ function ChangeRow({
         it was being reviewed.
       */}
       <button
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1 text-2xs text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-40"
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1 text-2xs text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-50"
         disabled={busy}
         onClick={onAction}
         data-testid={`evidence-${actionId}-${file.path}`}
