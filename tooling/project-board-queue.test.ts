@@ -532,6 +532,17 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(ci({ item: fresh({ alone: { head: SHA2, text: 'x' } }) })).toMatchObject({ state: 'ci', quick: true })
   })
 
+  it('keeps a pull request that failed alone in a batch in attention, without rerunning its own run the batch cancelled', () => {
+    const reason = { kind: 'failed', text: '#77 failed alone in batch queue/batch-3: "verify" failed.', job: { name: 'verify', id: '61' } }
+    const cancelled = tiered([check(TIER, 'skipped'), check('verify', 'cancelled'), check('windows tests', 'cancelled')])
+    const d = ci({ item: fresh({ alone: { head: SHA, text: reason.text, reason } }), checks: cancelled, runs: [run('cancelled')] })
+    expect(d).toEqual({ state: 'attention', reason })
+    // The same reason on the same head: one message, not one per poll
+    expect(noticeKey(d.reason, SHA)).toBe('failed:' + SHA + ':61')
+    // A new head is tried afresh: its cancelled run is rerun, and it is batched again
+    expect(ci({ item: fresh({ alone: { head: SHA2, text: reason.text, reason } }), checks: cancelled, runs: [run('cancelled')] })).toMatchObject({ action: { type: 'rerun' } })
+  })
+
   it('batches items whose quick tier passed, one at a time when one was sent back, and never one alone again on its head', () => {
     const quick = (pr: number, head: string, extra: Record<string, unknown> = {}) =>
       waitingItem(pr, head, 'completed', { ci: { head, verdict: 'quick', runs: [{ id: 900 + pr, status: 'completed' }] }, ...extra })
@@ -2052,12 +2063,53 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(order.filter((w) => w.startsWith('rerun'))).toEqual([])
   })
 
+  it('bisects a red batch: the half that passes lands, the pull request that fails alone gets attention at once, nothing rerun', async () => {
+    const H = (n: number) => `${n}`.repeat(40).slice(0, 40)
+    const quickOf = (n: number) => [suiteCheck('full tier', 'skipped', n * 10, 5000 + n), suiteCheck('verify', 'success', n * 10 + 1, 5000 + n), suiteCheck('windows tests', 'success', n * 10 + 2, 5000 + n)]
+    const runOf = (k: number, head: string, conclusion: string) => ghRun(conclusion, 1, head, { id: 950 + k, head_branch: `queue/batch-${k}`, event: 'workflow_dispatch', check_suite_id: 6000 + k })
+    // #78 breaks the full tier: the batch of both fails, and so does #78 alone (the merges answer `batch-<last head>`)
+    const ran = (k: number, last: number, ok: boolean) => ({
+      runs: { [`batch-${H(last)}`]: [runOf(k, `batch-${H(last)}`, ok ? 'success' : 'failure')] },
+      checks: { [`batch-${H(last)}`]: fullChecks(6000 + k, ok ? 'success' : 'failure') },
+    })
+    runtime(
+      ghState({
+        prs: { '77': ghPr(77, { headRefOid: H(77) }), '78': ghPr(78, { headRefOid: H(78) }) },
+        runs: { [H(77)]: [ownRun(77, H(77), 977, 5077, 'success')], [H(78)]: [ownRun(78, H(78), 978, 5078, 'success')] },
+        checks: { [H(77)]: quickOf(77), [H(78)]: quickOf(78) },
+        logs: { '60032': 'FAIL e2e window.spec.ts > opens the window\nError: expected 1 window, got 0' },
+        on: { 'dispatch:queue/batch-1': ran(1, 78, false), 'dispatch:queue/batch-2': ran(2, 77, true), 'dispatch:queue/batch-3': ran(3, 78, false) },
+      }),
+      { ...TIERS, PROJECT_BOARD_QUEUE_BATCH_MIN: '2' },
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', '#77 to land and #78 to need attention', BATCH_WAIT_MS)
+    expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([
+      [[77, 78], 'failed'],
+      [[77], 'done'],
+      [[78], 'failed'],
+    ])
+    const order = writes().map(short2)
+    expect(order.filter((w) => w.startsWith('merge ') || w.startsWith('rerun'))).toEqual(['merge 77'])
+    const told = notices().filter((e) => e.kind === 'attention')
+    expect(told).toHaveLength(1)
+    expect(told[0]!.text).toContain('#78 failed alone in batch queue/batch-3')
+    expect(told[0]!.text).toContain('"windows tests" (job 60032) failed at batch-7 with a test or build failure')
+    expect(told[0]!.text).toContain('First failure: FAIL e2e window.spec.ts > opens the window')
+    await morePolls(4)
+    // Not batched again on its head, and still one message
+    expect(batchesOnDisk()).toHaveLength(3)
+    expect(notices().filter((e) => e.kind === 'attention')).toHaveLength(1)
+  })
+
   it('lands nothing when the batch of one fails, and tells the session why', async () => {
     runtime(
       tieredState({
         on: {
           'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure') } },
         },
+        logs: { '60002': 'FAIL e2e full.spec.ts > the full tier\nError: expected the window' },
       }),
       TIERS,
     )
@@ -2065,8 +2117,11 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
     await morePolls(4)
     const q = await call('merge_queue', { all: true })
-    expect(q.data.queue[0].reason.kind).toBe('full-tier')
-    expect(notices().at(-1)!.text).toContain('its batch of one ended without landing it: Batch queue/batch-1: "windows tests" (job 60002) failed at batch-c')
+    expect(q.data.queue[0].reason).toMatchObject({ kind: 'failed', job: { name: 'windows tests', id: '60002' } })
+    // Told once, at once, with the batch's failing job and its first failure line
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('#77 failed alone in batch queue/batch-1, a full run of it on main at main0: "windows tests" (job 60002) failed at batch-c with a test or build failure')
+    expect(notices()[0]!.text).toContain('First failure: FAIL e2e full.spec.ts > the full tier')
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'delete queue/batch-1'])
     // Not batched again on this head, batch after batch
     expect(batchesOnDisk()).toHaveLength(1)

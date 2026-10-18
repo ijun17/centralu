@@ -39,19 +39,21 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, pushEvent, SUBJECT_MAX } from './queue.mjs'
-import { afterMerge, batchable, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX } from './queue.mjs'
+import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
 const RED = new Set(['failed', 'failing'])
-/**
- * Fewer than this left after a conflict or a change, and there is no batch (QUEUE.batch.min is for
- * starting one). With two tiers a batch of one is a batch: every pull request lands through one.
- */
-const KEEP_MIN = QUEUE.batch ? Math.min(2, QUEUE.batch.min) : 2
 const TIERS = CI.fullTier !== null
+/**
+ * Fewer than this left after a split, a conflict or a change, and there is no batch (QUEUE.batch.min
+ * is for starting one). With two tiers a batch of one is a batch, whatever `min`: every pull request
+ * lands through one, and a red batch is split down to single pull requests (bisect), each half that
+ * passes landing.
+ */
+const KEEP_MIN = TIERS ? 1 : 2
 const workflowFile = (path) => path.split('/').pop()
 const list = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
@@ -345,6 +347,30 @@ async function runCi(b, ctx) {
       batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
     })
     return { state: 'landing' }
+  }
+  // Red alone (the end of a bisect, or a batch of one): its session hears at once, with the job and
+  // its first failure line. Back on its own CI, its run (cancelled for the batch) would be rerun first
+  // and say only "quick tier passed" (2026-10-19)
+  if (RED.has(d.reason.kind) && b.steps.length === 1 && TIERS) {
+    const s = b.steps[0]
+    const line = await failingLine(repo, d.reason.job)
+    const reason = {
+      ...d.reason,
+      kind: 'failed',
+      text: `${ref(repo, s.pr)} failed alone in batch ${b.branch}, a full run of it on ${defaultBranch} at ${short(b.base?.sha ?? '')}: ${d.reason.text.replace(/^Batch \S+: /, '')}${line}`,
+    }
+    return drop(b, ctx, `${d.reason.text.replace(/ Read it with.*$| Look with.*$/, '')} ${ref(repo, s.pr)} failed alone; its session is told.`, {
+      state: 'failed',
+      why: reason.text,
+      then: (fq) => {
+        const it = findItem(fq, repo, s.pr)
+        if (!it) return
+        // Not batched again on this head, and its poll answers this same reason (queue.mjs decideCi)
+        it.alone = { head: s.head, text: reason.text, reason }
+        Object.assign(it, { state: 'attention', reason, noticeKey: noticeKey(reason, s.head), updatedAt: at, nextAt: new Date(now + pollMs('attention')).toISOString() })
+        pushEvent(fq, it, { kind: 'attention', text: attentionText(it, reason, ref), notify: true, at })
+      },
+    })
   }
   // Attention for a batch is not a session's: red is split and tried again, anything else goes back
   if (RED.has(d.reason.kind) && b.steps.length >= 2) {

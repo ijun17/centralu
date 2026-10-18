@@ -368,6 +368,9 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
+  // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
+  // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
+  if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
   if (quickGreen(checks, runs, fullTier)) {
     const alone = item.alone?.head === head ? item.alone : null
     if (alone)

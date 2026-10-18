@@ -402,7 +402,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
   rerun, once (Reruns, above). A member that changes meanwhile (pushed, closed, a draft, taken out,
   queued again) ends the run; the rest are tried again without it. **Red** (a test or build failure,
   or an infrastructure failure twice): split in halves, a half of
-  two or more tried again, one alone goes back to its own CI. Anything else (no run in 15 minutes, a
+  two or more tried again, one alone goes back to its own CI; with two tiers every half is tried
+  again, down to single pull requests (bisect, below). Anything else (no run in 15 minutes, a
   refused rerun) sends them all back.
 - **The required-checks rule** (#962's open question, decided here): the queue's own rule, with no
   branch protection change. A member's required checks count as passed when the batch run passed
@@ -453,12 +454,19 @@ finished otherwise, null while not reported).
   (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
   off) → attention `full-tier`, saying how to start the full tier on it.
 - **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
-  repository's), and the fewest left after a conflict or a change is `min(2, min)`. A batch also takes
+  repository's), and the fewest left after a split, a conflict or a change is 1, whatever `min`. A batch also takes
   items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
   is taken alone, when it is the oldest. The batch's run must have passed the full tier's check too,
   or nothing lands from it (the batch is dropped).
-- **A batch of one that ended without landing its member** (red, refused, stopped, three errors, a
-  conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
+- **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
+  the default branch as it is then, so a half that passes lands before the other half is tried, and a
+  red half is split again. **A pull request red alone** (the end of a bisect, or a batch of one) needs
+  attention at once (`failed`: "#N failed alone in batch …", the job, its step and its first failure
+  line), kept as `alone.reason` on that head, which its poll answers before anything else
+  (`decideCi`): its own run, cancelled for the batch, is not rerun first only to say "quick tier
+  passed", and the message is sent once.
+- **A batch of one that ended without landing its member** otherwise (refused, stopped, three errors,
+  a conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
   its session (`full-tier`, with the batch's reason). A new head, or queueing it again, clears it.
   Without this a red batch of one was formed again every tick.
 - **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
