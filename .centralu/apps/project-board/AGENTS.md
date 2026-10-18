@@ -166,19 +166,24 @@ this before and could only write a log line when a pull request went DIRTY; noth
 and a half hours. The decisions are pure functions in `queue.mjs`; `queue-driver.mjs` keeps the queue
 file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the watch command.
 
-- **`queue_merge`** (`pr`, `lowers?`, `owner?`, `deleteBranch?`; model only): one pull request, or a
+- **`queue_merge`** (`pr`, `lowers?`, `owner?`, `author?`, `deleteBranch?`; model only): one pull request, or a
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
   request, and for a top based on a branch none of its lowers has. A pull request is in one item only.
-  `owner` names the queuing session (default a new id); the answer gives the watch command. Queued
+  `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
+  names the PR's author session, the one that opened or owns it and that a conflict is handed to
+  (#1182): default the caller's own, which is the `owner` it gives (an app server cannot tell which
+  session called it, docs/apps.md §5.1), else the one recorded before, else none (a generated owner
+  id is no session); `merge_queue` lists it on each item. Queued
   again (what an attention message may ask for), an item is looked at afresh: its clocks and failure
   count start over, a merge GitHub refused is tried again, reruns spent on its head stay spent, and
-  without a new `owner` it stays the first session's, whose watch command listens for that owner.
+  without a new `owner` it stays the first session's, whose watch command listens for that owner (and
+  without a new `author`, the first author's).
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
-- **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY,
-  BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
+- **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
+  (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
   check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
   pull_request run when a push run shares the commit (`latestRuns`). A cancelled run is rerun once per
@@ -233,6 +238,98 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - `PROJECT_BOARD_QUEUE_TICK_MS` and `PROJECT_BOARD_QUEUE_POLL_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
+
+### Conflicts (#1182)
+
+A conflict stopped the item before; a person or the queuing session merged main by hand, and the item
+then waited behind everything queued since (#1091 conflicted three times). `queue-conflict.mjs` does
+the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
+
+- **The merge**: a DIRTY (or CONFLICTING) pull request based on the default branch, from a branch of
+  this repository, gets the default branch merged into it in a temporary worktree of the checkout
+  this app is committed in (`queue.conflicts.checkout` to change it), as `rebase_stack` works: the
+  refs fetched under `refs/centralu-queue` for a moment, hooks off, the person's checkout and branches
+  never touched, the worktree removed whatever happens. What a run killed half way leaves (its
+  folder, named `centralu-queue-merge-<pid>-…` in the temporary folder, its worktree registration,
+  fetched refs) is swept at the start of the next run (`sweep`: folders of processes that have
+  ended). A remote branch not at the head GitHub reported is read again on the next poll, and
+  nothing is merged into it. A fork's branch, or a stack's top based on a lower's branch, is handed
+  off at once (the reason says why). GitHub saying DIRTY of a branch that has the default branch in
+  it already ("Already up to date" here) is handed off too: there is nothing to push, and waiting for
+  a new head would wait for ever.
+- **Mechanical files**: when every conflicted file is named by an entry of `project.json`
+  `queue.conflicts.mechanical` (`files`: path patterns as `release.versionFiles`; `run`: commands as
+  argument lists, run in order without a shell, each at most `timeoutMinutes`, default 30; on Windows
+  a `.cmd` shim such as pnpm is started through cmd.exe), the default branch's version of each is
+  taken, each command of the matching entries runs once in list order (the lockfile entry first, so
+  the installs after it find it current), only the conflicted files and the files the entries name
+  are staged, and a file still holding a conflict marker stops it. The merge is committed ("Merge main
+  into <branch>", the person's own git identity) and pushed **never forced**: a fast-forward of the
+  head that was read, which git refuses when the branch moved. Refused because the author pushed while
+  the queue worked, it ends quietly (`superseded`, no hand-off): the author's head is the news, and
+  the next poll takes it. The pushed commit is a new head, so CI runs on it again (and through a
+  batch, the full tier) before it lands: nothing lands that CI has not passed on. A merge git makes
+  cleanly though GitHub said DIRTY is pushed the same way. Tests fail if the push gains `--force` or
+  the check that the branch is at the head GitHub reported goes.
+- **What regenerating made is shown**: a regenerated golden is approved without a person, and would
+  be the baseline from then on even if it records a regression. So the commit body and the
+  `regenerate` event carry each regenerated file's lines added and removed against the default
+  branch's version (`stat`), for a person to look at.
+- **The risk: code of the pull request runs on the queue's computer.** The commands run in a worktree
+  of the pull request's branch merged with main: `pnpm docs:schema`, `vitest`, `bundle:host` and
+  `build.rs` under `cargo check` are its code, from anyone who may push a branch to this repository
+  (a fork's never runs). They run as the person who runs the queue, unattended. Limits: every `pnpm
+  install` has `--ignore-scripts` (no lifecycle script of the pull request's packages runs), and each
+  command gets an allow-listed environment (`commandEnv`: PATH, home, temporary and system folders,
+  locale, the cargo, rustup and pnpm homes, `CI=1`), so no GH_TOKEN, GITHUB_TOKEN, API key or any
+  variable Centralu gives its apps reaches it. HOME stays (pnpm's store and cargo need it), so files
+  the person's account can read (`~/.npmrc`, `~/.cargo/credentials`, a gh login stored in a file
+  rather than the keychain) and the network remain within reach. The owner accepted that
+  (2026-10-18): a pull request from a branch of this repository already runs its code in CI with the
+  same trust, and the queue never runs a fork's (`cannotMergeBase`).
+- **node_modules without an install**: when the merged tree's `pnpm-lock.yaml` is the default
+  branch's and the one the queue's checkout installed (`node_modules/.modules.yaml` there), the
+  checkout's node_modules are linked into the worktree (`mirrorModules`: each workspace package's
+  node_modules a real folder of links, a link to a workspace package pointing at that package in the
+  worktree, so the merged source is what runs) and no `pnpm install` of the list runs, so native
+  modules built for the checkout are there. When the lockfile differs, the list's installs run with
+  `--ignore-scripts`; a native module may then be missing (better-sqlite3, which the schema doc and
+  the migration goldens need), its command fails, and the conflict goes to the author session: the
+  safe way to fail. No rebuild runs (it would run a dependency's install script). **The links are
+  removed before anything is removed recursively** (`dropLinks`: unlinked, never followed; also in
+  the sweep of a killed run's folder): `git worktree remove` follows a junction on Windows, and
+  would delete the checkout's own node_modules. Tests: both paths, and both removals with a link
+  left in place.
+- **The lists** (the owner's, 2026-10-18): `pnpm-lock.yaml` (`pnpm install --lockfile-only --ignore-scripts`; pnpm runs
+  the version `package.json` `packageManager` pins), `docs/generated/schema.md` (`pnpm docs:schema`),
+  the store migration goldens (`vitest run --update` of `store-migrations.test.ts`), and Tauri's
+  `permissions/autogenerated/*.toml` (written by `build.rs`: `pnpm bundle:host`, then `cargo check`).
+  `queue.conflicts.never` is never regenerated, whatever the mechanical list says, and always goes to
+  the author session: `e2e/ux/baseline.json`, and store migration steps and their numbers
+  (`store/migrations/*.ts`, `migrate-runner.ts`). Tests check that every pattern names a tracked file
+  and every script exists.
+- **The hand-off** (any other conflict, a command that failed, a push refused): attention `conflict`,
+  with the files and `relay` (`to`: the item's author session, `branch`, `text`: "Merge main into
+  <branch> and push again; conflicted files: …"). Until an app can message a session (#1173) the
+  attention event names the author session and carries that instruction for the queuing session to
+  relay; with no author recorded it says so, and that a session started on the branch needs that
+  instruction. Once per head; queued again, the merge is tried again (main may have moved).
+- **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
+  conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes
+  first: batches take it before older items, and `merge_queue` lists it first in its state
+  (`queueOrder`), instead of behind everything queued while it was fixed.
+- **Events with durations**: every step is an event of kind `conflict` (not a session's news) with
+  `step` and `ms`: `merge` (the files), `regenerate` (the commands, `stat`), `push` (`by: 'queue'`),
+  `superseded` (the author's head, `tip`), `handoff` (`by: 'session'`, `relay`), and `fixed` once a new head no longer conflicts (`ms` since the conflict
+  was found, `by` the queue or a session's push), so the daily metrics can count conflicts handled
+  without a person.
+- `PROJECT_BOARD_QUEUE_CHECKOUT` (empty: none) and `PROJECT_BOARD_QUEUE_CONFLICTS` (the lists as JSON)
+  change these only for tests, which otherwise would merge in this checkout, whose remote is GitHub.
+  Tests: `tooling/project-board-queue.test.ts` (the lists, and the app with real git and a bare
+  repository standing for GitHub's: mechanical only lands with no attention, code, the UX baseline and
+  a migration step hand off; a branch that moved, an author pushing during regeneration, a branch with
+  main in it already, a failing command; the environment the commands see, and the cleanup on each
+  path).
 
 ### Batches (#962)
 
@@ -359,12 +456,26 @@ and refuses with every reason at once, sending nothing.
   A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
-  `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
+  `situationsChecked`, `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
   heading left out (the template says so) and refuses a name the template does not have. **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a
-  heading whose guidance says "keep the heading" (Usability) must not be empty. The title must pass
+  heading whose guidance says "keep the heading" (Situations checked, Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
+  When those rules pass, it runs the repository's `pnpm pre-pr` (`scripts/pre-pr.mjs`, or
+  `rules.prePr` in project.json; #1181) in the checkout at `path` (default this app's), on the
+  pushed head and the branches of the open pull requests under it, fetched under
+  `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`); a ref it cannot remove
+  is a warning naming it. Its findings refuse the pull request and nothing is sent; its warnings (a
+  head behind main) do not, and go into Verified with the pass. `prePrExempt` leaves one check out
+  (`tsc`, `orphans`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
+  Verified. It runs outside `oneAtATime`, with progress every minute, since a stack takes minutes; a
+  fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
+  past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
+  process group), its `--cleanup` removes the worktrees and their links, and nothing is opened; a
+  call cancelled while waiting for its turn opens nothing either. A release bump (`release.mjs`)
+  calls `openPr` directly and does not run pre-pr: it changes version strings only, which the
+  release tool has checked itself.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
@@ -502,6 +613,7 @@ step shows on the screen.
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
+- `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers
   (`sleep`, `mapLimit`, `short`, `plural`) the modules share (pure).

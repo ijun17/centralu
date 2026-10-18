@@ -282,6 +282,8 @@ jobs:
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
           SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
           TARGET: ${{ matrix.target }}
+          # pnpm verify's styles.test.ts: main's bundle comparison is build.yml's verify job's (#1181)
+          CC_BUNDLE_COMPARED_BY: build.yml verify
           # The content signing key (docs/plans/thin-shell.md §4), PKCS#8 PEM. An environment
           # secret of `npm-publish`, so it exists only in a publishing run, behind the same
           # approval as NPM_TOKEN; a rehearsal has no environment and signs with a throwaway key.
