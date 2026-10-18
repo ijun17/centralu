@@ -713,7 +713,10 @@ needed setting aside. A saved notice also offers the recovery directory in the t
 count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
 keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
-index, HEAD tree, and every unmerged superproject commit against their remote refs. Candidate gitlinks
+index, HEAD tree, and every unmerged superproject commit against their remote refs. The configured trunk's
+history is scanned too (#623), when the project has modules: a gitlink merged there still names a module
+commit that may exist only in this checkout's private repository, so a commit that no remote has is kept even
+though the superproject history that records it landed. Candidate gitlinks
 are batch-checked in each module repository; unfetched objects are skipped because removing this
 checkout cannot lose them. Existence checks set `GIT_NO_LAZY_FETCH=1` and disable transports with
 `GIT_ALLOW_PROTOCOL=`; the latter also prevents network access on Git versions that predate the lazy-fetch
@@ -774,9 +777,8 @@ fails, so the entry stays restorable. A folder that cannot be moved back is logg
 name while the entry is still in the trash (joining any snapshot made since), and are deleted once it is gone,
 so a crash at any point of a purge is repaired. Purge and restore wait for that repair; a folder that cannot
 be repaired (held open on Windows) is logged and retried at the next start, and the others go on. No automatic trash expiry is implemented; expiry
-must use `purgeSession` if added. Gitlinks found only in older merged superproject history remain a
-follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
-that module commits were pushed. Writes by other programs during capture are outside this session's lock.
+must use `purgeSession` if added. A superproject merge does not prove that module commits were pushed, so
+gitlinks in merged trunk history are scanned like unmerged ones (#623). Writes by other programs during capture are outside this session's lock.
 
 **Size.** The two definitions are 1,357 characters (`AGENT_BUDGET_CHARS` 1,375; 1,332 before #861's `name`, a bare string; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
