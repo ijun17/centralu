@@ -3,6 +3,8 @@ import type { ExternalAppInfo, NormalizedEvent, StoredMessage } from '@cc/protoc
 import type { AppToolResult } from '@cc/platform/ports'
 import type { AppState, InlineView, PinnedView, StoreGet, StoreSet } from './state.js'
 import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+import { noteAppArrivals } from '@cc/core'
+import { usesLines } from './uses-lines.js'
 import { returnsToPanel } from './screens.js'
 import { reloadBudget } from './reloadBudget.js'
 import { viewReconnect } from './viewReconnect.js'
@@ -305,6 +307,7 @@ const releasedOrphans = new Set<string>()
 type AppActions = Pick<
   AppState,
   | 'refreshExternalApps'
+  | 'dismissAppArrival'
   | 'setAppShared'
   | 'removeUserApp'
   | 'refreshAppQuestions'
@@ -341,6 +344,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
         try {
           const externalApps = await platform.apps.list()
           set({ externalApps })
+          noteArrivals(get, set)
           get().pruneFoldedGroups()
           // If an app came up again with new code, reopen that app's open views (M4 C-4)
           followAppCode(get, set)
@@ -651,12 +655,24 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     })
   },
 
+  dismissAppArrival(key) {
+    if (!get().appArrivals.some((a) => a.key === key)) return
+    set((s) => ({ appArrivals: s.appArrivals.filter((a) => a.key !== key) }))
+    get().saveWorkspace()
+  },
+
   async createApp(spec) {
     const platform = get().platform
     if (!platform) throw new Error('Not connected to the host')
     // A refusal is thrown as is — the host's own message is the reason (an id already taken, an untrusted project). The window shows that message
     const made = await platform.apps.create(spec)
     const { app, builder } = made
+    // An app the person made here is no news to them: seen before the list brings it (#1141)
+    const madeIn = app.projectId
+    if (madeIn && get().appsSeen[madeIn]) {
+      const key = externalAppKey(madeIn, app.appId)
+      set((s) => ({ appsSeen: { ...s.appsSeen, [madeIn]: [...new Set([...(s.appsSeen[madeIn] ?? []), key])].sort() } }))
+    }
     /*
      * Placed into the list immediately. The host also sends its own list broadcast
      * (`external_apps_changed`), but waiting for it would leave the sidebar without a row for a while
@@ -679,3 +695,33 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     return made
   },
 })
+
+/** Forgets what this window had seen of one project, and its notices: the next read looks at it afresh (#1141) */
+export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string): void {
+  const s = get()
+  if (!(projectId in s.appsSeen) && !s.appArrivals.some((a) => a.projectId === projectId)) return
+  const { [projectId]: _gone, ...seen } = s.appsSeen
+  set({ appsSeen: seen, appArrivals: s.appArrivals.filter((a) => a.projectId !== projectId) })
+  get().saveWorkspace()
+}
+
+/**
+ * Notes the apps trusted projects gained since this window last looked (#1141, `noteAppArrivals`): each one becomes an
+ * inbox notice once. Run after the app list is read; a project whose trust changed is looked at afresh then
+ * (`forgetArrivalsOf`). Saved with the workspace, so a reload does not say it again.
+ */
+export function noteArrivals(get: StoreGet, set: StoreSet): void {
+  const s = get()
+  const trusted = new Set(Object.values(s.projects).filter((p) => p.trusted).map((p) => p.id))
+  // Keyed as the catalog keys an app with a project (`externalAppKey`), titled as it titles one
+  const apps = s.externalApps.flatMap((a) =>
+    a.projectId ? [{ key: externalAppKey(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: a.name ?? a.appId, asks: a.uses ? usesLines(a.uses) : [] }] : [],
+  )
+  const { seen, arrived } = noteAppArrivals(apps, trusted, s.appsSeen)
+  const held = new Set(s.appArrivals.map((a) => a.key))
+  const fresh = arrived.filter((a) => !held.has(a.key))
+  const kept = s.appArrivals.filter((a) => trusted.has(a.projectId) && apps.some((x) => x.key === a.key))
+  if (JSON.stringify(seen) === JSON.stringify(s.appsSeen) && fresh.length === 0 && kept.length === s.appArrivals.length) return
+  set({ appsSeen: seen, appArrivals: [...kept, ...fresh] })
+  get().saveWorkspace()
+}

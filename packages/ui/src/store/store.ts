@@ -220,6 +220,8 @@ export const useStore = create<AppState>((rawSet, get) => {
     externalAppRunChanges: {},
     externalAppChangedBy: {},
     externalApps: [] as ExternalAppInfo[],
+    appArrivals: [],
+    appsSeen: {},
     themeFiles: [] as ThemeFileEntry[],
     lastGoodThemes: {} as Record<string, ThemeFileEntry>,
     appQuestions: [] as AppQuestion[],

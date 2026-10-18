@@ -1,3 +1,4 @@
+import { TrustProjectButton } from './TrustCard.jsx'
 import { useEffect, useState } from 'react'
 import { newAppIdProblem } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -44,7 +45,6 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const orchestratorTool = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
   const createApp = useStore((s) => s.createApp)
-  const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   const allTools = useTools()
   /*
    * The default tool is guessed to match what the host would choose — a project app defaults to
@@ -258,16 +258,8 @@ ${parent?.trim() ?? ''}`
               <p className="text-xs leading-body text-ink-muted">
                 Apps only run in projects you trust. Trust {project.name} to make an app here.
               </p>
-              <Button
-                variant="primary"
-                onRaised
-                size="sm"
-                className="mt-1.5"
-                onClick={() => void setProjectTrusted(project.id, true)}
-                data-testid="new-app-trust"
-              >
-                Trust this project
-              </Button>
+              {/* The same card as the project's row, with its apps listed (#1141) */}
+              <TrustProjectButton projectId={project.id} testId="new-app-trust" className="mt-1.5" />
             </div>
           )}
 

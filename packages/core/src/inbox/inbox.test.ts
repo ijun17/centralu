@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { buildInbox, countWaiting, isProposalId, nextWaitingSession, pendingProposals, proposalCandidates, type InboxCandidate } from './inbox.js'
+import { appArrivalCandidates, buildInbox, countWaiting, isAppArrivalId, isProposalId, noteAppArrivals, nextWaitingSession, pendingProposals, proposalCandidates, type InboxCandidate } from './inbox.js'
 
 const NOW = 1_000_000
 
@@ -165,5 +165,29 @@ describe('pending proposals', () => {
     const inbox = buildInbox([...proposals, s('a', 'waiting_approval')], NOW)
     expect(nextWaitingSession(inbox, 'a')).toBe('proposal:mcp:playwright')
     expect(nextWaitingSession(inbox, 'proposal:skill:weekly')).toBe('a')
+  })
+})
+
+describe('apps a trusted project gains (#1141)', () => {
+  const app = (projectId: string, appId: string) => ({ key: `${projectId}/${appId}`, projectId, appId, title: appId, asks: [] })
+  it('a project seen for the first time gives no notice; an app it gains after does, once', () => {
+    const first = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {})
+    expect(first).toEqual({ seen: { p1: ['p1/notes'] }, arrived: [] })
+    const later = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), first.seen)
+    expect(later.arrived.map((a) => a.key)).toEqual(['p1/board'])
+    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), later.seen).arrived).toEqual([])
+  })
+
+  it('an untrusted project is not watched, and trusting it again starts afresh', () => {
+    const seen = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {}).seen
+    const untrusted = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(), seen)
+    expect(untrusted).toEqual({ seen: {}, arrived: [] })
+    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), untrusted.seen).arrived).toEqual([])
+  })
+
+  it('stands in the inbox as unread and waiting, under its own id', () => {
+    const [row] = buildInbox(appArrivalCandidates([{ key: 'p1/board', projectId: 'p1', appId: 'board', title: 'Board', asks: [] }]), 0)
+    expect(row).toMatchObject({ id: 'app-arrival:p1/board', name: 'New app: Board', unread: true, state: 'waiting_input' })
+    expect(isAppArrivalId(row!.id)).toBe(true)
   })
 })

@@ -149,6 +149,19 @@ describe('a manifest at a project root', () => {
   })
 })
 
+describe('what an app declares, for its project trust card (#1141)', () => {
+  it("an untrusted project's apps, root and inner alike, carry what their manifests declare they may ask for; one declaring nothing carries none", () => {
+    writeManifest({ uses: { agent: true, host: ['sessions.list'] } })
+    plantApp(join(projRoot, ...PROJECT_APPS), 'notes', { uses: { apps: ['board'] } })
+    plantApp(join(projRoot, ...PROJECT_APPS), 'plain')
+    projects = [{ ...projects[0]!, trusted: false }]
+    rt.refresh()
+    expect(root()).toMatchObject({ status: 'untrusted', uses: { agent: true, host: ['sessions.list'] } })
+    expect(rt.list().find((a) => a.appId === 'notes')).toMatchObject({ status: 'untrusted', uses: { apps: ['board'] } })
+    expect(rt.list().find((a) => a.appId === 'plain')).not.toHaveProperty('uses')
+  })
+})
+
 describe('versions of a root app', () => {
   it('outside git, Centralu keeps copies of its code as it starts, under the project\'s key', { timeout: 10_000 * SLOW }, async () => {
     writeManifest()

@@ -189,7 +189,11 @@ test.describe('C-1: new app', () => {
     await expect(dialog.getByTestId('new-app-untrusted')).toContainText('Apps only run in projects you trust.')
     await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
 
+    // The same card as the project's row (#1141), in the dialog: nothing is trusted on the first press
     await dialog.getByTestId('new-app-trust').click()
+    await expect(dialog.getByTestId('new-app-trust-card')).toContainText('Trust this project?')
+    expect(await trustCalls(page)).toEqual([])
+    await dialog.getByTestId('new-app-trust-card-yes').click()
     await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
     await expect(dialog.getByTestId('new-app-untrusted')).toHaveCount(0)
     await dialog.getByTestId('new-app-create').click()

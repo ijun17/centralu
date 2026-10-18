@@ -162,8 +162,15 @@ either to act.
   what trusting covers: each of the project's apps (its root app and those in `.centralu/apps`) with
   its name, the first line of its description and what its manifest's `uses` declares, in plain words
   (`uses` is on the app list for this, a protocol addition), and says that the project's own root
-  app then reaches the orchestrator and other projects. A long list scrolls inside the card. When
-  the project has apps, the menu's "Trust this project…" opens that card instead of trusting at once.
+  app then reaches the orchestrator and other projects. A long list scrolls inside the card, and each
+  description is shown whole. When the project has apps, the menu's "Trust this project…" opens that
+  card instead of trusting at once, and so does every other "Trust this project…" (an untrusted app's
+  screen, its row in Settings, the New app dialog), in place (`TrustCard`).
+- **An app a trusted project gains later** (a manifest a `git pull` brought, root or inside) is
+  trusted with the project (owner). The inbox says so once ("New app: <name>", with what it may ask
+  for); opening it opens the app, Done takes it off. The window keeps what it has seen per trusted
+  project in its workspace snapshot (`noteAppArrivals` in @cc/core); a project seen for the first
+  time, or whose trust just changed, gives no notice, since its card listed its apps.
 - **Migration**: the `trusted` column arrived untrusted by default (store v33); then v35 marked
   **every project that existed at that moment** as trusted, once. Those were folders the person had
   chosen and worked in for weeks, and an update must not silently start ignoring their `.claude/`

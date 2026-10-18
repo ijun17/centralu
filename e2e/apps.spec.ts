@@ -146,7 +146,7 @@ test('registering a project asks to trust it once — "Later" sends nothing, and
   await expect.poll(async () => (await trustCalls(page)).at(-1)).toEqual({ projectId: beta, trusted: true })
 })
 
-test('an app from an untrusted project shows with a reason, and can be trusted right there in one click', async ({ page }) => {
+test("an app from an untrusted project shows with a reason, and can be trusted right there, through the card listing its project's apps", async ({ page }) => {
   await page.goto('/?mock=1')
   const pid = await addProject(page, '/tmp/alpha')
   await page.getByTestId('trust-ask-no-alpha').click()
@@ -156,7 +156,12 @@ test('an app from an untrusted project shows with a reason, and can be trusted r
   const row = page.getByTestId(`external-app-${pid}/notes`)
   await expect(row.getByTestId('external-app-status')).toHaveText('Not trusted')
   await expect(row.getByTestId('external-app-reason')).toHaveText("This project isn't trusted, so its apps don't run.")
+  // The same card as the project's row, with the project's apps listed (#1141): nothing is trusted on the first press
   await row.getByTestId('external-app-trust').click()
+  const card = row.getByTestId('external-app-trust-card')
+  await expect(card.getByTestId(`external-app-trust-card-app-${pid}/notes`)).toContainText('App notes')
+  expect(await trustCalls(page)).toEqual([])
+  await card.getByTestId('external-app-trust-card-yes').click()
   await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
   // The host rescans and broadcasts — the app becomes stopped, and the trust button disappears
   await expect(row.getByTestId('external-app-status')).toHaveText('Stopped')
@@ -402,6 +407,10 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     expect(await opened(page)).toEqual([])
 
     await blocked.getByTestId('pinned-trust').click()
+    // The card lists the project's apps before anything is trusted (#1141)
+    await expect(blocked.getByTestId(`pinned-trust-card-app-${pid}/slider`)).toBeVisible()
+    expect(await trustCalls(page)).toEqual([])
+    await blocked.getByTestId('pinned-trust-card-yes').click()
     await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
@@ -819,8 +828,8 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(card.getByTestId('trust-ask-apps-title-board')).toHaveText('Its 2 apps:')
     const board = card.getByTestId(`trust-ask-app-${pid}/board`)
     await expect(board).toContainText('Board')
-    await expect(board).toContainText('The team board')
-    await expect(board).not.toContainText('with more lines')
+    // The whole description, not its first line only
+    await expect(board.getByTestId('trust-card-app-description')).toHaveText('The team board\nwith more lines')
     await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the orchestrator and your other projects can use it.')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: run your default agent in a new session')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: call other apps: notes')
@@ -839,6 +848,33 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     expect(await page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([])
     await page.getByTestId('trust-ask-yes-board').click()
     await expect.poll(() => page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([{ projectId: pid, trusted: true }])
+  })
+
+  /*
+   * An app a trusted project gains later (a manifest a git pull brought) is trusted with it (owner, #1141), and the inbox
+   * says so once, with what it may ask for
+   */
+  test('an app a trusted project gains stands once in the inbox with what it may ask for; opening it opens the app, and it does not come back', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('notes', pid, { name: 'Notes', trusted: false, status: 'untrusted' })])
+    await page.getByTestId('trust-ask-yes-board').click()
+    await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
+    // The host reads its apps again for the change of trust
+    await setApps(page, [app('notes', pid, { name: 'Notes' })])
+    // The apps it was trusted with are no news
+    await expect.poll(() => page.evaluate(() => (window as any).__store.getState().appsSeen)).toEqual({ [pid]: [`${pid}/notes`] })
+    expect(await page.evaluate(() => (window as any).__store.getState().appArrivals)).toEqual([])
+
+    await setApps(page, [app('notes', pid, { name: 'Notes' }), app('timer', pid, { name: 'Timer', uses: { agent: true } })])
+    await page.getByTestId('counter').click()
+    const item = page.getByTestId(`inbox-item-app-arrival:${pid}/timer`)
+    await expect(item).toContainText('New app: Timer')
+    await expect(page.getByTestId(`inbox-arrival-asks-app-arrival:${pid}/timer`)).toContainText('May ask to: run your default agent in a new session')
+    await item.click()
+    await expect(page.getByTestId(`pinned-app-${pid}/timer`)).toBeVisible()
+    // Read once: the next list read does not bring it back
+    await setApps(page, [app('notes', pid, { name: 'Notes' }), app('timer', pid, { name: 'Timer', uses: { agent: true } })])
+    expect(await page.evaluate(() => (window as any).__store.getState().appArrivals)).toEqual([])
   })
 
   test('a long list of apps scrolls inside the trust card', async ({ page }) => {

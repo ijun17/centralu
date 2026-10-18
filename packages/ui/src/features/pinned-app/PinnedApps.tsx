@@ -1,3 +1,4 @@
+import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -452,7 +453,6 @@ function Body({
   onRestart: () => void
   onMessage: (m: AppFrameMessage) => Promise<boolean>
 }) {
-  const trust = useStore((s) => s.setProjectTrusted)
   const connection = useStore((s) => s.connection)
   const title = app?.title ?? pv.appId
   /*
@@ -517,9 +517,8 @@ function Body({
       <Notice testId="pinned-untrusted" title={app.status.reason ?? ''}>
         Trusting lets this project&apos;s apps run and its settings apply.
         {app.projectId && (
-          <Button variant="primary" className="mt-3 block" onClick={() => void trust(app.projectId!, true)} data-testid="pinned-trust">
-            Trust this project
-          </Button>
+          // The same card as the project's row, with its apps listed (#1141): trusting is never one press away
+          <TrustProjectButton projectId={app.projectId} testId="pinned-trust" className="mt-3 block" />
         )}
       </Notice>
     )

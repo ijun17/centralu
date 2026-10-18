@@ -173,13 +173,19 @@ export function Inbox() {
                       {projectLabelOf(projects, it.projectId)}
                     </span>
                     {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
-                    {!it.proposal && (
+                    {!it.proposal && !it.arrival && (
                       <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
                     )}
                     <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                      <span className="text-xs text-ink-faint">
+                      <span
+                        className="max-w-64 truncate text-xs text-ink-faint"
+                        title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
+                        data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
+                      >
                         {/* Why the turn stopped says more than the state it stopped in (#698) */}
-                        {it.proposal
+                        {it.arrival
+                          ? arrivalAsks(it.arrival.asks)
+                          : it.proposal
                           ? 'Needs your answer'
                           : it.interruption
                             ? interruptionLabel(it.interruption)
@@ -256,4 +262,12 @@ function WaitingTime({ since }: { since: number | null }) {
 /** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread */
 function doneable(it: { state: string; interruption?: { reason: string } | null }): boolean {
   return it.state === 'waiting_input' || (it.state === 'idle' && !!it.interruption)
+}
+
+/**
+ * What an app a trusted project gained declares it may ask for (#1141), for its inbox notice: it is trusted with the
+ * project, so this is what that trust now lets it ask
+ */
+function arrivalAsks(asks: readonly string[]): string {
+  return asks.length > 0 ? `Trusted with its project. May ask to: ${asks.map((a) => a.charAt(0).toLowerCase() + a.slice(1)).join('; ')}` : 'Trusted with its project. Asks for nothing beyond its own tools'
 }

@@ -1,3 +1,4 @@
+import { forgetArrivalsOf } from './apps.js'
 import type { ProjectInfo } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
@@ -220,6 +221,12 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
           const p = s.projects[projectId]
           return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
         })
+        /*
+         * Trust changed here (#1141): the project is looked at afresh at the next read of the app list, which the host
+         * sends for the change. The apps it has then were on its card, so none is news, even ones whose list had not
+         * arrived when the person pressed Trust; untrusted, it is no longer watched
+         */
+        forgetArrivalsOf(get, set, projectId)
         const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
         if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
       } catch (e) {

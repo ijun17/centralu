@@ -245,6 +245,7 @@ test.describe('import (E-3)', () => {
     expect(await mockList<unknown[]>(page, 'openedViews')).toEqual([])
 
     await pinned.getByTestId('pinned-trust').click()
+    await pinned.getByTestId('pinned-trust-card-yes').click()
     await expect(pinned.getByTestId('pinned-untrusted')).toHaveCount(0)
     await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: project.id }])
     await expect(page.getByTestId('project-app-mark-notes')).toHaveAttribute('data-status', 'stopped')

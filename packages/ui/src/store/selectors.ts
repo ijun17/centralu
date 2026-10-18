@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
+import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
@@ -59,22 +59,31 @@ export function useToolMeta(tool: ToolName): ToolDescriptor {
 }
 
 /** Everything that waits on the person (#703): sessions in a waiting state, and the orchestrator's proposals nobody answered */
-function candidates(state: Pick<AppState, 'sessions' | 'mcpProposals' | 'skillProposals'>): InboxCandidate[] {
-  return [...Object.values(state.sessions).map(toCandidate), ...proposalCandidates(pendingProposals(state))]
+function candidates(state: Pick<AppState, 'sessions' | 'mcpProposals' | 'skillProposals' | 'appArrivals'>): InboxCandidate[] {
+  // And the apps trusted projects gained (#1141)
+  return [...Object.values(state.sessions).map(toCandidate), ...proposalCandidates(pendingProposals(state)), ...appArrivalCandidates(state.appArrivals)]
 }
 
 export function useInbox(now: number): InboxItem[] {
   const sessions = useStore((s) => s.sessions)
   const mcpProposals = useStore((s) => s.mcpProposals)
   const skillProposals = useStore((s) => s.skillProposals)
-  return useMemo(() => buildInbox(candidates({ sessions, mcpProposals, skillProposals }), now), [sessions, mcpProposals, skillProposals, now])
+  const appArrivals = useStore((s) => s.appArrivals)
+  return useMemo(
+    () => buildInbox(candidates({ sessions, mcpProposals, skillProposals, appArrivals }), now),
+    [sessions, mcpProposals, skillProposals, appArrivals, now],
+  )
 }
 
 export function useCounts() {
   const sessions = useStore((s) => s.sessions)
   const mcpProposals = useStore((s) => s.mcpProposals)
   const skillProposals = useStore((s) => s.skillProposals)
-  return useMemo(() => countWaiting(candidates({ sessions, mcpProposals, skillProposals })), [sessions, mcpProposals, skillProposals])
+  const appArrivals = useStore((s) => s.appArrivals)
+  return useMemo(
+    () => countWaiting(candidates({ sessions, mcpProposals, skillProposals, appArrivals })),
+    [sessions, mcpProposals, skillProposals, appArrivals],
+  )
 }
 
 /** Is a proposal waiting for the person's answer? The orchestrator's row asks this (#703) */

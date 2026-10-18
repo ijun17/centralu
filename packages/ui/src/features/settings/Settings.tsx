@@ -1,3 +1,4 @@
+import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
@@ -479,7 +480,6 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
-  const trustProject = useStore((s) => s.setProjectTrusted)
   const toggleSettings = useStore((s) => s.toggleSettings)
   const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
@@ -505,16 +505,8 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </p>
       )}
       {app.info.status === 'untrusted' && app.projectId && (
-        <Button
-          variant="primary"
-          onRaised
-          size="sm"
-          className="mt-1.5"
-          onClick={() => void trustProject(app.projectId!, true)}
-          data-testid="external-app-trust"
-        >
-          Trust this project
-        </Button>
+        // The same card as the project's row, with its apps listed (#1141)
+        <TrustProjectButton projectId={app.projectId} testId="external-app-trust" className="mt-1.5" />
       )}
       {/* An imported app (M4 E-3) — where it came from, and, if it is waiting on the person's confirmation, the path to that confirmation */}
       {app.info.imported && (
