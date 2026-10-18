@@ -163,7 +163,8 @@ export class ExternalApps {
     this.desk = new BrokerDesk(
       {
         has: (ref) => this.find(ref) !== undefined,
-        roots: (id) => [...this.scopes.values()].flatMap(({ apps }) => [...apps.values()]).filter((e) => e.found.root === true && e.ref.appId === id).map((e) => e.ref),
+        // Only a trusted project's: a root app reaches beyond its project because its project is trusted (#1141)
+        roots: (id) => [...this.scopes.values()].flatMap(({ apps }) => [...apps.values()]).filter((e) => e.found.root === true && e.scope.trusted && e.ref.appId === id).map((e) => e.ref),
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => this.startEnv.masker(ref),
         origin: (runId) => this.calls.chainOrigin(runId),
@@ -801,7 +802,8 @@ export class ExternalApps {
       ...this.startEnv.secretSlots(e),
       ...this.importMark(e),
       // A user-folder app is available to every project already, so only a project app carries the mark (#371)
-      ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
+      // A root app has no share switch: its project's trust decides (#1141), so it never carries the mark
+      ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141)
       ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length) ? { uses: m.uses } : {}),

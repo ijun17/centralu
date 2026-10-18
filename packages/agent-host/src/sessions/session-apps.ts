@@ -154,6 +154,16 @@ function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | '
   )
 }
 
+/**
+ * Whether an app of an untrusted project may still be given to this session because the session's boundary is open
+ * (`auto`, #603). A root app reaches the orchestrator and other projects because its project is trusted (#1141,
+ * owner: trust follows the project), so an untrusted project's root app reaches none of them, under `auto` or not: only
+ * its own project's sessions. An app inside a project keeps #603's rule (an auto session may attach a shared one).
+ */
+export function untrustedReaches(session: Pick<AppSessionKey, 'projectId'>, app: Pick<ExternalAppInfo, 'projectId' | 'root'>, open: boolean): boolean {
+  return open && !(app.root === true && app.projectId !== session.projectId)
+}
+
 /** The first of `app-<id>`, `app-<id>-2`, … that `taken` does not hold */
 export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[]): string {
   const has = (name: string) => (Array.isArray(taken) ? taken.includes(name) : (taken as ReadonlySet<string>).has(name))
@@ -318,7 +328,7 @@ export class SessionAppsHub {
    * keep answering "yes" even after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
-    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && !!this.opts.boundaryOpen?.(session.id)))
+    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && untrustedReaches(session, a, !!this.opts.boundaryOpen?.(session.id))))
     const named = new Set<string>()
     const hits = usable
       .filter((a) => givesApp(session, a))
@@ -362,8 +372,9 @@ export class SessionAppsHub {
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
-    if (app.status === 'untrusted' && !this.opts.boundaryOpen?.(session.id)) return { reachable: false, reason: 'untrusted' }
-    if (UNUSABLE.has(app.status) && !(app.status === 'untrusted' && this.opts.boundaryOpen?.(session.id))) return { reachable: false, reason: 'app-unusable', status: app.status }
+    const opened = untrustedReaches(session, app, !!this.opts.boundaryOpen?.(session.id))
+    if (app.status === 'untrusted' && !opened) return { reachable: false, reason: 'untrusted' }
+    if (UNUSABLE.has(app.status) && !(app.status === 'untrusted' && opened)) return { reachable: false, reason: 'app-unusable', status: app.status }
     const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameRef(h.ref, ref))?.server ?? appMcpServerName(app.appId)) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }

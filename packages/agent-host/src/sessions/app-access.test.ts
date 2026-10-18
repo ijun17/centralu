@@ -36,7 +36,7 @@ const session = (id: string, projectId: string | null): AppSessionKey => {
   return key
 }
 
-function newAccess(): AppAccess {
+function newAccess(boundaryOpen?: () => boolean): AppAccess {
   const store: AppAccessStore = {
     settings: {
       appSetting: (k) => w.store.settings.appSetting(k),
@@ -48,6 +48,7 @@ function newAccess(): AppAccess {
   return new AppAccess({
     hub,
     store,
+    ...(boundaryOpen ? { boundaryOpen } : {}),
     session: (id) => sessions.get(id) ?? null,
     projects: () => projects,
     ensureAccess: async (sessionId, to, what) => {
@@ -312,13 +313,27 @@ describe('a project that is an app (#1141)', () => {
     expect(asks).toEqual([])
   })
 
-  it('a root app in a project the person has not trusted is neither listed nor attached', async () => {
+  it("an untrusted project's root app reaches no other session, not even one under auto, nor the orchestrator; its own project's session under auto still gets it (an inner shared app keeps #603's rule)", async () => {
     w.trust.p2 = false
     w.plantRoot('p2', 'kanban')
     w.rt.refresh()
+    // Every session's boundary is open (auto, #603): it opens an untrusted project's apps to that project's own sessions only
+    access.dispose()
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      callJoinWaitMs: 300,
+      boundaryOpen: () => true,
+      onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) },
+    })
+    access = newAccess(() => true)
     session('w1', 'p1')
-    expect(refs('w1')).toEqual(['helper'])
+    expect(refs('w1')).toEqual(['Beta/board', 'helper'])
     expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
+    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    expect(hub.refsFor(orchestrator).map((h) => h.server)).toEqual(['app-helper'])
+    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
+    expect(hub.refsFor(session('w2', 'p2')).map((h) => h.server)).toContain('app-kanban')
   })
 
   it("the orchestrator gets every root app and no project's inner app; its own project's sessions get it; two of one id are named apart", () => {

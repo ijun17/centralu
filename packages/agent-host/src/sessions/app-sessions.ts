@@ -317,11 +317,10 @@ export class AppSessions {
     switch (name) {
       case 'sessions.list': {
         const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
-        // A project app only sees that project's sessions; a user-folder app sees all of them (a user-folder
-        // app is the orchestrator's own — decision 4), and so does a root app, which took its place (#1141)
-        const everyone = app.projectId === null || !!this.host.appsHub?.rt.list().some((a) => a.root === true && a.projectId === app.projectId && a.appId === app.appId)
+        // A project app only sees that project's sessions, a root app included (#1141: as its permission card says); a
+        // user-folder app sees all of them (a user-folder app is the orchestrator's own — decision 4)
         const sessions = this.host.listSessions()
-          .filter((s) => everyone || s.projectId === app.projectId)
+          .filter((s) => app.projectId === null || s.projectId === app.projectId)
           .map((s) => ({
             id: s.id,
             name: s.name,

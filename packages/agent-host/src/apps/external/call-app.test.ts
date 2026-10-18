@@ -24,6 +24,8 @@ let dataRoot = ''
 let roots: { p1: string; p2: string } = { p1: '', p2: '' }
 let logs = ''
 let rt: ExternalApps
+/** Whether p2 is trusted — a test turns it off to see an untrusted project's root app go unreached */
+let p2Trusted = true
 
 const plant = (where: 'p1' | 'p2' | 'user', id: string, uses: Record<string, unknown> = {}) =>
   plantApp(where === 'user' ? join(dataRoot, 'apps') : join(roots[where], ...PROJECT_APPS), id, {
@@ -44,6 +46,7 @@ const askCallApp = async (asker: AppRef, args: Record<string, unknown>, signal?:
 }
 
 beforeEach(() => {
+  p2Trusted = true
   root = tempRoot('cc-call-app-')
   dataRoot = join(root, 'data')
   roots = { p1: join(root, 'p1'), p2: join(root, 'p2') }
@@ -52,7 +55,7 @@ beforeEach(() => {
   rt = new ExternalApps({
     projects: () => [
       { id: 'p1', path: roots.p1, trusted: true },
-      { id: 'p2', path: roots.p2, trusted: true },
+      { id: 'p2', path: roots.p2, trusted: p2Trusted },
     ],
     dataRoot,
     reservedIds: [],
@@ -199,6 +202,16 @@ describe('call_app — a project that is an app (#1141)', () => {
     expect(rt.runs(ref('p2', 'kanban'))[0]).toMatchObject({ tool: 'echo', callerKind: 'app', status: 'ok' })
     const fromUser = await askCallApp(ref(null, 'lonely'), { app: 'kanban', tool: 'echo', args: { text: 'yo' } })
     expect(fromUser.broker).toEqual({ isError: false, text: 'echo: yo', structured: null })
+  })
+
+  it("an untrusted project's root app is not reached by its id: its project's trust is what lets it reach beyond", async () => {
+    plant('p1', 'notes', { apps: ['kanban'] })
+    plantRoot('p2', 'kanban')
+    p2Trusted = false
+    rt.refresh()
+    const { broker } = await askCallApp(ref('p1', 'notes'), { app: 'kanban', tool: 'echo', args: { text: 'hi' } })
+    expect(broker).toMatchObject({ isError: true, text: expect.stringContaining('no project is an app called that') })
+    expect(rt.runs(ref('p2', 'kanban'))).toEqual([])
   })
 
   it('the rule, in order: own project, then the user folder, then the one root app of that id — two of one id reach neither', () => {

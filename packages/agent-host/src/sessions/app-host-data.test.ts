@@ -59,7 +59,7 @@ describe('sessions.list', () => {
 })
 
 describe('sessions.list for a project that is an app (#1141)', () => {
-  it('a root app receives every session, as the user-folder app it took the place of did, and the orchestrator reaches it', async () => {
+  it("a root app receives its project's sessions only, as the permission card says, also when the orchestrator calls it", async () => {
     plantApp(w.root, 'repo', {
       id: 'board',
       server: { command: process.execPath, args: [fileURLToPath(new URL('../apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'mediation'] },
@@ -75,7 +75,8 @@ describe('sessions.list for a project that is an app (#1141)', () => {
     const r = await read(orchestrator, 'app-board', 'sessions.list')
     expect(r.isError).toBe(false)
     const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()
-    expect(ids).toEqual([orchestrator.id, mine.id, elsewhere.id].sort())
+    expect(ids).toEqual([mine.id])
+    expect(ids).not.toContain(elsewhere.id)
   })
 })
 

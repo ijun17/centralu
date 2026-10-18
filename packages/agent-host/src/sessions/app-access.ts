@@ -1,7 +1,7 @@
 import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, freeServerName, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS, freeServerName, untrustedReaches, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
 import { listSetting } from '../dev-services/store/settings.js'
 
@@ -135,7 +135,9 @@ export class AppAccess implements OnDemandApps {
     const from = session.projectId
     if (from === null || (!this.projectTrusted(from) && !this.deps.boundaryOpen?.(session.id))) return false
     // A user-folder app, or another project's root app (#1141, which took the user-folder app's place): no switch, no card
-    if (app.projectId === null || (app.root === true && app.projectId !== from)) return true
+    if (app.projectId === null) return true
+    // Another project's root app follows its project's trust (owner, #1141): never one of an untrusted project, even under auto
+    if (app.root === true && app.projectId !== from) return app.status !== 'untrusted'
     if (app.projectId === from || app.shared !== true) return false
     const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
     if (!r) return false
@@ -261,7 +263,7 @@ export class AppAccess implements OnDemandApps {
     const have = this.deps.hub.refsFor(session)
     return this.deps.hub.rt
       .list()
-      .filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && this.deps.boundaryOpen?.(session.id)))
+      .filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && untrustedReaches(session, a, !!this.deps.boundaryOpen?.(session.id))))
       .filter((a) => a.projectId === null || (a.projectId !== session.projectId && (a.shared === true || a.root === true)))
       .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
