@@ -1693,9 +1693,11 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 마지막 필요 뒤 10분 동안, 그리고 허브가 마지막으로 들은 대로 거기 세션이 턴 안에 있는 동안 유지된다(이벤트마다 따라가므로,
 링크가 끊길 때 열려 있던 턴은 계속 시도하게 한다). 그 뒤 닫힌다(`disconnected`), 떨어져 있던 동안에도. 그동안 세션은 그 기기에서
 계속 돌고, 다음 연결 때 창이 그 기기를 다시 읽으며(`machine_resync`) 세션이 한 말도 함께 읽는다. 행의 Disconnect는 기기를
-연결 해제하지 않고 링크를 닫는다; Connect(`machines.reconnect`)는 링크를 열고 Disconnect까지 유지한다. 시작할 때 연결하는
+연결 해제하지 않고 링크를 닫는다; Connect(`machines.reconnect`)는 링크를 열고 Disconnect까지 유지한다. 사람이 Disconnect한 뒤에는,
+창이 그 기기의 무언가를 아직 열어 두었다고 다시 알려도(`repeat`가 붙은 `machines.need`) 되살리지 않는다; Connect, 창이 그 기기의
+것을 새로 여는 것, 에이전트의 일은 되살린다. 시작할 때 연결하는
 기기를 사람이 끊었으면 Connect나 허브의 다음 시작까지 그대로다: 에이전트의 일이 되살리지 않는다. 끊긴 기기에 설치, 업데이트,
-자동 시작 변경을 하면 먼저 연결한다: 링크의 ssh로 돌기 때문이다. 이전 호스트는 이 열을 무시하고 모든 기기를 시작할 때 연결하고,
+자동 시작 변경을 하면 먼저 연결한다: 링크의 ssh로 돌기 때문이다. 고정하지는 않으며, 유지 시간은 작업이 끝난 때부터 센다. 이전 호스트는 이 열을 무시하고 모든 기기를 시작할 때 연결하고,
 이전 창은 `disconnected`를 `unreachable`로 읽고 설정을 보여 주지 않는다.
 
 **버전은 연결 전에 확인한다**(계획 문서 §4). 연결 줄은 돌고 있는 원격 호스트의 `version`과 `protocolVersion`을

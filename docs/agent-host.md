@@ -2703,10 +2703,12 @@ away. The link stays up for 10 minutes after the last need, and for as long as a
 hub last heard it (followed event by event, so a turn open when the link dropped keeps it tried); then it closes
 (`disconnected`), also while it was away. Its sessions keep running there meanwhile; on the next connect the window
 re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
-unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. A machine connected at
-start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
+unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
+Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
+does not bring it back; Connect, the window opening something of it again, or an agent's work does. A machine connected
+at start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
 back. An install, update or autostart change on a disconnected machine connects it first, since it runs over the link's
-ssh. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
+ssh, without pinning it: its hold runs from the end of the job. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
 `unreachable` and shows no setting.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`

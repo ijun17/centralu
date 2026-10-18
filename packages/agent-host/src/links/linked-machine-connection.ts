@@ -130,6 +130,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private parked = false
   /** The person connected it (`connect`): it stays up until they disconnect it, whatever `connect` says */
   private pinned = false
+  /**
+   * The person disconnected it (`machines.disconnect`): the window saying again that it still has the machine open
+   * (`need` with `repeat`) does not bring it back. Connect does, the window opening something of it does, and an
+   * agent's work does
+   */
+  private downByPerson = false
   /** When something last needed it (`need`), for a machine that connects when needed */
   private neededAt = 0
   private idleTimer: ReturnType<typeof setInterval> | undefined
@@ -258,6 +264,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   connect(): void {
     this.pinned = true
+    this.downByPerson = false
     if (this.parked) return this.start()
     this.reconnect()
   }
@@ -266,10 +273,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * Something needs the machine now (#1134): the window opened one of its projects or sessions, or an agent is started
    * or sent work there. A machine that connects when needed is connected, or tried again now when it was away, and
    * is kept up for `NEED_HOLD_MS` after this. Resolves once the attempt ended (connected, or why not) or after
-   * `waitMs`; never rejects. Any other machine is left as it is
+   * `waitMs`; never rejects. Any other machine is left as it is. `repeat`: the window saying again that something of
+   * the machine is still open, which does not undo the person's Disconnect
    */
-  need(waitMs = this.deps.needWaitMs ?? NEED_WAIT_MS): Promise<void> {
+  need(opts: { waitMs?: number; repeat?: boolean } = {}): Promise<void> {
+    const waitMs = opts.waitMs ?? this.deps.needWaitMs ?? NEED_WAIT_MS
     if (this.connectMode !== 'when_needed') return Promise.resolve()
+    if (opts.repeat && this.downByPerson) return Promise.resolve()
+    this.downByPerson = false
     this.neededAt = Date.now()
     if (this.reachable) return Promise.resolve()
     if (this.parked) {
@@ -298,8 +309,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * Closes the link and tries none until it is connected or needed again (#1134). The machine stays linked; its
    * sessions keep running there, and the mirror lists them as last known
    */
-  async disconnect(why?: string): Promise<void> {
+  async disconnect(why?: string, byPerson = false): Promise<void> {
     this.pinned = false
+    this.downByPerson = byPerson
     this.parked = true
     this.stopped = true
     clearTimeout(this.retryTimer)
@@ -328,6 +340,21 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** An install, update or other operation the person started holds the machine; it is not idle meanwhile */
   protected operating(): boolean {
     return this.held
+  }
+
+  /**
+   * What the person asks of a disconnected machine runs over its link's ssh (#1134): it is opened for that, and not
+   * pinned. The operation holds it while it runs (`operating`), and its end counts as a need (`noteNeeded`)
+   */
+  openForOperation(): void {
+    if (!this.parked) return
+    this.downByPerson = false
+    this.start()
+  }
+
+  /** Counted as needed now, so the hold runs from here (#1134) */
+  protected noteNeeded(): void {
+    this.neededAt = Date.now()
   }
 
   /**
