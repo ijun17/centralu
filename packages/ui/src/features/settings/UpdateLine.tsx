@@ -1,6 +1,7 @@
 import { APP_VERSION } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
+import { Pill } from '../../components/Pill.jsx'
 import { installedUpdate, applyOffer, useRelaunchCheck } from './apply-update.js'
 
 /**
@@ -33,20 +34,15 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   /*
    * One small capsule that says "Update" (owner, 2026-10-18), in the inbox capsule's shape; the version and what a
    * press does are in its tooltip, not written across the top bar. The words change only where they must: while it
-   * installs, and when it failed.
+   * installs, and when it failed. The capsule is Pill (components/Pill.tsx).
    */
-  const pill =
-    'flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs leading-none transition-colors [text-shadow:none]'
-  const quiet = `${pill} border-line bg-surface-hover/30 text-ink-muted`
-  const live = `${pill} border-line-strong bg-surface-hover/30 text-ink hover:bg-surface-hover/60`
-
   if (update.phase === 'updating') {
     return (
       <Tooltip content={`Installing ${update.latest ?? 'the new version'}. Nothing restarts until you apply it.`} align="right">
-        <span className={quiet} data-testid="update-line" role="status">
+        <Pill edge="quiet" data-testid="update-line" role="status">
           <UpdateIcon />
           Updating…{update.error && ` ${update.error}`}
-        </span>
+        </Pill>
       </Tooltip>
     )
   }
@@ -54,10 +50,10 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   if (update.phase === 'waiting_for_npm') {
     return (
       <Tooltip content={update.error ?? 'The new version is published, and npm is not serving it yet. It installs once npm does.'} align="right">
-        <span className={quiet} data-testid="update-line" role="status">
+        <Pill edge="quiet" data-testid="update-line" role="status">
           <UpdateIcon />
           Update
-        </span>
+        </Pill>
       </Tooltip>
     )
   }
@@ -80,20 +76,20 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
           }
         >
           <span className="flex" data-testid="update-line" role="status">
-            <button type="button" className={live} data-testid="update-apply-now" onClick={() => void applyUpdateNow()}>
+            <Pill edge="live" data-testid="update-apply-now" onClick={() => void applyUpdateNow()}>
               <UpdateIcon />
               Update
-            </button>
+            </Pill>
           </span>
         </Tooltip>
       )
     }
     return (
       <Tooltip content={`${offer.reason ?? ''} Restart Centralu to finish updating${update.latest ? ` to ${update.latest}` : ''}.${update.error ? ` ${update.error}` : ''}`} align="right">
-        <span className={quiet} data-testid="update-line" role="status">
+        <Pill edge="quiet" data-testid="update-line" role="status">
           <UpdateIcon />
           Restart to update
-        </span>
+        </Pill>
       </Tooltip>
     )
   }
@@ -101,10 +97,11 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   if (update.phase === 'failed') {
     return (
       <Tooltip content={update.error ?? 'Something went wrong'} testId="update-error" align="right">
-        <span className={`${pill} border-dashed border-ink text-ink-signal`} data-testid="update-line">
+        {/* A failure waits on the person: the signal ink at full strength, dashed (owner, 2026-10-18) */}
+        <Pill edge="dashed" data-testid="update-line">
           <UpdateIcon />
           Update failed
-        </span>
+        </Pill>
       </Tooltip>
     )
   }
@@ -113,10 +110,10 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
 
   return (
     <Tooltip content={`${update.latest} is out (this is ${APP_VERSION}). Press to install it; nothing restarts until you apply it.`} align="right">
-      <button type="button" className={live} data-testid="update-line" onClick={() => void applyUpdate()}>
+      <Pill edge="live" data-testid="update-line" onClick={() => void applyUpdate()}>
         <UpdateIcon />
         Update
-      </button>
+      </Pill>
     </Tooltip>
   )
 }

@@ -27,6 +27,7 @@
     "build:app-runtime": "node packages/agent-host/scripts/build-app-runtime.mjs",
     "codex:bindings": "node packages/agent-host/scripts/codex-bindings.mjs",
     "drift:claude": "node scripts/claude-sdk-drift.mjs",
+    "drift:surface": "tsx scripts/surface-drift.mts",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",

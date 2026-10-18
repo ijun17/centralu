@@ -59,6 +59,9 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
   can still be serving during a host swap (`Store.migrate()`, `docs/agent-host.md`).
 - The host logs to stderr only. stdout carries one handshake line with a secret.
 - Tests that wait on wall-clock time fail under load. Wait for an event, or give generous bounds.
+- A framed button, pick-one toggle, small caps label, capsule or text field is a shared component
+  (`Button`, `Segmented`, `Badge`, `Pill`, `TextInput`/`TextField` in `packages/ui/src/components/`),
+  not a class string; `tooling/shared-components.test.ts` fails on a hand-drawn one and names the component.
 
 ## How work is done
 
