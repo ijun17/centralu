@@ -30,16 +30,19 @@ export type KeptRunRow = {
  * trash once the session itself is deleted. The person reads them in Settings → Trash and deletes them there; the run
  * log's retention prunes them with the rest (`AppRunRecords.pruneAppRuns`).
  *
- * A record holds the whole conversation (owner decision, 2026-10-06), copied from `messages` in SQLite without passing
- * through the host, and everything the trash lists, so it needs neither the session nor the run log line to be read.
+ * A record holds the whole conversation (owner decision, 2026-10-06), copied from `messages` and its subagents' steps
+ * from `subagent_messages` (#222) in SQLite without passing through the host, and everything the trash lists, so it
+ * needs neither the session nor the run log line to be read. The purge that follows deletes both tables' rows of the
+ * session, so the copy is what is left of them.
  */
 export class KeptRuns {
   constructor(private readonly db: Database.Database) {}
 
   /**
    * Keeps the record of one app-agent session before it is deleted: its run's row as it ended, the names the trash
-   * shows, and a copy of every message. One transaction, so a record is never kept half-copied. Returns false when the
-   * run is not in the log (pruned meanwhile), so the caller keeps the session rather than lose what it did.
+   * shows, and a copy of every message and every subagent step. One transaction, checked by its row counts against the
+   * session's, so a record is never kept half-copied. Returns false, with nothing kept, when the run is not in the log
+   * (pruned meanwhile) or the copy is not whole: the caller then keeps the session rather than lose what it did.
    */
   keepRun(r: { runId: string; sessionId: string; sessionName: string; appName: string; projectName: string | null; tool: string; keptAt: number }): boolean {
     const tx = this.db.transaction((): boolean => {
@@ -55,15 +58,37 @@ export class KeptRuns {
         .run(r.projectName, r.appName, r.sessionId, r.sessionName, r.tool, r.keptAt, r.runId).changes
       if (inserted === 0) return false
       this.db.prepare(`DELETE FROM app_run_messages WHERE run_id = ?`).run(r.runId)
-      this.db
+      this.db.prepare(`DELETE FROM app_run_subagent_messages WHERE run_id = ?`).run(r.runId)
+      const messages = this.db
         .prepare(
           `INSERT INTO app_run_messages (run_id, seq, role, kind, payload, ts)
            SELECT ?, seq, role, kind, payload, ts FROM messages WHERE session_id = ?`,
         )
-        .run(r.runId, r.sessionId)
+        .run(r.runId, r.sessionId).changes
+      const steps = this.db
+        .prepare(
+          `INSERT INTO app_run_subagent_messages (run_id, parent_call_id, seq, role, kind, payload, ts)
+           SELECT ?, parent_call_id, seq, role, kind, payload, ts FROM subagent_messages WHERE session_id = ?`,
+        )
+        .run(r.runId, r.sessionId).changes
+      const has = this.db
+        .prepare(
+          `SELECT (SELECT COUNT(*) FROM messages WHERE session_id = @s) as messages,
+                  (SELECT COUNT(*) FROM subagent_messages WHERE session_id = @s) as steps,
+                  (SELECT COUNT(*) FROM app_run_messages WHERE run_id = @r) as keptMessages,
+                  (SELECT COUNT(*) FROM app_run_subagent_messages WHERE run_id = @r) as keptSteps`,
+        )
+        .get({ s: r.sessionId, r: r.runId }) as { messages: number; steps: number; keptMessages: number; keptSteps: number }
+      // Thrown, so the transaction takes back what it wrote: a record is the whole session or nothing
+      if (messages !== has.messages || steps !== has.steps || has.keptMessages !== has.messages || has.keptSteps !== has.steps) throw new IncompleteCopy()
       return true
     })
-    return tx()
+    try {
+      return tx()
+    } catch (e) {
+      if (e instanceof IncompleteCopy) return false
+      throw e
+    }
   }
 
   /** Every kept record, most recent first, with how much of the store each holds (its messages' bytes) */
@@ -76,7 +101,8 @@ export class KeptRuns {
                 substr(k.request, 1, ${REQUEST_PREVIEW_CHARS}) as requestPreview, k.started_at as startedAt, k.kept_at as keptAt,
                 (SELECT COUNT(*) FROM app_run_messages m WHERE m.run_id = k.run_id) as messages,
                 LENGTH(CAST(k.request AS BLOB)) + LENGTH(CAST(k.answer AS BLOB)) + COALESCE(LENGTH(CAST(k.output AS BLOB)), 0)
-                  + COALESCE((SELECT SUM(LENGTH(CAST(m.payload AS BLOB))) FROM app_run_messages m WHERE m.run_id = k.run_id), 0) as bytes
+                  + COALESCE((SELECT SUM(LENGTH(CAST(m.payload AS BLOB))) FROM app_run_messages m WHERE m.run_id = k.run_id), 0)
+                  + COALESCE((SELECT SUM(LENGTH(CAST(m.payload AS BLOB))) FROM app_run_subagent_messages m WHERE m.run_id = k.run_id), 0) as bytes
          FROM app_run_records k ORDER BY k.kept_at DESC, k.rowid DESC`,
       )
       .all() as (Omit<KeptRunRow, 'tokens'> & { tokensIn: number | null; tokensOut: number | null })[]
@@ -108,6 +134,7 @@ export class KeptRuns {
       let gone = 0
       for (const id of runIds) {
         this.db.prepare(`DELETE FROM app_run_messages WHERE run_id = ?`).run(id)
+        this.db.prepare(`DELETE FROM app_run_subagent_messages WHERE run_id = ?`).run(id)
         gone += this.db.prepare(`DELETE FROM app_run_records WHERE run_id = ?`).run(id).changes
         this.db.prepare(`UPDATE app_runs SET request = '', answer = NULL, output = NULL WHERE id = ? AND request IS NOT NULL`).run(id)
       }
@@ -121,3 +148,6 @@ export class KeptRuns {
     return (this.db.prepare(`SELECT run_id as runId FROM app_run_records`).all() as { runId: string }[]).map((r) => r.runId)
   }
 }
+
+/** A copy whose row counts do not match the session's (`keepRun`), thrown to roll the transaction back */
+class IncompleteCopy extends Error {}

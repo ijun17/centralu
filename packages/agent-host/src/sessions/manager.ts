@@ -2259,6 +2259,7 @@ export class SessionManager {
       },
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.purgeSession(...a),
+      trashIf: (...a) => self.trash.trashIf(...a),
       agentRunEnded: (...a) => self.appSessions.agentRunEnded(...a),
       get trashing() {
         return self.trash.trashing

@@ -287,6 +287,12 @@
    },
    {
     "type": "index",
+    "name": "sqlite_autoindex_app_run_subagent_messages_1",
+    "tbl_name": "app_run_subagent_messages",
+    "sql": null
+   },
+   {
+    "type": "index",
     "name": "sqlite_autoindex_app_runs_1",
     "tbl_name": "app_runs",
     "sql": null
@@ -428,6 +434,12 @@
     "name": "app_run_records",
     "tbl_name": "app_run_records",
     "sql": "CREATE TABLE app_run_records (\n              run_id       TEXT PRIMARY KEY,\n              project_id   TEXT,\n              project_name TEXT,\n              app_id       TEXT NOT NULL,\n              app_name     TEXT NOT NULL,\n              session_id   TEXT NOT NULL,\n              session_name TEXT NOT NULL,\n              tool         TEXT NOT NULL,\n              status       TEXT NOT NULL,\n              duration_ms  INTEGER,\n              tokens_in    INTEGER,\n              tokens_out   INTEGER,\n              request      TEXT NOT NULL,\n              answer       TEXT NOT NULL,\n              output       TEXT,\n              started_at   INTEGER NOT NULL,\n              kept_at      INTEGER NOT NULL\n            )"
+   },
+   {
+    "type": "table",
+    "name": "app_run_subagent_messages",
+    "tbl_name": "app_run_subagent_messages",
+    "sql": "CREATE TABLE app_run_subagent_messages (\n              run_id         TEXT NOT NULL,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (run_id, parent_call_id, seq)\n            )"
    },
    {
     "type": "table",
@@ -654,6 +666,7 @@
    "app_run_failures": [],
    "app_run_messages": [],
    "app_run_records": [],
+   "app_run_subagent_messages": [],
    "app_runs": [],
    "app_settings": [],
    "approval_rules": [],
@@ -830,6 +843,18 @@
      "output TEXT notnull=0 default=null pk=0",
      "started_at INTEGER notnull=1 default=null pk=0",
      "kept_at INTEGER notnull=1 default=null pk=0"
+    ],
+    "rows": []
+   },
+   "app_run_subagent_messages": {
+    "columns": [
+     "run_id TEXT notnull=1 default=null pk=1",
+     "parent_call_id TEXT notnull=1 default=null pk=2",
+     "seq INTEGER notnull=1 default=null pk=3",
+     "role TEXT notnull=1 default=null pk=0",
+     "kind TEXT notnull=1 default=null pk=0",
+     "payload TEXT notnull=1 default=null pk=0",
+     "ts INTEGER notnull=1 default=null pk=0"
     ],
     "rows": []
    },

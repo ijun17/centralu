@@ -99,6 +99,29 @@ export class SessionTrash {
    * tool, and **+ → Past conversations**, still have it.
    */
   async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
+    await this.trashShared(sessionId, removeWorktree, removeExternal, recovery, fromCleanup)
+  }
+
+  /**
+   * A delete the host makes on its own (#378: a finished app-agent session), moved to the trash only if `onlyIf` says
+   * so. It is asked at the last moment, with nothing of the session touched yet and nothing awaited from there until
+   * the session has left `meta`, so no message, wake or card can come in between; false keeps the session as it is.
+   * Such a delete never withdraws a wake (`onlyIf` is there to refuse a waking session), and never rides on a delete
+   * already under way: that one is the person's, and keeps the session in the trash.
+   * @returns whether the session went to the trash
+   */
+  trashIf(sessionId: string, removeExternal: boolean, onlyIf: () => boolean): Promise<boolean> {
+    return this.trashShared(sessionId, false, removeExternal, undefined, false, onlyIf)
+  }
+
+  private async trashShared(
+    sessionId: string,
+    removeWorktree: boolean,
+    removeExternal: boolean,
+    recovery: WorktreeRecovery | undefined,
+    fromCleanup: boolean,
+    onlyIf?: () => boolean,
+  ): Promise<boolean> {
     /*
      * A restore or a purge still running (#839): a restore makes the session live only at its end, so a delete now found
      * no session, told the windows it was gone, and the restore then brought it back behind that word
@@ -111,25 +134,39 @@ export class SessionTrash {
        * the recovery snapshot, and removing the worktree after it would leave nothing a restore could bring back.
        */
       if (recovery || fromCleanup) throw rpcError('The session is already being deleted without its recovery snapshot')
-      return pending
+      // The person's own delete, which keeps the session in the trash: not the host's to purge after it (`trashIf`)
+      if (onlyIf) return false
+      await pending
+      return !this.host.meta.has(sessionId)
     }
     // The first request owns the options; concurrent sidebar/agent deletes share its result.
-    const deleting = this.trashSessionOnce(sessionId, removeWorktree, removeExternal, recovery, fromCleanup)
+    let moved = false
+    const deleting = this.trashSessionOnce(sessionId, removeWorktree, removeExternal, recovery, fromCleanup, onlyIf).then((m) => {
+      moved = m
+    })
     this.trashing.set(sessionId, deleting)
     try {
       await deleting
     } finally {
       this.trashing.delete(sessionId)
     }
+    return moved
   }
 
-  private async trashSessionOnce(sessionId: string, removeWorktree: boolean, removeExternal: boolean, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
+  private async trashSessionOnce(
+    sessionId: string,
+    removeWorktree: boolean,
+    removeExternal: boolean,
+    recovery?: WorktreeRecovery,
+    fromCleanup = false,
+    onlyIf?: () => boolean,
+  ): Promise<boolean> {
     if (this.host.worktrees.worktreeCleanup.has(sessionId) && !recovery && !fromCleanup) throw rpcError('The session worktree is being removed')
     const m = this.host.meta.get(sessionId)
     if (!m) {
       // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
       this.host.emit({ type: 'session_deleted', sessionId })
-      return
+      return false
     }
     /*
      * A session with worktree children used to be undeletable while one was unmerged (#69): a worktree whose manager
@@ -152,7 +189,14 @@ export class SessionTrash {
      * session would come back on the next startup, and if the wake had started from a send, the
      * agent would go on to execute the message that had just been sent.
      */
-    await this.host.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
+    if (!onlyIf) await this.host.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
+    /*
+     * The host's own delete (#378 review) is decided here, with nothing awaited from this line until the session has left
+     * `meta` below (a handle to dispose is one `onlyIf` refuses): a person's message, a wake or a card either came before
+     * it and keeps the session, or finds the session gone. Checked earlier, a message in between woke the session and the
+     * delete then cancelled that wake, and the message was lost.
+     */
+    if (onlyIf && !onlyIf()) return false
     /*
      * A handoff's original that goes (#738): what it still has (settled children, and anything it started after a
      * handoff that kept it) goes to the session that inherited its handoff, before the teardown below lets go of it. A
@@ -247,6 +291,7 @@ export class SessionTrash {
     // restored conversation reopens them from its history
     this.host.appsHub?.sessionGone(sessionId)
     this.host.emit({ type: 'session_deleted', sessionId })
+    return true
   }
 
   /** Only one trash operation per session at a time — a purge racing a restore would restore half of a deleted session */

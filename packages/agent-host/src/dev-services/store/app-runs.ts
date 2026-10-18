@@ -199,6 +199,7 @@ export class AppRunRecords {
   pruneAppRuns(before: number): number {
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM app_run_messages WHERE run_id IN (SELECT run_id FROM app_run_records WHERE started_at < ?)`).run(before)
+      this.db.prepare(`DELETE FROM app_run_subagent_messages WHERE run_id IN (SELECT run_id FROM app_run_records WHERE started_at < ?)`).run(before)
       this.db.prepare(`DELETE FROM app_run_records WHERE started_at < ?`).run(before)
       this.db.prepare(`DELETE FROM app_run_failures WHERE created_at < ?`).run(before)
       return this.db.prepare(`DELETE FROM app_runs WHERE created_at < ?`).run(before).changes

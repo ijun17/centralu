@@ -61,8 +61,9 @@ export class StepsV55 extends MigrationRange {
          * An app-agent run keeps its own record (#378). `app_runs` gains the app's request, the agent's answer and its
          * structured output for a run_agent row (masked like the rest of the row). A session the run stood up is
          * deleted once the run ends cleanly; what it said is copied first into `app_run_records` (one row per run, with
-         * what the trash lists) and `app_run_messages` (its conversation, the same columns as `messages`). Neither
-         * points at `sessions`: the record outlives the session, the run log line and the project.
+         * what the trash lists), `app_run_messages` (its conversation, the same columns as `messages`) and
+         * `app_run_subagent_messages` (its subagents' steps, as `subagent_messages` keeps them, #222). None points at
+         * `sessions`: the record outlives the session, the run log line and the project.
          *
          * **Expand only (#292's rule).** Nullable columns and new tables, which an older build never reads. An older
          * build that purges a session still deletes its `app_runs` rows, as it always did; this build clears the link.
@@ -104,6 +105,16 @@ export class StepsV55 extends MigrationRange {
               payload TEXT NOT NULL,
               ts      INTEGER NOT NULL,
               PRIMARY KEY (run_id, seq)
+            );
+            CREATE TABLE IF NOT EXISTS app_run_subagent_messages (
+              run_id         TEXT NOT NULL,
+              parent_call_id TEXT NOT NULL,
+              seq            INTEGER NOT NULL,
+              role           TEXT NOT NULL,
+              kind           TEXT NOT NULL,
+              payload        TEXT NOT NULL,
+              ts             INTEGER NOT NULL,
+              PRIMARY KEY (run_id, parent_call_id, seq)
             );
           `)
         },

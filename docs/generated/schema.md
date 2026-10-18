@@ -78,6 +78,15 @@ erDiagram
     INTEGER started_at
     INTEGER kept_at
   }
+  app_run_subagent_messages {
+    TEXT run_id PK
+    TEXT parent_call_id PK
+    INTEGER seq PK
+    TEXT role
+    TEXT kind
+    TEXT payload
+    INTEGER ts
+  }
   app_runs {
     TEXT id PK
     TEXT project_id
@@ -357,6 +366,20 @@ Added in v56.
 Indexes:
 
 - `idx_app_run_records_app`: `app_id`, `project_id`, `started_at`
+
+### `app_run_subagent_messages`
+
+Added in v56.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | no |  | PK 1 | v56 |
+| `parent_call_id` | TEXT | no |  | PK 2 | v56 |
+| `seq` | INTEGER | no |  | PK 3 | v56 |
+| `role` | TEXT | no |  |  | v56 |
+| `kind` | TEXT | no |  |  | v56 |
+| `payload` | TEXT | no |  |  | v56 |
+| `ts` | INTEGER | no |  |  | v56 |
 
 ### `app_runs`
 

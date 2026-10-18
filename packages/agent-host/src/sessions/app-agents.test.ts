@@ -1,5 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RpcMethods, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { AppToolResult } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
@@ -457,5 +458,114 @@ describe('run_agent — a finished session goes, its record stays in the trash (
     expect(brokerSaid(await call).isError).toBe(false)
     expect(agentSessions().map((s) => s.id)).toEqual([agent!.id])
     expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  /*
+   * #378 review: the person's part was heard only while the run's wait was tracked and once the desk's verdict came. Opened
+   * or written to while the process was closing (hundreds of ms to seconds with a real CLI), or written to between the
+   * check and the move to the trash, the session was deleted anyway: the person's message was lost, or its wake cancelled
+   * ("The session was deleted while waking"). The gaps are driven here by a close and a wake the test holds.
+   */
+  const held = () => {
+    let release!: () => void
+    const promise = new Promise<void>((r) => (release = r))
+    return { promise, release }
+  }
+  /** Starts a run whose process close the test holds, and returns once that close has begun */
+  const runWithHeldClose = async () => {
+    const close = held()
+    claude.onSend = (h) => {
+      h.closing = close.promise
+      answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const call = callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
+    const agent = await until(() => agentSessions()[0], (s) => s !== undefined && claude.handles.get(s.id)?.disposed === true)
+    return { call, agent: agent!, close, caller }
+  }
+
+  it('a session the person opened while its process was closing stays theirs', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const { call, agent, close } = await runWithHeldClose()
+    await rpc('sessions.markRead', { sessionId: agent.id, seq: 0 })
+    close.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it('a message the person sent while its process was closing wakes the session, which stays, and the message is not lost', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const { call, agent, close } = await runWithHeldClose()
+    // The wake the message starts is held until the desk's verdict has begun, so the verdict comes while it is under way
+    const wake = held()
+    claude.starting = wake.promise
+    claude.onSend = () => {}
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation((run) => {
+      const decided = verdict(run as Parameters<typeof verdict>[0])
+      wake.release()
+      return decided
+    })
+    const sent = rpc('agents.send', { sessionId: agent.id, text: 'and add a title' }).then(
+      () => 'sent',
+      (e: Error) => e.message,
+    )
+    close.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    expect(await sent).toBe('sent')
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+    expect(claude.handles.get(agent.id)!.sent).toEqual([expect.stringContaining('and add a title')])
+  })
+
+  it('a session another session woke between the answer and the verdict stays, and its turn goes on', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      if (h.sent.length === 1) answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    // Not the person: a message from another session (an orchestrator's send_to_session) is not "taking part"
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
+      await mgr.send(run.sessionId, 'one more thing', undefined, { sessionId: caller.id, name: caller.name })
+      return verdict(run as Parameters<typeof verdict>[0])
+    })
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    const agent = agentsMade()[0]!
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+    expect(claude.handles.get(agent.id)!.sent.at(-1)).toContain('one more thing')
+  })
+
+  it('a session holding an attachment stays: the record copies the conversation, not files', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      mkdirSync(join(dataRoot, 'attachments', h.sessionId), { recursive: true })
+      writeFileSync(join(dataRoot, 'attachments', h.sessionId, 'shot.png'), 'png')
+      answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it('a session whose record could not be saved stays', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const keep = vi.spyOn(store.keptRuns, 'keepRun').mockReturnValue(false)
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(keep).toHaveBeenCalledTimes(1)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.trash.listTrash()).toEqual([])
   })
 })
