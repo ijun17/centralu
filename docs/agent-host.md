@@ -2657,7 +2657,9 @@ session keep their own machine's view.
 **And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
 delivered there as an instruction from `<orchestrator> on <this computer>`; with `reportBack`, `observeLinked` watches
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
-session's own background work running included (§1.2.1 step 7, #723).
+session's own background work running included (§1.2.1 step 7, #723). The watch starts at the instruction's own
+`user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
+is an earlier turn's.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
 refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s

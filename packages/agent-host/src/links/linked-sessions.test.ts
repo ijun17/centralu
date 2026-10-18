@@ -334,11 +334,15 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     let duringSend: (() => void) | undefined
     let listed: () => Promise<{ sessionId: string; tasks: object[] }[] | null> = async () => []
     let linked = true
+    let relayRecord = true
     const links = {
       machineOf: (id: string) => (id.startsWith('m1.') ? 'Box' : null),
-      send: async () => {
+      send: async (sessionId: string, text: string, fromName: string) => {
         duringSend?.()
-        return failSend ? { ok: false as const, error: 'Box is not reachable right now' } : { ok: true as const }
+        if (failSend) return { ok: false as const, error: 'Box is not reachable right now' }
+        // The machine records the instruction, and the hub hears it as the machine's own message event (#1082)
+        if (relayRecord) mgr.observeLinked({ type: 'user_message', sessionId, text, from: { sessionId: 'm1._hub-orchestrator', name: fromName } })
+        return { ok: true as const }
       },
       describe: () => (linked ? { name: 'Worker', project: 'api on Box' } : null),
       lastWords: async () => 'all done',
@@ -360,6 +364,8 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       whileSending: (f: () => void) => (duringSend = f),
       listing: (f: typeof listed) => (listed = f),
       remove: () => (linked = false),
+      /** The machine's record of the instruction is still on its way when the send answers */
+      recordLate: () => (relayRecord = false),
     }
   }
   const cleanup: (() => Promise<void>)[] = []
@@ -377,6 +383,45 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     expect(h.reports()[0]).toContain('id: m1.w1')
     expect(h.reports()[0]).toContain('Project: api on Box')
     expect(h.reports()[0]).toContain('all done')
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  /*
+   * #1082: the wait is set before the send, and the end of the turn the session was in can still be on its way. The
+   * machine sent it before it recorded the instruction, so it reaches the hub first, and it is not the instruction's.
+   */
+  it("a turn end the machine sent before it recorded the instruction is not the instruction's end (#1082)", async () => {
+    const h = await hub()
+    h.whileSending(() => {
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    })
+    await h.send(true)
+    await h.settle(0)
+    expect(h.reports()).toEqual([])
+    h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work finished.')])
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  it('the wait starts at its own instruction, also when the record of it comes after the send answered (#1082)', async () => {
+    const h = await hub()
+    h.recordLate()
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    // Another instruction's record, or one this hub did not send, is not this one's
+    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'something else', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
+    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go' })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(0)
+    expect(h.reports()).toEqual([])
+    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
+    // A turn running when the machine took it in ends with it in it (mid-turn input), as a local session's does
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work finished.')])
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 

@@ -513,14 +513,14 @@ export function orchestratorToolsFor(
         /*
          * A linked machine's session (#82 phase 4): delivered there as an instruction from this orchestrator, under
          * that session's own approval settings. The report is watched for before the send, since the machine's first
-         * events can reach this hub before its answer does. While the send is out, the session's events go to the new
-         * wait, a turn end included: the new instruction's turn is what the orchestrator asked about. An earlier report
+         * events can reach this hub before its answer does. The new wait reads nothing until the machine's record of this
+         * instruction is relayed (`instruction`, #1082): a turn end before it is an earlier turn's. An earlier report
          * paused over its own work (#723) is replaced by it, as a new task ends a pause here; if the send fails it is
          * put back, and its settle wait starts again from the work as the hub knows it now. A turn end of the old work
-         * that came in that moment went to the new wait and is not told again.
+         * that came in that moment is not the new wait's, and is not told again.
          */
         const earlier = host.children.linkedReports.get(sessionId)
-        const mine = reportBack ? { orchestratorId, busy: false } : undefined
+        const mine = reportBack ? { orchestratorId, busy: false, instruction: text } : undefined
         if (mine) host.children.setLinkedReport(sessionId, mine)
         const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
         // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile

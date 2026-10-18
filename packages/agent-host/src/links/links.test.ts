@@ -1290,6 +1290,31 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(reports[1]).toContain('echo: and a third time')
   })
 
+  /*
+   * #1082: the end of a turn the machine sent before it took in the next instruction can reach the hub after the hub
+   * set that instruction's report wait. Here the hub hears the first turn's end late, just before the machine's record
+   * of the second instruction, the order one link delivers them in. The report is the second instruction's turn.
+   */
+  it('a turn end the hub hears late is not the report of the instruction the machine took after it (#1082)', async () => {
+    const { tool, remote, hub } = await rig()
+    const hear = hub.mgr.observeLinked.bind(hub.mgr)
+    const late: Parameters<typeof hear>[0][] = []
+    let heldOne = false
+    hub.mgr.observeLinked = (e) => {
+      if (e.sessionId === 'm1.w1' && e.type === 'turn_complete' && !heldOne) return void ((heldOne = true), late.push(e))
+      if (e.sessionId === 'm1.w1' && e.type === 'user_message' && e.text === 'and now the restore') for (const held of late.splice(0)) hear(held)
+      hear(e)
+    }
+    await tool('send_to_session', { sessionId: 'm1.w1', text: 'run the backup' })
+    // That turn ended there; the hub has not heard it yet
+    await eventually(() => late.length === 1 && remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: run the backup'))
+    await tool('send_to_session', { sessionId: 'm1.w1', text: 'and now the restore', reportBack: true })
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu]')))
+    const reports = told(hub).filter((t) => t.startsWith('[Centralu]'))
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toContain('echo: and now the restore')
+  })
+
   it('reaches a machine’s session that has children (a former worktree manager, #561) as an instruction, not as someone else’s words (step 2)', async () => {
     const { tool, remote } = await rig({ worktreeChild: true })
     expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
