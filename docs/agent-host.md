@@ -1644,8 +1644,10 @@ attached, and got no status again. A window the keeper closed itself may only be
 its reader blocked), so its detach does not stop the keeper even when it was the last one and background mode is
 off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window as it does for an announced relaunch, the next
 attach spends that, and if none comes the idle rule applies as usual. Each window has a writer thread of its own
-(`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one, and the
-attach answer is queued first and never replaced. Before, pushes were blocking writes under the keeper's state lock,
+(`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one of the same
+swap phase, and the attach answer is queued first and never replaced. A view of another swap phase is kept: a
+swap's phases follow each other at once (standby, then draining), and a window that had only read the later one
+was never told of the earlier (#368). Before, pushes were blocking writes under the keeper's state lock,
 so a window that stopped reading held every push, request and host status for up to 5 s at each change. A keeper
 handoff lets every writer send what it queued, then stops them before the windows' sockets change hands.
 
