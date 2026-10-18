@@ -16,9 +16,9 @@
 // Every step answers how long it took, for the queue's events (the daily metrics count conflicts the
 // queue handled without a person).
 import { execFile } from 'node:child_process'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { GitError, fetchRefs, git, remoteFor, topLevel } from './git.mjs'
 import { pathMatches } from './versions.mjs'
 import { listSome, short } from './util.mjs'
@@ -132,6 +132,104 @@ function alive(pid) {
   }
 }
 
+/** A link to a folder: a junction on Windows (no privilege needed), a symbolic link elsewhere */
+const LINK = process.platform === 'win32' ? 'junction' : 'dir'
+
+/**
+ * Removes every link (symbolic link or junction) under `dir` without following it, descending only
+ * into real folders (#1182 review): a recursive removal that followed the links `mirrorModules`
+ * makes would delete the checkout's own node_modules. Skips `.git` and the `.pnpm` store of an
+ * install made in the worktree, whose links point inside it.
+ */
+export async function dropLinks(dir) {
+  let names
+  try {
+    names = await readdir(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const path = join(dir, name)
+    const st = await lstat(path).catch(() => null)
+    if (!st) continue
+    if (st.isSymbolicLink()) await unlink(path).catch(() => rmdir(path).catch(() => {}))
+    else if (st.isDirectory() && name !== '.git' && name !== '.pnpm') await dropLinks(path)
+  }
+}
+
+/**
+ * Whether the merged tree's lockfile is the default branch's and the one the checkout installed:
+ * then the checkout's node_modules are the merged tree's, and nothing needs installing. The checkout
+ * must have been installed (pnpm's `node_modules/.modules.yaml`).
+ */
+async function sameLock(root, tmp, mainTip) {
+  try {
+    await lstat(join(root, 'node_modules', '.modules.yaml'))
+    const [merged, main, checkout] = await Promise.all([
+      git(tmp, ['hash-object', 'pnpm-lock.yaml']),
+      git(tmp, ['rev-parse', `${mainTip}:pnpm-lock.yaml`]),
+      git(root, ['hash-object', 'pnpm-lock.yaml']),
+    ])
+    return merged.trim() === main.trim() && main.trim() === checkout.trim()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Gives the worktree the checkout's node_modules without installing (#1182 review): pnpm's
+ * node_modules of the root and of each workspace package are mirrored as real folders of links.
+ * A link to a package of the workspace points at that package in the worktree (the merged source,
+ * not the checkout's own); any other link, to the store or a folder, at what it is in the checkout.
+ * Plain files (pnpm's state) are copied. Answers how many folders were mirrored.
+ */
+export async function mirrorModules(root, tmp) {
+  const rootReal = await realpath(root)
+  const inWorkspace = (target) => {
+    const rel = relative(rootReal, target)
+    return rel && !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(sep).includes('node_modules') ? rel : null
+  }
+  const link = async (target, path) => {
+    try {
+      await symlink(target, path, LINK)
+    } catch {
+      // A link to a file (a junction cannot be one): its copy does
+      await copyFile(target, path).catch(() => {})
+    }
+  }
+  const mirror = async (src, dst) => {
+    await mkdir(dst, { recursive: true })
+    for (const name of await readdir(src)) {
+      const s = join(src, name)
+      const d = join(dst, name)
+      const st = await lstat(s)
+      if (st.isSymbolicLink()) {
+        const target = await realpath(s).catch(() => null)
+        if (!target) continue
+        const rel = inWorkspace(target)
+        await link(rel ? join(tmp, rel) : target, d)
+      } else if (st.isDirectory()) {
+        // A scope holds links of its own, which may be workspace packages
+        if (name.startsWith('@')) await mirror(s, d)
+        else await link(s, d)
+      } else if (st.isFile()) await copyFile(s, d)
+    }
+  }
+  const packages = (await git(tmp, ['ls-files', '-z', '--', 'package.json', '*/package.json']))
+    .split('\0')
+    .filter((p) => p && !p.split('/').includes('node_modules'))
+    .map((p) => dirname(p))
+  let count = 0
+  for (const dir of new Set(packages)) {
+    const src = join(root, dir, 'node_modules')
+    const st = await lstat(src).catch(() => null)
+    if (!st?.isDirectory()) continue
+    await mirror(src, join(tmp, dir, 'node_modules'))
+    count += 1
+  }
+  return count
+}
+
 /**
  * What a run killed half way leaves (#1182 review): its worktree folder in the temporary folder, its
  * registration in the checkout, refs it fetched. Removed at the start of each run: the folders of
@@ -144,6 +242,8 @@ export async function sweep(root, base = tmpdir()) {
     const pid = Number(name.slice(TMP_PREFIX.length).split('-')[0])
     if (pid !== process.pid && alive(pid)) continue
     const path = join(base, name)
+    // Its links first: neither git nor the removal below may follow one into the checkout
+    await dropLinks(path)
     await git(root, ['worktree', 'remove', '--force', path]).catch(() => {})
     await rm(path, { recursive: true, force: true }).catch(() => {})
   }
@@ -264,7 +364,27 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
         await git(tmp, ['checkout', '--theirs', '--', f]).catch(() => git(tmp, ['rm', '--quiet', '--', f]))
       }
       const timeoutMs = conflicts.timeoutMs ?? 30 * 60_000
+      // node_modules, decided once the lockfile is regenerated (#1182 review): the merged lockfile is
+      // main's and the checkout's, so the checkout's node_modules are linked and no install runs; or
+      // it is not, and the list's installs run, with --ignore-scripts (a native module may then be
+      // missing, and its command fails: handed off)
+      let modules = null
+      const prepare = async () => {
+        if (modules) return
+        modules = 'installed'
+        if (!(await sameLock(root, tmp, mainTip))) return
+        try {
+          await mirrorModules(root, tmp)
+          modules = 'linked'
+        } catch {
+          await dropLinks(tmp)
+        }
+      }
       for (const argv of plan.commands) {
+        const install = argv[0] === 'pnpm' && argv[1] === 'install'
+        const lockfileOnly = install && argv.includes('--lockfile-only')
+        if (!lockfileOnly) await prepare()
+        if (install && !lockfileOnly && modules === 'linked') continue
         try {
           await run(tmp, argv, timeoutMs)
         } catch (e) {
@@ -299,7 +419,7 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
         ...(stat.length ? stat.map((x) => `  ${statLine(x)}`) : ['  no change']),
       ].join('\n')
       await git(tmp, [...HOOKS_OFF, 'commit', '--quiet', '-F', '-'], { input: `${message}\n\n${body}\n` })
-      steps.push({ step: 'regenerate', ms: clock() - regenerating, files, commands: plan.commands.map(commandLine), stat })
+      steps.push({ step: 'regenerate', ms: clock() - regenerating, files, commands: plan.commands.map(commandLine), stat, modules })
     }
     sha = (await git(tmp, ['rev-parse', 'HEAD'])).trim()
     if (!renew()) return { outcome: 'yielded' }
@@ -323,6 +443,8 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
     return handoff(`The queue could not merge ${defaultBranch} into ${branch} itself: ${e.message}`)
   } finally {
     if (tmp) {
+      // The links into the checkout's node_modules go first, unfollowed
+      await dropLinks(tmp)
       await git(root, ['worktree', 'remove', '--force', tmp]).catch(() => {})
       await rm(tmp, { recursive: true, force: true }).catch(() => {})
       await git(root, ['worktree', 'prune']).catch(() => {})

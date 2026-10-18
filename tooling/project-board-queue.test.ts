@@ -1,10 +1,10 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { fakeExe, gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
@@ -1212,7 +1212,7 @@ type ConflictRepo = { work: string; origin: string; main: string; heads: Record<
  * GitHub's address, which git rewrites to `origin.git` (as rebase_stack's tests do), and it is left on a branch of its
  * own with uncommitted work, which nothing may touch.
  */
-function conflictRepo(branches: Record<number, string[]>): ConflictRepo {
+function conflictRepo(branches: Record<number, string[]>, { base = {}, branch = {} }: { base?: Record<string, string>; branch?: Record<string, string> } = {}): ConflictRepo {
   const origin = join(root, 'origin.git')
   const work = join(root, 'work')
   g(root, 'init', '-q', '--bare', '-b', 'main', origin)
@@ -1229,6 +1229,7 @@ function conflictRepo(branches: Record<number, string[]>): ConflictRepo {
   }
   for (const f of files) write(f, 'base\n')
   write('README.md', 'base\n')
+  for (const [f, text] of Object.entries(base)) write(f, text)
   g(work, 'add', '-A')
   g(work, 'commit', '-q', '-m', 'base')
   const heads: Record<string, string> = {}
@@ -1236,6 +1237,7 @@ function conflictRepo(branches: Record<number, string[]>): ConflictRepo {
     g(work, 'checkout', '-q', '-b', `feat/b${n}`, 'main')
     for (const f of changed) write(f, `branch ${n}\n`)
     write(`own-${n}.txt`, `${n}\n`)
+    for (const [f, text] of Object.entries(branch)) write(f, text)
     g(work, 'add', '-A')
     g(work, 'commit', '-q', '-m', `change ${n}`)
     heads[n] = g(work, 'rev-parse', 'HEAD')
@@ -1264,6 +1266,12 @@ const SCRIPTS = {
     'for (const f of process.argv.slice(2)) writeFileSync(f, `regenerated ${f}\\n`)',
   ],
   fail: ["process.stderr.write('warming up\\nregeneration broke\\n')", 'process.exit(1)'],
+  // What the command finds in node_modules: an outside package (ext) and a workspace package (ws)
+  probe: [
+    "import { readFileSync, writeFileSync } from 'node:fs'",
+    "const read = (f) => { try { return readFileSync(f, 'utf8').trim() } catch { return 'none' } }",
+    "for (const f of process.argv.slice(2)) writeFileSync(f, `ext=${read('packages/p/node_modules/ext/x.txt')} ws=${read('packages/p/node_modules/ws/v.txt')}\\n`)",
+  ],
   push: [
     "import { execFileSync } from 'node:child_process'",
     "import { writeFileSync } from 'node:fs'",
@@ -1300,6 +1308,52 @@ function conflictRuntime(repo: ConflictRepo, prs: number[], { lists = testLists(
 
 /** A commit an author made on top of the branch's head (the same tree, a new commit), not pushed yet: the checkout is not touched */
 const authorCommit = (repo: ConflictRepo, n: number) => g(repo.work, 'commit-tree', `${repo.heads[n]}^{tree}`, '-p', repo.heads[n]!, '-m', `author's fix ${n}`)
+/** A workspace with a lockfile and two packages, p depending on q (a workspace package) and on an outside package */
+const WORKSPACE = {
+  '.gitignore': 'node_modules\n',
+  'package.json': '{}\n',
+  'pnpm-lock.yaml': 'lock v1\n',
+  'packages/p/package.json': '{}\n',
+  'packages/q/package.json': '{}\n',
+  'packages/q/v.txt': 'base\n',
+}
+
+/**
+ * The checkout installed as pnpm leaves it: `node_modules/.modules.yaml`, an outside package in the root's
+ * node_modules, and p's node_modules linking q (the checkout's own copy) and that package.
+ */
+function installCheckout(repo: ConflictRepo) {
+  const nm = join(repo.work, 'node_modules')
+  mkdirSync(join(nm, 'marker'), { recursive: true })
+  writeFileSync(join(nm, '.modules.yaml'), 'layoutVersion: 5\n')
+  writeFileSync(join(nm, 'marker', 'x.txt'), 'from the checkout\n')
+  mkdirSync(join(repo.work, 'packages/p/node_modules'), { recursive: true })
+  symlinkSync(join(repo.work, 'packages/q'), join(repo.work, 'packages/p/node_modules/ws'), 'junction')
+  symlinkSync(join(nm, 'marker'), join(repo.work, 'packages/p/node_modules/ext'), 'junction')
+}
+
+/** A `pnpm` on the app's PATH that records each call to pnpm-calls.jsonl and "installs" the outside package */
+function fakePnpm() {
+  const calls = join(root, 'pnpm-calls.jsonl')
+  fakeExe(
+    fake.bin,
+    'pnpm',
+    [
+      "const fs = require('fs')",
+      `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n')`,
+      "fs.mkdirSync('packages/p/node_modules/ext', { recursive: true })",
+      "fs.writeFileSync('packages/p/node_modules/ext/x.txt', 'installed\\n')",
+    ].join('\n'),
+  )
+  return () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
+}
+
+/** Lists where the schema doc is regenerated as the board's list does it: an install, then a command that needs node_modules */
+const modulesLists = () => {
+  testLists('probe')
+  return JSON.stringify({ mechanical: [{ files: ['docs/generated/schema.md'], run: [['pnpm', 'install', '--frozen-lockfile', '--ignore-scripts'], [process.execPath, join(root, 'probe.mjs'), 'docs/generated/schema.md']] }], never: LISTS.never })
+}
+
 /** The queue's own temporary folders left in the app's temporary folder */
 const queueTmps = () => readdirSync(appTmp()).filter((f) => f.startsWith('centralu-queue-merge-'))
 
@@ -1446,13 +1500,52 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(tipOf(repo, 77)).toBe(ahead)
   })
 
-  it('hands off a regeneration that fails, and leaves no worktree, registration or ref, sweeping those a killed run left', async () => {
-    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+  it("links the checkout's node_modules and installs nothing when the lockfile is main's, workspace packages from the merged tree", async () => {
+    const repo = conflictRepo({ 77: ['docs/generated/schema.md'] }, { base: WORKSPACE, branch: { 'packages/q/v.txt': 'branch\n' } })
+    installCheckout(repo)
     const before = untouched(repo.work)
-    // What a run killed half way left: a folder of an ended process, and one still registered as a worktree
+    const pnpmCalls = fakePnpm()
+    conflictRuntime(repo, [77], { lists: modulesLists() })
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
+    // The outside package from the checkout, the workspace package as merged (the branch's, not the checkout's)
+    expect(g(repo.origin, 'show', `${tipOf(repo, 77)}:docs/generated/schema.md`)).toBe('ext=from the checkout ws=branch')
+    expect(pnpmCalls()).toEqual([])
+    expect(conflictSteps().find((e) => e.step === 'regenerate')).toMatchObject({ modules: 'linked' })
+    // Removing the worktree followed none of its links into the checkout
+    expect(readFileSync(join(repo.work, 'node_modules/marker/x.txt'), 'utf8')).toBe('from the checkout\n')
+    expect(readFileSync(join(repo.work, 'packages/q/v.txt'), 'utf8')).toBe('base\n')
+    expect(existsSync(join(repo.work, 'packages/p/node_modules/ws'))).toBe(true)
+    expect(untouched(repo.work)).toEqual(before)
+    expect(queueTmps()).toEqual([])
+  })
+
+  it('installs with --ignore-scripts, and links nothing, when the lockfile is not main\'s', async () => {
+    const repo = conflictRepo({ 77: ['docs/generated/schema.md'] }, { base: WORKSPACE, branch: { 'pnpm-lock.yaml': 'lock v2\n' } })
+    installCheckout(repo)
+    const pnpmCalls = fakePnpm()
+    conflictRuntime(repo, [77], { lists: modulesLists() })
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
+    expect(pnpmCalls()).toEqual([['install', '--frozen-lockfile', '--ignore-scripts']])
+    expect(g(repo.origin, 'show', `${tipOf(repo, 77)}:docs/generated/schema.md`)).toBe('ext=installed ws=none')
+    expect(conflictSteps().find((e) => e.step === 'regenerate')).toMatchObject({ modules: 'installed' })
+    expect(readFileSync(join(repo.work, 'node_modules/marker/x.txt'), 'utf8')).toBe('from the checkout\n')
+    expect(queueTmps()).toEqual([])
+  })
+
+  it('hands off a regeneration that fails, and leaves no worktree, registration or ref, sweeping those a killed run left', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] }, { base: { '.gitignore': 'node_modules\n' } })
+    installCheckout(repo)
+    const before = untouched(repo.work)
+    // What a run killed half way left: a folder of an ended process, with a link into the checkout's
+    // node_modules as a run that linked them leaves it, and one still registered as a worktree
     mkdirSync(join(appTmp(), 'centralu-queue-merge-999999999-left'), { recursive: true })
     writeFileSync(join(appTmp(), 'centralu-queue-merge-999999999-left', 'x'), 'x')
+    symlinkSync(join(repo.work, 'node_modules'), join(appTmp(), 'centralu-queue-merge-999999999-left', 'node_modules'), 'junction')
     g(repo.work, 'worktree', 'add', '-q', '--detach', join(appTmp(), 'centralu-queue-merge-999999998-left'), repo.main)
+    // git's own removal of a worktree follows a junction on Windows: this one must be unlinked first
+    symlinkSync(join(repo.work, 'node_modules'), join(appTmp(), 'centralu-queue-merge-999999998-left', 'node_modules'), 'junction')
     g(repo.work, 'update-ref', 'refs/centralu-queue/0', repo.main)
     conflictRuntime(repo, [77], { lists: testLists('fail') })
     await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
@@ -1462,6 +1555,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(tipOf(repo, 77)).toBe(repo.heads[77])
     expect(untouched(repo.work)).toEqual(before)
     expect(queueTmps()).toEqual([])
+    // The sweep removed the left link, not what it pointed at
+    expect(readFileSync(join(repo.work, 'node_modules/marker/x.txt'), 'utf8')).toBe('from the checkout\n')
   })
 
   it('hands off a conflict in the UX baseline or a store migration step even beside mechanical files, and says when no author session is recorded', async () => {

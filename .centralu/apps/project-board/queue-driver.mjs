@@ -385,8 +385,8 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
       ? conflictEvent(`${n}: merged ${defaultBranch} into ${pr.headRefName} in a temporary worktree in ${span(st.ms)}; ${st.files.length ? `conflicts in ${listSome(st.files, 8)}` : 'no conflicts'}.`, { step: 'merge', ms: st.ms, files: st.files })
       : st.step === 'regenerate'
         ? conflictEvent(
-            `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
-            { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat },
+            `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}${st.modules === 'linked' ? " (node_modules linked from the queue's checkout, its lockfile being main's: no install)" : ''}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
+            { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat, modules: st.modules },
           )
         : st.step === 'superseded'
           ? conflictEvent(`${n}: ${pr.headRefName} moved to ${short(st.tip)} while the queue merged ${defaultBranch} in (its author pushed first), so git refused the queue's ${short(st.sha)}; the queue takes the new head.`, {
