@@ -266,14 +266,6 @@ export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
 export type AutostartRow = { label: string; on: boolean; note: string | null }
 
 /**
- * The start-at-boot switch of a machine's row (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by
- * default), from what the machine said it would use. Null where it offers nothing (macOS, a Linux without systemd, WSL
- * without interop) or has not said (a machine that predates it, or never answered).
- *
- * The note says where the switch falls short of "at boot": a systemd user manager that starts only at login because
- * enabling lingering there needs an administrator, and a Windows task, which runs at sign-in.
- */
-/**
  * The reverse direction's switch (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): its label, the
  * question turning it on asks once (what it allows, and what it does not), and the row's note when it is on but cannot
  * work. Null from a hub that predates it
@@ -291,6 +283,14 @@ export function asksRow(m: Pick<MachineInfo, 'asks' | 'name'>): { label: string;
   }
 }
 
+/**
+ * The start-at-boot switch of a machine's row (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by
+ * default), from what the machine said it would use. Null where it offers nothing (macOS, a Linux without systemd, WSL
+ * without interop) or has not said (a machine that predates it, or never answered).
+ *
+ * The note says where the switch falls short of "at boot": a systemd user manager that starts only at login because
+ * enabling lingering there needs an administrator, and a Windows task, which runs at sign-in.
+ */
 export function autostartRow(m: Pick<MachineInfo, 'autostart' | 'name'>): AutostartRow | null {
   const a = m.autostart
   if (!a?.how) return null
