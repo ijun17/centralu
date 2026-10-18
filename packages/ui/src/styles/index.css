@@ -1143,45 +1143,47 @@
  * in the tooltip. `lookOf` (features/session/look.ts) maps a session to one of them, and writes it
  * as `data-look`.
  *
- *   idle       nothing around the chip (the chip's own thin grey border)
- *   answering  a light grey ring (`ink-muted`, the ring the orbit left with the spin turned off): it is
- *              working, nothing to do; white stays for what calls the person
- *   stopped    a white dashed ring on a grey chip: the turn broke off (error, interruption, limit)
- *   waiting    a white ring on a grey chip: the person has to act (approval, a question)
+ *   idle       the chip's thin grey border
+ *   answering  a light grey border (`ink-muted`): it is working, nothing to do; white stays for what calls
+ *              the person
+ *   stopped    a white dashed border on a grey chip: the turn broke off (error, interruption, limit)
+ *   waiting    a white border on a grey chip: the person has to act (approval, a question)
  *
- * The mark keeps the structure it had with the orbit: a 1.5px ring painted as the background behind a
- * 14px chip, 17px in all. A background cannot be dashed, so the stopped look draws the same 1.5px as a
- * dashed border instead of padding, which keeps the size.
+ * The mark is one 17px chip whose own border is the look (below, 2026-10-18).
  */
 .cc-mark {
   /*
-   * A fixed box: a border is snapped to whole device pixels (1.5px is drawn as 1px at 1x) while padding is
-   * not, so the dashed look would otherwise be smaller than the others. The chip sits centred inside.
+   * One edge, not three (owner, 2026-10-18: the mark read blurry). It used to be a 1.5px ring painted as a background
+   * behind a 14px chip that had its own 1px border and the keycap's inset light and drop shadow: three edges a pixel
+   * apart, the shadow making the bottom heavier than the top, and the ring's corner not following the chip's.
+   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 1.5px when it says
+   * something. No shadow: the border alone separates it from the sidebar.
    */
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  height: 17px;
+  min-width: 17px;
+}
+.cc-mark > .cc-chip {
   box-sizing: border-box;
   height: 17px;
   min-width: 17px;
-  padding: 1.5px;
-}
-.cc-mark[data-look='answering'] {
-  background: var(--color-ink-muted);
-}
-.cc-mark[data-look='waiting'] {
-  background: var(--color-ink-signal);
-}
-.cc-mark[data-look='stopped'] {
-  padding: 0;
-  border: 1.5px dashed var(--color-ink-signal);
-}
-.cc-mark > .cc-chip {
+  width: auto;
+  border-radius: 4px;
+  border: 1px solid var(--color-line-strong);
   background-color: var(--color-surface-floor);
+  box-shadow: none;
 }
-/* The grey chip of the two looks that stopped or wait */
-.cc-mark[data-look='stopped'] > .cc-chip,
+.cc-mark[data-look='answering'] > .cc-chip {
+  border: 1.5px solid var(--color-ink-muted);
+}
 .cc-mark[data-look='waiting'] > .cc-chip {
+  border: 1.5px solid var(--color-ink-signal);
+  background-color: var(--color-surface-selected);
+}
+.cc-mark[data-look='stopped'] > .cc-chip {
+  border: 1.5px dashed var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
 
