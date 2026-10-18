@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { interruptNotice, type SessionSummary } from '@cc/core'
 import { formatCount } from '../../../app/format.js'
 import { useStore } from '../../../store/store.js'
+import { Button } from '../../../components/Button.jsx'
 import { formatElapsed, useElapsedNow } from '../elapsed.js'
 
 /**
@@ -136,18 +137,19 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
             {line}
           </span>
         )}
-        <button
-          type="button"
-          className={`${line ? '' : 'ml-auto '}shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:cursor-default disabled:hover:border-line disabled:hover:text-ink-faint`}
+        <Button
+          variant="subtle"
+          size="sm"
+          className={`${line ? '' : 'ml-auto '}shrink-0`}
           onClick={() => void interrupt(sessionId)}
-          disabled={stopping}
-          aria-busy={stopping || undefined}
+          busy={stopping}
+          busyText="Stopping…"
           title={stopping ? 'Waiting for the tool to confirm the stop' : notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
           data-testid="activity-interrupt"
           data-stopping={stopping || undefined}
         >
-          {stopping ? 'Stopping…' : 'Stop'}
-        </button>
+          Stop
+        </Button>
       </div>
     </div>
   )
