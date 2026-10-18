@@ -713,10 +713,10 @@ Where it is stored:
 
 - `linked_machines`: the machines the person linked: id, name, ssh target, remote shell, the slot for folding
   numbers, the version pair accepted (store v46), and whether that machine's sessions may ask this computer's projects
-  (`asks`, off by default, store v57, #550).
+  (`asks`, off by default, store v60, #550).
 - `machine_headers`: the mirror: each machine's sessions and projects as it last listed them (store v46).
 - `machine_ask_consents`: the pairs the person approved for the reverse direction: a session of a linked machine and a
-  project of this computer, so later asks in that pair need no card until withdrawn (store v57, #550). Removed with the
+  project of this computer, so later asks in that pair need no card until withdrawn (store v60, #550). Removed with the
   machine, with the project, and when the machine's switch goes off.
 
 Live only (hub memory): each link's status, its ssh processes and forward, the remote's cursor and epoch. Not stored
