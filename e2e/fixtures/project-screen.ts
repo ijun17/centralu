@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
-import { startSession } from './new-session.js'
+import { newSession as controlNewSession, setup as controlSetup } from './control.js'
 
 /**
  * Helpers for the project screen's scenarios (#203), and the scenarios that run in two engines.
@@ -11,29 +11,11 @@ import { startSession } from './new-session.js'
  * or none — and only a drag the browser runs itself asks that question.
  */
 
-export async function setup(page: Page, projects: string[]) {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  for (const [i, path] of projects.entries()) {
-    await page.evaluate((p: string) => ((window as any).__mock.nextPickedDirectory = p), path)
-    if (i === 0) {
-      await page.getByTestId('orchestrator-pick-folder').click()
-      await page.getByTestId('new-session-dialog').waitFor()
-      await page.keyboard.press('Escape')
-    } else {
-      await page.getByTestId('add-project').click()
-    }
-    await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
-  }
-}
+/** The control scenarios' first run with these projects (fixtures/control.ts), without trusting them */
+export const setup = (page: Page, projects: string[]) => controlSetup(page, { projects })
 
-export async function newSession(page: Page, projectName: string): Promise<string> {
-  await startSession(page, projectName)
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
-}
+/** A new session in `projectName`, started at once from its menu, with no first instruction (fixtures/control.ts) */
+export const newSession = (page: Page, projectName: string): Promise<string> => controlNewSession(page, projectName)
 
 /** The panels on the project screen, in the order they stand */
 export const panels = (page: Page) =>

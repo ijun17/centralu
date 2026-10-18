@@ -1,3 +1,5 @@
+import { Button } from './Button.jsx'
+
 /**
  * An action that asks first, in the place where it was pressed (#428): a sentence, then Cancel and the action.
  *
@@ -41,36 +43,24 @@ export function InlineConfirm({
   /** The sentence itself, when a test reads it apart from the buttons */
   textTestId?: string
 }) {
-  const noButton = (
-    <button
-      type="button"
-      className={
-        inline
-          ? 'text-xs text-ink-faint hover:text-ink'
-          : 'rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink'
-      }
-      onClick={onNo}
-      data-testid={noTestId}
-    >
+  // Inline, the two run on as words in a line of text: no frame, no padding
+  const noButton = inline ? (
+    <button type="button" className="text-xs text-ink-faint hover:text-ink" onClick={onNo} data-testid={noTestId}>
       {noLabel}
     </button>
+  ) : (
+    <Button variant="ghost" size="sm" onClick={onNo} data-testid={noTestId}>
+      {noLabel}
+    </Button>
   )
-  const yesButton = (
-    <button
-      type="button"
-      className={
-        inline
-          ? 'text-xs text-danger hover:text-ink disabled:opacity-50'
-          : tone === 'danger'
-            ? 'rounded-md border border-danger/40 px-2 py-0.5 text-xs text-danger transition-colors hover:border-danger/70 disabled:opacity-50'
-            : 'rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:text-ink-signal disabled:opacity-50'
-      }
-      disabled={busy}
-      onClick={onYes}
-      data-testid={yesTestId}
-    >
+  const yesButton = inline ? (
+    <button type="button" className="text-xs text-danger hover:text-ink disabled:opacity-50" disabled={busy} onClick={onYes} data-testid={yesTestId}>
       {yesLabel}
     </button>
+  ) : (
+    <Button variant={tone === 'danger' ? 'danger' : 'primary'} size="sm" disabled={busy} onClick={onYes} data-testid={yesTestId}>
+      {yesLabel}
+    </Button>
   )
   if (inline) {
     return (

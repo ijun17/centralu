@@ -8,6 +8,8 @@ import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import { useVirtualCopy } from '../viewer/useVirtualCopy.js'
+import { Button } from '../../components/Button.jsx'
+import { Badge } from '../../components/Badge.jsx'
 import { diffFileLabel, diffPlaceAt, renderableDiffRows, type DiffPlace } from './diff.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
@@ -554,19 +556,12 @@ function Branches({ projectId }: { projectId: string }) {
             ))}
           </ul>
           <div className="mt-2 flex gap-1.5">
-            <button
-              className="rounded-md border border-line bg-surface-raised px-2 py-1 text-sm text-ink hover:border-line-strong"
-              onClick={() => void doCheckout(pending.branch)}
-              data-testid="checkout-proceed"
-            >
+            <Button variant="primary" size="md" onClick={() => void doCheckout(pending.branch)} data-testid="checkout-proceed">
               Switch anyway
-            </button>
-            <button
-              className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
-              onClick={() => setPending(null)}
-            >
+            </Button>
+            <Button variant="ghost" size="md" onClick={() => setPending(null)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -591,7 +586,9 @@ function BranchList({
   if (branches.length === 0) return null
   return (
     <div className="border-b border-line/60" data-testid={`branches-${title.toLowerCase()}`}>
-      <h3 className="px-2.5 py-1.5 text-2xs uppercase text-ink-faint">{title}</h3>
+      <Badge as="h3" className="px-2.5 py-1.5">
+        {title}
+      </Badge>
       <ul>
         {branches.map((b) => (
           <li key={b.name}>

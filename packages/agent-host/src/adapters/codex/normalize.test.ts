@@ -416,6 +416,14 @@ describe('state and gauges', () => {
     expect(out[1]).toMatchObject({ type: 'context_update', used: 120, window: 1_000_000, exactness: 'exact' })
   })
 
+  // #850 item 20: the running reading and the request's own reading split input two ways, and only the request clamped
+  it('never counts more cached input than input, in the running reading as in the request', () => {
+    const odd = { inputTokens: 100, outputTokens: 20, cachedInputTokens: 150, totalTokens: 120 }
+    const params = { tokenUsage: { total: odd, last: odd } }
+    expect(n('thread/tokenUsage/updated', params)[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 0, cacheReadTokens: 100 } })
+    expect(new CodexRequestInputs().take(params)).toEqual({ inputTokens: 0, cacheReadTokens: 100 })
+  })
+
   /*
    * A usage update is not the same as hitting a limit.
    *
