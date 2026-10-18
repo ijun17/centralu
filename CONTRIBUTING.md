@@ -315,6 +315,13 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
   with `gh pr list` and `gh pr diff`, leaves out your stack's own, and names the one it clashes with.
   The numbers themselves come from the brief that gave you the work; a session whose brief names
   none and that finds it needs a step stops and asks (this check is only the backstop);
+- a repository-wide guard test your branch adds or changes (any `tooling/*.test.ts`, a test that scans the
+  whole repository from its root, or a file saying `pre-pr: guard`): each such guard is run against every
+  other open, non-draft pull request's head merged with your branch, and the ones it would fail are listed
+  with the first line of the failure. This never refuses: the list is printed and goes into **Verified**
+  (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
+  `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
+  merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked;
 - each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported;
 - and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
@@ -323,7 +330,7 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
 checks a branch other than the one checked out. When one check's finding stands for a reason (a
 test that cannot fail without the change, and why), leave that check out with the reason:
-`--exempt revert="<why>"` (or `tsc`, `orphans`, `store-step`). The board's `open_pr` runs it on the pushed branch
+`--exempt revert="<why>"` (or `tsc`, `orphans`, `store-step`, `guards`). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
 worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not

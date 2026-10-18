@@ -1599,6 +1599,14 @@ back to a generic OS opener that could execute repository-authored content. A li
 with a VS Code Remote-SSH link instead (#82): VS Code connects over the person's ssh and, by default, asks before opening a remote file
 or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub hands it a path and never reads or runs the file itself.
 
+A worktree session's file links (#1209) name the session: `fs.readFile` and `fs.resolve` with a `sessionId` take that
+session's folder as the root instead of the project's (its worktree, or the project when it has none), and every check
+above runs against that root. The host builds the root from its own record of the session, never from a path the window
+sends, and hands the same string to the containment check and to the read (`SessionManager.folderOf`). A session of
+another project is refused, so a project id cannot carry a stranger's folder, and a path outside the worktree is refused
+like one outside the project, the main checkout included. A session's folder is only read, revealed and opened: `trash`
+and `project` with a `sessionId` are refused.
+
 Limits:
 
 - An in-root hardlink shares an inode with its other names. Canonical pathname checks do

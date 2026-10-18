@@ -158,7 +158,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'git.cancel': project(),
   'fs.listDir': project(),
   'fs.watch': project(),
-  'fs.readFile': project(),
+  // The session whose folder the file is in (#1209) is that machine's too
+  'fs.readFile': project(undefined, (p, q) => ({ ...p, sessionId: q.stripMaybe(p.sessionId, 'The session the file belongs to') })),
   'fs.move': project(),
   'fs.importFile': project(),
   'fs.resolve': { kind: 'noRemote', key: 'projectId' },

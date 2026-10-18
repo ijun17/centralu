@@ -21,8 +21,9 @@ export type Screen =
    * A file and the git screen are pages of their own (owner, 2026-10-18): they open over the screen they were opened
    * from (`under`, which back returns to with its reading place, #61) and are drawn over it in the centre lane, so
    * coming back costs nothing. `under` is where they stand, not what they are, so it is not part of their sameness.
+   * A file's `sessionId` is the session whose folder (its worktree) it was opened in (#1209); absent is the project's.
    */
-  | { kind: 'file'; path: string; projectId: string | null; under: Screen | null }
+  | { kind: 'file'; path: string; projectId: string | null; sessionId?: string | null; under: Screen | null }
   | {
       kind: 'git'
       sub: 'changes' | 'history' | 'branches'
@@ -56,7 +57,7 @@ export function sameScreen(a: Screen | undefined, b: Screen | undefined): boolea
         (a.machine ?? null) === ((b as typeof a).machine ?? null)
       )
     case 'file':
-      return a.path === (b as typeof a).path && a.projectId === (b as typeof a).projectId
+      return a.path === (b as typeof a).path && a.projectId === (b as typeof a).projectId && (a.sessionId ?? null) === ((b as typeof a).sessionId ?? null)
     case 'git': {
       const c = b as typeof a
       return a.sub === c.sub && a.path === c.path && a.sha === c.sha && a.staged === c.staged
