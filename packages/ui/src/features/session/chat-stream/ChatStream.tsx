@@ -275,7 +275,6 @@ export function ChatStream({
         <StickyUser sticky={sticky} />
 
         <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
-        {reading && !gaveUp && <ChatSkeleton />}
 
         {/*
         No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll
@@ -364,6 +363,19 @@ export function ChatStream({
 
         {working && <ActivityRow sessionId={sessionId} activity={activity} />}
       </div>
+      {/*
+        The skeleton stands over the list, not in it, from the moment history is asked for until the list has settled
+        where it opens (owner, 2026-10-18). In the list it vanished as the rows arrived, and the list then stayed hidden
+        while it settled (#61), so the pane went blank for a moment between the two; one overlay covers both.
+      */}
+      {((reading && !gaveUp) || settling) && (
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-4"
+          data-testid="chat-skeleton-cover"
+        >
+          <ChatSkeleton />
+        </div>
+      )}
       {/* Pressing the thumb is a person taking over, as a press on the native bar was */}
       <OverlayScrollbar
         scrollRef={scrollRef}
