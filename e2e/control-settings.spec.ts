@@ -652,3 +652,42 @@ test("Switching sessions does not leave the previous tool's model list behind", 
   await page.evaluate(() => (window as never as { __releaseModels?: () => void }).__releaseModels?.())
   await expect(menu.getByTestId('settings-model-haiku')).toBeVisible()
 })
+
+/*
+ * A pick-one row is a radio group (components/Segmented.tsx): Tab enters on the picked option and leaves the group
+ * in one press, the arrows pick the next or previous option. Typed with page.keyboard from a click on the picked
+ * option, the way a person reaches it, and asserted on what was picked and where the next key goes.
+ */
+test('Settings: a pick-one row moves with the arrow keys, and Tab leaves it in one press', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-appearance').click()
+  const group = page.getByRole('radiogroup', { name: 'Line height' })
+  const radios = group.getByRole('radio')
+  const count = await radios.count()
+  expect(count).toBeGreaterThan(2)
+  const picked = await radios.evaluateAll((els) => els.findIndex((e) => e.getAttribute('aria-checked') === 'true'))
+  expect(picked).toBeGreaterThanOrEqual(0)
+  // Only the picked option takes Tab
+  await expect(group.locator('[tabindex="0"]')).toHaveCount(1)
+  await radios.nth(picked).click()
+
+  const next = (picked + 1) % count
+  await page.keyboard.press('ArrowRight')
+  await expect(radios.nth(next)).toHaveAttribute('aria-checked', 'true')
+  await expect(radios.nth(next)).toBeFocused()
+  await expect(radios.nth(picked)).toHaveAttribute('aria-checked', 'false')
+
+  await page.keyboard.press('ArrowLeft')
+  await expect(radios.nth(picked)).toHaveAttribute('aria-checked', 'true')
+  await expect(radios.nth(picked)).toBeFocused()
+
+  await page.keyboard.press('End')
+  await expect(radios.nth(count - 1)).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Home')
+  await expect(radios.nth(0)).toHaveAttribute('aria-checked', 'true')
+
+  // One Tab and the focus is past the whole group, not on its next option
+  await page.keyboard.press('Tab')
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="radiogroup"][aria-label="Line height"]'))).toBe(false)
+})

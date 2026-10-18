@@ -10,10 +10,11 @@ import type { GridMock } from './grid.js'
 import type { MachinesMock } from './machines.js'
 import type { TrashMock } from './trash.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** The host's wording and code for a project id it does not know (`SessionManager.requireProject`) */
 function projectNotFound(projectId: string): Error {
-  return Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+  return mockError(`Project not found: ${projectId}`)
 }
 
 /** `items` in the order `orderedIds` names them; ids not named keep their order after them, unknown ids are ignored */
@@ -66,11 +67,11 @@ export class ProjectsMock {
     create: async (name: string, parent?: string, machine?: string | null, source?: GitSource) => {
       this.createProjectCalls.push({ name, ...(parent ? { parent } : {}), ...(machine ? { machine } : {}), ...(source ? { source } : {}) })
       const t = this.newProjectTarget(name, parent, machine, source)
-      if (!t.path) throw Object.assign(new Error(t.error ?? 'Give the new folder a name.'), { code: 'internal' })
+      if (!t.path) throw mockError(t.error ?? 'Give the new folder a name.')
       // A failed clone leaves nothing, as the host's does
       const cloneError = source ? this.nextCloneError : null
       this.nextCloneError = null
-      if (cloneError) throw Object.assign(new Error(cloneError), { code: 'internal' })
+      if (cloneError) throw mockError(cloneError)
       this.takenPaths.add(t.path)
       /*
        * The same rule as the real thing (project-creation.ts createProject, #655, #999): a folder made empty holds only
@@ -204,7 +205,7 @@ export class ProjectsMock {
       const p = this.projectStore.list.find((x) => x.id === projectId)
       if (!p) throw projectNotFound(projectId)
       const branch = baseBranch.trim()
-      if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
+      if (!branch) throw mockError('Pick the branch worktrees should fork from')
       p.worktreeManager = { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch: branch }
       this.emit({ type: 'projects_changed' })
     },

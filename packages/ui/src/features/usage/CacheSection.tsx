@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol'
 import { cacheHitRate, cacheWindowName, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
+import { Badge } from '../../components/Badge.jsx'
 import { formatCount } from '../../app/format.js'
 
 /**
@@ -196,7 +197,7 @@ function TopSessions({
 }) {
   return (
     <div className="mt-3" data-testid="usage-cache-sessions">
-      <span className="text-2xs uppercase text-ink-faint">{writes ? 'Most cache writes' : 'Most uncached input'}</span>
+      <Badge>{writes ? 'Most cache writes' : 'Most uncached input'}</Badge>
       <ul className="mt-1 space-y-px">
         {sessions.map((s) => {
           const title = s.name || 'Deleted session'

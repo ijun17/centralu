@@ -10,12 +10,11 @@ import { isPlainEscape, isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { Button } from '../../components/Button.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
 import { useToolChoice } from './useToolChoice.js'
-
-/** What one field looks like. All three must share a shape to read as "the same kind of answer" */
-const inputClass =
-  'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
 /**
  * The state of the past sessions list.
@@ -274,24 +273,19 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             <MachineTag machine={machine} testId="new-session-machine" className="self-center font-normal" />
           </h2>
           {/* The tool — two buttons need no subheading to make their meaning clear. Model and permissions are set from the header after creation */}
-          <div className="mt-2.5 flex gap-1.5">
-            {allTools.map((t) => (
-              <button
-                key={t.name}
-                type="button"
-                onClick={() => setTool(t.name)}
-                data-testid={`tool-option-${t.name}`}
-                title={info(t.name)?.detail}
-                className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
-                  tool === t.name
-                    ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                    : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
-                } ${tools && !usable(t.name) ? 'opacity-50' : ''}`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Tool"
+            value={tool}
+            onChange={setTool}
+            className="mt-2.5"
+            options={allTools.map((t) => ({
+              value: t.name,
+              label: t.label,
+              testId: `tool-option-${t.name}`,
+              title: info(t.name)?.detail,
+              dim: !!tools && !usable(t.name),
+            }))}
+          />
           {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
           {blocked && (
             <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="tool-blocked">
@@ -423,19 +417,20 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 `centralu/<first 8 chars of the session id>` (manager.ts).
               */}
               <Field label="Branch" hint="blank = centralu/<session id>">
-                <input
+                <TextInput
                   type="text"
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
                   placeholder="feature/…"
                   data-testid="worktree-branch-input"
                   spellCheck={false}
-                  className={inputClass}
+                  font="mono"
+                  className="w-full"
                 />
               </Field>
               {/* **Where** the new branch forks from — a fact that used to live nowhere on screen */}
               <Field label="From" hint="the new branch forks from here">
-                <input
+                <TextInput
                   type="text"
                   value={baseValue}
                   onChange={(e) => setBase(e.target.value)}
@@ -443,7 +438,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   placeholder={trunk || 'current branch'}
                   data-testid="worktree-base-input"
                   spellCheck={false}
-                  className={inputClass}
+                  font="mono"
+                  className="w-full"
                 />
                 <datalist id="worktree-base-options">
                   {(branches ?? []).map((b) => (
@@ -460,25 +456,27 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               {setupOpen ? (
                 <div className="space-y-2.5" data-testid="worktree-setup-edit">
                   <Field label="Setup command" hint="runs once, in the new worktree">
-                    <input
+                    <TextInput
                       type="text"
                       value={setupCommand}
                       onChange={(e) => setSetupCommand(e.target.value)}
                       placeholder="pnpm install"
                       data-testid="worktree-setup-command"
                       spellCheck={false}
-                      className={inputClass}
+                      font="mono"
+                      className="w-full"
                     />
                   </Field>
                   <Field label="Copy from the project" hint="comma-separated">
-                    <input
+                    <TextInput
                       type="text"
                       value={copyFiles}
                       onChange={(e) => setCopyFiles(e.target.value)}
                       placeholder=".env.local"
                       data-testid="worktree-copy-files"
                       spellCheck={false}
-                      className={inputClass}
+                      font="mono"
+                      className="w-full"
                     />
                     {/*
                     Candidates are only **pointed at** (#76). Pressing one adds it to the field
@@ -536,16 +534,17 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   </Field>
                 </div>
               ) : (
-                <button
-                  type="button"
+                <Button
+                  variant="subtle"
+                  size="xs"
                   data-testid="worktree-setup-summary"
                   onClick={() => setSetupOpen(true)}
-                  className="block w-full truncate rounded-md border border-line px-2 py-1 text-left font-mono text-2xs text-ink-faint hover:border-line-strong hover:text-ink-muted"
+                  className="block w-full truncate text-left font-mono"
                   title="Edit worktree setup"
                 >
                   {savedSetup?.command ? `setup: ${savedSetup.command}` : 'setup: (none)'}
                   {savedSetup?.copyFiles.length ? ` · copies: ${savedSetup.copyFiles.join(', ')}` : ''}
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -573,15 +572,16 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           >
             Cancel
           </button>
-          <button
+          <Button
+            type="submit"
+            variant="primary"
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >
             {busy ? (resume ? 'Loading…' : 'Starting…') : resume ? 'Load' : 'Start'}
-          </button>
+          </Button>
         </footer>
       </form>
     </Modal>
