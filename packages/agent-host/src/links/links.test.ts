@@ -1812,6 +1812,32 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(records()).toEqual([])
   })
 
+  // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there
+  it("counts a working child on the machine under its parent's project ceiling, and frees the place when its turn ends", async () => {
+    const { remote, hub, answer, start, agent } = await rig()
+    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    // A turn that waits on the person there keeps working
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const full = expect.stringContaining('1 agents started by this project\'s sessions are already working')
+    // Another start from this project is refused before any card, here or on the machine
+    expect(await start({ task: 'another' })).toMatchObject({ ok: false, error: full })
+    expect(await hub.mgr.startAgent('h1', { task: 'a local one' })).toMatchObject({ ok: false, error: full })
+    // The person answers there: the turn ends, its report comes, and the place is free again
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    await eventually(() => (hub.mgr as unknown as { delegationFlow: { remote: { workingIn(p: string): number } } }).delegationFlow.remote.workingIn('p-hub') === 0)
+    // New work for it counts again: a send at rest is refused while another child holds the one place
+    const again = start({ task: 'please approve this one too', wait: false })
+    await answer('allow')
+    const second = await again
+    if (!second.ok) throw new Error(second.error)
+    expect(await agent(r.sessionId, 'send', 'more')).toMatchObject({ ok: false, error: full })
+  })
+
   // #1038: the sidebar hangs the child under its parent, as a local child, not under the machine's project
   it("names the session that started it as the child's owner in the hub's rows and events, until that session is gone", async () => {
     const { hub, answer, start } = await rig()

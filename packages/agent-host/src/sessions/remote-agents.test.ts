@@ -36,7 +36,7 @@ function agents(): RemoteAgents {
     linkedTasksRunning: () => [],
     tellSession: async (_to: string, text: string) => void told.push(text),
   } as unknown as RemoteAgentsHost
-  return new RemoteAgents(host)
+  return new RemoteAgents(host, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
 }
 
 beforeEach(() => {

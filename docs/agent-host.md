@@ -402,7 +402,8 @@ below retained for `safe` and `normal`:
 2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
-   A child counts while a delegated turn runs. Checked before the card and again after it,
+   A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
+   while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`). Checked before the card and again after it,
    and for a new `agent_session send` turn. The check after the card also takes the place (#673 review,
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
    given back if the start fails, so calls at once cannot pass the ceiling together. A fork takes its place the same way
@@ -572,8 +573,10 @@ machine's trash, its worktree left there), and `list` names its machine. `answer
 its cards are answered there or in the session's own window. When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
 is back, a child whose turn ended meanwhile is reported then. The paths its answer names are that machine's, and none
-is made readable here. Not yet: the child is not counted under this host's per-project ceiling (it runs on the other
-computer), and a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
+is made readable here. It counts under the caller's project's ceiling (below, "How many"), wherever it runs: the
+ceiling bounds how much one project's sessions set going at once, and the machine counts nothing for a session the
+hub started there; its start holds a place from the card's answer until its wait or report counts it, and a new
+`send` turn is checked as a local one. Not yet: a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
 stored; `list` reads its state from the machine) but no longer owes its report. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
 children's records, and a handoff gives them to the heir. In the sidebar it hangs under its caller, in the caller's

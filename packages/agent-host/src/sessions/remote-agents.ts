@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionState } from '@cc/protocol'
+import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, StartAgentOpts } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
@@ -60,6 +60,15 @@ export type RemoteAgentsHost = Pick<
   'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
 >
 
+/**
+ * The project's ceiling on agents working at once (`AgentStartGates`, reached through the start flow): a child on a
+ * linked machine counts under its parent's project (#1038), and its start holds a place from its check, as a local one
+ */
+export type AgentPlaces = {
+  agentCeilingError(callerId: string, projectId: string): string | null
+  reservePlace(callerId: string, projectId: string): { release: () => void } | { error: string }
+}
+
 /** How a wait on a remote child's turn ended */
 type Step = { step: 'completed' } | { step: 'failed'; error: string } | { step: 'deleted' } | { step: 'unreachable'; machine: string }
 
@@ -80,7 +89,10 @@ export class RemoteAgents {
   /** Children whose parent was told their link dropped, until it is back */
   private readonly toldDown = new Set<string>()
 
-  constructor(private readonly host: RemoteAgentsHost) {}
+  constructor(
+    private readonly host: RemoteAgentsHost,
+    private readonly places: AgentPlaces,
+  ) {}
 
   /** The hub's record of a child on a linked machine, by its qualified id */
   of(sessionId: string): RemoteAgent | undefined {
@@ -111,6 +123,19 @@ export class RemoteAgents {
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }
     return out
+  }
+
+  /**
+   * How many children the project's sessions started on linked machines are working now (#1038): the turn the caller
+   * gave is running as far as the hub knows, a call waits on it or its report is owed. One whose turn ended with its
+   * own background work still running there is not, as a local child whose turn ended is not (#721)
+   */
+  workingIn(projectId: string): number {
+    return this.records().filter((r) => {
+      if (this.host.meta.get(r.callerId)?.projectId !== projectId) return false
+      const report = this.host.children.linkedReports.get(r.sessionId)
+      return this.waits.has(r.sessionId) || (report?.orchestratorId === r.callerId && !report.paused)
+    }).length
   }
 
   /**
@@ -146,6 +171,9 @@ export class RemoteAgents {
     const refused = this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
     const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)!
+    // Counted under the caller's project, as a local child is (#1038); checked before anything is asked
+    const full = this.places.agentCeilingError(callerId, project.id)
+    if (full) return { ok: false, error: full }
     const reader = this.host.linkedReader
     if (!reader) return { ok: false, error: 'No machine is linked to this computer, so no session can be started on one. Start it here, without machine.' }
     const machine = reader.machineNamed(opts.machine)
@@ -199,6 +227,27 @@ export class RemoteAgents {
     if (decision === null || ctl.signal.aborted) {
       return { ok: false, error: signal?.aborted ? 'The call was withdrawn before the session was created, so none was.' : `No session was created: the question to the person was withdrawn or not answered in time. ${ASK_THE_PERSON}` }
     }
+    // A place is held from here until the child counts (its wait or report armed), so starts at once cannot pass the ceiling together
+    const place = this.places.reservePlace(callerId, project.id)
+    if ('error' in place) return { ok: false, error: place.error }
+    try {
+      return await this.makeChild(callerId, caller, opts, { machine, target, tool, name, model, effort, branch, startedAt }, reader, place.release, signal)
+    } finally {
+      place.release()
+    }
+  }
+
+  /** The child made on the machine once allowed, its task sent, and its answer waited for (`startAgent`) */
+  private async makeChild(
+    callerId: string,
+    caller: SessionInfo,
+    opts: StartAgentOpts & { machine: string },
+    c: { machine: { id: string; name: string }; target: LinkedProject; tool: string; name?: string; model?: string; effort?: string; branch?: string; startedAt: number },
+    reader: LinkedSessions,
+    counted: () => void,
+    signal?: AbortSignal,
+  ): Promise<ChildRunResult> {
+    const { machine, target, tool, name, model, effort, branch, startedAt } = c
     const made = await reader.createSession(target, {
       tool: tool as never,
       ...(name ? { name } : {}),
@@ -223,6 +272,8 @@ export class RemoteAgents {
      */
     const waiting = opts.wait === false ? undefined : this.openWait(rec.sessionId)
     if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
+    // It counts by itself now (`workingIn`)
+    counted()
     const label = labelOf(this.host.store.messages, caller)
     // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
     const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label, { depth: depthOf(this.host, callerId) + 1 })
@@ -276,6 +327,9 @@ export class RemoteAgents {
         if (inTurn(now.state)) return { ok: false, error: `"${rec.name}" is working on ${rec.machine} (${now.state}). A note into a running turn does not reach another machine yet: wait for it, or stop it, then send.` }
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }
+        // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
+        const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
+        if (full) return { ok: false, error: full }
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
         const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label, { depth: depthOf(this.host, callerId) + 1 })
         if (!sent.ok) {
