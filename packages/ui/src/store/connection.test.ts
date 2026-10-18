@@ -9,7 +9,7 @@ import { goodThemes, RECOVERY_RETRY_MS } from './connection.js'
 /**
  * The store's link to the host (connection.ts): attaching to a platform, what a drop and a return
  * do to the state, and the recovery's retries. The saved-workspace writer and the resync merge have
- * their own scenarios in store.test.ts; these are the rules that had none.
+ * their own scenarios in store-layout.test.ts and store-connection.test.ts; these are the rules that had none.
  *
  * The subscriptions and the recovery's generation are module state, shared by every test here, so
  * each test uses session ids of its own.

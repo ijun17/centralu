@@ -1588,9 +1588,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
-    const told = () => hub.store.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
+    const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
     const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
-    const records = () => JSON.parse(hub.store.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
+    const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
     return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf }
   }
 
@@ -1607,7 +1607,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // It is a session of that project there, recorded on that machine one level below the caller, and so is its task's turn
     const child = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!
     expect(child).toMatchObject({ projectId: 'p-app', permissionPreset: 'normal' })
-    expect(remoteStore.appSetting(`agent_depth:${child.id}`)).toBe('1')
+    expect(remoteStore.settings.appSetting(`agent_depth:${child.id}`)).toBe('1')
     expect(sent).toHaveBeenCalledWith(child.id, expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
     // The caller's own: listed with its machine, and followed through the link
     expect(await list()).toEqual([expect.objectContaining({ sessionId: r.sessionId, machine: 'Remote box', state: 'finished' })])

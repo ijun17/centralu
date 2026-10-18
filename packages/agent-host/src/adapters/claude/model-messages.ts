@@ -106,15 +106,23 @@ export function assistantEvents(m: Json, sessionId: string, opts?: AssistantStre
     out.push({
       type: 'usage_update',
       sessionId,
-      tokens: {
-        inputTokens: tokenCount(usage.input_tokens),
-        outputTokens: tokenCount(usage.output_tokens),
-        cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
-        cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
-      },
+      tokens: { ...requestInputTokens(usage), outputTokens: tokenCount(usage.output_tokens) },
     })
   }
   return out
+}
+
+/**
+ * One request's input as an Anthropic `usage` block counts it (#850): uncached, read from the cache, and written to it.
+ * Both the message's own reading (`assistantEvents`) and the cache accounting's request (`ClaudeStreamNormalizer`) read
+ * it here.
+ */
+export function requestInputTokens(usage: Json): { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } {
+  return {
+    inputTokens: tokenCount(usage.input_tokens),
+    cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
+    cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
+  }
 }
 
 export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {

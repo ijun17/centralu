@@ -22,6 +22,7 @@ import {
 } from './imports.js'
 import type { AppManifest } from './manifest.js'
 import { appsFolderOf } from './placement.js'
+import { USER_APPS_PARTS } from './discovery.js'
 import { folderFingerprint } from './fingerprint.js'
 import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
@@ -283,7 +284,7 @@ export class AppHandover {
   /** An id that already exists — even a folder standing there with an invalid manifest belongs to the person. Never overwritten (the same rule as a new app) */
   private refuseTaken(id: string): void {
     this.host.rescanUser()
-    if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, 'apps', id))) {
+    if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, ...USER_APPS_PARTS, id))) {
       throw new ImportRefused(`An app with the id "${id}" is already in your apps. Remove it first, or change the id in its manifest`)
     }
   }

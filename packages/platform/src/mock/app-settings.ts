@@ -1,4 +1,4 @@
-import { appKeyOf } from '@cc/protocol'
+import { appKeyOf, noSuchAppText } from '@cc/protocol'
 import type { AppPermission, AppUsage, AppQuestion } from '@cc/protocol'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
@@ -74,7 +74,7 @@ export class AppSettingsMock {
     },
     setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
-      if (!a) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
+      if (!a) throw new Error(noSuchAppText({ projectId, appId }))
       const slot = a.secrets?.find((s) => s.name === name)
       if (value !== null) {
         if (!slot) throw new Error(`This app does not declare a secret named ${name}`)

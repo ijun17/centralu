@@ -223,7 +223,7 @@ export class RemoteAgents {
      */
     const waiting = opts.wait === false ? undefined : this.openWait(rec.sessionId)
     if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
-    const label = labelOf(this.host.store, caller)
+    const label = labelOf(this.host.store.messages, caller)
     // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
     const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
@@ -248,7 +248,7 @@ export class RemoteAgents {
     if (rec.callerId !== callerId) return { ok: false, error: `${rec.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.` }
     const reader = this.host.linkedReader
     if (!reader) return { ok: false, error: `${rec.sessionId} is on ${rec.machine}, and no machine is linked to this computer now.` }
-    const label = labelOf(this.host.store, this.host.meta.get(callerId)!)
+    const label = labelOf(this.host.store.messages, this.host.meta.get(callerId)!)
     const stateOf = async (): Promise<{ ok: true; state: SessionState } | { ok: false; error: string }> => {
       const r = await reader.read(rec.sessionId, 1)
       return r.ok ? { ok: true, state: (r.state ?? 'idle') as SessionState } : { ok: false, error: `${rec.machine} cannot be asked about "${rec.name}" now: ${r.error ?? 'no answer'}` }
