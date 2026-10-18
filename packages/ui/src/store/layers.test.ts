@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCovered } from './layers.js'
+import { dialogOpen, isCovered } from './layers.js'
 
 describe('isCovered (#850 item 11)', () => {
   const none = { openLayers: 0, paletteOpen: false, settingsOpen: false, usageOpen: false, inboxOpen: false, overlay: null }
@@ -24,5 +24,16 @@ describe('isCovered (#850 item 11)', () => {
     // Every other layer still covers it
     for (const layer of each.filter((l) => !('inboxOpen' in l))) expect(isCovered({ ...none, inboxOpen: true, ...layer }, 'inbox')).toBe(true)
     for (const layer of each.filter((l) => !('overlay' in l))) expect(isCovered({ ...none, overlay: {}, ...layer }, 'overlay')).toBe(true)
+  })
+})
+
+describe('dialogOpen (#842 item 1)', () => {
+  const none = { openLayers: 0, settingsOpen: false, usageOpen: false }
+
+  it('is true for a modal, settings or usage, and false with none of them', () => {
+    expect(dialogOpen(none)).toBe(false)
+    expect(dialogOpen({ ...none, openLayers: 1 })).toBe(true)
+    expect(dialogOpen({ ...none, settingsOpen: true })).toBe(true)
+    expect(dialogOpen({ ...none, usageOpen: true })).toBe(true)
   })
 })

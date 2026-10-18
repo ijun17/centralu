@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NormalizedEvent } from './events.js'
+import { NormalizedEvent } from './events.js'
 import { continuesStreamRow, endsStreamRow, keepsSubagentStep, recordedRowKind, streamRowKind, subagentStepRow } from './transcript-rows.js'
 
 const delta = (text: string, messageId?: string): NormalizedEvent => ({ type: 'message_delta', sessionId: 's', role: 'assistant', text, ...(messageId ? { messageId } : {}) })
@@ -26,6 +26,10 @@ describe('transcript rows', () => {
     expect(endsStreamRow(error)).toBe(true)
     expect(endsStreamRow({ type: 'state_change', sessionId: 's', state: 'working' })).toBe(false)
     expect(endsStreamRow({ type: 'turn_complete', sessionId: 's' })).toBe(true)
+    // An agent's image is a row of its own between the text around it (#868)
+    expect(endsStreamRow({ type: 'message_image', sessionId: 's', mime: 'image/png', data: '' })).toBe(true)
+    // …and its event keeps the row's number through the wire schema, which drops a key it does not know
+    expect(NormalizedEvent.parse({ type: 'message_image', sessionId: 's', mime: 'image/png', data: '', seq: 7 })).toMatchObject({ seq: 7 })
   })
 
   it('a subagent step keeps its kind and role, and a chunk with no text is dropped (#222)', () => {

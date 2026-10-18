@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { newSessionProjectOf, useStore } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
@@ -7,6 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
+import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
 
 type Item =
@@ -246,6 +247,15 @@ export function CommandPalette() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, items, cursor, choose, toggle])
 
+  /*
+   * A dialog with a combobox (#842 item 7): focus stays inside while it is up, the field says it drives the list, and the
+   * list says which option the cursor is on. The options are not Tab stops: the arrows walk them, as the footer says.
+   */
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dialog = useDialogFocus(panelRef, open)
+  const listId = useId()
+  const optionId = (i: number) => `${listId}-${i}`
+
   if (!open) return null
 
   /*
@@ -260,12 +270,21 @@ export function CommandPalette() {
     <div className="absolute inset-0 z-40 flex items-start justify-center pt-10" onClick={() => toggle(false)} data-testid="command-palette">
       <div className="absolute inset-x-0 bottom-0 top-9 bg-scrim backdrop-blur-[2px]" />
       <div
-        className="relative w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
+        ref={panelRef}
+        {...dialog}
+        aria-label="Command palette"
+        className="relative w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none"
         onClick={(e) => e.stopPropagation()}
         data-testid="palette-panel"
       >
         <input
           ref={inputRef}
+          role="combobox"
+          aria-expanded={items.length > 0}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={items[cursor] ? optionId(cursor) : undefined}
+          aria-label="Search sessions, projects, apps, messages"
           className="w-full border-b border-line bg-transparent px-4 py-3 text-md text-ink placeholder:text-ink-faint focus:outline-none"
           placeholder="Search sessions, projects, apps, messages"
           value={query}
@@ -275,15 +294,19 @@ export function CommandPalette() {
           }}
           data-testid="palette-input"
         />
-        <ul className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
+        <ul id={listId} role="listbox" aria-label="Results" className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
           {items.length === 0 ? (
-            <li className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">
+            <li role="presentation" className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">
               No results
             </li>
           ) : (
             items.map((item, i) => (
-              <li key={`${item.kind}-${item.id}`}>
+              <li key={`${item.kind}-${item.id}`} role="presentation">
                 <button
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === cursor}
+                  tabIndex={-1}
                   className={`flex w-full items-baseline gap-2 border-l-2 px-3 py-1.5 text-left transition-colors ${
                     i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
                   }`}

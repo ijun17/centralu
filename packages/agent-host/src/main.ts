@@ -584,6 +584,8 @@ const server = new HostServer({
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)
+    // The folders only that window had open stop being watched (#842 item 6)
+    mgr.forgetWatchHolder(client)
     // A window told to relaunch closing is its relaunch; one that had not answered is one less to wait for (#665)
     updateApply.clientGone(client)
   },

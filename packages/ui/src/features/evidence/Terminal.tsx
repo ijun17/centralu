@@ -44,6 +44,36 @@ export function TerminalPane({ projectId }: { projectId: string }) {
    * allowed to write to the screen.
    */
   const loadGen = useRef(0)
+
+  /*
+   * Output that arrives between a terminal's snapshot (its `history` in the answer to list or create) and the moment its
+   * view mounts and subscribes (#842 item 5). The view mounts a render after the answer, and a dev server printing in
+   * between lost those lines for good: they were not in the snapshot and nobody was listening yet. The pane listens all
+   * along, keeps what comes for a terminal from its answer until its view takes it (`takeEarly`), and the view writes
+   * the snapshot, then this, then listens, with nothing in between.
+   *
+   * It starts at the answer, not at the request: what the host sent before its answer is already in the snapshot, since
+   * the events and the answer come down one connection in order.
+   */
+  const early = useRef(new Map<string, string[]>())
+  useEffect(
+    () =>
+      platform.terminal.onOutput((e) => {
+        early.current.get(e.terminalId)?.push(e.data)
+      }),
+    [platform],
+  )
+  /** The views on screen (`viewKey`), so a re-read holds output only for the ones about to mount */
+  const mounted = useRef(new Set<string>())
+  const holdEarly = (list: readonly TerminalInfo[]) => {
+    for (const t of list) early.current.set(t.terminalId, [])
+  }
+  const takeEarly = useCallback((terminalId: string) => {
+    const held = early.current.get(terminalId) ?? []
+    early.current.delete(terminalId)
+    return held
+  }, [])
+
   const load = useCallback(async () => {
     const gen = ++loadGen.current
     try {
@@ -53,25 +83,40 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       if (list.length === 0) {
         const t = await platform.terminal.create(projectId, 80, 24)
         if (gen !== loadGen.current) return
+        holdEarly([t])
         setTerminals([t])
         return
       }
+      // Only for the ones not on screen yet: a view already mounted listens for itself
+      holdEarly(list.filter((t) => !mounted.current.has(viewKey(resyncs.current, t.terminalId))))
       setTerminals(list)
     } catch (e) {
       if (gen === loadGen.current) setError((e as Error).message)
     }
   }, [platform, projectId])
 
+  /*
+   * A reconnect that had to resync, or a host swap, reads the terminals again and mounts them fresh (#842 item 4). The
+   * views on screen were attached to a connection that is gone: output from the gap was missing, a shell that died
+   * meanwhile never got its exit (so no Restart), and a shell the new host did not keep took keys that went nowhere.
+   * A fresh list carries each shell's scrollback and whether it is alive, and drops the ones that are gone.
+   */
+  const hostResyncs = useStore((s) => s.hostResyncs)
+  const resyncs = useRef(hostResyncs)
+  resyncs.current = hostResyncs
+
   useEffect(() => {
-    // The project changed — the old project's shells must not stay showing
+    // The project changed, or the host was resynced — the shells on screen must not stay showing
+    early.current.clear()
     setTerminals(null)
     setError(null)
     void load()
-  }, [load])
+  }, [load, hostResyncs])
 
   const add = async () => {
     try {
       const t = await platform.terminal.create(projectId, 80, 24)
+      holdEarly([t])
       setTerminals((prev) => [...(prev ?? []), t])
     } catch (e) {
       setError((e as Error).message)
@@ -115,7 +160,18 @@ export function TerminalPane({ projectId }: { projectId: string }) {
           close would never actually work.
         */}
         {(terminals ?? []).map((t) => (
-          <TerminalView key={t.terminalId} info={t} onClose={(id) => void close(id)} />
+          /*
+            The resync count is part of the key, so a resync mounts every view fresh even when the new list answers
+            before the empty one was drawn and the two renders are batched into one.
+          */
+          <TerminalView
+            key={viewKey(hostResyncs, t.terminalId)}
+            viewKey={viewKey(hostResyncs, t.terminalId)}
+            info={t}
+            takeEarly={takeEarly}
+            mounted={mounted.current}
+            onClose={(id) => void close(id)}
+          />
         ))}
       </div>
     </section>
@@ -174,7 +230,26 @@ function CommandTerminal({ projectId, run }: { projectId: string; run: CommandRu
  * reopening the window, redraws it by receiving the output so far the moment it reattaches.
  * The component disappearing does **not kill the shell** — it just means the tab was switched away.
  */
-function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (terminalId: string) => void }) {
+/** A terminal's view on screen: the same shell after a resync is a new view */
+function viewKey(resyncs: number, terminalId: string): string {
+  return `${resyncs}:${terminalId}`
+}
+
+function TerminalView({
+  viewKey: key,
+  info,
+  takeEarly,
+  mounted,
+  onClose,
+}: {
+  viewKey: string
+  info: TerminalInfo
+  /** What the pane kept for this terminal since its snapshot (#842 item 5) */
+  takeEarly: (terminalId: string) => string[]
+  /** The pane's record of which views are on screen */
+  mounted: Set<string>
+  onClose: (terminalId: string) => void
+}) {
   const platform = usePlatform()
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Xterm | null>(null)
@@ -202,7 +277,10 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     return mountXterm(el, platform, 'shell', { cursorBlink: true, scrollback: 5000 }, (term, fit) => {
       termRef.current = term
       fit()
+      // The snapshot, then what came after it, then live: one synchronous run, so no chunk falls between (#842 item 5)
       if (historyRef.current) term.write(historyRef.current)
+      for (const chunk of takeEarly(info.terminalId)) term.write(chunk)
+      mounted.add(key)
 
       const offOutput = platform.terminal.onOutput((e) => {
         if (e.terminalId === idRef.current) term.write(e.data)
@@ -223,12 +301,36 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
           onData.dispose()
           offOutput()
           offExit()
+          mounted.delete(key)
           termRef.current = null
         },
       }
     })
     // **Identity is terminalId alone.** history or title changing does not cause it to reattach
-  }, [platform, info.terminalId])
+  }, [platform, info.terminalId, key, takeEarly, mounted])
+
+  /*
+   * One restart at a time (#842 item 10): a second click while the first was on its way restarted the shell twice, and
+   * an answer that came back after the view was gone wrote into a disposed terminal.
+   */
+  const restarting = useRef(false)
+  const restart = async () => {
+    const term = termRef.current
+    if (!term || restarting.current) return
+    restarting.current = true
+    try {
+      const next = await platform.terminal.restart(idRef.current, term.cols, term.rows)
+      if (termRef.current !== term) return
+      idRef.current = next.terminalId
+      setDead(!next.alive)
+      term.reset()
+      if (next.history) term.write(next.history)
+    } catch (e) {
+      if (termRef.current === term) term.write(`\r\n\x1b[2m— could not restart: ${(e as Error).message} —\x1b[0m\r\n`)
+    } finally {
+      restarting.current = false
+    }
+  }
 
   return (
     <div
@@ -241,15 +343,7 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
           <button
             className="rounded-md px-1 text-2xs text-ink-muted transition-colors hover:text-ink"
             data-testid={`terminal-restart-${info.terminalId}`}
-            onClick={async () => {
-              const term = termRef.current
-              if (!term) return
-              const next = await platform.terminal.restart(idRef.current, term.cols, term.rows)
-              idRef.current = next.terminalId
-              setDead(!next.alive)
-              term.reset()
-              if (next.history) term.write(next.history)
-            }}
+            onClick={() => void restart()}
           >
             Restart
           </button>

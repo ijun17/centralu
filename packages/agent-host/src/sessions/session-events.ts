@@ -155,9 +155,8 @@ export class SessionEvents {
           const ref = this.host.appSessions.builderRefOf(m)
           if (ref) this.host.apps.appsHub?.rt.builderTurnEnded(ref)
         }
+        // An image takes its row here too, in order; its file is written after (#40 part 2, #868: `persistImage`)
         seq = this.host.record.persistMessage(e, m)
-        // An image is persisted as a file (#40, part 2) — it is async, so no seq is taken here
-        if (e.type === 'message_image') void this.host.record.persistImage(e, m)
         // Commit attribution (#50) — caught in passing whenever a git commit tool call goes by
         if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
         this.host.store.sessions.upsertSession(m)

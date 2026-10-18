@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
+import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 
 /** A key as a real keyboard sends it: `code` names the key cap, `key` what it types (a Korean layout types ㅛ on Y) */
 const key = (
@@ -65,5 +65,23 @@ describe('typingTarget', () => {
     expect(typingTarget({ tagName: 'DIV', isContentEditable: true } as never)).toBe(true)
     expect(typingTarget({ tagName: 'DIV', isContentEditable: false } as never)).toBe(false)
     expect(typingTarget(null)).toBe(false)
+  })
+})
+
+describe('Enter on a focused control (#842 item 2)', () => {
+  it('leaves Enter to a focused button or link, and still opens the row from the list itself', () => {
+    expect(inboxKeyAction(key('Enter'), { ...FREE, onButton: true })).toBeNull()
+    expect(inboxKeyAction(key('Enter'), { ...FREE, onButton: false })).toBe('open')
+    // The other keys still act on the row under the cursor
+    expect(inboxKeyAction(key('d'), { ...FREE, onButton: true })).toBe('done')
+    expect(inboxKeyAction(key('Escape'), { ...FREE, onButton: true })).toBe('close')
+  })
+
+  it('reads a button, a link and what is inside a button as a control', () => {
+    const el = (closest: string | null) => ({ closest: (sel: string) => (closest && sel.includes(closest) ? {} : null) }) as unknown as EventTarget
+    expect(buttonTarget(el('button'))).toBe(true)
+    expect(buttonTarget(el('a[href]'))).toBe(true)
+    expect(buttonTarget(el(null))).toBe(false)
+    expect(buttonTarget(null)).toBe(false)
   })
 })

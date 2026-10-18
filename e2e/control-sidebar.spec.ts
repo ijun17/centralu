@@ -473,6 +473,55 @@ test('Renaming a session in the sidebar sticks — the automatic name never over
   await expect(page.getByTestId(`session-row-${id}`)).toContainText('Guard MCP')
 })
 
+test('Switching away from the window mid-rename keeps the edit open, and saves nothing half-typed (#842 item 14)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'original name')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId(`session-row-${id}`).dblclick()
+  const input = page.getByTestId(`session-name-input-${id}`)
+  await input.fill('half')
+  // ⌘Tab to another app: the window loses focus, and the field blurs with it
+  await page.evaluate(() => {
+    const real = document.hasFocus.bind(document)
+    ;(window as any).__realHasFocus = real
+    document.hasFocus = () => false
+    ;(document.activeElement as HTMLElement).blur()
+  })
+  await expect(input).toBeVisible()
+  expect(await page.evaluate((sid) => (window as any).__store.getState().sessions[sid].name, id)).toBe('original name')
+
+  // Back in the window: the field has focus again, and the name is finished there
+  await page.evaluate(() => {
+    document.hasFocus = (window as any).__realHasFocus
+  })
+  // As the window gives it back: the caret where it was, nothing selected
+  await input.focus()
+  await page.keyboard.type(' done')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('half done')
+})
+
+test('Back in the window without the field getting focus again, the rename is saved rather than left open (#842 item 14)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'original name')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId(`session-row-${id}`).dblclick()
+  const input = page.getByTestId(`session-name-input-${id}`)
+  await input.fill('renamed meanwhile')
+  await page.evaluate(() => {
+    const real = document.hasFocus.bind(document)
+    document.hasFocus = () => false
+    ;(document.activeElement as HTMLElement).blur()
+    // The window comes back, and focus does not return to the field
+    document.hasFocus = real
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  await expect(input).toHaveCount(0)
+  await expect(page.getByTestId(`session-row-${id}`)).toContainText('renamed meanwhile')
+})
+
 test('Pressing Escape while editing the name leaves the old name unchanged', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'original name')

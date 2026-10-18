@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent, StoredMessage } from '@cc/protocol'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from './transcript.js'
+import { mergePage } from './historyPages.js'
 
 /**
  * The transcript rules on their own — the same assertions store.test.ts makes through the store,
@@ -160,5 +161,22 @@ describe("a Centralu call's mark (#730)", () => {
     expect(messagesToChat([row(3, 'tool_call', { callId: 'c1', summary })])[0]).toMatchObject({ kind: 'tool', centralu: mark })
     // An ordinary call carries none
     expect(feed([{ type: 'tool_call', callId: 'c2', summary: { tool: 'Bash', title: 'ls', paths: [] } }])[0]).not.toHaveProperty('centralu')
+  })
+})
+
+describe('an agent image and a re-read of history (#868)', () => {
+  it('takes its row number live, so the host\'s row (a path, no bytes) merges with it instead of showing twice', () => {
+    const live = appendChat(
+      appendChat([], { type: 'message_delta', sessionId: 's', role: 'assistant', text: 'Here: ', seq: 1 } as NormalizedEvent),
+      { type: 'message_image', sessionId: 's', mime: 'image/png', data: 'AAAA', seq: 2 } as NormalizedEvent,
+    )
+    expect(live.map((i) => [i.kind, i.storedSeq])).toEqual([['assistant', 1], ['image', 2]])
+
+    const rows: StoredMessage[] = [
+      { sessionId: 's', seq: 1, role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId: 's', role: 'assistant', text: 'Here: ' }, ts: 1 },
+      { sessionId: 's', seq: 2, role: 'system', kind: 'image', payload: { type: 'message_image', sessionId: 's', mime: 'image/png', data: '', path: '/a/agent-image.png' }, ts: 2 },
+    ]
+    const merged = mergePage(live, messagesToChat(rows), rows)
+    expect(merged.map((i) => i.kind)).toEqual(['assistant', 'image'])
   })
 })

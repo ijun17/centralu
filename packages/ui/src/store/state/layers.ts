@@ -33,6 +33,12 @@ export type LayersSlice = {
   overlay: Overlay
   inboxOpen: boolean
   toast: string | null
+  /**
+   * Counts every toast said, the same words again included (#842 item 14). The toast's timer restarts on it: keyed on
+   * the words alone, a failure said twice in a row did not restart it, and the second one vanished early or at once.
+   * Raised by the store's `set` whenever a write says a toast (`stampToasts`), so no caller has to remember it.
+   */
+  toastAt: number
   /** The file the code viewer is showing (a project-relative path) */
   viewerPath: string | null
   /**

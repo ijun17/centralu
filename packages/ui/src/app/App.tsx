@@ -12,6 +12,7 @@ import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } 
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
+import { dialogOpen } from '../store/layers.js'
 import { useCounts, computeInbox, currentWaitingId } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -33,7 +34,7 @@ import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { IconButton } from '../components/IconButton.jsx'
-import { StepIcon } from '../components/icons.jsx'
+import { CloseIcon, StepIcon } from '../components/icons.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
 import { lazyComponent } from '../components/lazy.jsx'
 
@@ -650,6 +651,15 @@ function GlobalKeys() {
         position otherwise.
       */
       const letter = letterOf(e)
+      const mod = e.metaKey || e.ctrlKey
+      /*
+        A dialog keeps the keyboard (#842 item 1): its own keys (Esc, Enter, Tab) are its, and none of the window's
+        shortcuts reach the screen under it. The open palette lets only ⌘K through, the key that closes it; the rest
+        would act behind it while it stays up.
+      */
+      const layers = useStore.getState()
+      if (dialogOpen(layers)) return
+      if (layers.paletteOpen && !(mod && letter === 'k')) return
       // Back and forward between screens ⌘[ ⌘] / Alt+← Alt+→ (#374); never while typing (keys.ts says why)
       const dir = e.defaultPrevented ? null : navKeyOf(e)
       if (dir) {
@@ -659,19 +669,19 @@ function GlobalKeys() {
         return
       }
       // Command palette ⌘K (FR-17)
-      if ((e.metaKey || e.ctrlKey) && letter === 'k') {
+      if (mod && letter === 'k') {
         e.preventDefault()
         useStore.getState().togglePalette()
         return
       }
-      if ((e.metaKey || e.ctrlKey) && letter === 'i') {
+      if (mod && letter === 'i') {
         e.preventDefault()
         toggleInbox()
         return
       }
       // Jump to the next waiting item: approval → error → waiting-for-input, in that order
       // (sorting lives in core)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && letter === 'a') {
+      if (mod && e.shiftKey && letter === 'a') {
         e.preventDefault()
         const st = useStore.getState()
         const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
@@ -680,7 +690,7 @@ function GlobalKeys() {
       }
       // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
       // Git and files are not a screen that replaces the conversation, they sit alongside it.
-      if ((e.metaKey || e.ctrlKey) && letter === 'b') {
+      if (mod && letter === 'b') {
         e.preventDefault()
         useStore.getState().togglePanel()
         return
@@ -689,7 +699,7 @@ function GlobalKeys() {
       // held (caught by e2e)
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
       // Jump to project ⌘1-9 (FR-17)
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && digit) {
+      if (mod && !e.shiftKey && digit) {
         const st = useStore.getState()
         const project = Object.values(st.projects)[Number(digit) - 1]
         if (project) {
@@ -740,12 +750,14 @@ function GlobalKeys() {
 
 function Toast() {
   const toast = useStore((s) => s.toast)
+  // Every toast said, the same words again included: the timer restarts on each (#842 item 14)
+  const toastAt = useStore((s) => s.toastAt)
   const setToast = useStore((s) => s.setToast)
   useEffect(() => {
     if (!toast) return
     const t = setTimeout(() => setToast(null), 2500)
     return () => clearTimeout(t)
-  }, [toast, setToast])
+  }, [toast, toastAt, setToast])
   if (!toast) return null
   return (
     /*
@@ -757,11 +769,15 @@ function Toast() {
       what it covers up is the app's whole answer to "that didn't work".
     */
     <div
-      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink shadow-(--shadow-popover)"
+      className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-md border border-line bg-surface-raised py-2 pl-3 pr-1.5 text-sm text-ink shadow-(--shadow-popover)"
       data-testid="toast"
       role="status"
     >
-      {toast}
+      <span>{toast}</span>
+      {/* Gone before it was read is the toast's whole risk; one that is in the way can be put away (#842 item 14) */}
+      <IconButton label="Dismiss" onClick={() => setToast(null)} testId="toast-dismiss" placement="top" align="right">
+        <CloseIcon size={11} />
+      </IconButton>
     </div>
   )
 }
