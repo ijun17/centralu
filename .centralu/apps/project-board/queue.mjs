@@ -234,10 +234,10 @@ export function conflictInstruction({ base, branch, files }) {
  * and carries the instruction, and the queuing session relays it; with no author recorded, it says
  * so and that a session started on the branch needs that instruction.
  */
-export function handoffReason({ item, pr, files = [], why, ref }) {
+export function handoffReason({ item, pr, files = [], why, ref, instruction = null }) {
   const n = ref(item.repo, item.pr)
   const branch = pr.headRefName
-  const text = conflictInstruction({ base: pr.baseRefName, branch, files })
+  const text = instruction ?? conflictInstruction({ base: pr.baseRefName, branch, files })
   const author = item.author ?? null
   const where = files.length ? ` in ${files.length > 8 ? `${files.slice(0, 8).join(', ')} and ${files.length - 8} more` : files.join(', ')}` : ''
   const to = author

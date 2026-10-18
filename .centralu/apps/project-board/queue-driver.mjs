@@ -367,7 +367,7 @@ const conflictEvent = (text, data) => ({ kind: 'conflict', text, data })
  * while it works, since regenerating can take minutes. Answers `{ decision, patch?, events }`, or
  * `{ yielded }` when another driver took the queue.
  */
-async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
+async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [] }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -377,8 +377,8 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
   // Handed off on this head already: the same reason, so no second message
   if (done?.outcome === 'handoff' && done.reason) return { decision: { state: 'attention', reason: done.reason }, events: [] }
   const since = item.conflict?.at ?? at
-  const hand = (why, files, steps = []) => {
-    const d = handoffReason({ item, pr, files, why, ref })
+  const hand = (why, files, steps = [], instruction = null) => {
+    const d = handoffReason({ item, pr, files, why, ref, instruction })
     const to = d.reason.relay.to
     return {
       decision: d,
@@ -402,7 +402,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
   keep.unref?.()
   let r
   try {
-    r = await mergeMain({ repo: item.repo, pr, defaultBranch, dir: QUEUE.conflicts.checkout, conflicts: QUEUE.conflicts, renew })
+    r = await mergeMain({ repo: item.repo, pr, defaultBranch, dir: QUEUE.conflicts.checkout, conflicts: QUEUE.conflicts, renew, landed })
   } finally {
     clearInterval(keep)
   }
@@ -416,6 +416,11 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
             `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}${st.modules === 'linked' ? " (node_modules linked from the queue's checkout, its lockfile being main's: no install)" : ''}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
             { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat, modules: st.modules },
           )
+        : st.step === 'rebase'
+          ? conflictEvent(
+              `${n}: ${pr.headRefName} still carried the original commits of #${st.dropped}, which the queue landed as a squash; rebased it onto ${defaultBranch} without them in ${span(st.ms)}${st.files.length ? `, which conflicts in ${listSome(st.files, 8)}` : ''}.`,
+              { step: 'rebase', ms: st.ms, files: st.files, dropped: st.dropped },
+            )
         : st.step === 'superseded'
           ? conflictEvent(`${n}: ${pr.headRefName} moved to ${short(st.tip)} while the queue merged ${defaultBranch} in (its author pushed first), so git refused the queue's ${short(st.sha)}; the queue takes the new head.`, {
               step: 'superseded',
@@ -423,12 +428,12 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
               sha: st.sha,
               tip: st.tip,
             })
-          : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue' }),
+          : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName}${st.lease ? ' with a lease on the head it read (--force-with-lease)' : ''} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue', ...(st.lease ? { lease: true } : {}) }),
   )
   if (r.outcome === 'pushed') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'pushed', sha: r.sha, files: r.files } }, events: steps }
   // Quietly: the author's own push is the fix, or the next conflict, which the next poll reads
   if (r.outcome === 'superseded') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'superseded', tip: r.tip, files: r.files } }, events: steps }
-  return hand(r.why, r.files, steps)
+  return hand(r.why, r.files, steps, r.instruction ?? null)
 }
 
 /**
@@ -436,7 +441,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew, save }) {
+async function pollItem(item, { now, ref, renew, save, landed = [] }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -449,7 +454,7 @@ async function pollItem(item, { now, ref, renew, save }) {
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }
-    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch })
+    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch, landed })
     if (c.yielded) return { yielded: true }
     d = c.decision
     Object.assign(base, c.patch ?? {})
@@ -581,9 +586,14 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
       if (it) Object.assign(it, p)
     })
+  // What this queue landed (#1221): a pull request stacked on one of them still carries its commits
+  const landed = q.items
+    .filter((i) => i.state === 'merged' && i.head && i.pr !== item.pr && String(i.repo).toLowerCase() === String(item.repo).toLowerCase())
+    .sort((a, b) => String(b.mergedAt ?? '').localeCompare(String(a.mergedAt ?? '')))
+    .map((i) => ({ pr: i.pr, head: i.head }))
   let r
   try {
-    r = await pollItem(item, { now, ref, renew, save })
+    r = await pollItem(item, { now, ref, renew, save, landed })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`

@@ -188,7 +188,9 @@ Tauri's generated permissions: `queue.conflicts` in the board app's `project.jso
 them and pushes the merge, which runs CI again. Anything else, the UX baseline and store migration
 steps always, comes back to the session that opened the pull request (`queue_merge` `author`) as
 "merge main and push again; conflicted files: …". Merge main and push; the fixed pull request goes
-to the front of the queue.
+to the front of the queue. A pull request stacked on one the queue just landed as a squash is
+rebased onto main without that one's commits instead (`git rebase --onto`, pushed with
+`--force-with-lease`); only when that rebase conflicts does it come back to you, saying how.
 
 **A stack's lower pull requests are drafts** (#1066). The merge queue lands a stack through its top
 (`queue_merge` with `lowers`), on the top's run and its batch, which test the whole stack; a lower's

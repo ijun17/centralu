@@ -210,7 +210,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (a driver stopped between the merge and writing it down, or by hand): then each head branch is
   deleted and the lowers closed, a branch kept when another open pull request is based on it (deleting
   it would close that one). Found merged into another branch, nothing is closed or deleted. Never
-  `--auto`, never `--delete-branch`, never a force push.
+  `--auto`, never `--delete-branch`, never a force push but one: the lease after a restack (Conflicts, below).
 - **Failures on one item** that are not an outage (a pull request gone, a write GitHub refuses) are
   counted; three in a row → attention, once.
 - **Gentle on GitHub**: one item per tick (5 s), each item again after its own wait (90 s while CI
@@ -304,6 +304,20 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   batch, the full tier) before it lands: nothing lands that CI has not passed on. A merge git makes
   cleanly though GitHub said DIRTY is pushed the same way. Tests fail if the push gains `--force` or
   the check that the branch is at the head GitHub reported goes.
+- **Stacked on one the queue landed as a squash** (#1221 on #1218, 2026-10-19): GitHub moves such a
+  pull request's base to the default branch, but its branch still carries the lower's original commits,
+  which conflict with their own squash (five files there), and merging main in cannot fix that. So
+  before merging, the queue looks for a pull request it landed (its merged items' heads, newest first)
+  whose head is in the branch and not in the default branch (squashed, not merged), the nearest one
+  (`landedUnder`), and rebases the branch onto the default branch without its commits (`git rebase
+  --onto <default> <its head>`, hooks off, in the same temporary worktree). Pushed with a lease on the
+  head it read (`--force-with-lease=refs/heads/<branch>:<head>`, the owner's, 2026-10-19: the only push
+  the queue forces), so git refuses it when the author pushed meanwhile (`superseded`, as for a merge).
+  The new head runs CI (and a batch, the full tier) before it lands, and goes to the front once fixed.
+  Only a rebase that itself conflicts is handed off, with that instruction ("Rebase <branch> onto main
+  without #N's commits (git rebase --onto origin/main <head>) … push with --force-with-lease"), not
+  "merge main". Events: `rebase` (`dropped`: that pull request, `files` when it conflicted), then `push`
+  with `lease: true`.
 - **What regenerating made is shown**: a regenerated golden is approved without a person, and would
   be the baseline from then on even if it records a regression. So the commit body and the
   `regenerate` event carry each regenerated file's lines added and removed against the default
@@ -359,7 +373,8 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
 - `PROJECT_BOARD_QUEUE_CHECKOUT` (empty: none) and `PROJECT_BOARD_QUEUE_CONFLICTS` (the lists as JSON)
   change these only for tests, which otherwise would merge in this checkout, whose remote is GitHub.
   Tests: `tooling/project-board-queue.test.ts` (the lists, and the app with real git and a bare
-  repository standing for GitHub's: mechanical only lands with no attention, code, the UX baseline and
+  repository standing for GitHub's: a pull request stacked on a squashed one rebased and landed, or
+  handed off when even the rebase conflicts; mechanical only lands with no attention, code, the UX baseline and
   a migration step hand off; a branch that moved, an author pushing during regeneration, a branch with
   main in it already, a failing command; the environment the commands see, and the cleanup on each
   path).

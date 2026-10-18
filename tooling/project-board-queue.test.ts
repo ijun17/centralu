@@ -1542,7 +1542,110 @@ const untouched = (work: string) => ({
   refs: g(work, 'for-each-ref', 'refs/centralu-queue'),
 })
 
+/**
+ * #1221 on #1218 (2026-10-19): #77 stacked on #76; #76 lands as a squash, GitHub moves #77's base to main, and #77's
+ * branch still carries #76's original commits, which conflict with their squash and what main did since (five files).
+ * `ownConflict`: #77's own commit also changes a file main changed since, so even the rebase conflicts.
+ */
+function squashedStack({ ownConflict = false } = {}) {
+  const repo = conflictRepo({ 90: ['other.txt'] })
+  const { work } = repo
+  const files = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts']
+  const write = (f: string, text: string) => {
+    mkdirSync(join(work, f, '..'), { recursive: true })
+    writeFileSync(join(work, f), text)
+  }
+  g(work, 'checkout', '-q', 'main')
+  for (const f of files) write(f, 'base\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'the files')
+  const base = g(work, 'rev-parse', 'HEAD')
+  g(work, 'checkout', '-q', '-b', 'feat/b76', base)
+  for (const f of files) write(f, 'lower 76\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'change 76')
+  const lower = g(work, 'rev-parse', 'HEAD')
+  g(work, 'checkout', '-q', '-b', 'feat/b77', lower)
+  write('own-77.txt', '77\n')
+  if (ownConflict) write('src/a.ts', 'top 77\n')
+  g(work, 'add', 'own-77.txt', 'src/a.ts')
+  g(work, 'commit', '-q', '-m', 'change 77')
+  const top = g(work, 'rev-parse', 'HEAD')
+  // main: #76 as one squash commit, then main changes the same files again
+  g(work, 'checkout', '-q', 'main')
+  g(work, 'merge', '-q', '--squash', 'feat/b76')
+  g(work, 'commit', '-q', '-m', 'change 76 (#76)')
+  for (const f of files) write(f, 'main after 76\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'main moves on')
+  const main = g(work, 'rev-parse', 'HEAD')
+  g(work, 'push', '-q', '-f', 'origin', 'main', 'feat/b76', 'feat/b77')
+  g(work, 'checkout', '-q', 'mine')
+  return { ...repo, main, heads: { 76: lower, 77: top } as Record<string, string>, files }
+}
+
+/** #76 queued and landed by the queue first (green on its head), so the queue knows the head it landed */
+async function landLower(repo: ConflictRepo) {
+  patchGh((s) => {
+    s.prs['76'] = ghPr(76, { headRefOid: repo.heads[76] })
+    s.checks[repo.heads[76]!] = green()
+    s.runs[repo.heads[76]!] = [ghRun('success', 1, repo.heads[76], { head_branch: 'feat/b76' })]
+  })
+  await call('queue_merge', { pr: 76, owner: 'tester' })
+  await until((x) => stateOf(x, 76) === 'merged', '#76 to land')
+}
+
 describe('the merge queue resolves a conflict with main itself, or hands it to the author session (#1182)', { timeout: 120_000 * SLOW }, () => {
+  it('rebases a pull request stacked on one it landed as a squash onto main without that one\'s commits, pushes it with a lease, and lands it once CI passed (#1221)', async () => {
+    const repo = squashedStack()
+    const before = untouched(repo.work)
+    conflictRuntime(repo, [77])
+    await landLower(repo)
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the rebase to be pushed')
+    const tip = tipOf(repo, 77)
+    // Its own commit only, on main: #76's original commit is gone, nothing merged, nothing conflicted
+    expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tip).split(' ').slice(1)).toEqual([repo.main])
+    expect(g(repo.origin, 'log', '-1', '--format=%s', tip)).toBe('change 77')
+    expect(g(repo.origin, 'show', `${tip}:own-77.txt`)).toBe('77')
+    expect(g(repo.origin, 'show', `${tip}:src/a.ts`)).toBe('main after 76')
+    expect(spawnSync('git', ['merge-base', '--is-ancestor', repo.heads[76]!, tip], { cwd: repo.origin, env: GIT_ENV }).status).toBe(1)
+    expect(untouched(repo.work)).toEqual(before)
+    expect(queueTmps()).toEqual([])
+    expect(conflictSteps().map((e) => [e.step, e.dropped ?? null, e.lease ?? null])).toEqual([
+      ['rebase', 76, null],
+      ['push', null, true],
+    ])
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+    // Nothing lands from the rebased head until CI has passed on it
+    expect(writes().filter((w) => w[0] === 'merge').map((w) => w[1])).toEqual(['76'])
+    patchGh((s) => {
+      Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[tip] = green('2026-10-17T09:00:00Z')
+      s.runs[tip] = [ghRun('success', 1, tip)]
+    })
+    await until((x) => stateOf(x) === 'merged', 'the rebased head to land')
+    expect(writes().find((w) => w[0] === 'merge' && w[1] === '77')![2]).toEqual(expect.arrayContaining(['--match-head-commit', tip]))
+    expect(conflictSteps().at(-1)).toMatchObject({ step: 'fixed', by: 'queue' })
+  })
+
+  it('hands it off when the rebase without the landed one\'s commits conflicts too, saying how to rebase, and pushes nothing (#1221)', async () => {
+    const repo = squashedStack({ ownConflict: true })
+    conflictRuntime(repo, [77])
+    await landLower(repo)
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+    expect(q.queue.find((i: any) => i.pr === 77).reason).toMatchObject({ kind: 'conflict', files: ['src/a.ts'], relay: { to: 'writer', branch: 'feat/b77' } })
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    const told = notices().filter((e) => e.kind === 'attention')
+    expect(told).toHaveLength(1)
+    expect(told[0]!.text).toContain(`#76 landed as a squash, and feat/b77 still carries its original commits; the queue rebased feat/b77 onto main without them (git rebase --onto main ${repo.heads[76]!.slice(0, 7)}), and that conflicts too.`)
+    expect((told[0] as any).relay.text).toBe(`Rebase feat/b77 onto main without #76's commits (git rebase --onto origin/main ${repo.heads[76]}), resolve the conflicts and push with --force-with-lease; conflicted files: src/a.ts.`)
+    expect(conflictSteps().map((e) => e.step)).toEqual(['rebase', 'handoff'])
+    expect(queueTmps()).toEqual([])
+  })
+
+
   it('regenerates a conflict only in mechanical files, pushes the merge, and lands its new head once CI passed on it, with no attention', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml', 'docs/generated/schema.md'] })
     const before = untouched(repo.work)
