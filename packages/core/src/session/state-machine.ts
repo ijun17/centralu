@@ -37,3 +37,12 @@ export const URGENCY: Record<SessionState, number> = {
 export function needsAnswer(s: { state: SessionState; pendingQuestions: { readonly length: number } }): boolean {
   return s.state === 'waiting_approval' || s.pendingQuestions.length > 0
 }
+
+/**
+ * The state a session is listed, counted and drawn under. An open question is listed as an approval is (owner,
+ * 2026-10-18): the inbox, its counters and a folded project's line all keep it until it is answered, whatever else the
+ * session is doing. An error keeps its own place: it outranks the question.
+ */
+export function listedState(s: { state: SessionState; pendingQuestions: { readonly length: number } }): SessionState {
+  return s.state !== 'error' && s.pendingQuestions.length > 0 ? 'waiting_approval' : s.state
+}
