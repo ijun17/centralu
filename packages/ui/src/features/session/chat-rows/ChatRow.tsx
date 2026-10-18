@@ -323,6 +323,8 @@ export function ToolCard({
    * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
    * practice. The full output is what `result` delivers.)
    */
+  /** The whole input shows once the card is open, when it says more than the title row can (below) */
+  const showInput = !call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60)
   /** Still running: no answer yet and no failure */
   const running = item.result === undefined && item.ok === undefined
   const liveTail =
@@ -411,9 +413,11 @@ export function ToolCard({
         What the tool was given, whole, once the card is open (owner, 2026-10-18: a long command was cut to one line in
         the title and could not be read anywhere). Only when it says more than the title row could.
       */}
-      {!call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60) && (
+      {showInput && (
         <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-input">
+          <span className="readout mb-1 block text-2xs uppercase tracking-wide text-ink-faint">Input</span>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-hover/25 px-2.5 py-1.5 font-mono text-xs leading-body text-ink-muted">
+            {item.tool === 'Bash' && <span className="select-none text-ink-faint">$ </span>}
             {item.title}
           </pre>
         </div>
@@ -439,6 +443,8 @@ export function ToolCard({
 
       {!call && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
+          {/* Named only beside a shown input, where the two would otherwise read as one block */}
+          {showInput && <span className="readout mb-1 block px-0.5 text-2xs uppercase tracking-wide text-ink-faint">Output</span>}
           <pre
             ref={outRef}
             className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted ${
