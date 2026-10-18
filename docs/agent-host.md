@@ -403,7 +403,8 @@ below retained for `safe` and `normal`:
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
    A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
-   while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`). Checked before the card and again after it,
+   while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`); a removed machine's child holds no place,
+   and one deleted there while the link was down is forgotten when the link is back (`caughtUp`). Checked before the card and again after it,
    and for a new `agent_session send` turn. The check after the card also takes the place (#673 review,
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
    given back if the start fails, so calls at once cannot pass the ceiling together. A fork takes its place the same way

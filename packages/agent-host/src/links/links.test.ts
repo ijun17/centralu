@@ -1838,6 +1838,36 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await agent(r.sessionId, 'send', 'more')).toMatchObject({ ok: false, error: full })
   })
 
+  // #1038 review: a child deleted there while the link was down, or on a removed machine, kept its place for good
+  it('frees the place of a child deleted on its machine while the link was down, and of a removed machine\'s child', async () => {
+    const { remote, remoteStore, hub, answer, start, records } = await rig()
+    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    const ceiling = () => (hub.mgr as unknown as { delegationFlow: { starts: { agentCeilingError(c: string, p: string): string | null } } }).delegationFlow.starts.agentCeilingError('h1', 'p-hub')
+    const begin = async (task: string) => {
+      const call = start({ task, wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      return r.sessionId
+    }
+    const a = await begin('please approve the command')
+    expect(ceiling()).toContain('already working')
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
+    await there.trashSession(a.slice('m1.'.length))
+    await there.disposeAll()
+    await remoteHost(remote.port, remoteStore)
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => ceiling() === null)
+    expect(records()).toEqual([])
+    // A child of a machine then removed from Centralu holds no place either
+    await begin('please approve this one too')
+    expect(ceiling()).toContain('already working')
+    await hub.links.remove('m1')
+    expect(ceiling()).toBeNull()
+  })
+
   // #1038: the sidebar hangs the child under its parent, as a local child, not under the machine's project
   it("names the session that started it as the child's owner in the hub's rows and events, until that session is gone", async () => {
     const { hub, answer, start } = await rig()

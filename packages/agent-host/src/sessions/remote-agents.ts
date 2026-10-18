@@ -131,8 +131,12 @@ export class RemoteAgents {
    * own background work still running there is not, as a local child whose turn ended is not (#721)
    */
   workingIn(projectId: string): number {
-    return this.records().filter((r) => {
-      if (this.host.meta.get(r.callerId)?.projectId !== projectId) return false
+    const mine = this.records().filter((r) => this.host.meta.get(r.callerId)?.projectId === projectId)
+    if (!mine.length) return 0
+    const reader = this.host.linkedReader
+    return mine.filter((r) => {
+      // A removed machine's child is out of reach for good: no end of it will come to free the place (#1038 review)
+      if (!reader?.machineLinked(r.machineId)) return false
       const report = this.host.children.linkedReports.get(r.sessionId)
       return this.waits.has(r.sessionId) || (report?.orchestratorId === r.callerId && !report.paused)
     }).length
@@ -554,8 +558,16 @@ export class RemoteAgents {
   private async caughtUp(machineId: unknown): Promise<void> {
     const reader = this.host.linkedReader
     if (!reader || typeof machineId !== 'string') return
-    for (const rec of this.records()) {
-      if (rec.machineId !== machineId) continue
+    // Deleted there while the link was down, or the machine removed: nothing of it will come, so nothing is owed of it
+    // and it holds no place under the ceiling (#1038 review). Read as `list` reads it; not at all if it cannot be read
+    const mine = this.records().filter((r) => r.machineId === machineId)
+    if (!mine.length) return
+    const listed = await reader.list().catch(() => null)
+    for (const rec of mine) {
+      if (listed && this.gone(rec, reader, listed)) {
+        this.forget(rec.sessionId)
+        continue
+      }
       const missed = this.toldDown.delete(rec.sessionId)
       const report = this.host.children.linkedReports.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || (!report.busy && !missed)) continue
