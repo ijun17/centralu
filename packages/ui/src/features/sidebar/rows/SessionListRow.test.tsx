@@ -70,6 +70,16 @@ describe('SessionListRow', () => {
     }
   })
 
+  // #1038: a child started on another machine stands under its parent's project, so its row says where it runs
+  it("names the machine of a session that runs on another machine than the project's", () => {
+    state = { machines: { m1: { id: 'm1', name: 'Windows PC' } }, projects: { p1: { id: 'p1', name: 'app', machine: null } } } as unknown as Partial<AppState>
+    const html = render(session({ id: 'm1.c1', machine: 'm1' }), false, true)
+    expect(html).toMatch(/data-testid="session-machine-m1\.c1"[^>]*>Windows PC</)
+    // A row of the project's own machine carries none: the project's badge says it already
+    state = { ...state, projects: { p1: { id: 'p1', name: 'app', machine: 'm1' } } } as unknown as Partial<AppState>
+    expect(render(session({ id: 'm1.c1', machine: 'm1' }), false)).not.toContain('session-machine-')
+  })
+
   it('keeps each list its own test id and indentation', () => {
     expect(render(session(), false)).toContain('data-testid="session-row-s1"')
     expect(render(session(), true)).toContain('data-testid="app-session-row-s1"')

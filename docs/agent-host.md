@@ -576,7 +576,11 @@ is made readable here. Not yet: the child is not counted under this host's per-p
 computer), and a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
 stored; `list` reads its state from the machine) but no longer owes its report. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
-children's records, and a handoff gives them to the heir.
+children's records, and a handoff gives them to the heir. In the sidebar it hangs under its caller, in the caller's
+project, with its machine's tag: the hub names the caller as its `askedBy` in that machine's rows and owner events
+(`LinkDeps.ownerOf`, `SessionManager.remoteAgentParent`) and sends `session_owner` when it records the child, hands it
+to an heir, or forgets it with its caller; the window places a session whose parent runs on another machine under
+that parent's project (`sidebarProjectOf`).
 
 **Creator and worktree ancestry** (#637). `askedBy` records who started an agent, regardless of its folder.
 `parentSessionId` records worktree ancestry (including former manager children); `start_agent` sets it only

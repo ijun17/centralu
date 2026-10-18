@@ -99,6 +99,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     tunnelFor: () => new DirectTunnel(line),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
+    ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
     ...extra,
   })
   mgr.useLinkedSessions((id) => links.knowsSession(id))
@@ -1784,6 +1785,23 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await hub.links.remove('m1')
     expect(await agent(b.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('was removed from Centralu') })
     expect(records()).toEqual([])
+  })
+
+  // #1038: the sidebar hangs the child under its parent, as a local child, not under the machine's project
+  it("names the session that started it as the child's owner in the hub's rows and events, until that session is gone", async () => {
+    const { hub, answer, start } = await rig()
+    const u = await ui(hub.port)
+    const call = start({ wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const row = async () => (await u.call('sessions.list')).find((s: any) => s.id === r.sessionId)
+    expect(await row()).toMatchObject({ askedBy: 'h1', projectId: 'm1.p-app', machine: 'm1' })
+    // A row the windows already hold from the machine's own event moves too
+    await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === 'h1'))
+    await hub.mgr.trashSession('h1')
+    await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === null))
+    expect((await row()).askedBy ?? null).toBeNull()
   })
 
   // #1038 review: the records outlived the session that started them

@@ -31,6 +31,12 @@ export class Qualifier {
     readonly machine: string,
     /** The machine's number for folding numeric ids (`encodeNumber`), from the registry */
     readonly slot: number,
+    /**
+     * The hub's session a session of this machine is a child of (#1038), by the session's hub-side id: start_agent with
+     * a machine starts it there with no parent the machine knows, and the hub keeps who started it. Its rows and owner
+     * events then name that session as `askedBy`, so the sidebar hangs it under its parent as it does a local child.
+     */
+    private readonly ownerOf?: (sessionId: string) => string | undefined,
   ) {}
 
   private readonly prefix = (): string => `${this.machine}.`
@@ -86,12 +92,14 @@ export class Qualifier {
   session(s: unknown): unknown {
     if (!isObj(s)) return s
     if (isObj(s.pendingApproval)) this.noteCard(s.id, s.pendingApproval.requestId, s.pendingApproval.detail)
+    const id = this.maybeId(s.id)
+    const owner = typeof id === 'string' ? this.ownerOf?.(id) : undefined
     return {
       ...s,
-      id: this.maybeId(s.id),
+      id,
       projectId: this.maybeId(s.projectId),
       parentSessionId: this.maybeId(s.parentSessionId),
-      ...('askedBy' in s ? { askedBy: this.maybeId(s.askedBy) } : {}),
+      ...(owner ? { askedBy: owner } : 'askedBy' in s ? { askedBy: this.maybeId(s.askedBy) } : {}),
       scopeSessionIds: Array.isArray(s.scopeSessionIds) ? s.scopeSessionIds.map((x) => this.maybeId(x)) : s.scopeSessionIds,
       machine: this.machine,
     }
@@ -292,7 +300,7 @@ export class Qualifier {
       case 'handoff':
         return { ...base, fromSessionId: this.maybeId(e.fromSessionId) }
       case 'session_owner':
-        return { ...base, askedBy: this.maybeId(e.askedBy), parentSessionId: this.maybeId(e.parentSessionId) }
+        return { ...base, askedBy: (sid !== undefined ? this.ownerOf?.(sid) : undefined) ?? this.maybeId(e.askedBy), parentSessionId: this.maybeId(e.parentSessionId) }
       case 'approval_request':
         this.noteCard(e.sessionId, e.requestId, e.detail)
         return { ...base, detail: this.approvalDetail(e.detail) }

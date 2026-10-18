@@ -57,7 +57,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'askHost' | 'autoBoundaryOpen' | 'children' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
+  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
 >
 
 /** How a wait on a remote child's turn ended */
@@ -113,15 +113,23 @@ export class RemoteAgents {
     return out
   }
 
-  /** The caller is gone (trashed): its children's records go, and nothing is owed to it (#1038 review) */
+  /**
+   * The caller is gone (trashed): its children's records go, and nothing is owed to it (#1038 review). Each stays on
+   * its machine, and goes back to that machine's project in the sidebar
+   */
   forgetCaller(callerId: string): void {
-    for (const r of this.records().filter((x) => x.callerId === callerId)) this.forget(r.sessionId)
+    for (const r of this.records().filter((x) => x.callerId === callerId)) {
+      this.forget(r.sessionId)
+      this.owned(r.sessionId, null)
+    }
   }
 
   /** A handoff gave the original's work to `to` (#693): its children on linked machines are the heir's, report included */
   moveCaller(from: string, to: string): void {
-    if (!this.records().some((r) => r.callerId === from)) return
+    const moving = this.records().filter((r) => r.callerId === from)
+    if (!moving.length) return
     this.save(this.records().map((r) => (r.callerId === from ? { ...r, callerId: to } : r)))
+    for (const r of moving) this.owned(r.sessionId, to)
     for (const [id, report] of [...this.host.children.linkedReports]) {
       if (report.orchestratorId === from && this.of(id)) this.host.children.setLinkedReport(id, { ...report, orchestratorId: to })
     }
@@ -206,6 +214,8 @@ export class RemoteAgents {
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(),
     }
     this.save([...this.records(), rec])
+    // Its row came to the windows before the hub knew whose it is: now it hangs under the caller (#1038)
+    this.owned(rec.sessionId, callerId)
     /*
      * Set before the send, as the machine's first events can reach the hub before its answer does (#1038 review: a turn
      * that failed at once was reported, and the wait that came after it waited out its bound): the call's wait when it
@@ -500,6 +510,15 @@ export class RemoteAgents {
       // Read again: the turn's own end may have come in while the machine was asked
       if (this.host.children.linkedReports.get(rec.sessionId) === report) this.host.settleLinkedTurn(rec.sessionId)
     }
+  }
+
+  /**
+   * Tells the windows whose child a machine's session is now (#1038): the links name the parent in its rows from here
+   * on (`LinkDeps.ownerOf`), and this moves a row the windows hold already. The machine knows no parent for it, and
+   * none for its folder: a session start_agent made there is never a worktree manager's
+   */
+  private owned(sessionId: string, askedBy: string | null): void {
+    this.host.emit({ type: 'session_owner', sessionId, askedBy, parentSessionId: null })
   }
 
   private records(): RemoteAgent[] {

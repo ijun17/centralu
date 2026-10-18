@@ -839,6 +839,14 @@ export class SessionManager {
   }
 
   /**
+   * The session here that started a linked machine's session with start_agent (#1038), by its hub-side id; none for any
+   * other. The links name it as the session's `askedBy` (`LinkDeps.ownerOf`), so the sidebar hangs it under its parent.
+   */
+  remoteAgentParent(sessionId: string): string | undefined {
+    return this.delegationFlow.remote.of(sessionId)?.callerId
+  }
+
+  /**
    * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
    * there ends as `observeLinkedAsk` judges it; the end of a turn the orchestrator is waiting on becomes its report, as
    * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work

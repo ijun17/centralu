@@ -90,7 +90,7 @@ type NormalizedEvent =
   | { type: 'interruption';     sessionId, interruption: Interruption|null }  // #698: why the last turn did not finish (network, quit, interrupted, reconnecting); kept as SessionInfo.interruption
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
-  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this child to the session that took over (a settled one too when the original goes, #738); the sidebar hangs it there
+  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this child to the session that took over (a settled one too when the original goes, #738); the sidebar hangs it there. #1038: also the hub naming its session that started a linked machine's child (null once that session is gone)
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
   | { type: 'update_apply_request'; requestId }                 // #665: an agent's "Apply now"; each window answers with updates.answerApply
