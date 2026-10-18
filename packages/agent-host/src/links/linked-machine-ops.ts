@@ -24,6 +24,11 @@ export class LinkedMachine extends LinkedMachineConnection {
   /** The person removed what the hub installed (`machines.uninstall`); it does not come back unasked, until they install again */
   private removedByPerson = false
 
+  /** An operation keeps a machine that connects when needed connected while it runs (#1134) */
+  protected override operating(): boolean {
+    return this.held || this.busy !== null
+  }
+
   /**
    * Installs the hub's version there (`machines.install`, install.ts, plan §10.2). A host running
    * there keeps running; a link that is not connected (nothing was installed, or nothing runs) opens
@@ -194,6 +199,8 @@ export class LinkedMachine extends LinkedMachineConnection {
     return (then) => {
       this.busy = null
       this.operation = null
+      // The hold of a machine that connects when needed runs from the end of what the person asked (#1134)
+      this.noteNeeded()
       then?.()
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }

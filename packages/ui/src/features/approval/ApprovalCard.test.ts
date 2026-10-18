@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ApprovalDetail, NO_PATH, UNKNOWN_CARD } from '@cc/protocol'
-import { approvalCardCovered, approvalKeyAction, offersAlways } from './ApprovalCard.jsx'
+import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
  * `code` having a default value matters.
@@ -211,5 +211,34 @@ describe('offersAlways', () => {
     const unread = ApprovalDetail.parse({ kind: 'machine_link', text: 'Link this computer?' })
     expect(offersAlways(unread)).toBe(false)
     expect(offersAlways({ kind: 'other', raw: 'Link this computer?', about: UNKNOWN_CARD })).toBe(false)
+  })
+})
+
+describe('agentStartScope — how far "always" on a start-agent card reaches', () => {
+  it('is the project when asked for and the child has one', () => {
+    expect(agentStartScope({ project: { id: 'p1' } }, true)).toBe('project')
+    expect(agentStartScope({ project: { id: 'p1' } }, false)).toBe('session')
+  })
+
+  // The orchestrator's child works in no project (#853): ⌥a used to send `project` for it, and the toast said so
+  it('stays the session for a child that works in no project', () => {
+    expect(agentStartScope({ project: { id: '' } }, true)).toBe('session')
+  })
+})
+
+describe('keyScope — the scope a key answers with', () => {
+  const start = (id: string) => ({ kind: 'agent_start', project: { id, name: 'x' }, tool: 'Codex', preset: 'normal', text: 't' }) as ApprovalDetail
+
+  // ⌥a on the orchestrator's card: the key asks for the project, the card has none to give
+  it('keeps ⌥a to the session on a start-agent card that has no project', () => {
+    expect(keyScope(start(''), { decision: 'always', scope: 'project' })).toBe('session')
+    expect(keyScope(start('p1'), { decision: 'always', scope: 'project' })).toBe('project')
+    expect(keyScope(start('p1'), { decision: 'always', scope: 'session' })).toBe('session')
+  })
+
+  it('passes what the key asked for on every other card, and nothing for allow or deny', () => {
+    const command = { kind: 'command', command: 'ls', cwd: '/x' } as ApprovalDetail
+    expect(keyScope(command, { decision: 'always', scope: 'project' })).toBe('project')
+    expect(keyScope(start(''), { decision: 'allow' })).toBeUndefined()
   })
 })

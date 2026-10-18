@@ -37,6 +37,16 @@ export interface RoutedMachine {
   observe(kind: 'sessions' | 'projects', list: unknown[]): void
   /** A session of the remote the hub does not show: its orchestrator and coordinators (§3.4) */
   hides(session: unknown): boolean
+  /**
+   * Not connected, and connected when something needs it (#1134): its last known lists stand for it until then.
+   * Absent: a machine connected whenever the hub runs
+   */
+  readonly onDemand?: boolean
+  /**
+   * Something needs the machine now (#1134): one that connects when needed is connected, and this resolves once that
+   * attempt ended, connected or not. Any other machine is left as it is. Absent: nothing to do
+   */
+  need?(): Promise<void>
 }
 
 /**
