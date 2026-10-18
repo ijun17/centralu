@@ -256,7 +256,7 @@ export function ChatStream({
               measurements are undisturbed.
             */
             className={`absolute left-0 w-full min-w-0 ${
-              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : bubbleOf(chat, v.index) ? '' : 'pb-3'
+              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : joinsNext(bubbleOf(chat, v.index)) ? '' : 'pb-3'
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
               chat[v.index]?.storedSeq === searchTarget?.seq ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70' : ''
             }`}
@@ -299,10 +299,11 @@ export function ChatStream({
 }
 
 /**
- * Where a row stands in the agent's answer bubble (owner, 2026-10-18): everything the agent did between two of the
- * person's messages (text, reasoning, tool calls, images, approvals) is one bubble, like the person's own message
- * on the right, so a turn reads as one reply and not as loose rows. Markers (compaction, handoff, an error line)
- * belong to the conversation, not to the answer, so they stand outside and split it.
+ * Where a row stands in the agent's answer bubble (owner, 2026-10-18): what the agent says (its text and its
+ * reasoning) stands in a bubble on the left, like the person's own message on the right. Rows of text in a row
+ * share one bubble. Tool calls, images, approvals and markers (compaction, handoff, an error line) are what it did
+ * or what happened, not what it said, so they stand outside, on the page, and split it (owner: a tool card inside
+ * the bubble read as a box in a box).
  *
  * The list is virtual, so the bubble is drawn in pieces, one per row: the first rounds the top, the last the
  * bottom, the ones between carry only the sides. No gap between rows inside a bubble: the spacing is the piece's
@@ -311,7 +312,12 @@ export function ChatStream({
 type BubblePart = 'solo' | 'first' | 'mid' | 'last'
 
 function inBubble(item: ChatItem | undefined): boolean {
-  return item !== undefined && item.kind !== 'user' && item.kind !== 'mark'
+  return item?.kind === 'assistant' || item?.kind === 'reasoning'
+}
+
+/** Whether the row's bubble runs on into the next row, so no gap may stand between them */
+function joinsNext(part: BubblePart | null): boolean {
+  return part === 'first' || part === 'mid'
 }
 
 function bubbleOf(chat: readonly ChatItem[], i: number): BubblePart | null {
