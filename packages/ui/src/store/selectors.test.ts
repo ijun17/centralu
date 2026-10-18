@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { projectLabelOf, sidebarProjectOf } from './selectors.js'
+import { computeInbox, projectLabelOf, sidebarProjectOf } from './selectors.js'
 import { openProjectOf } from './screens.js'
 
 describe('sidebarProjectOf (#1038)', () => {
@@ -60,5 +60,21 @@ describe('projectLabelOf', () => {
 
   it('says nothing for a project the list does not hold yet', () => {
     expect(projectLabelOf(projects, 'gone')).toBe('')
+  })
+})
+
+describe('computeInbox: a question', () => {
+  const q = (state: SessionSummary['state'], over: Partial<SessionSummary> = {}) =>
+    ({ id: 'q', projectId: 'p', name: 'api', state, waitingSince: null, lastSeq: 3, lastReadSeq: 3, pendingQuestions: [{}], interruption: null, ...over }) as unknown as SessionSummary
+  const list = (s: SessionSummary) => computeInbox({ sessions: { [s.id]: s }, mcpProposals: [], skillProposals: [] } as never, 0)
+
+  it('is listed as an approval is, marked as a question the person answers', () => {
+    expect(list(q('working'))).toMatchObject([{ id: 'q', state: 'waiting_approval', asking: true }])
+    expect(list(q('waiting_approval'))).toMatchObject([{ state: 'waiting_approval', asking: true }])
+  })
+
+  it('leaves an error as an error, and an approval without a question unmarked', () => {
+    expect(list(q('error'))).toMatchObject([{ state: 'error' }])
+    expect(list(q('waiting_approval', { pendingQuestions: [] }))[0]!.asking).toBe(false)
   })
 })

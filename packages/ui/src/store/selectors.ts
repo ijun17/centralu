@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
+import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, listedState, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
@@ -18,7 +18,8 @@ import { sidebarProjectOf } from './sidebarTree.js'
  */
 const toCandidate = (x: SessionSummary) => ({
   id: x.id, projectId: x.projectId, name: x.name,
-  state: x.state !== 'error' && x.pendingQuestions.length > 0 ? ('waiting_approval' as const) : x.state,
+  state: listedState(x),
+  asking: x.pendingQuestions.length > 0,
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
   preview: x.preview, interruption: x.interruption ?? null,
 })

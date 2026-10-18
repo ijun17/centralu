@@ -34,6 +34,8 @@ export type InboxCandidate = {
   lastReadSeq: number
   preview?: string
   interruption?: Interruption | null
+  /** The wait is a question the agent asked, which the person answers rather than allows (listed as an approval is) */
+  asking?: boolean
   /** Set on a pending orchestrator proposal (#703): this row is the proposal, not a session, and `id` is not a session id */
   proposal?: PendingProposal
 }
