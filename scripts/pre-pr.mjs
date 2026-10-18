@@ -14,6 +14,13 @@
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
 //             requests; the stack's own are left out. The orchestrator assigns the numbers; this is the backstop.
+//   guards    never a refusal: when the branch adds or changes a repository-wide guard test (a tooling/*.test.ts, or
+//             a test that scans the whole repository), each changed guard is run against every other open,
+//             non-draft pull request's head merged with this branch, and the ones it would fail are listed with
+//             the first line of the failure, as warnings (they go into Verified). Each day's guards broke a
+//             queued pull request an hour after landing; the author fixes those in the same change, or tells
+//             their authors. Bounded: a time limit (--guards-limit), only the guards the branch changed, and a
+//             pull request that does not merge cleanly (or needs other dependencies) is skipped and said so.
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
@@ -24,7 +31,7 @@
 // board's `open_pr` runs this and refuses with its findings (.centralu/apps/project-board, pre-pr.mjs).
 //
 //   node scripts/pre-pr.mjs [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]...
-//                           [--remote <name>] [--no-fetch] [--json] [--run-id <id>]
+//                           [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--guards-limit <seconds>]
 //   node scripts/pre-pr.mjs --cleanup <run-id>     removes what a run that was killed left behind
 //
 // --head defaults to HEAD, --main to <remote>/main, --base (what the pull request merges into: a lower
@@ -95,16 +102,16 @@ export function passingNewTests({ reverted, base }) {
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', LANG: 'C' }
 
-function git(cwd, args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', env: ENV, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+function git(cwd, args, env = {}) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
 }
 
 const tail = (text, lines = 25) => String(text ?? '').trim().split('\n').slice(-lines).join('\n')
 
 /** Runs a Node entry point of the worktree's own node_modules; answers { ok, out }. */
-function nodeBin(dir, bin, args, env = {}) {
+function nodeBin(dir, bin, args, env = {}, timeout = 0) {
   try {
-    const out = execFileSync(process.execPath, [join(dir, 'node_modules', bin), ...args], { cwd: dir, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+    const out = execFileSync(process.execPath, [join(dir, 'node_modules', bin), ...args], { cwd: dir, encoding: 'utf8', timeout, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
     return { ok: true, out }
   } catch (e) {
     return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message) }
@@ -157,10 +164,12 @@ export const realRunners = {
    * Gives a worktree its dependencies. When the worktree's lockfile is the one the checkout
    * installed, its node_modules folders are linked in (seconds, no network); otherwise pnpm installs
    * into the worktree. removeRun takes every link away before the worktree goes: a delete that
-   * followed one would reach the checkout's own dependencies.
+   * followed one would reach the checkout's own dependencies. With `linkOnly`, a worktree whose lockfile
+   * differs is not installed (minutes, for each of many pull requests): answers false.
    */
-  prepare(dir, root) {
+  prepare(dir, root, { linkOnly = false } = {}) {
     if (!sameText(join(root, 'node_modules', '.pnpm', 'lock.yaml'), join(dir, 'pnpm-lock.yaml'))) {
+      if (linkOnly) return false
       pnpm(['install', '--frozen-lockfile', '--prefer-offline', '--ignore-scripts'], dir)
       return
     }
@@ -179,12 +188,12 @@ export const realRunners = {
     const start = r.out.indexOf('{')
     return JSON.parse(r.out.slice(start))
   },
-  vitest(dir, files) {
+  vitest(dir, files, { timeoutMs = 0 } = {}) {
     const out = join(mkdtempSync(join(tmpdir(), 'cc-prepr-vitest-')), 'report.json')
     const data = mkdtempSync(join(tmpdir(), 'cc-prepr-data-'))
     try {
       // Failing tests exit non-zero, which is an answer here, not an error
-      nodeBin(dir, 'vitest/vitest.mjs', ['run', '--reporter=json', `--outputFile=${out}`, ...files], { CC_DATA_DIR: data })
+      nodeBin(dir, 'vitest/vitest.mjs', ['run', '--reporter=json', `--outputFile=${out}`, ...files], { CC_DATA_DIR: data }, timeoutMs)
       return existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null
     } finally {
       rmSync(join(out, '..'), { recursive: true, force: true })
@@ -196,7 +205,7 @@ export const realRunners = {
 // --- Worktrees, and taking them away again ---------------------------------------------------------
 
 /** The checks a pull request can be exempted from, each with a reason. `main` is only ever a warning. */
-export const CHECKS = ['tsc', 'orphans', 'store-step', 'revert']
+export const CHECKS = ['tsc', 'orphans', 'store-step', 'guards', 'revert']
 
 // --- Store step numbers (#1203) ----------------------------------------------------------------------
 
@@ -261,22 +270,160 @@ function stepsAt(root, commit) {
   return found
 }
 
+/** The open pull requests that are not the stack's own: a head that is one of its `commits`, or one of its branches' `names`. */
+export function otherPrs(listed, commits, names) {
+  const own = new Set(commits)
+  return listed.filter((pr) => !own.has(pr.headRefOid) && !names.has(pr.headRefName))
+}
+
 /**
  * The open pull requests that add store steps, leaving out the stack's own (a head that is one of its
  * `commits`, or one of its branches' `names`). Only a pull request that touches {@link STEP_DIR} costs a full diff.
  */
-function otherPrsAddingSteps({ gh, root, commits, names }) {
-  const own = new Set(commits)
-  const listed = JSON.parse(gh(['pr', 'list', '--state', 'open', '--limit', '500', '--json', 'number,title,headRefName,headRefOid'], root))
+function otherPrsAddingSteps({ gh, root, listed, commits, names }) {
   const others = []
-  for (const pr of listed) {
-    if (own.has(pr.headRefOid) || names.has(pr.headRefName)) continue
+  for (const pr of otherPrs(listed, commits, names)) {
     const files = String(gh(['pr', 'diff', String(pr.number), '--name-only'], root)).split('\n')
     if (!files.some((f) => f.trim().startsWith(STEP_DIR))) continue
     const steps = stepsAddedByDiff(gh(['pr', 'diff', String(pr.number)], root))
     if (steps.length) others.push({ number: pr.number, title: pr.title, head: pr.headRefName, steps })
   }
   return others
+}
+
+// --- Guards against the open pull requests (the day-1 cost: a guard landed, a queued pull request broke) --------
+
+/** A test that scans the whole repository: a derived path up from the test's folder, and a walk or a `git ls-files`. */
+const REPO_SCAN = /ls-files|readdirSync\([^)]*recursive:\s*true|globSync|\bwalk\w*\(/
+const REPO_ROOT = /REPO_ROOT|repoRoot|\bROOT\b|'\.\.\/\.\.|"\.\.\/\.\./
+/** A file can say it is one: `pre-pr: guard` anywhere in it. */
+const GUARD_MARK = /pre-pr: guard/
+
+/** A repository-wide guard: a test under tooling/, a test that scans the repository from its root, or one that says so. */
+export function isGuardTest(path, text = '') {
+  if (!isVitestFile(path)) return false
+  return /^tooling\/[^/]+\.test\.[cm]?[jt]sx?$/.test(path) || GUARD_MARK.test(text) || (REPO_SCAN.test(text) && REPO_ROOT.test(text))
+}
+
+/** The guard files a branch adds or changes over `from` (a commit), read at `to`. */
+export function guardFiles(root, from, to) {
+  const parts = git(root, ['diff', '--name-status', '--no-renames', '-z', from, to]).split('\0').filter(Boolean)
+  const guards = []
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const path = parts[i + 1]
+    if (parts[i][0] === 'D' || !isVitestFile(path)) continue
+    let text = ''
+    try {
+      text = git(root, ['show', `${to}:${path}`])
+    } catch {
+      continue
+    }
+    if (isGuardTest(path, text)) guards.push(path)
+  }
+  return guards
+}
+
+// vitest colours its messages: the escape character is what is stripped
+// eslint-disable-next-line no-control-regex
+const stripAnsi = (t) => String(t ?? '').replace(/\u001b\[[0-9;]*m/g, '')
+
+/** The failures of a vitest JSON report as `{ file, name, line }`, `line` the first line of the message. */
+export function failuresOf(report, root) {
+  const firstLine = (m) => stripAnsi(m).split('\n').map((l) => l.trim()).find(Boolean) ?? 'failed'
+  return (report?.testResults ?? []).flatMap((f) => {
+    const file = relative(root, f.name).split('\\').join('/')
+    const tests = (f.assertionResults ?? []).filter((t) => t.status === 'failed')
+    if (tests.length) return tests.map((t) => ({ file, name: [...(t.ancestorTitles ?? []), t.title].join(' > '), line: firstLine(t.failureMessages?.[0]) }))
+    // A file that did not load (or timed out) has no test of its own to fail
+    return f.status === 'failed' ? [{ file, name: '', line: firstLine(f.message) }] : []
+  })
+}
+
+/** The most one pull request's guards may take, and the default for the whole check. */
+export const GUARDS_PER_PR_MS = 5 * 60_000
+export const GUARDS_LIMIT_MS = 10 * 60_000
+
+/**
+ * Runs `guards` (files of this branch) against each of `prs` (open, not the stack's own) with this branch
+ * merged in: a commit of the pull request's head and `head`, made from a merge that did not conflict. Answers
+ * `{ failing, skipped, unchecked }`; never throws for one pull request's trouble. `makeWorktree(commit)`
+ * answers a worktree, or null when its dependencies would need an install.
+ */
+export function runGuards({ root, remote, runId, runners, prs, head, guards, makeWorktree, dropWorktree, limitMs, now, log, check }) {
+  const failing = []
+  const skipped = []
+  const unchecked = []
+  const deadline = now() + limitMs
+  const space = `refs/centralu-pre-pr-guards/${runId}`
+  const ident = { GIT_AUTHOR_NAME: 'pre-pr', GIT_AUTHOR_EMAIL: 'pre-pr@localhost', GIT_COMMITTER_NAME: 'pre-pr', GIT_COMMITTER_EMAIL: 'pre-pr@localhost' }
+  try {
+    try {
+      git(root, ['fetch', '--no-tags', '--quiet', remote, ...prs.map((p) => `+refs/pull/${p.number}/head:${space}/${p.number}`)])
+    } catch (e) {
+      return { failing, skipped: prs.map((p) => ({ pr: p, why: `its head could not be fetched (${tail(e.stderr ?? e.message, 1)})` })), unchecked }
+    }
+    for (const pr of prs) {
+      check()
+      if (now() >= deadline) {
+        unchecked.push(pr)
+        continue
+      }
+      let wt = null
+      try {
+        const theirs = git(root, ['rev-parse', '--verify', `${space}/${pr.number}^{commit}`]).trim()
+        let tree
+        try {
+          tree = git(root, ['merge-tree', '--write-tree', '--name-only', '--no-messages', theirs, head]).split('\n')[0].trim()
+        } catch (e) {
+          const files = String(e.stdout ?? '').trim().split('\n').slice(1).filter(Boolean)
+          skipped.push({ pr, why: files.length ? `does not merge cleanly with this branch (${files.slice(0, 5).join(', ')})` : 'could not be merged with this branch' })
+          continue
+        }
+        const commit = git(root, ['commit-tree', tree, '-p', theirs, '-p', head, '-m', `pre-pr guards: #${pr.number} with this branch`], ident).trim()
+        wt = makeWorktree(commit)
+        if (!wt) {
+          skipped.push({ pr, why: 'needs other dependencies than this checkout has (a different lockfile)' })
+          continue
+        }
+        const present = guards.filter((g) => existsSync(join(wt, g)))
+        if (!present.length) continue
+        log(`guards against #${pr.number}`)
+        const report = runners.vitest(wt, present, { timeoutMs: Math.max(1000, Math.min(GUARDS_PER_PR_MS, deadline - now())) })
+        if (!report) {
+          skipped.push({ pr, why: 'vitest gave no report (it ran out of time, or did not start)' })
+          continue
+        }
+        const fails = failuresOf(report, wt)
+        if (fails.length) failing.push({ pr, failures: fails })
+      } catch (e) {
+        if (String(e.message) === 'interrupted') throw e
+        skipped.push({ pr, why: `could not be checked (${tail(e.message, 1)})` })
+      } finally {
+        if (wt) dropWorktree(wt)
+      }
+    }
+  } finally {
+    for (const pr of prs) {
+      try {
+        git(root, ['update-ref', '-d', `${space}/${pr.number}`])
+      } catch {
+        // never made, or already gone
+      }
+    }
+  }
+  return { failing, skipped, unchecked }
+}
+
+/** The warnings for a {@link runGuards} answer: one for each pull request it would fail, one for what was not checked. */
+export function guardWarnings({ failing, skipped, unchecked }, guards) {
+  const warnings = failing.map(({ pr, failures }) => {
+    const first = failures[0]
+    const more = failures.length > 1 ? ` (and ${failures.length - 1} more)` : ''
+    return { check: 'guards', message: `#${pr.number} "${pr.title}" (${pr.headRefName}) would fail ${first.file}${first.name ? ` > ${first.name}` : ''} with this branch merged in: ${first.line}${more}. Fix it in this change, or tell its author.` }
+  })
+  const left = [...skipped.map(({ pr, why }) => `#${pr.number} (${why})`), ...unchecked.map((pr) => `#${pr.number} (time limit reached)`)]
+  if (left.length) warnings.push({ check: 'guards', message: `${guards.join(', ')} was not run against: ${left.join('; ')}.` })
+  return warnings
 }
 
 /** Every run keeps its worktrees in one folder of the temporary folder, named after the run. */
@@ -314,6 +461,23 @@ export function unlinkLinks(dir, depth = 3) {
   return n
 }
 
+/** Takes one worktree of a run away, links first. Answers what went wrong, or null. */
+export function removeWorktree(wt, root) {
+  try {
+    unlinkLinks(wt)
+    // A second look finds nothing, or nothing is removed: never a recursive delete with a link inside
+    if (unlinkLinks(wt) !== 0) throw new Error('a link came back')
+  } catch (err) {
+    return `${wt}: its dependency links could not be removed (${err.message}); remove the links, then the folder`
+  }
+  try {
+    git(root, ['worktree', 'remove', '--force', wt])
+  } catch {
+    rmSync(wt, { recursive: true, force: true })
+  }
+  return null
+}
+
 /**
  * Takes a run's folder away: the links in each worktree first, then the worktree (through git, so
  * the checkout forgets it), then the folder. Safe on a run that died halfway: it reads nothing but
@@ -324,20 +488,8 @@ export function removeRun(dir, root) {
   if (!existsSync(dir)) return left
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (!e.isDirectory() || !e.name.startsWith('wt-')) continue
-    const wt = join(dir, e.name)
-    try {
-      unlinkLinks(wt)
-      // A second look finds nothing, or nothing is removed: never a recursive delete with a link inside
-      if (unlinkLinks(wt) !== 0) throw new Error('a link came back')
-    } catch (err) {
-      left.push(`${wt}: its dependency links could not be removed (${err.message}); remove the links, then the folder`)
-      continue
-    }
-    try {
-      git(root, ['worktree', 'remove', '--force', wt])
-    } catch {
-      rmSync(wt, { recursive: true, force: true })
-    }
+    const problem = removeWorktree(join(dir, e.name), root)
+    if (problem) left.push(problem)
   }
   if (!left.length) rmSync(dir, { recursive: true, force: true })
   try {
@@ -382,7 +534,7 @@ export function sweepStale(root, { isAlive = alive } = {}) {
  * the run; a warning does not. `exempt` maps a check of {@link CHECKS} to the reason it is not run.
  * `runners` replaces the tools (tests); `log` hears progress; `stopped()` says the run was interrupted.
  */
-export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false } = {}) {
+export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false, guardsLimitMs = GUARDS_LIMIT_MS, now = Date.now } = {}) {
   const root = resolve(git(cwd, ['rev-parse', '--show-toplevel']).trim())
   for (const [check, why] of Object.entries(exempt)) {
     if (!CHECKS.includes(check)) throw new Error(`No check is called ${check}; the checks are ${CHECKS.join(', ')}.`)
@@ -451,12 +603,20 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'owner.json'), `${JSON.stringify({ pid: process.pid, root })}\n`)
   let made = 0
-  const worktree = (commit) => {
+  const worktree = (commit, options) => {
     const wt = join(dir, `wt-${++made}`)
     git(root, ['worktree', 'add', '--detach', '--quiet', wt, commit])
-    runners.prepare(wt, root)
+    if (runners.prepare(wt, root, options) === false) {
+      removeWorktree(wt, root)
+      return null
+    }
     return wt
   }
+  // The open pull requests, read once for the checks that look at them
+  let listed
+  const openPrs = () =>
+    (listed ??= JSON.parse(runners.gh(['pr', 'list', '--state', 'open', '--limit', '500', '--json', 'number,title,headRefName,headRefOid,isDraft'], root)))
+  const names = new Set(heads.flatMap((h) => h.names).flatMap((n) => [n, n.replace(`${remote}/`, ''), n.replace(/^refs\/centralu-pre-pr\/[^/]+\//, '')]))
   const check = () => {
     if (stopped()) throw new Error('interrupted')
   }
@@ -487,10 +647,9 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       const added = stepsAddedByDiff(git(root, ['diff', '--no-renames', '-U0', forkMain, at.head, '--', STEP_DIR]))
       if (added.length) {
         log(`Store step(s) ${added.join(', ')}: looking at main and the open pull requests`)
-        const names = new Set(heads.flatMap((h) => h.names).flatMap((n) => [n, n.replace(`${remote}/`, ''), n.replace(/^refs\/centralu-pre-pr\/[^/]+\//, '')]))
         let others
         try {
-          others = otherPrsAddingSteps({ gh: runners.gh, root, commits, names })
+          others = otherPrsAddingSteps({ gh: runners.gh, root, listed: openPrs(), commits, names })
         } catch (e) {
           throw new Error(`Store step(s) ${added.join(', ')} are new here, and the open pull requests could not be read (${e.message}). Run it where gh is logged in, or exempt store-step with the reason.`)
         }
@@ -539,6 +698,26 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       }
       if (!loose.length) notes.push(`${reverted.filter((t) => t.status !== 'passed').length} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
     }
+
+    // guards: only a warning. The guards this branch adds or changes, against the open pull requests with it merged in
+    if (!skip('guards')) {
+      check()
+      const guards = guardFiles(root, git(root, ['merge-base', at.main, at.head]).trim(), at.head)
+      if (guards.length) {
+        let prs
+        try {
+          prs = otherPrs(openPrs(), commits, names).filter((p) => !p.isDraft)
+        } catch (e) {
+          warnings.push({ check: 'guards', message: `${guards.join(', ')} could not be run against the open pull requests: they could not be read (${e.message}).` })
+        }
+        if (prs) {
+          log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsLimitMs / 1000)} s`)
+          const res = runGuards({ root, remote, runId, runners, prs, head: at.head, guards, makeWorktree: (commit) => worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, root), limitMs: guardsLimitMs, now, log, check })
+          warnings.push(...guardWarnings(res, guards))
+          notes.push(`${guards.join(', ')} run against ${prs.length} open pull request(s): ${res.failing.length} would fail, ${res.skipped.length} skipped, ${res.unchecked.length} not reached.`)
+        }
+      }
+    }
   } finally {
     for (const left of removeRun(dir, root)) notes.push(`Left ${left}.`)
   }
@@ -555,11 +734,12 @@ export function parseArgs(argv) {
     else if (['--head', '--base', '--main', '--remote'].includes(a) && value !== undefined) o[a.slice(2)] = argv[++i]
     else if (a === '--run-id' && value !== undefined) o.runId = argv[++i]
     else if (a === '--cleanup' && value !== undefined) o.cleanup = argv[++i]
+    else if (a === '--guards-limit' && /^\d+$/.test(value ?? '')) o.guardsLimitMs = Number(argv[++i]) * 1000
     else if (a === '--stack' && value !== undefined) o.stack.push(argv[++i])
     else if (a === '--exempt' && value !== undefined && value.includes('=')) {
       const [check, ...why] = argv[++i].split('=')
       o.exempt[check] = why.join('=')
-    } else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] | --cleanup <run-id>`)
+    } else throw new Error(`Unknown argument ${a}. Usage: pnpm pre-pr [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--guards-limit <seconds>] | --cleanup <run-id>`)
   }
   if (o.runId !== undefined && !/^[\w.-]+$/.test(o.runId)) throw new Error('--run-id takes letters, digits, ".", "_" and "-" only.')
   if (o.cleanup !== undefined && !/^[\w.-]+$/.test(o.cleanup)) throw new Error('--cleanup takes a run id: letters, digits, ".", "_" and "-" only.')

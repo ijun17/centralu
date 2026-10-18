@@ -31,6 +31,7 @@ export const Markdown = memo(function Markdown({
   projectRoot,
   projectId = null,
   sessionId = null,
+  linkSessionId = null,
 }: {
   text: string
   projectRoot: string | null
@@ -38,6 +39,8 @@ export const Markdown = memo(function Markdown({
   projectId?: string | null
   /** The session whose reply this is; null where a local image is not to be read */
   sessionId?: string | null
+  /** The session whose folder projectRoot is: a link reads the file through it, from its worktree (#1209) */
+  linkSessionId?: string | null
 }) {
   /*
    * While a reply streams, its finished blocks are rendered once and kept, and only the block still being written is
@@ -52,7 +55,13 @@ export const Markdown = memo(function Markdown({
       {piecesOf(split.current).map((piece, i) => (
         <Fragment key={i}>
           {i > 0 && '\n'}
-          <MarkdownBlock text={piece} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} />
+          <MarkdownBlock
+            text={piece}
+            projectRoot={projectRoot}
+            projectId={projectId}
+            sessionId={sessionId}
+            linkSessionId={linkSessionId}
+          />
         </Fragment>
       ))}
     </div>
@@ -72,11 +81,13 @@ export const MarkdownBlock = memo(function MarkdownBlock({
   projectRoot,
   projectId,
   sessionId = null,
+  linkSessionId = null,
 }: {
   text: string
   projectRoot: string | null
   projectId: string | null
   sessionId?: string | null
+  linkSessionId?: string | null
 }) {
   return (
     <ReactMarkdown
@@ -113,7 +124,12 @@ export const MarkdownBlock = memo(function MarkdownBlock({
          */
         a: ({ node: _node, href, children, ...props }) => {
           const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
-          if (ref) return <FileLink refInfo={ref} projectId={projectId}>{children}</FileLink>
+          if (ref)
+            return (
+              <FileLink refInfo={ref} projectId={projectId} sessionId={linkSessionId}>
+                {children}
+              </FileLink>
+            )
           if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
             return (
               <a
@@ -163,7 +179,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
           if (!ref) return <code {...props}>{children}</code>
           return (
-            <FileLink refInfo={ref} projectId={projectId}>
+            <FileLink refInfo={ref} projectId={projectId} sessionId={linkSessionId}>
               <code>{children}</code>
             </FileLink>
           )
@@ -202,14 +218,19 @@ function tryDecode(href: string): string {
  * session's project, so if the viewer picked its project from whichever session is focused, a
  * link in the neighboring pane of the grid would open the same path in a different project —
  * WKWebView does not give focus on a button click, so a pane's onFocusCapture cannot move focus.
+ * It carries its session too (#1209): the path is relative to that session's folder, its worktree when it has one, and
+ * the host reads it from there; with the project alone a worktree session's link opened the main checkout's copy.
  */
 export function FileLink({
   refInfo,
   projectId,
+  sessionId = null,
   children,
 }: {
   refInfo: FileRef
   projectId: string | null
+  /** The session whose folder the path is in; null for the project's own */
+  sessionId?: string | null
   children: ReactNode
 }) {
   const openFile = useStore((s) => s.openFile)
@@ -226,11 +247,11 @@ export function FileLink({
         // The line goes first: by the time `openFile` renders the viewer, the
         // row it should land on has to already be waiting for it.
         if (refInfo.line !== null) requestViewerJump(refInfo.path, refInfo.line)
-        openFile(refInfo.path, projectId)
+        openFile(refInfo.path, projectId, sessionId)
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        void revealFile(refInfo.path, projectId)
+        void revealFile(refInfo.path, projectId, sessionId)
       }}
     >
       {children}

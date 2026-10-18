@@ -48,6 +48,12 @@ export type LayersSlice = {
    * relative path in the focused panel's project instead. `null` follows focus, as before.
    */
   viewerProjectId: string | null
+  /**
+   * The session whose folder that file is in, when a session's file link opened it (#1209): its worktree, read through
+   * the session (`fs.readFile`'s `sessionId`). A worktree session's link used to open the main checkout's copy. `null`
+   * reads the project's own folder, as the file tree and the git panel do.
+   */
+  viewerSessionId: string | null
   paletteOpen: boolean
   /**
    * The number of windows currently open (#158) — raised when a screen-covering layer like `Modal`
@@ -65,11 +71,15 @@ export type LayersSlice = {
   openSettingsAt(category: string): void
   /**
    * Opens a file in the wide overlay (the common entry point for the file tree and the git panel).
-   * If `projectId` is given, the file belongs to that project — otherwise the focused session's project
+   * If `projectId` is given, the file belongs to that project — otherwise the focused session's project.
+   * `sessionId`: the file is in that session's folder (its worktree), as a session's file link says (#1209)
    */
-  openFile(path: string, projectId?: string | null): void
-  /** Right-click on a file link in the conversation — reveals it in Finder under the link's own project (or the currently viewed session's project if none is given) */
-  revealFile(path: string, projectId?: string | null): Promise<void>
+  openFile(path: string, projectId?: string | null, sessionId?: string | null): void
+  /**
+   * Right-click on a file link in the conversation — reveals it in Finder under the link's own project (or the currently
+   * viewed session's project if none is given), in the link's session's folder when it names one (#1209)
+   */
+  revealFile(path: string, projectId?: string | null, sessionId?: string | null): Promise<void>
   /**
    * Opens the full git screen (changes, history, branches) as an overlay. If `path` is given, opens
    * that file's diff first. `staged` says which side the diff is — if not given, opens that path's

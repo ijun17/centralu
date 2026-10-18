@@ -19,9 +19,15 @@ export interface FsPort {
    * Changes arrive as `fs_changed` on the event stream — this call only registers.
    */
   watch(projectId: string, paths: string[]): Promise<{ watched: number }>
-  readFile(projectId: string, relPath: string): Promise<FsFile>
-  /** Resolve a project-relative path to the host-validated absolute path for native handoff. */
-  resolve(projectId: string, relPath: string): Promise<{ path: string }>
+  /**
+   * `sessionId` (#1209): the path is that session's, read from its folder (its worktree when it has one) and refused
+   * outside it. Without it, the project's own folder.
+   */
+  readFile(projectId: string, relPath: string, sessionId?: string): Promise<FsFile>
+  /**
+   * Resolve a project-relative path to the host-validated absolute path for native handoff. `sessionId` as `readFile`'s
+   */
+  resolve(projectId: string, relPath: string, sessionId?: string): Promise<{ path: string }>
   /**
    * Move an entry into another folder of the same project (#19, drag inside the tree).
    *
@@ -55,8 +61,8 @@ export interface FsPort {
    * `trash` never reaches the project folder; this is the one way there, and it takes no path.
    */
   trashProjectFolder(projectId: string): Promise<{ supported: boolean; reason?: string }>
-  /** Show it in the desktop's file manager (#19). Unsupported in a browser, with a reason */
-  reveal(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
+  /** Show it in the desktop's file manager (#19), in `sessionId`'s folder as `readFile`'s. Unsupported in a browser, with a reason */
+  reveal(projectId: string, relPath: string, sessionId?: string): Promise<{ supported: boolean; reason?: string }>
   /**
    * Show the file a `messageImage` answer named (its `file`) in the desktop's file manager. That path is the host's,
    * resolved and opened by it; the window never builds one. Unsupported in a browser, with a reason.

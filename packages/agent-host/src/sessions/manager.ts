@@ -1783,8 +1783,21 @@ export class SessionManager {
   forgetWatchHolder(holder: WatchHolder): void {
     this.watchers.forgetHolder(holder)
   }
-  readTextFile(projectId: string, path: string) {
-    return readTextFile(this.cwdOf(projectId), path)
+  readTextFile(projectId: string, path: string, sessionId?: string) {
+    return readTextFile(this.folderOf(projectId, sessionId), path)
+  }
+
+  /**
+   * The folder a file link of this session is in (#1209): its worktree, or the project's when it has none. Without a
+   * session, the project's. A session of another project is refused, so a project's id cannot carry another's folder.
+   * The answer is the root the caller both checks the path against and reads through: one string, never re-derived.
+   */
+  private folderOf(projectId: string, sessionId: string | undefined): string {
+    if (sessionId === undefined) return this.cwdOf(projectId)
+    const m = this.meta.get(sessionId)
+    if (!m) throw sessionNotFound(sessionId)
+    if (m.projectId !== projectId) throw rpcError(`Session ${sessionId} is not a session of this project`)
+    return m.worktree?.path ?? this.cwdOf(projectId)
   }
 
   // ── File operations (#19) — only path resolution happens here; validation and execution are delegated to
@@ -1798,7 +1811,11 @@ export class SessionManager {
   /** The absolute path handed to the OS by the desktop shell (trash, file manager, IDE). Built by the side that
    * knows the project: for the trash the entry itself, a link included; otherwise what it is, a link followed inside the
    * project; never the project folder (#838) */
-  resolveFile(projectId: string, path: string, purpose?: FsResolvePurpose) {
+  resolveFile(projectId: string, path: string, purpose?: FsResolvePurpose, sessionId?: string) {
+    // A session's folder is only revealed and opened: the trash and the project folder stay the project's (#1209)
+    if (sessionId !== undefined && (purpose === 'trash' || purpose === 'project'))
+      throw rpcError(`A session's folder is not resolved for ${purpose}`)
+    if (sessionId !== undefined) return resolveTarget(this.folderOf(projectId, sessionId), path)
     const root = this.cwdOf(projectId)
     // The project folder for its delete dialog only (#838); an older window's dialog sends the literal root and no purpose
     if (purpose === 'project' || (purpose === undefined && pathParts(root, path).length === 0)) return resolveProjectFolder(root)

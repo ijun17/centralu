@@ -89,8 +89,12 @@ export const projectMethods = {
     params: z.object({ projectId: ProjectId, paths: z.array(z.string()) }),
     result: z.object({ watched: z.number() }),
   },
+  /**
+   * `sessionId` (#1209): the path is that session's, so it is read from the session's folder (its worktree, or the
+   * project when it has none) and refused outside it. The session must be one of this project's. Absent, the project.
+   */
   'fs.readFile': {
-    params: z.object({ projectId: ProjectId, path: z.string() }),
+    params: z.object({ projectId: ProjectId, path: z.string(), sessionId: SessionId.optional() }),
     result: FsFile,
   },
   /**
@@ -131,6 +135,11 @@ export const projectMethods = {
        * folder only for `project`, and for an older window's literal root (`.`), which only its delete dialog sends.
        */
       purpose: FsResolvePurpose.optional(),
+      /**
+       * The session whose folder the path is in, as `fs.readFile`'s (#1209): revealing or opening a worktree session's
+       * file. Only for reveal and open; refused with `trash` and `project`, which act on the project's own files.
+       */
+      sessionId: SessionId.optional(),
     }),
     result: z.object({ path: z.string() }),
   },

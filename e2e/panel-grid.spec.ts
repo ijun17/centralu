@@ -45,13 +45,13 @@ test('grid: a file link opens from the project of the panel it was clicked in â€
   await expect(page.getByTestId('code-viewer')).toBeVisible()
   await expect
     .poll(() => page.evaluate(() => (window as never as { __mock: any }).__mock.fileOps.filter((o: any) => o.op === 'read').at(-1)))
-    .toEqual({ op: 'read', projectId: betaProject, path: 'src/index.ts' })
+    .toEqual({ op: 'read', projectId: betaProject, path: 'src/index.ts', sessionId: beta })
 
   await page.keyboard.press('Escape')
   await link.dispatchEvent('contextmenu')
   await expect
     .poll(() => page.evaluate(() => (window as never as { __mock: any }).__mock.fileOps.filter((o: any) => o.op === 'reveal').at(-1)))
-    .toEqual({ op: 'reveal', projectId: betaProject, path: 'src/index.ts' })
+    .toEqual({ op: 'reveal', projectId: betaProject, path: 'src/index.ts', sessionId: beta })
 })
 
 /**
