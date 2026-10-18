@@ -17,7 +17,7 @@ change.
 | Same id as an app in `.centralu/apps/` | The inner app keeps it (it is unchanged by this issue); the root app is listed `invalid` and says why |
 | Trust | The project's. Untrusted project: listed `untrusted`, never started |
 | Process | Working directory, `dir` and the builder's cwd are the project root |
-| Versions | A project in git: its git history (`git log` of the root). Otherwise kept copies, like a user-folder app's, under `<data>/app-versions/<project id>/<id>/` |
+| Versions | A project in git: its git history (`git log` of the root). Otherwise kept copies, like a user-folder app's, under `<data>/app-versions/<project id>/<id>/`. Restoring one copies its files back and **deletes nothing**: the app's folder is the person's whole project. A restore is refused when the copy of the current files it takes first could not be made |
 
 Everything kept per app follows that key, as for any project app: data
 (`<data>/app-data/<project id>/<id>/`), logs, secrets, grants (`app_permissions`), runs, the builder
@@ -45,11 +45,19 @@ builder in the project root. A project's "New app…" still makes an inner app. 
 same way, in a new project folder under the parent; "Import and enable" registers it trusted,
 "Import" untrusted (trusting the project is enabling it).
 
+
 ## 4. Existing user-folder apps
 
-Each `<data>/apps/<id>/` with a manifest is **registered as a project in place** when the host starts
-(and when a new one appears there, such as an approved MCP server), once. Its state is carried from
-`_user/<id>` to `<new project id>/<id>`:
+Each `<data>/apps/<id>/` with a valid manifest whose id is its folder's name (the rule a user-folder
+app has today) is **registered as a project in place**, once. It runs once
+the host is **ready**, where the steps a swap left for later run (`runDeferred`): a host that fails
+before ready hands back to the previous build without having moved anything, so the copies below are
+taken from what that build last wrote. Sessions the manager already holds are moved with it and
+announced, so the builder is found under the new key in the same run. A folder whose manifest is
+invalid, or names another id (a backup copy such as `notes-copy`), is not adopted: it stays in the user
+folder, listed with its reason, as today, and the log says so. One that appears later (an approved
+MCP server) follows while the host runs. Its state is carried from `_user/<id>` to
+`<new project id>/<id>`:
 
 | Item | How |
 |---|---|
@@ -71,15 +79,26 @@ copies is a later release's step.
 
 ## 5. Which sessions get its tools
 
-| Session | Root app |
+**Trust follows the project** (owner, 2026-10-18, on review): a root app has no switch of its own,
+no share switch either. Its project's trust decides whether it runs and whether it reaches beyond its
+project; the project's trust card and its menu row say how many apps the project has and that they
+may reach other projects. Capability grants stay as they are (#1173 folds them in later).
+
+| Session | Root app of a trusted project |
 |---|---|
 | The orchestrator | Gets it, as it gets user-folder apps |
 | Its own project's sessions | Get it (it is that project's app) |
-| Another project's session | Attaches it through `find_apps` / `attach_app` without a share switch or consent card, as a user-folder app; named `<project>/<id>` |
+| Another project's session | Attaches it through `find_apps` / `attach_app` without a consent card, as a user-folder app; named `<project>/<id>`, or its bare id when one project has it |
 | App-agent sessions | None, as before |
 
-Its broker reach is a user-folder app's: `host_data sessions.list` sees every session, and other root
-apps answer `call_app` by id after the caller's own project. `git.status` reads its project.
+An untrusted project's root app reaches no session outside its project, the orchestrator included,
+even one running under `auto` (whose boundaries open for its own project's apps only). Apps inside a
+project (`.centralu/apps`) keep their share switch and the pair consent; they too run only in a
+trusted project.
+
+Its broker: `call_app` reaches another trusted project's root app by id after the caller's own project
+and the user folder, when exactly one has it. `host_data sessions.list` answers its own project's
+sessions, as for any project app and as the permission card says; `git.status` reads its project.
 
 ## Decisions
 
@@ -93,7 +112,11 @@ apps answer `call_app` by id after the caller's own project. `git.status` reads 
 | Approved MCP servers | Become root apps too, in place | Stay hidden user-folder apps: two kinds of app again, and Settings would be the only place to find them |
 | Imported apps | Project trust replaces the import mark (enabled = trusted) | Keep the per-app review on `server`/`uses` changes: a second gate a project app does not have; capability questions still ask before any broker use |
 | Versions of a root app | git when the project is a repository, kept copies otherwise | Always copies: a large repository would be copied on every start |
-| A root app's reach | A user-folder app's (orchestrator, attach without consent, every session in `host_data`) | A project app's: migrated apps would lose what they did yesterday |
+| A root app's reach | A user-folder app's (orchestrator, attach without a card) while its project is trusted; the trust card says the project's apps may reach other projects (owner) | A per-app switch ("Share", then "Trust this app"): a second decision about the same code, which the owner ruled out. Never: migrated apps would lose what they did yesterday |
+| `host_data sessions.list` of a root app | Its project's sessions, as the permission card says | Every session: the card would have to say so, and a repository's app would read every project's session names |
+| Restoring a root app's version outside git | Copies the version back, deletes nothing, refused if the copy taken first failed | As a user-folder app (deletes what the version lacks): the folder is the person's whole project |
+| When user-folder apps move | After the host is ready, sessions moved live | At start: a host failing before ready leaves the previous build serving on old copies, marked done |
+| A folder named apart from its manifest id | Not adopted, stays listed with its reason | Adopted: two folders with one id (a backup copy) would both become runnable |
 | Where the note lives | `docs/plans/` (a record, English only) and the parts that last in `apps.md` / `domain-model.md` | A new design document: most of it is a one-time migration |
 
 ## Not handled yet

@@ -342,8 +342,8 @@ Which apps a session gets (`givesApp`, `session-apps.ts`; `allowed`, `app-access
 
 | Session | Gets by default | May attach |
 |---|---|---|
-| Orchestrator | user-folder apps and root apps | |
-| Session in a trusted project | that project's apps | user-folder apps and other projects' root apps; another project's inner app if it is shared and the project consent (`apps`) is given |
+| Orchestrator | user-folder apps, and the root apps of trusted projects | |
+| Session in a trusted project | that project's apps | user-folder apps and other trusted projects' root apps; another project's inner app if it is shared and the project consent (`apps`) is given |
 | Builder | its own app, too | as above |
 | App-agent session | none | none |
 
