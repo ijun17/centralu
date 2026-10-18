@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
-import { appKeyOf, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
+import { appKeyOf, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -108,7 +108,7 @@ export class AppBuilderMock {
       const have = this.registry.appBuilders.get(key)
       if (have && this.store.sessions.has(have)) return structuredClone(this.store.sessions.get(have)!)
       const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
-      if (!app) throw new Error(`There is no such app: ${projectId ?? 'user'}/${appId}`)
+      if (!app) throw new Error(noSuchAppText({ projectId, appId }))
       if (!app.trusted) {
         throw new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
       }
@@ -149,7 +149,10 @@ export class AppBuilderMock {
       this.store.sessions.set(id, info)
       this.registry.appBuilders.set(key, id)
       // The same rule as the real thing: creating a session sets that project's default tool (manager.createSession)
-      if (project) project.defaultTool = chosen
+      if (project && project.defaultTool !== chosen) {
+        project.defaultTool = chosen
+        this.emit({ type: 'projects_changed' })
+      }
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       return structuredClone(info)
     },

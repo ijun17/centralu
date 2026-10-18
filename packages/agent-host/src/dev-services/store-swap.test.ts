@@ -47,13 +47,14 @@ describe('migrations during a host swap (#280 step 3)', () => {
     raw(file, (db) => db.pragma('user_version = 38'))
 
     const s = new Store(file, { swap: true })
-    expect(s.migrationsRun).toBe(KNOWN - 38 - 1)
+    // v40 is heavy and v56 breaks older readers (#423): both wait for after the swap
+    expect(s.migrationsRun).toBe(KNOWN - 38 - 2)
     expect(s.schemaVersion).toBe(KNOWN)
-    expect(s.deferredSteps).toEqual([40])
+    expect(s.deferredSteps).toEqual([40, 56])
     // The host works on the expanded store before the heavy step has run
     expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
 
-    expect(s.runDeferred()).toBe(1)
+    expect(s.runDeferred()).toBe(2)
     expect(s.deferredSteps).toEqual([])
     s.close()
     expect(setting(file, 'deferred_migrations')).toBeUndefined()
@@ -72,7 +73,7 @@ describe('migrations during a host swap (#280 step 3)', () => {
     expect(s.minReaderVersion).toBe(28)
 
     s.runDeferred()
-    expect(s.minReaderVersion).toBe(32)
+    expect(s.minReaderVersion).toBe(56)
     s.close()
   })
 
@@ -80,10 +81,10 @@ describe('migrations during a host swap (#280 step 3)', () => {
     const file = currentStore()
     raw(file, (db) => db.pragma('user_version = 38'))
     new Store(file, { swap: true }).close()
-    expect(setting(file, 'deferred_migrations')).toBe('[40]')
+    expect(setting(file, 'deferred_migrations')).toBe('[40,56]')
 
     const next = new Store(file)
-    expect(next.migrationsRun).toBe(1)
+    expect(next.migrationsRun).toBe(2)
     expect(next.deferredSteps).toEqual([])
     next.close()
   })

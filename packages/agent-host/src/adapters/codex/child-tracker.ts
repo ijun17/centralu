@@ -1,5 +1,6 @@
 import { asObj, str } from '../../json-value.js'
 import { type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
+import { BackgroundEvents, endedSummary } from '../background-events.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { firstLine } from '../tool-titles.js'
 import { codexItemOk } from './items.js'
@@ -69,7 +70,8 @@ export class CodexChildTracker {
   private readonly threads = new Map<string, { active: boolean; turnId: string | null }>()
   /** Linked children: thread to its launch call and description. Only these are listed. */
   private readonly linked = new Map<string, { callId: string; description: string }>()
-  private lastLive = '[]'
+  /** The events, by the rule both adapters share (`BackgroundEvents`): a repeat of the last list is not sent */
+  private readonly events: BackgroundEvents
   /**
    * Launch cards held open while the children they started run (#843). A `spawnAgent` item completes the moment the
    * child starts (measured: its `item/completed` names the child's thread before the child has done anything), so its
@@ -81,7 +83,9 @@ export class CodexChildTracker {
   /** Children whose turn already ended, so a launch result arriving after that is not held (the latest few) */
   private done: string[] = []
 
-  constructor(private readonly sessionId: string) {}
+  constructor(private readonly sessionId: string) {
+    this.events = new BackgroundEvents(sessionId)
+  }
 
   /** A launch call's result, held while the children it started run; false when it goes out now (none still runs) */
   hold(result: Extract<NormalizedEvent, { type: 'tool_result' }>, threads: readonly string[]): boolean {
@@ -163,7 +167,7 @@ export class CodexChildTracker {
 
   private ended(thread: string, status: 'completed' | 'failed' | 'stopped', summary?: string): BackgroundTask | null {
     const task = this.task(thread)
-    return task ? { ...task, status, ...(summary ? { summary } : {}) } : null
+    return task ? { ...task, status, ...endedSummary(summary) } : null
   }
 
   private task(thread: string): BackgroundTask | null {
@@ -192,11 +196,9 @@ export class CodexChildTracker {
 
   /** The event when the live set or an ending moved; nothing when neither did. */
   private changed(ended: (BackgroundTask | null)[] = []): NormalizedEvent[] {
-    const live = this.live()
-    const done = ended.filter((t): t is BackgroundTask => t !== null)
-    const key = JSON.stringify(live)
-    if (key === this.lastLive && done.length === 0) return []
-    this.lastLive = key
-    return [{ type: 'background_tasks', sessionId: this.sessionId, live, ...(done.length ? { ended: done } : {}) }]
+    return this.events.event(
+      this.live(),
+      ended.filter((t): t is BackgroundTask => t !== null),
+    )
   }
 }

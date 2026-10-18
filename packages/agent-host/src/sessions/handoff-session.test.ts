@@ -81,6 +81,23 @@ class Adapter implements AgentAdapter {
 
 const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
 
+/*
+ * The call bound counts from the call, card and all, so a short one also cut short calls meant to finish: on a loaded
+ * runner the person's answer or the record's export took past 400 ms and the call said "still running" with no
+ * successor yet (#368). The bound is longer than any test here, and shortened only around a call that must outlast it
+ * (`pastTheBound`), one whose note never comes until the test writes it.
+ */
+const LONG_CALL = 60_000
+const timings = { callMs: LONG_CALL, noteMs: 5_000 }
+async function pastTheBound<T>(call: () => Promise<T>): Promise<T> {
+  timings.callMs = 300
+  try {
+    return await call()
+  } finally {
+    timings.callMs = LONG_CALL
+  }
+}
+
 let store: Store
 let root: string
 let mgr: SessionManager
@@ -90,12 +107,13 @@ let codex: Adapter
 beforeEach(() => {
   store = new Store()
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-handoff-session-')))
+  timings.callMs = LONG_CALL
   claude = new Adapter('claude')
   codex = new Adapter('codex')
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', codex]])
   mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {}, undefined, join(root, 'worktrees'), {
     processes,
-    handoffTimings: { callMs: 400, noteMs: 5_000 },
+    handoffTimings: timings,
   })
   mgr.prLookup = async () => null
 })
@@ -277,7 +295,7 @@ describe('handoff_session (#694)', () => {
 
   it('mode agent past the call bound: "still running" with a handle, which picks up that handoff and no later one', async () => {
     const { target, orch } = await world('auto')
-    const first = await handoff(orch, { sessionId: target, mode: 'agent' })
+    const first = await pastTheBound(() => handoff(orch, { sessionId: target, mode: 'agent' }))
     expect(first.text).toContain('is still running')
     // Named the way this seat calls it (#850): handoff_session is a rare command, reached through centralu_run
     const handle = /Call centralu_run\(command="handoff_session", args=\{waitFor: "(ho-[^"]+)"\}\) to keep waiting/.exec(first.text)![1]!
@@ -300,7 +318,7 @@ describe('handoff_session (#694)', () => {
 
   it('a finished run nobody waited on does not answer a later call on the same session (#694 review)', async () => {
     const { target, orch } = await world('auto')
-    const first = await handoff(orch, { sessionId: target, mode: 'agent' })
+    const first = await pastTheBound(() => handoff(orch, { sessionId: target, mode: 'agent' }))
     expect(first.text).toContain('is still running')
     claude.handles.get(target)!.answer('The note.')
     await eventually(() => named('Long run').length === 2)

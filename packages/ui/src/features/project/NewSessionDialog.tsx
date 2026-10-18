@@ -9,6 +9,7 @@ import { formatBytes } from '../../app/format.js'
 import { isPlainEscape, isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
 import { useToolChoice } from './useToolChoice.js'
 
@@ -76,7 +77,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    */
   const allTools = useTools()
   const machine = project?.machine ?? null
-  const { tool, setTool, toolMeta, tools, info, usable, blocked } = useToolChoice(
+  const { tool, setTool, toolMeta, tools, info, usable, blocked, detectError, redetect } = useToolChoice(
     project?.defaultTool ?? allTools[0]?.name ?? '',
     machine,
   )
@@ -298,6 +299,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                 ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
                 : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`}
             </p>
+          )}
+          {detectError && (
+            <LoadFailed what="which tools are installed" error={detectError} onRetry={() => void redetect()} className="mt-2" testId="tool-detect-failed" />
           )}
         </header>
 

@@ -773,7 +773,6 @@ interface AgentAdapter {
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 휴지통으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
 - `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 휴지통으로 간 세션을 빼는 것 말고는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
-- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계. 만들지 않았고, 테이블은 나중 릴리스에서 지운다([agent-host.ko.md](agent-host.ko.md) §6)
 - `workspace(id, layout, updated_at)` — 스냅숏
 
 위 목록은 핵심만 적은 것이다. 지금 스키마의 모든 테이블과 열은 마이그레이션에서 생성한 [generated/schema.md](generated/schema.md)에 있다.

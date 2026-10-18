@@ -134,8 +134,8 @@ const NEW_ROLE_NEW_AGENT =
  * answer is read exactly when the result is used. Never a delete of its own: deleting can drop a branch, so it stays
  * the parent's or the person's call.
  */
-export function cleanUpLine(sessionId: string): string {
-  return `Once you have used its answer and need nothing more from it, delete it: agent_session(sessionId="${sessionId}", action="delete"). Work not on the trunk is kept in the trash.`
+export function cleanUpLine(sessionId: string, call = `agent_session(sessionId="${sessionId}", action="delete")`): string {
+  return `Once you have used its answer and need nothing more from it, delete it: ${call}. Work not on the trunk is kept in the trash.`
 }
 
 /** agent_session list (#690): the caller's own children, each with what deleting it would cost */

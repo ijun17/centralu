@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GitBranch, GitFileStatus } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -131,11 +133,12 @@ function Changes({
         )
         if (hit) void openDiff(hit)
       })
-      .catch(() => {})
+      // Said, as a failed diff is (#850 item 8): silent, the click looked like it did nothing. Clicking again retries
+      .catch((e: Error) => alive && setToast(`Could not load diff: ${e.message}`))
     return () => {
       alive = false
     }
-  }, [pick, initialPath, initialStaged, platform, projectId, openDiff])
+  }, [pick, initialPath, initialStaged, platform, projectId, openDiff, setToast])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -453,8 +456,9 @@ function History({
     void platform.git
       .commitDetail(projectId, initialSha)
       .then((d) => setDetail({ sha: initialSha, files: d.files, diff: d.diff, truncated: d.truncated }))
-      .catch(() => {})
-  }, [pick, initialSha, platform, projectId])
+      // Said, as a failed file diff is (#850 item 8): silent, the screen kept "Pick a commit" under the one just picked
+      .catch((e: Error) => setToast(`Could not load the commit: ${e.message}`))
+  }, [pick, initialSha, platform, projectId, setToast])
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -506,16 +510,14 @@ function Branches({ projectId }: { projectId: string }) {
   // The one write here moves the branch **name** the sidebar prints, so it goes through the
   // store too (issue #49) — the dry run beside it changes nothing and stays a plain read.
   const gitCheckout = useStore((s) => s.gitCheckout)
-  const [branches, setBranches] = useState<GitBranch[] | null>(null)
+  /*
+   * A failed read is not an empty list (#850 item 8): it used to draw no branch at all, as if the repository had none.
+   * A refresh after a checkout that fails keeps the list beside the error
+   */
+  const loaded = useLoad<GitBranch[]>(() => platform.git.branches(projectId), [platform, projectId])
+  const branches = loaded.data ?? null
+  const load = () => void loaded.reload()
   const [pending, setPending] = useState<{ branch: string; conflicts: string[] } | null>(null)
-
-  const load = useCallback(() => {
-    void platform.git
-      .branches(projectId)
-      .then(setBranches)
-      .catch(() => setBranches([]))
-  }, [platform, projectId])
-  useEffect(load, [load])
 
   const attempt = async (branch: string) => {
     const dry = await platform.git.checkout(projectId, branch, true)
@@ -567,6 +569,9 @@ function Branches({ projectId }: { projectId: string }) {
             </button>
           </div>
         </div>
+      )}
+      {loaded.error !== null && (
+        <LoadFailed what="the branches" error={loaded.error} onRetry={load} className="border-b border-line/60 px-2.5 py-1.5" testId="git-branches-failed" />
       )}
       <BranchList title="Local" branches={local} onPick={attempt} />
       <BranchList title="Remote" branches={remote} onPick={attempt} />

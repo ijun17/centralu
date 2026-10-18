@@ -1,6 +1,14 @@
 import type Database from 'better-sqlite3'
 import { parseJson } from './json.js'
 
+/**
+ * The settings one session keeps, as a condition on `app_settings` with `@sessionId` bound: every key of the shape
+ * `<name>:<sessionId>` (`agent_depth:`, `report_paused:`, `tool_prefix:`, …). A key built for one session takes that
+ * shape, and the trash's purge deletes them all by it (`TrashRecords.purgeSession`), so a key added later goes with
+ * its session without the purge having to learn its name.
+ */
+export const SESSION_SETTING_OF = `length(key) > length(@sessionId) + 1 AND substr(key, -length(@sessionId) - 1) = ':' || @sessionId`
+
 /** The part of the store one setting is read from and written to */
 export type SettingAccess = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }
 

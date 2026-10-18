@@ -9,6 +9,7 @@ import { fileChangesOf } from './items.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { turnIdOf } from './turn-reads.js'
+import { asObj } from '../../json-value.js'
 
 /** What the requests read of the session they belong to */
 export type RequestsHost = {
@@ -241,7 +242,7 @@ function approvalKindOf(meta: unknown): string | null {
  * to Codex's own sentence (`message`) when those are absent.
  */
 function appApprovalDetail(server: string, message: unknown, meta: unknown): ApprovalDetail {
-  const m = (typeof meta === 'object' && meta !== null ? meta : {}) as Record<string, unknown>
+  const m = asObj(meta)
   const title = typeof m.tool_title === 'string' && m.tool_title ? m.tool_title : typeof message === 'string' ? message : ''
   const params = m.tool_params === undefined ? '' : ` ${JSON.stringify(m.tool_params).slice(0, 1000)}`
   return { kind: 'other', raw: `${server} · ${title}${params}` }

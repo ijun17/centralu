@@ -368,6 +368,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    허브의 오케스트레이터가 `reportBack`으로 연결된 머신의 세션에 일을 보냈을 때도 같다(#723, `sessions/linked-reports.ts`).
    머신의 턴이 끝났는지는 그 머신에 맡긴 ask_project와 같은 함수로 읽는다(`linkedTurnEnd`, `sessions/linked-turn-end.ts`, #428):
    그곳의 승인이나 질문은 도는 턴이고(작업 중 상태도 `isInTurn`으로 같다), 오류와 사용량 한도는 끝나지 못한 턴이다. 중단은 턴이 도는 것을 본 뒤에만 끝나지 못한 턴으로 친다(로컬의 `AgentRunWait`와 같다, #698). 그 전의 중단은 맡긴 일이 아니라 그 앞의 턴을 끝낸 것이다.
+   허브의 기다림은 그 머신이 지시를 기록한 `user_message`가 전달된 뒤부터 읽는다(#1082). 한 링크는 한 머신의 이벤트를 순서대로 전하므로, 그보다 먼저 온 턴 끝은 지시가 들어가기 전에 끝난 앞 턴의 것이다. 기록이 전달되기 전에 사라졌다면(그쪽 호스트 교체) 보내기의 답이 온 뒤로는 기다리지 않는다. 답은 같은 링크에서 기록 뒤에 오므로, 그 뒤의 턴 끝이 보고다.
    그곳에서 지워진 세션은 기다리던 ask_project를 끝낸다.
    허브는 머신의 연결이 올라올 때마다(`machine_resync`: 첫 연결, 끊긴 뒤, 허브가 시작한 뒤) 그 머신의 `sessions.list`에서
    세션마다 작업 목록을 통째로 읽는다(`LinkedSessions.backgroundTasks`). 머신은 작업이 바뀔 때만 다시 알리기 때문이다. 그 뒤로는
@@ -1793,7 +1794,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | 테이블 추가 (3은 색인도 채운다: 무거움; 44는 한 프로젝트가 다른 프로젝트에 닿도록 받은 "항상"을 적는 `project_consents`를 더한다, #371; 46은 허브의 링크와 각 기기에서 마지막으로 들은 것을 적는 `linked_machines`와 `machine_headers`, 그리고 nullable `grid_layout.remote_session_id`를 더한다, #82; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다; 46: 이전 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 세션 패널을 버린다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48, 55 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561. 55는 다른 프로젝트의 세션을 가리키는 `askedBy`, 곧 #614 이전 ask_project의 뜻을 비운다. #844 전까지는 host가 시작할 때마다 하던 일이다) | 읽는다, 되돌릴 수 없다 (55: beta.20 이하의 빌드는 아직 옛 뜻으로 쓰고, 이 단계 뒤에 그 빌드가 쓴 줄은 그 뜻을 그대로 지닌다. 그 빌드가 보이던 대로다) |
-| **13, 28, 32** | **테이블이나 열 삭제** | **깨진다: `min_reader_version`을 올린다** |
+| **13, 28, 32, 56** | **테이블이나 열 삭제** (56: 아무도 쓴 적 없는 `usage_facts`, #423) | **깨진다: `min_reader_version`을 올린다** (56: 옛 host는 그 테이블을 빈 채로 다시 만들 뿐, 해가 없다) |
 
 스키마를 바꾸는 단계는 같은 PR에서 [generated/schema.md](generated/schema.md)를 다시 만든다(`pnpm docs:schema`). 새
 테이블은 [domain-model.ko.md](domain-model.ko.md)와 그 원본의 "저장되는 곳" 목록에 한 줄을 얻는다. 둘 다 하기
@@ -1804,6 +1805,10 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 저장소의 테이블은 두 빌드가 나눠 쓰는 모양 하나이고, §5.1이 다룬다. 다른 모양도 많이 같은 식으로 저장되거나 오간다.
 `app_settings`의 JSON 행, 데이터 폴더의 파일, 사람이나 다른 빌드가 쓰는 파일, 프로세스 사이의 줄과 프레임이다. 호스트
 교체 중에, 사람이 이전 릴리스로 돌아간 뒤에, 서로 다른 릴리스의 두 기계 사이에서 옛 빌드와 새 빌드가 그 각각을 읽는다.
+
+세션 하나를 위해 남기는 `app_settings` 행의 키는 `<이름>:<sessionId>`이다(`agent_depth:`, `report_paused:`,
+`tool_prefix:`, …). 세션을 영구 삭제하면 그 모양의 키를 모두 지운다(`SESSION_SETTING_OF`, `purgeSession`). 그래서
+세션별 키를 새로 더해도 영구 삭제에 줄을 더할 필요가 없다.
 
 모든 모양의 규칙:
 
@@ -1816,7 +1821,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 모양 | 위치 | 읽는 곳 / 쓰는 곳 | 옛 모양 | 새 모양 | 깨짐 | 테스트 |
 |---|---|---|---|---|---|---|
 | 화면 설정 (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | 빠진 필드마다 기본값 | 못 읽는 값은 기본값으로 보이고, 이 빌드가 변경을 쓸 때 모르는 필드와 못 읽는 값은 남는다 | 기본값, 행 이름을 댄 stderr 한 줄. 다음 변경이 덮어쓴다 | `theme.test.ts`, `ui-preferences.test.ts` |
-| 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store.test.ts` (ui), `notify.test.ts` |
+| 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store-layout.test.ts` (ui), `notify.test.ts` |
 | 테마·글꼴 캐시 | 페이지의 `localStorage` | `applyCachedTheme`, `applyCachedTypography` | 값마다 확인 | 무시 | 캐시 없음과 같다. 첫 프레임만이고 호스트의 답이 뒤따른다 | (캐시뿐) |
 | 키퍼 설정 | `keeper-settings.json` | `source::load_settings` / `save_background` (키퍼) | `background` 기본값은 꺼짐 | 모르는 필드는 그대로 두었다가 다시 쓴다. `background`가 참·거짓이 아니면 그 값만 꺼짐으로 읽고 stderr에 한 줄 남긴다 | 꺼짐으로 읽고 파일 이름을 밝힌 stderr 한 줄을 남긴다. 다음 저장이 덮어쓴다 | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | 그리드 배치 | `grid_layout` | `Store.listGridView` / `setGridView` | 스팬 없는 행은 고른 것 없음으로 읽힌다 (v43) | `kind`에 CHECK가 있어 새 패널 종류는 테이블 재구성, 곧 §5.1의 깨는 단계다. 범위 밖 스팬은 없음으로 읽힌다 | (행) | `store.test.ts` (v42, v43) |
@@ -1872,9 +1877,9 @@ SDK, 다른 쪽은 `app-server`). 답하지 못하는 어댑터는 던지고, �
 `~/.codex/sessions/**`를 감시하며 증분 파싱하고, `usage_facts` 행을 써서 `usage.weekly` RPC로
 읽고, 집계는 `core/usage`에서 한다는 설계. **그중 어느 것도 존재하지 않는다** — chokidar는
 의존성이 아니고, `core/usage`에는 §6.1의 캐시 계산만 있고, `usage.weekly` 메서드도 없으며,
-`usage_facts`에 행을 쓴 빌드는 하나도 없다. 그래도 지금은 `schema.sql`에 남는다: v0.1.0-beta.10까지의
-릴리스는 프로젝트를 지울 때 여기서 그 행을 지우고, 이 빌드가 그것을 건드리지 않는 첫 빌드라서, 지우는 것은 나중
-릴리스의 수축 단계다(§5.1 규칙 2). 게다가 그것은 §8.1이
+`usage_facts`에 행을 쓴 빌드는 하나도 없다. 그 테이블은 이제 `schema.sql`에 없고, 저장소 단계 56이 기존
+저장소에서 지운다(#423. 수축 단계, §5.1 규칙 2: 프로젝트를 지울 때 그 행을 지우던 마지막 릴리스 한 번 뒤).
+게다가 그것은 §8.1이
 말하는 규칙의 **정반대**였고, 두 절이 이 문서 안에서 서로를 부정한 채 나란히 있었다. 도구의
 비공개 JSONL을 읽는 것이 바로 §8.1이 금지하는 일이고, 이유도 거기 적혀 있다: 문서화되지 않은
 포맷은 업그레이드에서 소리 없이 깨지며, 숫자가 조용히 깨지는 것은 숫자가 없는 것보다 나쁘다.

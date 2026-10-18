@@ -220,12 +220,16 @@
   {
    "to": 55,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 56,
+   "breaksOlderReaders": true
   }
  ],
- "version": 55,
- "ran": 54,
+ "version": 56,
+ "ran": 55,
  "store": {
-  "userVersion": 55,
+  "userVersion": 56,
   "master": [
    {
     "type": "index",
@@ -369,12 +373,6 @@
     "type": "index",
     "name": "sqlite_autoindex_subagent_messages_1",
     "tbl_name": "subagent_messages",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_usage_facts_1",
-    "tbl_name": "usage_facts",
     "sql": null
    },
    {
@@ -541,12 +539,6 @@
    },
    {
     "type": "table",
-    "name": "usage_facts",
-    "tbl_name": "usage_facts",
-    "sql": "CREATE TABLE usage_facts (\n      date       TEXT NOT NULL,\n      tool       TEXT NOT NULL,\n      model      TEXT NOT NULL,\n      project_id TEXT,\n      input_tokens  INTEGER NOT NULL DEFAULT 0,\n      output_tokens INTEGER NOT NULL DEFAULT 0,\n      cache_tokens  INTEGER NOT NULL DEFAULT 0,\n      cost_est   REAL NOT NULL DEFAULT 0,\n      PRIMARY KEY (date, tool, model, project_id)\n    )"
-   },
-   {
-    "type": "table",
     "name": "workspace",
     "tbl_name": "workspace",
     "sql": "CREATE TABLE workspace (\n      id         INTEGER PRIMARY KEY CHECK (id = 1),\n      layout     TEXT NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
@@ -708,7 +700,6 @@
      "match": "NONE"
     }
    ],
-   "usage_facts": [],
    "workspace": []
   },
   "tables": {
@@ -774,7 +765,7 @@
     "rows": [
      {
       "key": "min_reader_version",
-      "value": "32"
+      "value": "56"
      }
     ]
    },
@@ -1219,30 +1210,6 @@
      "ts INTEGER notnull=1 default=null pk=0"
     ],
     "rows": []
-   },
-   "usage_facts": {
-    "columns": [
-     "date TEXT notnull=1 default=null pk=1",
-     "tool TEXT notnull=1 default=null pk=2",
-     "model TEXT notnull=1 default=null pk=3",
-     "project_id TEXT notnull=0 default=null pk=4",
-     "input_tokens INTEGER notnull=1 default=0 pk=0",
-     "output_tokens INTEGER notnull=1 default=0 pk=0",
-     "cache_tokens INTEGER notnull=1 default=0 pk=0",
-     "cost_est REAL notnull=1 default=0 pk=0"
-    ],
-    "rows": [
-     {
-      "date": "2026-01-01",
-      "tool": "claude",
-      "model": "opus",
-      "project_id": "p1",
-      "input_tokens": 5,
-      "output_tokens": 6,
-      "cache_tokens": 0,
-      "cost_est": 0
-     }
-    ]
    },
    "workspace": {
     "columns": [

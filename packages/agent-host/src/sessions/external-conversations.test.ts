@@ -6,7 +6,7 @@ import { ExternalConversations, type ExternalConversationsHost } from './externa
 
 /*
  * The tools' own conversations on their own (#428): which live session holds one, whether one is gone, and when the
- * catch-up marker is stamped. Import and catch-up run over the real manager (manager.test.ts, history sync).
+ * catch-up marker is stamped. Import and catch-up run over the real manager (manager-resume.test.ts, history sync).
  */
 
 let store: Store

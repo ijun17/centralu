@@ -390,7 +390,8 @@ type ProtocolError = {
   `projects.createPreview`(#515), `processes.strays`,
   `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`,
   `messages.search`, `apps.list`, `approvals.rules`, `projectConsents.list`)은 기기를 가로질러
-  합친다. 메서드마다 한 줄인 표는 `packages/agent-host/src/links/routes.ts`이고, 프로토콜에 더한
+  합친다. 닿지 않는 기기는 합친 결과에서 빠진다. `trash.list`는 그런 기기를 이름으로 알리고(`unreached`, #841)
+  `trash.empty`는 각각을 실패로 적으므로, 어느 쪽도 휴지통 전체로 읽히지 않는다. 메서드마다 한 줄인 표는 `packages/agent-host/src/links/routes.ts`이고, 프로토콜에 더한
   메서드는 거기서 분류되기 전까지 컴파일되지 않는다.
 - **숫자.** 다른 기기의 승인 규칙 id는 음수로 접힌다(기기마다 구간 하나). 그 값으로 부른
   `approvals.deleteRule`은 그 기기에 닿는다. 로컬 규칙 id는 음수가 아니므로, 기기를 모르는 UI가 그

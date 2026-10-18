@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import type { NormalizedEvent } from '@cc/protocol'
+import { asObj } from '../json-value.js'
 
 /**
  * Turns an image that arrived carrying only a path (#40, imageView) into an event the screen can draw.
@@ -50,7 +51,7 @@ export function mcpImageEvents(sessionId: string, content: unknown): NormalizedE
   if (!Array.isArray(content)) return []
   const out: NormalizedEvent[] = []
   for (const raw of content) {
-    const part = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+    const part = asObj(raw)
     if (part.type !== 'image') continue
     const data = typeof part.data === 'string' ? part.data : ''
     const mime = typeof part.mimeType === 'string' ? part.mimeType : ''

@@ -167,7 +167,7 @@ export function UsageDonuts() {
           }
         })
         /*
-         * A question that failed is not an answer (owner, 2026-10-18: a linked machine read "No agent" for minutes
+         * A question that failed is not an answer (#850 item 8; owner, 2026-10-18: a linked machine read "No agent" for minutes
          * after its host restarted for an update, though Claude Code was there). The last answer stays, or nothing is
          * drawn yet, and the machine is asked again soon rather than at the next 5-minute tick.
          */

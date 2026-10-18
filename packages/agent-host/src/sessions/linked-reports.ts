@@ -1,5 +1,6 @@
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
+import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport } from './child-ownership.js'
 
@@ -33,6 +34,12 @@ export type LinkedReportsHost = {
   ): Promise<void>
 }
 
+/** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
+function fromHub(from: unknown): boolean {
+  const id = (from as { sessionId?: unknown } | null)?.sessionId
+  return typeof id === 'string' && id.endsWith(`.${HUB_SENDER}`)
+}
+
 /** A machine's event as the hub relays it to its windows (qualified, links.ts): only the fields read here */
 export type LinkedEvent = {
   type: string
@@ -42,6 +49,8 @@ export type LinkedEvent = {
   error?: { message?: string }
   machine?: unknown
   machineId?: unknown
+  text?: unknown
+  from?: unknown
   live?: unknown
   ended?: unknown
   clearEnded?: unknown
@@ -101,6 +110,18 @@ export class LinkedReports {
     this.remember(sessionId)
     if (e.type === 'background_tasks') {
       if (wait.paused) this.settleLater(sessionId, wait)
+      return
+    }
+    /*
+     * A wait set for an instruction starts at that instruction (#1082). It is set before the send goes out, and a turn
+     * end the machine sent before it recorded the instruction can still be on its way: a link relays one machine's
+     * events in order, so what comes before the instruction's own `user_message` happened there before it, and is the
+     * end of an earlier turn. From that message on, as before: a turn running there then takes the instruction as
+     * mid-turn input and its end is the report, as a local session's is. A record that never comes (lost before it was
+     * relayed) is not waited for past the send's answer (`sendToSession`, orchestrator-seat.ts).
+     */
+    if (wait.instruction !== undefined) {
+      if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) delete wait.instruction
       return
     }
     const step = linkedTurnEnd(wait.busy, e)
