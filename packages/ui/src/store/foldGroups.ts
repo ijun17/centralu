@@ -1,4 +1,5 @@
 import { parseAppKey, type SessionSummary } from '@cc/core'
+import { sidebarProjectOf, treeParentOf } from './sidebarTree.js'
 
 /*
  * Folding a group (#666). A group is the rows hidden behind one chevron: the children a session started, or the
@@ -28,17 +29,15 @@ export function foldGroupsHiding(
   const own = session.appId ? appKeyOf(session) : null
   const appKey = own !== null && listedApps.has(own) ? own : null
   const keys: string[] = appKey !== null ? [appGroupKey(appKey)] : []
-  const parentId =
-    session.forkedFrom && session.forkedFrom !== session.id ? session.forkedFrom
-    : session.parentSessionId ? session.parentSessionId
-    : session.askedBy && session.askedBy !== session.id ? session.askedBy
-    : null
-  const parent = parentId ? all[parentId] : undefined
-  if (parent && parent.projectId === session.projectId) {
+  const here = sidebarProjectOf(session, all)
+  // The parent the tree draws this row under: one in the same sidebar project and the same app group (or none)
+  const parentId = treeParentOf(session, (id) => {
+    const parent = all[id]
+    if (!parent || sidebarProjectOf(parent, all) !== here) return false
     const parentOwn = parent.appId ? appKeyOf(parent) : null
-    // Only a parent in the same list draws this row nested under itself
-    if ((parentOwn !== null && listedApps.has(parentOwn) ? parentOwn : null) === appKey) keys.push(childrenGroupKey(parent.id))
-  }
+    return (parentOwn !== null && listedApps.has(parentOwn) ? parentOwn : null) === appKey
+  })
+  if (parentId) keys.push(childrenGroupKey(parentId))
   return keys
 }
 

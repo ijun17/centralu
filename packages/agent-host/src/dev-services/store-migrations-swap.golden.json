@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 58,
+  "version": 59,
   "deferred": [
    3,
    11,
@@ -13,7 +13,7 @@
   ],
   "minReader": 0
  },
- "userVersion": 58,
+ "userVersion": 59,
  "master": [
   {
    "type": "index",
@@ -277,7 +277,7 @@
    "type": "table",
    "name": "linked_machines",
    "tbl_name": "linked_machines",
-   "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            )"
+   "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , connect TEXT)"
   },
   {
    "type": "table",

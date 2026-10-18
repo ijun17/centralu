@@ -1,5 +1,5 @@
 import type { Interruption, SessionState } from '@cc/protocol'
-import { isListedWaiting, isUnread, needsAnswer, type ReadTracked } from '@cc/core'
+import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**
  * What a folded project's name line says in place of the sessions it hides (#205).
@@ -24,10 +24,12 @@ export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input'
 export type FoldSummaryState = (typeof FOLD_SUMMARY_STATES)[number]
 
 export function foldSummary(
-  sessions: readonly ({ state: SessionState; interruption?: Interruption | null } & ReadTracked)[],
+  sessions: readonly ({ state: SessionState; pendingQuestions: readonly unknown[]; interruption?: Interruption | null } & ReadTracked)[],
 ): { state: FoldSummaryState; count: number }[] {
   const counts = new Map<SessionState, number>()
-  for (const s of sessions) {
+  for (const raw of sessions) {
+    // An open question is an approval here as it is in the inbox (`listedState`): the line cannot call it working or nothing
+    const s = { ...raw, state: listedState(raw) }
     // Waiting states follow the inbox rule (#669): a read `waiting_input` session is not "waiting on me"
     if (s.state === 'waiting_input' && !isListedWaiting(s)) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
