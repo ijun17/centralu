@@ -32,9 +32,10 @@ const scripts = (
   JSON.parse(readFileSync(at('package.json'), 'utf8')) as { scripts: Record<string, string> }
 ).scripts
 
+// `pnpm install` is pnpm's own command (the surface job needs the workspace), not a script
 const invoked = [...live.matchAll(/\bpnpm ([a-z][a-z0-9:._-]*)/g)]
   .map((m) => m[1])
-  .filter((n): n is string => n !== undefined)
+  .filter((n): n is string => n !== undefined && n !== 'install')
 
 describe('the drift workflow runs checks that exist', () => {
   it('invokes at least one pnpm script per vendor job', () => {
@@ -87,5 +88,34 @@ describe('drift is information, not a gate', () => {
     expect(on).toContain('workflow_dispatch:')
     const triggers = [...on!.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1])
     expect(triggers.sort()).toEqual(['schedule', 'workflow_dispatch'])
+  })
+})
+
+describe('the surface job watches what became possible (#270)', () => {
+  const job = /^ {2}surface:\n((?: {4,}.*\n|\n)*)/m.exec(live)?.[1] ?? ''
+  const script = readFileSync(at('scripts/surface-drift.mts'), 'utf8')
+
+  it('exists, and files its findings as an issue', () => {
+    expect(job, `${WORKFLOW} has no surface job`).not.toBe('')
+    expect(job).toContain('pnpm drift:surface --file-issue')
+    expect(job).toMatch(/GH_TOKEN: \$\{\{ github\.token \}\}/)
+  })
+
+  it('may write issues and nothing else', () => {
+    expect(job).toMatch(/permissions:\n\s+contents: read\n\s+issues: write\n/)
+  })
+
+  it('reads the latest CLIs, not whatever the runner has', () => {
+    expect(job).toContain('@anthropic-ai/claude-code@latest')
+    expect(job).toContain('@openai/codex@latest')
+  })
+
+  it("installs each adapter's npm packages at @latest, never the workspace pins", () => {
+    expect(script).toContain('`${name}@latest`')
+    expect(script).toContain("'--prefix', prefix")
+  })
+
+  it('reads every registered adapter, so a new one is watched without editing the job', () => {
+    expect(script).toContain('adapters: createAdapters()')
   })
 })

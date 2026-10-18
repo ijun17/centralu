@@ -8,6 +8,7 @@ import type { ExternalSessionsMock } from './external-sessions.js'
 import type { TrashMock } from './trash.js'
 import { putInOrder } from './projects.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** A name coined from a person's words, as the host cuts it (`truncate`, external-conversations.ts): one line, 40 characters (#999) */
 const autoName = (text: string) => oneLineText(text, 40)
@@ -202,16 +203,11 @@ export class SessionsMock {
     send: async (sessionId: string, text: string, attachments?: Attachment[]) => {
       if (attachments?.length) this.sentAttachments.push(...attachments)
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       // The same rule as the host: if it is asleep, revive it and then send (automatic resume)
       if (!s.live) {
         if (this.unresumable.has(sessionId)) {
-          throw Object.assign(
-            new Error('Could not resume the conversation: this session cannot be resumed'),
-            {
-              code: 'session_not_found',
-            },
-          )
+          throw mockError('Could not resume the conversation: this session cannot be resumed', 'session_not_found')
         }
         await this.wakeUp(sessionId)
       }
@@ -249,7 +245,7 @@ export class SessionsMock {
     },
     switchTool: async (sessionId: string, tool: ToolName) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       /*
        * The same rule as the real thing: switching tools breaks the thread to resume, and
        * **also drops the model and its attached settings** (a rule confirmed by measurement —
@@ -295,7 +291,7 @@ export class SessionsMock {
       },
     ) => {
       const sess = this.store.sessions.get(sessionId)
-      if (!sess) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!sess) throw mockError('Session not found', 'session_not_found')
       if (s.model !== undefined) sess.model = s.model
       if (s.effort !== undefined) sess.effort = s.effort
       if (s.verbosity !== undefined) sess.verbosity = s.verbosity
@@ -328,7 +324,7 @@ export class SessionsMock {
     },
     restartSession: async (sessionId: string) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       this.restarted.push(sessionId)
       if (this.unresumable.has(sessionId)) {
         return { session: { ...s }, resumed: false, reason: 'This session cannot be resumed' }
@@ -338,7 +334,7 @@ export class SessionsMock {
     },
     resumeSession: async (sessionId: string) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       this.resumeCalls.push(sessionId)
       if (this.unresumable.has(sessionId)) {
         return { session: { ...s }, resumed: false, reason: 'This session cannot be resumed' }
@@ -350,7 +346,7 @@ export class SessionsMock {
     /** Forks off a locked conversation — pointing at a copy makes it the same as if the lock had come off */
     forkConversation: async (sessionId: string) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       this.unresumable.delete(sessionId)
       s.live = true
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'resumed' })
@@ -363,10 +359,10 @@ export class SessionsMock {
     */
     rename: async (sessionId: string, name: string) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
       // One line, as the host keeps a name (manager.rename, #838)
       const next = oneLineText(name)
-      if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })
+      if (!next) throw mockError('Session name cannot be empty')
       s.name = next
       s.autoNamed = false
       this.emit({ type: 'session_title', sessionId, title: next, auto: false })
@@ -399,7 +395,7 @@ export class SessionsMock {
    */
   private checkWorktree(params: CreateSessionParams): void {
     const p = this.projectStore.list.find((x) => x.id === params.projectId)
-    const refuse = (message: string) => Object.assign(new Error(message), { code: 'internal' })
+    const refuse = (message: string) => mockError(message)
     if (!p?.git?.isRepo || p.git.denied) {
       throw refuse(p?.git?.denied ? 'Cannot read this git repository — grant folder access and try again' : 'Worktrees need a git repository. This directory is not one.')
     }

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { Question, QuestionAnswer } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
+import { Pill } from '../../components/Pill.jsx'
 
 /**
  * The choices an agent holds out (AskUserQuestion).
@@ -133,9 +134,9 @@ export function QuestionCard({
       data-testid="question-card"
     >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+        <Pill size="label" edge="solid" tone="bright">
           Agent is asking
-        </span>
+        </Pill>
         <span className="text-xs text-ink-faint">
           {tabbed ? `${questions.length} questions` : 'Pick an option'}
         </span>

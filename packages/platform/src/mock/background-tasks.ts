@@ -2,6 +2,7 @@ import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import { applyBackgroundTasks } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** Each session's background tasks (#290) and the calls that stop them */
 export class BackgroundTasksMock {
@@ -42,8 +43,8 @@ export class BackgroundTasksMock {
     stopBackgroundTask: async (sessionId: string, taskId: string) => {
       const live = this.backgroundOf(sessionId).filter((t) => t.status === 'running')
       const task = live.find((t) => t.id === taskId)
-      if (!task) throw Object.assign(new Error('That background task is no longer running'), { code: 'task_gone' })
-      if (!task.stoppable) throw Object.assign(new Error('This task cannot be stopped on its own'), { code: 'unsupported' })
+      if (!task) throw mockError('That background task is no longer running')
+      if (!task.stoppable) throw mockError('This task cannot be stopped on its own')
       this.stoppedTasks.push(taskId)
       this.emit({ type: 'background_tasks', sessionId, live: live.filter((t) => t.id !== taskId), ended: [{ ...task, status: 'stopped' }] })
     },

@@ -1,5 +1,6 @@
 import { wireBaseName, wireJoin, wireParent, wireSegments } from '@cc/protocol'
 import type { FsEntry, FsFile } from '../ports/index.js'
+import { mockError } from './mock-error.js'
 
 /** The mock's file tree: the listing grouped by parent path, and the file contents by path */
 export type MemoryFsState = { entries: Record<string, FsEntry[]>; files: Record<string, string> }
@@ -30,7 +31,7 @@ export class MemoryFs {
    */
   requireInside(rel: string): void {
     const fail = () => {
-      throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
+      throw mockError('Path is outside the project')
     }
     if (rel.startsWith('/')) fail()
     let depth = 0
@@ -145,13 +146,13 @@ export class MemoryFs {
     const path = wireJoin(toDir, name)
     if (path === from) return { path, moved: false }
     if (path.startsWith(`${from}/`)) {
-      throw Object.assign(new Error(`Cannot move ${name} into itself`), { code: 'internal' })
+      throw mockError(`Cannot move ${name} into itself`)
     }
     if ((this.state.entries[toDir] ?? []).some((e) => e.path === path)) {
-      throw Object.assign(new Error(`${path} already exists — nothing was moved`), { code: 'internal' })
+      throw mockError(`${path} already exists — nothing was moved`)
     }
     const entry = this.detach(from)
-    if (!entry) throw Object.assign(new Error(`${from} is no longer there`), { code: 'internal' })
+    if (!entry) throw mockError(`${from} is no longer there`)
     const sub = this.takeSubtree(from)
     const rekey = (p: string) => path + p.slice(from.length)
     for (const [dir, list] of Object.entries(sub.entries)) {
@@ -169,7 +170,7 @@ export class MemoryFs {
     const leaf = wireBaseName(name)
     const path = wireJoin(toDir, leaf)
     if ((this.state.entries[toDir] ?? []).some((e) => e.path === path)) {
-      throw Object.assign(new Error(`${path} already exists — nothing was written`), { code: 'internal' })
+      throw mockError(`${path} already exists — nothing was written`)
     }
     this.state.entries[toDir] = [
       ...(this.state.entries[toDir] ?? []),
@@ -195,7 +196,7 @@ export class MemoryFs {
       return
     }
     if (!this.detach(path))
-      throw Object.assign(new Error(`${path} is no longer there`), { code: 'internal' })
+      throw mockError(`${path} is no longer there`)
     this.takeSubtree(path)
   }
 }

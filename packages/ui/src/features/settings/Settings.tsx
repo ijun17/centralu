@@ -13,6 +13,9 @@ import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Modal } from '../../components/Modal.jsx'
+import { Badge } from '../../components/Badge.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
@@ -413,7 +416,9 @@ function AppsSettings() {
           {projectIds.map((pid) => (
             <div key={pid} className="mb-4">
               {/* The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up */}
-              <p className="readout text-2xs uppercase text-ink-faint">{projects[pid]?.name ?? 'Project'}</p>
+              <Badge as="p" readout>
+                {projects[pid]?.name ?? 'Project'}
+              </Badge>
               <ul className="mt-2 space-y-2">
                 {catalog.byProject[pid]!.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
@@ -423,7 +428,9 @@ function AppsSettings() {
           ))}
           {catalog.user.length > 0 && (
             <div className="mb-4">
-              <p className="readout text-2xs uppercase text-ink-faint">Your apps</p>
+              <Badge as="p" readout>
+                Your apps
+              </Badge>
               <ul className="mt-2 space-y-2">
                 {catalog.user.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
@@ -446,7 +453,9 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
   const name = useMachineName(machine) ?? machine
   return (
     <div className="mb-4" data-testid={`settings-machine-apps-${machine}`}>
-      <p className="readout text-2xs uppercase text-ink-faint">{name}’s apps</p>
+      <Badge as="p" readout>
+        {name}’s apps
+      </Badge>
       <ul className="mt-2 space-y-2">
         {apps.map((a) => (
           <ExternalAppRow key={a.key} app={a} />
@@ -496,14 +505,16 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </p>
       )}
       {app.info.status === 'untrusted' && app.projectId && (
-        <button
-          type="button"
-          className="mt-1.5 rounded-md border border-line bg-surface-floor px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+        <Button
+          variant="primary"
+          onRaised
+          size="sm"
+          className="mt-1.5"
           onClick={() => void trustProject(app.projectId!, true)}
           data-testid="external-app-trust"
         >
           Trust this project
-        </button>
+        </Button>
       )}
       {/* An imported app (M4 E-3) — where it came from, and, if it is waiting on the person's confirmation, the path to that confirmation */}
       {app.info.imported && (
@@ -512,9 +523,11 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </p>
       )}
       {app.info.status === 'unconfirmed' && (
-        <button
-          type="button"
-          className="mt-1.5 rounded-md border border-line bg-surface-floor px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+        <Button
+          variant="primary"
+          onRaised
+          size="sm"
+          className="mt-1.5"
           onClick={() => {
             toggleSettings(false)
             openApp(app.projectId, app.appId)
@@ -522,7 +535,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           data-testid="external-app-review"
         >
           Review and enable…
-        </button>
+        </Button>
       )}
       <SecretsLine app={app} />
       <ShareLine app={app} />
@@ -669,7 +682,9 @@ export function OrchestratorSkills() {
   if (skills.length === 0 && loaded.error === null) return null
   return (
     <div className="mt-5 border-t border-line pt-3" data-testid="orchestrator-skills">
-      <p className="readout text-2xs uppercase text-ink-faint">Approved skills</p>
+      <Badge as="p" readout>
+        Approved skills
+      </Badge>
       {loaded.error !== null && (
         <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} className="mt-2" testId="orchestrator-skills-failed" />
       )}
@@ -826,8 +841,9 @@ function OrchestratorSettings() {
               >
                 Cancel
               </button>
-              <button
-                className="rounded-md border border-line-strong px-2.5 py-1 text-sm text-ink hover:bg-surface-hover/50"
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={() => {
                   void apply(asking.name)
                   setAsking(null)
@@ -835,7 +851,7 @@ function OrchestratorSettings() {
                 data-testid="orchestrator-switch-confirm-btn"
               >
                 Switch
-              </button>
+              </Button>
             </div>
           </div>
         </Modal>
@@ -876,11 +892,13 @@ function SessionToolsSwitch() {
       />
       <label className="mt-4 flex items-center gap-2 text-sm text-ink-muted">
         Running agents per project
-        <input
+        <TextInput
           type="number"
           min={0}
           step={1}
-          className="w-20 rounded border border-line bg-surface-floor px-2 py-1"
+          size="sm"
+          text="sm"
+          className="w-20"
           data-testid="settings-agent-ceiling"
           value={ceiling ?? ''}
           placeholder="Default"

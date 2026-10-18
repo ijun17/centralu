@@ -2,6 +2,7 @@ import { deliver } from '../deliver.js'
 import type { TerminalPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { ProjectStore } from './project-store.js'
+import { mockError } from './mock-error.js'
 
 /** The mock terminal, behind the `terminal` port */
 export class TerminalsMock {
@@ -87,7 +88,7 @@ export class TerminalsMock {
           return { terminalId: t.id, cwd, title: t.title, history: t.history, alive: true }
         }
       }
-      throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
+      throw mockError('Terminal not found')
     },
     onOutput: (h: (e: { terminalId: string; data: string }) => void) => {
       this.termHandlers.add(h)

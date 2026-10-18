@@ -1,5 +1,6 @@
 import type { AppReview, AppUses } from '@cc/protocol'
 import { formatBytes } from '../../app/format.js'
+import { Badge } from '../../components/Badge.jsx'
 
 /**
  * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
@@ -122,7 +123,9 @@ const SKIP_WHY: Record<string, string> = {
 function Section({ title, testId, tone, children }: { title: string; testId: string; tone?: 'alert'; children: React.ReactNode }) {
   return (
     <section data-testid={testId} className={tone === 'alert' ? 'rounded-md border border-line bg-surface-raised px-2.5 py-2' : undefined}>
-      <p className={`readout mb-1 text-2xs uppercase ${tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}>{title}</p>
+      <Badge as="p" readout tone={tone === 'alert' ? 'ink' : 'faint'} className="mb-1">
+        {title}
+      </Badge>
       {children}
     </section>
   )
