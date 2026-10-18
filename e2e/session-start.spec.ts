@@ -130,24 +130,58 @@ test('the tool buttons switch the same session, keep a typed draft, and read tha
   await expect(page.getByTestId('past-conversation-ext-1')).toHaveCount(0)
 })
 
-for (const { status, reason } of [
-  { status: { installed: false, loggedIn: false }, reason: 'Codex is not installed' },
-  { status: { installed: true, loggedIn: false }, reason: 'Codex needs a login' },
+/*
+ * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not logged
+ * in there is left out rather than shown greyed, since the list of tools will grow. The session's own tool always
+ * stands; with one tool left there is nothing to switch to, and the switch goes.
+ */
+const codexAs = (page: Page, st: { installed: boolean; loggedIn: boolean }) =>
+  page.evaluate((s) => {
+    const m = (window as any).__mock
+    m.detected = m.detected.map((t: { name: string }) => (t.name === 'codex' ? { ...t, ...s } : t))
+  }, st)
+
+for (const { status, why } of [
+  { status: { installed: false, loggedIn: false }, why: 'not installed' },
+  { status: { installed: true, loggedIn: false }, why: 'logged out' },
 ]) {
-  test(`a tool that cannot run here is dimmed with its reason: ${reason}`, async ({ page }) => {
+  test(`a tool that cannot run here is not offered, and with one left there is no switch: ${why}`, async ({ page }) => {
     await setup(page, { projects: ['/tmp/alpha'] })
-    await page.evaluate((st) => {
-      const m = (window as any).__mock
-      m.detected = m.detected.map((t: { name: string }) => (t.name === 'codex' ? { ...t, ...st } : t))
-    }, status)
+    await codexAs(page, status)
     const id = await plus(page)
-    const codex = page.getByTestId('session-start-tool-codex')
-    await expect(codex).toBeDisabled()
-    await expect(codex).toHaveAttribute('title', reason)
-    await expect(page.getByTestId('session-start-tool-claude')).toBeEnabled()
+    await expect(page.getByTestId('session-start')).toBeVisible()
+    await expect(page.getByTestId('session-start-tools')).toHaveCount(0)
+    await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
     expect((await stored(page, id))?.tool).toBe('claude')
   })
 }
+
+test("the session's own tool stands even when it cannot run, beside the one that can", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await plus(page)
+  await page.getByTestId('session-start-tool-codex').click()
+  await expect.poll(async () => (await stored(page, id))?.tool).toBe('codex')
+  // Codex goes away on this machine; the empty screen asks again when the person comes back to it
+  await codexAs(page, { installed: false, loggedIn: false })
+  await plus(page)
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('session-start')).toBeVisible()
+  await expect(page.getByTestId('session-start-tool-codex')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('session-start-tool-claude')).toBeEnabled()
+})
+
+test('every tool is offered when the machine could not be asked', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await codexAs(page, { installed: false, loggedIn: false })
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.detect = async () => {
+      throw new Error('the machine did not answer')
+    }
+  })
+  await plus(page)
+  await expect(page.getByTestId('session-start-tool-claude')).toBeVisible()
+  await expect(page.getByTestId('session-start-tool-codex')).toBeEnabled()
+})
 
 test('the past conversations show their shape while they are read, for each tool picked', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
