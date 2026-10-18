@@ -37,12 +37,16 @@ const CommandRunnerOverlay = lazyComponent(() =>
  */
 export function SessionView() {
   const session = useFocusedSession()
+  // Until the host's first lists arrive nothing is said here (owner, 2026-10-18): the session being restored may be
+  // about to open, so "Select a project or session" would flash first. Once known, the line fades in.
+  const listed = useStore((s) => s.connection === 'connected' || Object.keys(s.sessions).length > 0)
 
   if (!session) {
+    if (!listed) return <div className="flex-1" data-testid="empty-focus-waiting" />
     // With a project picked and no session, App shows the project screen (ProjectView, #203) instead of this
     return (
       <div
-        className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+        className="cc-fade flex flex-1 flex-col items-center justify-center gap-3 text-center"
         data-testid="empty-focus"
       >
         <p className="text-md text-ink-muted">Select a project or session</p>
