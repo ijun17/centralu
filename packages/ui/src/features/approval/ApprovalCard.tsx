@@ -148,7 +148,7 @@ export function ApprovalCard({
       (white is what waits on the person), the kind as a capsule, and the answers on a plain footer below a hairline.
     */
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid="approval-card"
       data-keys={inComposer ? 'composer' : 'bare'}
     >
@@ -241,7 +241,7 @@ export function PermissionCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid={testId}
       data-kind="capability"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
@@ -286,7 +286,7 @@ function ProjectAccessCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_access"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
@@ -373,7 +373,7 @@ function AgentStartCard({
   const remote = !!detail.machine
   return (
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid="approval-card"
       data-kind="agent_start"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
@@ -456,7 +456,7 @@ function ProjectCreateCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_create"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}

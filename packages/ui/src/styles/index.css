@@ -258,15 +258,28 @@
   --leading-code: 1.5;
 
   /*
-   * Four radii. sm for small marks (14px chips, checkboxes, inline code), md for controls and
-   * cards, lg for panels and bubbles, full for pills and dots. A shape inside a bordered shape
-   * takes the outer radius minus the border (the folded composer's bottom corners), so it is
-   * written as a calc on the token rather than as its own step.
+   * The corners (docs/design-system.md, Shape). Each step is named for what takes it:
+   *   sm      3px   small marks: checkboxes, inline code
+   *   md      4px   controls, keycaps, tool tiles, a session's mark
+   *   lg      8px   panels, menus, dialogs, tool cards
+   *   field  10px   what is typed into or picked from: the top bar's search field, a question's options and its
+   *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
+   *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
+   *                 approval and question cards (owner, 2026-10-18: rounder than the panels, so a message reads as
+   *                 speech, not as a box)
+   *   full          capsules (the top bar's) and dots
+   * `field-key` is the keycap inside a field: the field's corner less the 5px gap around the key, so the two
+   * curves run parallel (the search field's ⌘K). Any other shape inside a bordered shape takes the outer radius
+   * minus the border, written as a calc on the token at its call site (the folded composer's bottom corners).
+   * tooling/styles.test.ts fails on a corner written as a number outside components/ and styles/.
    */
   --radius-*: initial;
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 8px;
+  --radius-field: 10px;
+  --radius-field-key: calc(var(--radius-field) - 5px);
+  --radius-bubble: 14px;
   --radius-full: calc(infinity * 1px);
 
   --font-weight-*: initial;
@@ -1184,7 +1197,7 @@
   height: 17px;
   min-width: 17px;
   width: auto;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-line-strong);
   background-color: var(--color-surface-floor);
   box-shadow: none;

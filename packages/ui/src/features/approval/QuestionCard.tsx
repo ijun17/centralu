@@ -129,7 +129,7 @@ export function QuestionCard({
 
   return (
     <div
-      className="overflow-hidden rounded-[14px] border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
       data-testid="question-card"
     >
       <div className="flex items-center gap-2 px-3 pt-3">
@@ -200,7 +200,7 @@ export function QuestionCard({
                       type="button"
                       data-testid="question-option"
                       onClick={() => pick(qi, o.label, q.multiSelect)}
-                      className={`rounded-[10px] border px-3 py-2 text-left transition-colors ${
+                      className={`rounded-field border px-3 py-2 text-left transition-colors ${
                         on
                           ? 'border-ink-signal bg-surface-selected'
                           : 'border-line hover:bg-surface-selected/50'
@@ -220,7 +220,7 @@ export function QuestionCard({
                   type="button"
                   data-testid="question-other"
                   onClick={() => toggleOther(qi, q.multiSelect)}
-                  className={`rounded-[10px] border px-3 py-2 text-left transition-colors ${
+                  className={`rounded-field border px-3 py-2 text-left transition-colors ${
                     otherOn[qi]
                       ? 'border-ink-signal bg-surface-selected'
                       : 'border-line hover:bg-surface-selected/50'
@@ -237,7 +237,7 @@ export function QuestionCard({
                     value={otherText[qi] ?? ''}
                     onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
                     placeholder="Type your answer"
-                    className="w-full resize-y rounded-[10px] border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink outline-none focus:border-ink-signal"
+                    className="w-full resize-y rounded-field border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink outline-none focus:border-ink-signal"
                   />
                 )}
               </div>
