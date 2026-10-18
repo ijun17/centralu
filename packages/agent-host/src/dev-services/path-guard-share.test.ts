@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /*
  * Every realpath the guard asks, so a test can see that a link was never followed: following one that leads to a share
@@ -36,22 +37,48 @@ const { assertExistingPath, assertExistingPathSync, UnsafePathError } = await im
  * sign-in before the guard refused it. A repository can carry such a symlink (git makes one where symlinks are on).
  * The links here name this machine's own administrative share, so the old guard reached only localhost.
  */
+/** The 8.3 short name Windows gave `path`'s last name, or that name itself on a volume that makes none */
+const shortName = (path: string) =>
+  basename(
+    spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], {
+      windowsVerbatimArguments: true,
+      encoding: 'utf8',
+    }).stdout.trim(),
+  )
+
 /*
- * Not under the system's temporary folder (#368): the walk lists every folder from the drive down, so each walk here
- * listed it, over SMB for a project opened from a share, and a link spelled with the short name of a folder in it had
- * its entries asked one by one. A developer's machine where many sessions run tests holds thousands of entries there,
- * changing all the time (5,860 on one; a CI runner's is nearly empty), and these tests timed out at 15 s there, alone
- * as well. This folder and those above it hold a few dozen entries that nothing else changes while the tests run.
+ * Where the tests make their folders (#368). The walk lists every folder from the drive down, so each walk here listed
+ * the system's temporary folder, over SMB for a project opened from a share, and a link spelled with the short name of
+ * a folder in it had its entries asked one by one. A developer's machine where many sessions run tests holds thousands
+ * of entries there, changing all the time (5,860 on one), and these tests timed out at 15 s there, alone as well. So
+ * they use a folder of the checkout whose ancestors hold a few dozen entries that nothing else changes.
+ *
+ * Only on a volume that makes 8.3 short names, which the short-name cases need: a CI runner's checkout is on D:, which
+ * makes none, while its temporary folder is on C:, which does, and is nearly empty. There they use the temporary
+ * folder, as before. A machine where neither makes short names fails the short-name cases' own check.
  */
-const QUIET = fileURLToPath(new URL('../../node_modules/.cache/path-guard-share/', import.meta.url))
+function fixtureParent(): string {
+  if (process.platform !== 'win32') return tmpdir()
+  const quiet = fileURLToPath(new URL('../../node_modules/.cache/path-guard-share/', import.meta.url))
+  mkdirSync(quiet, { recursive: true })
+  const probe = mkdtempSync(join(quiet, 'a-long-name-for-a-short-name-'))
+  try {
+    return shortName(probe) === basename(probe) ? tmpdir() : quiet
+  } finally {
+    rmdirSync(probe)
+  }
+}
 
 describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the path guard', () => {
   let top: string
   let root: string
   const links: string[] = []
+  let parent: string
+  beforeAll(() => {
+    parent = fixtureParent()
+  })
   beforeEach(() => {
-    mkdirSync(QUIET, { recursive: true })
-    top = realpathSync.native(mkdtempSync(join(QUIET, 'guard-share-')))
+    top = realpathSync.native(mkdtempSync(join(parent, 'cc-guard-share-')))
     root = join(top, 'project')
     mkdirSync(join(root, 'inside'), { recursive: true })
     writeFileSync(join(root, 'inside', 'a.txt'), 'inside')
@@ -67,14 +94,6 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
     symlinkSync(target, join(root, name), type)
     if (type !== 'file') links.push(join(root, name))
   }
-  const shortName = (path: string) =>
-    basename(
-      spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], {
-        windowsVerbatimArguments: true,
-        encoding: 'utf8',
-      }).stdout.trim(),
-    )
-
   it('refuses it without following it, on the async walk and on the sync one, however the link is reached', async () => {
     const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
     const volume = execFileSync(mountvol, [top.slice(0, 2), '/L'], { encoding: 'utf8' }).trim()
