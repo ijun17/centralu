@@ -1,6 +1,6 @@
 import type { NormalizedEvent, RequestInput, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
-import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
+import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
@@ -9,7 +9,7 @@ import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import { str, type Json } from './json.js'
-import { assistantEvents, backgroundLaunch, streamEventEvents, userEvents } from './model-messages.js'
+import { assistantEvents, backgroundLaunch, requestInputTokens, streamEventEvents, userEvents } from './model-messages.js'
 import { ClaudeTaskPlan } from './task-plan.js'
 import { agentReport, agentStats, approvalDetail, editedPaths, toolSummary } from './tool-summary.js'
 import { rateLimitEvents, resultEvents } from './turn-ending.js'
@@ -346,9 +346,7 @@ export class ClaudeStreamNormalizer {
     this.requestsSeen.push(id)
     if (this.requestsSeen.length > 32) this.requestsSeen.shift()
     const request: RequestInput = {
-      inputTokens: tokenCount(usage.input_tokens),
-      cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
-      cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
+      ...requestInputTokens(usage),
       ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
       ...ttlOf(usage.cache_creation),
     }

@@ -11,7 +11,7 @@ import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 /*
  * The worktree code over a host it reaches only through `WorktreeHost` (#428): the refusals before anything is checked
  * out, and which sessions a cleanup under way holds still. Checking out, setting up and cleaning up are covered over
- * the real manager (manager.test.ts, worktree sessions).
+ * the real manager (manager-worktree.test.ts, worktree sessions).
  */
 
 let root: string

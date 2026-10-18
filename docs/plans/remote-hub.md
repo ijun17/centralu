@@ -854,7 +854,7 @@ real router and qualifier between them: the hub's door and CSP, four apps named 
 origins, the machine's answer checked, a hub that never gave the address out serving it, away, older and unlinked
 machines), `links/router.test.ts` (each view call and the `machine` parameter), `app-home-view.test.ts`
 (`apps.viewDocument` against a real app process), the window's keys and status (`app-catalog.test.ts`,
-`store.test.ts`), and e2e on the linked-hosts rig (`e2e/fixtures/linked-hosts-ui-scenarios.ts`).
+`store-apps.test.ts`), and e2e on the linked-hosts rig (`e2e/fixtures/linked-hosts-ui-scenarios.ts`).
 
 ### 11.7 Decided (owner, 2026-10-11)
 
@@ -910,7 +910,7 @@ pinned view shows all its panels, and Restart restarts it there. Remove was left
 machine, and would have removed this computer's app of the same id (§11.10 adds it).
 
 Tested: `links/router.test.ts` (each call sent by `machine`, the hub's own without it, the runs qualified, a builder
-asked from a view naming one machine), `store.test.ts` (Restart passes the machine), and the linked-hosts e2e in
+asked from a view naming one machine), `store-apps.test.ts` (Restart passes the machine), and the linked-hosts e2e in
 Chromium and WebKit (the machine's `notes` lists its own runs and asks that machine for its versions; this computer's
 `notes` lists none of them).
 
@@ -927,7 +927,7 @@ Settings → Apps did not list a machine's user-folder apps at all before this: 
 under its name, and the question before Remove names the machine and says this computer's apps are not touched.
 
 Tested: `links/router.test.ts` (removed on the named machine only, the hub's own without `machine`, an unlinked machine
-refused), `store.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
+refused), `store-apps.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
 `notes` on the grid and in pinned views, removing the machine's from Settings moves that machine's folder away and leaves
 this computer's folder, row, pinned view and grid panel as they were, while the machine's row, view and panel go.
 

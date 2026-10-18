@@ -8,7 +8,7 @@ import { newSession, setup } from './fixtures/project-screen.js'
  */
 
 /** Makes one port call fail until the returned function is called */
-async function failing(page: Page, port: 'git' | 'rules', method: string, message: string): Promise<() => Promise<void>> {
+async function failing(page: Page, port: 'git' | 'rules' | 'agents', method: string, message: string): Promise<() => Promise<void>> {
   await page.evaluate(
     ([port, method, message]) => {
       const target = (window as any).__mock[port]
@@ -88,4 +88,68 @@ test('a refresh of the changes that fails keeps the last list, with the error be
   })
   await expect(page.getByTestId('evidence-git-failed')).toContainText('git did not answer')
   await expect(page.getByTestId('evidence-git').getByText('a.ts')).toBeVisible()
+})
+
+test('the intro says a failed tool check failed, not that no tool is ready', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro-card-claude')).toBeVisible()
+  const heal = await failing(page, 'agents', 'detect', 'detect did not answer')
+  await page.getByTestId('redetect').click()
+
+  await expect(page.getByTestId('intro-detect-failed')).toContainText('detect did not answer')
+  await expect(page.getByTestId('intro-blocked')).toHaveCount(0)
+  // The last answer stays: a card that was ready is still there to pick
+  await expect(page.getByTestId('intro-card-claude')).toBeEnabled()
+
+  await heal()
+  await page.getByTestId('redetect').click()
+  await expect(page.getByTestId('intro-detect-failed')).toHaveCount(0)
+})
+
+test('the new session dialog says a failed tool check failed, and does not call the tool missing', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const heal = await failing(page, 'agents', 'detect', 'detect did not answer')
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('new-session-alpha').click()
+
+  await expect(page.getByTestId('tool-detect-failed')).toContainText('detect did not answer')
+  await expect(page.getByTestId('tool-blocked')).toHaveCount(0)
+  await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
+
+  await heal()
+  await page.getByTestId('tool-detect-failed-retry').click()
+  await expect(page.getByTestId('tool-detect-failed')).toHaveCount(0)
+})
+
+test('the branches view says a failed read of the branches failed, not that there are none', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.branches = [{ name: 'main', current: true, remote: false }]
+  })
+  await newSession(page, 'alpha')
+  const heal = await failing(page, 'git', 'branches', 'git branch did not answer')
+  await page.getByTestId('evidence-branch').click()
+
+  await expect(page.getByTestId('git-branches-failed')).toContainText('git branch did not answer')
+  await expect(page.getByTestId('branches-local')).toHaveCount(0)
+
+  await heal()
+  await page.getByTestId('git-branches-failed-retry').click()
+  await expect(page.getByTestId('git-branches-failed')).toHaveCount(0)
+  await expect(page.getByTestId('branches-local').getByTestId('branch-main')).toBeVisible()
+})
+
+test('a commit whose read fails says so, rather than asking to pick the commit just picked', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.commits = [
+      { sha: 'aaa111', shortSha: 'aaa111', subject: 'First commit', author: 'me', when: Date.now(), parents: [] },
+    ]
+  })
+  await newSession(page, 'alpha')
+  await failing(page, 'git', 'commitDetail', 'git show did not answer')
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa111').click()
+
+  await expect(page.getByTestId('toast')).toContainText('Could not load the commit: git show did not answer')
 })

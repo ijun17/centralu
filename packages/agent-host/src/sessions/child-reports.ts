@@ -14,15 +14,17 @@ import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
+import { callForm } from './tool-seats.js'
+import type { RoutedCardsHost } from './routed-cards.js'
 import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 
 /** The first line of a report held over the session's own background work (#721) */
-function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean): string {
+function pausedReportLine(running: readonly BackgroundTask[], stop: string | undefined): string {
   return (
     `[Centralu] The assigned work paused: its turn ended while its own background work is still running (${taskList(running)}). ` +
     'If that work is a server or watcher it leaves running, the answer below may be its final one. ' +
     'A final report follows only if that work ends' +
-    (stoppable ? '; agent_session(action="stop") on it stops that work and ends the wait.\n' : '.\n')
+    (stop ? `; ${stop} on it stops that work and ends the wait.\n` : '.\n')
   )
 }
 /**
@@ -58,6 +60,7 @@ function settledReportLine(tasks: readonly BackgroundTask[]): string {
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'handingOver' | 'meta' | 'store' | 'trashing'> &
+  Pick<RoutedCardsHost, 'toolProfileOf'> &
   Pick<RestartHost, 'inputsHeld'> &
   Pick<QueuedRequestsHost, 'projectRow'>
 
@@ -234,7 +237,7 @@ export class ChildReports {
     const outcome =
       work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused)
-      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable)
+      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined)
       : work && 'settled' in work ? settledReportLine(work.settled)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
@@ -278,9 +281,19 @@ export class ChildReports {
     // Counted as agent_session list counts them (own-agents.ts), so the number matches what list shows
     const others = ownAgents(this.host, parentId).filter((s) => s.id !== childId && agentState(this.host, s) === 'finished').length
     return (
-      `\n${cleanUpLine(childId)}` +
-      (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: agent_session(action="list") shows them.` : '')
+      `\n${cleanUpLine(childId, this.agentCall(parentId, { sessionId: childId, action: 'delete' }))}` +
+      (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: ${this.agentCall(parentId, { action: 'list' })} shows them.` : '')
     )
+  }
+
+  /**
+   * An agent_session call a report names, in the form its receiver calls it (#850): the orchestrator reaches agent_session
+   * only through centralu_run in the `commands` tier, where the bare call it would copy from the report is refused. A
+   * seat without the tool keeps the bare form the reports always named.
+   */
+  private agentCall(receiverId: string, args: Record<string, string>): string {
+    const bare = `agent_session(${Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`
+    return callForm(this.host.toolProfileOf(receiverId), 'agent_session', args) ?? bare
   }
 
   /**

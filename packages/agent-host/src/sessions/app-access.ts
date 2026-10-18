@@ -1,4 +1,4 @@
-import type { ExternalAppInfo } from '@cc/protocol'
+import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
@@ -100,7 +100,7 @@ export type AttachOutcome =
 export type DetachOutcome = { ok: true; server: string; when: 'now' | 'next_turn' } | { ok: false; error: string }
 
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
-const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${ref.projectId}/${ref.appId}`
+const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref.projectId, ref.appId)}`
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 /** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
@@ -290,7 +290,7 @@ export class AppAccess implements OnDemandApps {
   }
 
   private match(mine: Record_[], ref: string): Record_ | undefined {
-    return mine.find((r) => r.server === ref || this.refOf(r) === ref || (r.projectId !== null && `${r.projectId}/${r.appId}` === ref)) ?? mine.find((r) => r.appId === ref)
+    return mine.find((r) => r.server === ref || this.refOf(r) === ref || (r.projectId !== null && appKeyOf(r.projectId, r.appId) === ref)) ?? mine.find((r) => r.appId === ref)
   }
 
   private describe(a: ExternalAppInfo): FoundApp {
