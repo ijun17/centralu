@@ -265,8 +265,9 @@
    *   field  10px   what is typed into or picked from: the top bar's search field, a question's options and its
    *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
    *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
-   *                 approval and question cards (owner, 2026-10-18: rounder than the panels, so a message reads as
-   *                 speech, not as a box)
+   *                 approval and question cards, and the conversation's own cards (a new session's past
+   *                 conversations) (owner, 2026-10-18: rounder than the panels, so a message reads as speech, not
+   *                 as a box)
    *   full          capsules (the top bar's) and dots
    * `field-key` is the keycap inside a field: the field's corner less the 5px gap around the key, so the two
    * curves run parallel (the search field's ⌘K). Any other shape inside a bordered shape takes the outer radius
