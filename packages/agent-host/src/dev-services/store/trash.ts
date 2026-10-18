@@ -5,6 +5,7 @@ import { indexedText } from './search-index.js'
 import { type SessionRecords } from './sessions.js'
 import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
+import { SESSION_SETTING_OF } from './settings.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -147,6 +148,10 @@ export class TrashRecords {
    * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
    * transaction as the last chunk, so a purge cut short leaves the session in the trash with fewer messages, to be
    * purged again, and never messages without a session.
+   *
+   * The settings kept per session go too, all of them by their shape (`SESSION_SETTING_OF`) rather than by name: the
+   * purge used to name two of them, and every key added since stayed behind for good (a process's tool prefix and launch
+   * settings, its fresh-start mark, its last import, a paused report).
    */
   async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
     if (!this.isTrashed(sessionId)) return false
@@ -176,10 +181,8 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      // The depth it was started at (#867, `agentDepthKey` in sessions/agent-depth.ts)
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`agent_depth:${sessionId}`)
-      // A hub's task mark (#838, `hubAskDepthKey`)
-      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`hub_ask_depth:${sessionId}`)
+      // Every setting kept for it (`<name>:<sessionId>`, `SESSION_SETTING_OF` in store/settings.ts)
+      this.db.prepare(`DELETE FROM app_settings WHERE ${SESSION_SETTING_OF}`).run({ sessionId })
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })

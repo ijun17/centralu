@@ -2781,6 +2781,10 @@ the same way: JSON rows in `app_settings`, files in the data folder, files a per
 the lines and frames between processes. An older and a newer build read each of them during a host swap, after a
 person goes back a release, and between two machines on different releases.
 
+A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
+`tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
+`purgeSession`), so a new per-session key needs no line in the purge.
+
 The rules for every shape:
 
 - **A field added:** an older reader ignores it, and, where it writes the record back, keeps it.
