@@ -249,6 +249,26 @@ describe('consent per pair of projects', () => {
 })
 
 describe('how long an attachment lasts', () => {
+  /*
+   * The row is read and written by more than one build (#384). An attachment a newer build stored with a consent this
+   * one does not know is not used (a consent that cannot be read grants nothing), and it used to be dropped by the next
+   * attach or detach, which rewrote the list with only what this build could read.
+   */
+  it('an attachment stored with a consent this build does not know grants nothing, and is kept through an attach and a detach', async () => {
+    session('w1', 'p1')
+    const newer = { projectId: 'p2', appId: 'secret', server: 'app-secret', consent: 'standing' }
+    w.store.settings.setAppSetting('session_apps:w1', JSON.stringify([newer]))
+    access.dispose()
+    access = newAccess()
+    expect(access.attached('w1')).toEqual([])
+
+    await access.attach('w1', 'Beta/board')
+    expect(access.attached('w1')).toEqual([{ ref: { projectId: 'p2', appId: 'board' }, server: 'app-board' }])
+    expect(JSON.parse(w.store.settings.appSetting('session_apps:w1')!)).toContainEqual(newer)
+    access.detach('w1', 'Beta/board')
+    expect(JSON.parse(w.store.settings.appSetting('session_apps:w1')!)).toEqual([newer])
+  })
+
   it('outlives the host process (kept in the store) and goes when the session is deleted', async () => {
     session('w1', 'p1')
     await access.attach('w1', 'Beta/board')
