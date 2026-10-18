@@ -1,4 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
+import { newSession as openSession } from './control.js'
+
+/** A new session in `project` with no first instruction (fixtures/control.ts), once its view is up and has the keyboard */
+async function newSession(page: Page, project: string): Promise<string> {
+  const id = await openSession(page, project)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+  return id
+}
 
 /**
  * Another project's app tools, on demand (#371 part A) — what a person sees and clicks: the per-app
@@ -48,14 +56,6 @@ async function addProject(page: Page, path: string): Promise<string> {
     (p) => (Object.values((window as any).__store.getState().projects) as { id: string; path: string }[]).find((x) => x.path === p)!.id,
     path,
   )
-}
-
-async function newSession(page: Page, project: string): Promise<string> {
-  await page.getByTestId(`project-menu-${project}`).click()
-  await page.getByTestId(`new-session-${project}`).click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('session-view')).toBeVisible()
-  return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }
 
 const sharedWrites = (page: Page) => page.evaluate(() => (window as any).__mock.sharedWrites as { appId: string; projectId: string; shared: boolean }[])
