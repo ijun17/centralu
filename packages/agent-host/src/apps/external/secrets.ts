@@ -173,3 +173,14 @@ export function redactor(secrets: Record<string, string>): (text: string) => str
     return out
   }
 }
+
+/**
+ * An error the app raised, with its message masked (#1142). The same error when nothing in it needed masking;
+ * otherwise a new one under the same name, since the stack of the original holds the unmasked message too.
+ */
+export function maskedError(err: unknown, redact: (text: string) => string): Error {
+  if (!(err instanceof Error)) return new Error(redact(String(err)))
+  const message = redact(err.message)
+  if (message === err.message) return err
+  return Object.assign(new Error(message), { name: err.name })
+}

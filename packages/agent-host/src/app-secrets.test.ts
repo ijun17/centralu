@@ -269,4 +269,17 @@ describe('the value is left nowhere inside the host', () => {
     expect(listed.text).toContain('could not list tools again with API_KEY=[redacted:API_KEY]')
     expect(JSON.stringify(listed)).not.toContain(VALUE)
   })
+  // #1142: a screen read that fails goes on to the UI and over the linked-machine relay (apps.readResource, apps.viewDocument)
+  it('a resource read that fails with the value in its error reaches the caller with the name of the secret', async () => {
+    plant(['--leak-read'])
+    make()
+    await setSecret('API_KEY', VALUE)
+    const failure = await rt.readResource(ref, 'ui://keys/index.html').then(
+      () => null,
+      (e: unknown) => e as Error,
+    )
+    expect(failure?.message).toContain('upstream refused API_KEY=[redacted:API_KEY]')
+    expect(failure?.message).not.toContain(VALUE)
+    expect(failure?.stack).not.toContain(VALUE)
+  })
 })
