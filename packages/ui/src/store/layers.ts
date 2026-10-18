@@ -43,3 +43,21 @@ export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
 export function dialogOpen(st: Pick<CoveringLayers, 'openLayers' | 'settingsOpen' | 'usageOpen'>): boolean {
   return st.openLayers > 0 || st.settingsOpen || st.usageOpen
 }
+
+/** The windows that cover the whole screen and are not counted in `openLayers` */
+export type WindowLayers = Pick<CoveringLayers, 'paletteOpen' | 'settingsOpen' | 'usageOpen' | 'inboxOpen'>
+
+/**
+ * Whether a window that covers the screen opened between two states: the palette, the inbox, settings or usage. A
+ * popover that was open under it goes (`useDismiss`): it keeps nothing the person can still reach, and its Escape,
+ * claimed on the window before the window under it hears the key, would close the hidden popover instead of the window
+ * on top.
+ */
+export function coveringLayerOpened(prev: WindowLayers, next: WindowLayers): boolean {
+  return (
+    (next.paletteOpen && !prev.paletteOpen) ||
+    (next.settingsOpen && !prev.settingsOpen) ||
+    (next.usageOpen && !prev.usageOpen) ||
+    (next.inboxOpen && !prev.inboxOpen)
+  )
+}

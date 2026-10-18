@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 56, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 59, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -51,6 +51,42 @@ erDiagram
     TEXT result
     INTEGER created_at
   }
+  app_run_messages {
+    TEXT run_id PK
+    INTEGER seq PK
+    TEXT role
+    TEXT kind
+    TEXT payload
+    INTEGER ts
+  }
+  app_run_records {
+    TEXT run_id PK
+    TEXT project_id
+    TEXT project_name
+    TEXT app_id
+    TEXT app_name
+    TEXT session_id
+    TEXT session_name
+    TEXT tool
+    TEXT status
+    INTEGER duration_ms
+    INTEGER tokens_in
+    INTEGER tokens_out
+    TEXT request
+    TEXT answer
+    TEXT output
+    INTEGER started_at
+    INTEGER kept_at
+  }
+  app_run_subagent_messages {
+    TEXT run_id PK
+    TEXT parent_call_id PK
+    INTEGER seq PK
+    TEXT role
+    TEXT kind
+    TEXT payload
+    INTEGER ts
+  }
   app_runs {
     TEXT id PK
     TEXT project_id
@@ -69,6 +105,9 @@ erDiagram
     TEXT session_id
     INTEGER tokens_in
     INTEGER tokens_out
+    TEXT request
+    TEXT answer
+    TEXT output
   }
   app_settings {
     TEXT key PK
@@ -129,6 +168,7 @@ erDiagram
     INTEGER slot
     INTEGER added_at
     TEXT accepted_versions
+    TEXT connect
   }
   machine_headers {
     TEXT machine_id PK, FK
@@ -229,6 +269,7 @@ erDiagram
     TEXT kind
     TEXT payload
     INTEGER ts
+    INTEGER trashed_at
   }
   workspace {
     INTEGER id PK
@@ -277,6 +318,61 @@ Added in v34.
 | `result` | TEXT | yes |  |  | v34 |
 | `created_at` | INTEGER | no |  |  | v34 |
 
+### `app_run_messages`
+
+Added in v57.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | no |  | PK 1 | v57 |
+| `seq` | INTEGER | no |  | PK 2 | v57 |
+| `role` | TEXT | no |  |  | v57 |
+| `kind` | TEXT | no |  |  | v57 |
+| `payload` | TEXT | no |  |  | v57 |
+| `ts` | INTEGER | no |  |  | v57 |
+
+### `app_run_records`
+
+Added in v57.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | yes |  | PK | v57 |
+| `project_id` | TEXT | yes |  |  | v57 |
+| `project_name` | TEXT | yes |  |  | v57 |
+| `app_id` | TEXT | no |  |  | v57 |
+| `app_name` | TEXT | no |  |  | v57 |
+| `session_id` | TEXT | no |  |  | v57 |
+| `session_name` | TEXT | no |  |  | v57 |
+| `tool` | TEXT | no |  |  | v57 |
+| `status` | TEXT | no |  |  | v57 |
+| `duration_ms` | INTEGER | yes |  |  | v57 |
+| `tokens_in` | INTEGER | yes |  |  | v57 |
+| `tokens_out` | INTEGER | yes |  |  | v57 |
+| `request` | TEXT | no |  |  | v57 |
+| `answer` | TEXT | no |  |  | v57 |
+| `output` | TEXT | yes |  |  | v57 |
+| `started_at` | INTEGER | no |  |  | v57 |
+| `kept_at` | INTEGER | no |  |  | v57 |
+
+Indexes:
+
+- `idx_app_run_records_app`: `app_id`, `project_id`, `started_at`
+
+### `app_run_subagent_messages`
+
+Added in v57.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `run_id` | TEXT | no |  | PK 1 | v57 |
+| `parent_call_id` | TEXT | no |  | PK 2 | v57 |
+| `seq` | INTEGER | no |  | PK 3 | v57 |
+| `role` | TEXT | no |  |  | v57 |
+| `kind` | TEXT | no |  |  | v57 |
+| `payload` | TEXT | no |  |  | v57 |
+| `ts` | INTEGER | no |  |  | v57 |
+
 ### `app_runs`
 
 Added in v34.
@@ -300,6 +396,9 @@ Added in v34.
 | `session_id` | TEXT | yes |  |  | v37 |
 | `tokens_in` | INTEGER | yes |  |  | v38 |
 | `tokens_out` | INTEGER | yes |  |  | v38 |
+| `request` | TEXT | yes |  |  | v57 |
+| `answer` | TEXT | yes |  |  | v57 |
+| `output` | TEXT | yes |  |  | v57 |
 
 Indexes:
 
@@ -405,6 +504,7 @@ Added in v46.
 | `slot` | INTEGER | no |  |  | v46 |
 | `added_at` | INTEGER | no |  |  | v46 |
 | `accepted_versions` | TEXT | yes |  |  | v46 |
+| `connect` | TEXT | yes |  |  | v59 |
 
 ### `machine_headers`
 
@@ -554,6 +654,11 @@ Added in v41.
 | `kind` | TEXT | no |  |  | v41 |
 | `payload` | TEXT | no |  |  | v41 |
 | `ts` | INTEGER | no |  |  | v41 |
+| `trashed_at` | INTEGER | yes |  |  | v58 |
+
+Indexes:
+
+- `subagent_messages_trash`: `session_id`, `trashed_at`, `parent_call_id`
 
 ### `workspace`
 

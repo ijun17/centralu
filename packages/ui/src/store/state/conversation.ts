@@ -9,6 +9,9 @@ import type { ChatAttachment, ChatItem } from '../transcript.js'
 export type Draft = { text: string; attachments: ChatAttachment[] }
 export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
 
+/** A draft whose session is gone (`ConversationSlice.keptDrafts`); `name` is the session's, when the window knew it */
+export type KeptDraft = { sessionId: string; name: string | null; text: string }
+
 /**
  * One launch card's subagent steps on screen (#222).
  *
@@ -18,7 +21,11 @@ export const EMPTY_DRAFT: Draft = { text: '', attachments: [] }
  *   loading  a page is being read
  *   error    why the last read failed, shown in place of the steps
  */
-export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null }
+/**
+ * A launch card's steps as the window holds them (#222). `trashed`: how many of them are in the trash without their
+ * session (#418), read with the first page; absent until then, and from a host before it.
+ */
+export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null; trashed?: number }
 
 /** One conversation on screen: transcript, drafts, scroll position, history paging, sending and answering. */
 export type ConversationSlice = {
@@ -36,6 +43,13 @@ export type ConversationSlice = {
    * being closed and reopened.
    */
   drafts: Record<string, Draft>
+  /**
+   * What was being written in a session that is gone (#378 review), oldest first, until the person copies it or puts it
+   * away. A session leaves the window without the person asking too: the host deletes an app's agent session once its
+   * run is over, and a message that failed to send was put back in the draft just before. Its draft went with it
+   * (`forgetSessions`). The text only: attachments were files saved under the session, which went with it.
+   */
+  keptDrafts: KeptDraft[]
   /**
    * Whether a conversation was left standing at its newest line — **per session** (#31).
    *
@@ -120,6 +134,12 @@ export type ConversationSlice = {
   /** Reads the next page of a launch card's steps */
   loadMoreSubagentSteps(sessionId: string, callId: string): Promise<void>
   /**
+   * Moves a session's subagent steps to the trash, or puts them back (#418), and has its launch cards read them again:
+   * an open card reads at once, a closed one when it is opened. Returns an error message, or null when it is done.
+   */
+  trashSubagentSteps(sessionId: string): Promise<string | null>
+  restoreSubagentSteps(sessionId: string): Promise<string | null>
+  /**
    * Approval requests that have had a response sent but not yet answered (#158) — `inFlightKey(sessionId, requestId)`
    * → `true`. Keyed by the session too (#683 review): a request id is unique only within a session's process, so two
    * sessions can hold the same one, and an answer in one must not be dropped as a repeat of the other's. If a second input arrives on the same card (two key presses, the card and the rail)
@@ -167,6 +187,8 @@ export type ConversationSlice = {
   requestSettingsMenu(sessionId: string): void
   /** Attaches something not yet sent to a session (removed if it is empty) */
   setDraft(sessionId: string, draft: Draft): void
+  /** Puts away a kept draft (`keptDrafts`), once copied or not wanted */
+  dismissKeptDraft(sessionId: string): void
   /** Remember whether the conversation was left at its newest line (#31) */
   setStickToBottom(sessionId: string, sticking: boolean): void
   /** Records the row that was showing when it was left (#61). `null` clears it — meaning it was at the bottom */

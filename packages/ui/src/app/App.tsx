@@ -18,6 +18,7 @@ import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
+import { KeptDraftCard } from '../features/session/KeptDraft.jsx'
 import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { PinnedApps } from '../features/pinned-app/PinnedApps.jsx'
@@ -30,6 +31,7 @@ import { useSearchReserve } from './useSearchReserve.js'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
+import { useMachineNeeds } from '../features/machines/useMachineNeeds.js'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
@@ -59,6 +61,8 @@ export function App({
 }) {
   const attach = useStore((s) => s.attach)
   const setAppFocused = useStore((s) => s.setAppFocused)
+  // The linked machines that connect when needed, while one of their projects or sessions is open here (#1134)
+  useMachineNeeds()
 
   useEffect(() => {
     void attach(platform)
@@ -288,6 +292,7 @@ export function App({
           </OnceOpened>
           <ImportAppDialog />
           <Gust />
+          <KeptDraftCard />
           <Toast />
           <GlobalKeys />
         </div>

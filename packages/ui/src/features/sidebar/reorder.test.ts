@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dropsBefore, moveTo } from './reorder.js'
+import { dropsBefore, moveTo, projectOrderAfterDrop } from './reorder.js'
 
 describe('moveTo', () => {
   const ids = ['a', 'b', 'c', 'd']
@@ -48,5 +48,23 @@ describe('dropsBefore', () => {
 
   it('is after exactly in the middle — the boundary has to fall on one fixed side so the hand can predict it', () => {
     expect(dropsBefore(rect, 110)).toBe(false)
+  })
+})
+
+describe('projectOrderAfterDrop (#1038)', () => {
+  // m1's project lists a child that this computer ran for one of its sessions: another computer's session in the rows
+  const rows = [
+    { id: 'm1.a', projectId: 'm1.p' },
+    { id: 'c1', projectId: 'p-here' },
+    { id: 'm1.b', projectId: 'm1.p' },
+    { id: 'm1.c', projectId: 'm1.p' },
+  ]
+
+  it('sends only the sessions of the project itself', () => {
+    expect(projectOrderAfterDrop(rows, 'm1.p', 'm1.c', 'm1.a', true)).toEqual(['m1.c', 'm1.a', 'm1.b'])
+  })
+
+  it('sends the list unchanged for a drop on a row of another project', () => {
+    expect(projectOrderAfterDrop(rows, 'm1.p', 'm1.c', 'c1', true)).toEqual(['m1.a', 'm1.b', 'm1.c'])
   })
 })

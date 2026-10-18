@@ -171,6 +171,26 @@ describe('background work across a host swap (#648)', () => {
     expect(await b.mgr.sleepSession(id)).toBe(true)
   })
 
+  /*
+   * A record that does not read (#384), cut short or in a newer build's shape, used to read as "nothing running": a
+   * process the next host adopted was then free to sleep, and `close()` kills its shells silently. A record this build
+   * cannot read is no record: unknown until the tool lists its work.
+   */
+  it.each([
+    ['is not JSON', '[{"id":"dev","status":"runn'],
+    ['is not a list', '{"dev":"running"}'],
+    ['holds a task this build cannot read', JSON.stringify([{ id: 'dev', status: 'paused-by-a-newer-build' }])],
+  ])('a record that %s is held as unknown, not as nothing running', async (_label, record) => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    store.settings.setAppSetting(`background_tasks:${id}`, record)
+
+    const b = host(new Set([id]))
+    await adopt(b, id)
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(await b.mgr.sleepSession(id)).toBe(false)
+  })
+
   it('an unknown state is bounded by quiet: after two hours without a word the session is taken as holding nothing, and recorded', async () => {
     const a = host()
     const id = await sessionWithShell(a)

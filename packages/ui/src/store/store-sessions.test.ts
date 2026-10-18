@@ -353,6 +353,56 @@ describe('a session deleted while awaited is never revived (#163)', () => {
       undefined, undefined, undefined, undefined, undefined,
     ])
   })
+
+  // #378 review: the host deletes an app's agent session once its run is over, and the draft went with it
+  it('a draft with words in it survives its session\'s deletion, to be copied', () => {
+    const id = 'del-draft-378'
+    useStore.setState({
+      sessions: { [id]: { ...sessionInfo(id, { name: 'Notes · agent 10:02', appId: 'notes' }) } as never, empty: { ...sessionInfo('empty') } as never },
+      drafts: { [id]: { text: 'and also check the\nsecond list', attachments: [] }, empty: { text: '   ', attachments: [] } },
+    })
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: id } as NormalizedEvent)
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: 'empty' } as NormalizedEvent)
+
+    expect(useStore.getState().drafts[id]).toBeUndefined()
+    expect(useStore.getState().keptDrafts).toEqual([{ sessionId: id, name: 'Notes · agent 10:02', text: 'and also check the\nsecond list' }])
+    useStore.getState().dismissKeptDraft(id)
+    expect(useStore.getState().keptDrafts).toEqual([])
+  })
+
+  it('a message that failed to send and went back to the draft survives the session\'s deletion', async () => {
+    const s = 'del-sent-378'
+    const mock = new MockPlatform()
+    mock.sessions.set(s, sessionInfo(s, { appId: 'notes' }))
+    await useStore.getState().attach(mock)
+    vi.spyOn(mock.agents, 'send').mockRejectedValue(new Error('The session was deleted'))
+
+    await useStore.getState().send(s, 'a sentence that must not be lost')
+    expect(useStore.getState().drafts[s]?.text).toBe('a sentence that must not be lost')
+    useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: s } as NormalizedEvent)
+
+    expect(useStore.getState().keptDrafts.map((d) => d.text)).toEqual(['a sentence that must not be lost'])
+  })
+})
+
+/*
+ * An app's agent session the person opens stays theirs (#378 review). The host hears "opened" through markRead, which
+ * the window skipped with nothing unread: the app's request is read as it arrives, so a fresh app-agent session opened
+ * that way told the host nothing, and a short run deleted it under the person's eyes.
+ */
+describe('an app-agent session on screen', () => {
+  it('tells the host it is open even with nothing unread, without moving the read position', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('open-378', sessionInfo('open-378', { appId: 'notes', lastSeq: 1, lastReadSeq: 1 }))
+    mock.sessions.set('plain-378', sessionInfo('plain-378', { lastSeq: 1, lastReadSeq: 1 }))
+    await useStore.getState().attach(mock)
+    const marked = vi.spyOn(mock.agents, 'markRead')
+
+    await useStore.getState().markOpened('open-378')
+    await useStore.getState().markOpened('plain-378')
+
+    expect(marked.mock.calls).toEqual([['open-378', 1]])
+  })
 })
 
 /*
@@ -393,6 +443,28 @@ describe('a late lock error offers the fork (#168)', () => {
     const st = useStore.getState()
     expect(st.sessions[id]!.live).toBe(true)
     expect(st.wakeLocked[id]).toBeUndefined()
+  })
+})
+
+/*
+ * A newer host's session (#384). `sessions.list` reads it tolerantly (`parseTolerant`): a value this build does not
+ * know costs that value only. `session_created`, the only word about a session the host made on its own, parsed it
+ * strictly, so one new word left the session out of the sidebar until a reconnect listed it.
+ */
+describe('a session a newer host created', () => {
+  it('is added from session_created even with a value this build does not know, as the session list would', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const newer = { ...sessionInfo('newer-made'), permissionPreset: 'plan-only', laterField: { a: 1 } }
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: newer.id, session: newer } as unknown as NormalizedEvent)
+    expect(useStore.getState().sessions['newer-made']).toMatchObject({ id: 'newer-made', name: newer.name })
+  })
+
+  it('is not added from a session_created that carries no session', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: 'no-record', session: 'not a session' } as unknown as NormalizedEvent)
+    expect(useStore.getState().sessions['no-record']).toBeUndefined()
   })
 })
 

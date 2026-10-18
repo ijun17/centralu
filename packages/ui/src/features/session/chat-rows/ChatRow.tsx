@@ -5,7 +5,7 @@ import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
 import { FileLink, Markdown } from '../Markdown.jsx'
 import { titlePieces } from '../filePath.js'
-import { formatSaidAt } from '../../../app/format.js'
+import { formatCount, formatSaidAt } from '../../../app/format.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
@@ -551,10 +551,20 @@ export function SubagentSteps({
               </button>
             </p>
           )}
-          {steps && !steps.loading && !steps.error && items.length === 0 && (
+          {/*
+            Steps moved to the trash without the session (#418) are said to be there, with the way back: read as "none
+            were recorded", a card the person emptied looked like one that never kept anything
+          */}
+          {steps && !steps.loading && !steps.error && !!steps.trashed && (
+            <p className="text-xs text-ink-faint" data-testid="subagent-steps-trashed">
+              {trashedLine(steps.trashed, items.length > 0)}
+            </p>
+          )}
+          {steps && !steps.loading && !steps.error && !steps.trashed && items.length === 0 && (
+            /* Steps deleted for good from the trash (#418) leave the card as empty as one that never kept any */
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-empty">
-              No steps were recorded for this agent. One that ran before Centralu kept them left only its
-              report.
+              No steps are kept for this agent: it ran before Centralu kept them, or its steps were deleted from the
+              trash.
             </p>
           )}
           {steps?.more && !steps.loading && (
@@ -570,6 +580,16 @@ export function SubagentSteps({
       )}
     </div>
   )
+}
+
+/**
+ * Where a card's trashed steps went (#418), in the number they are: "The step was moved… restores it" for one,
+ * "…restores them" for more, and "N earlier steps" when a running subagent wrote more under the card since
+ */
+export function trashedLine(trashed: number, more: boolean): string {
+  const one = trashed === 1
+  const what = more ? `${formatCount(trashed)} earlier ${one ? 'step was' : 'steps were'}` : one ? 'The step was' : 'The steps were'
+  return `${what} moved to the trash. Settings → Trash restores ${one ? 'it' : 'them'}.`
 }
 
 /** When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink */
