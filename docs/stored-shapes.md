@@ -85,7 +85,7 @@ anything either, so a reader whose fallback would be written back has to say it 
 | A session's permission preset | `sessions.permission_preset` | agent-host store | `SessionRecords.readSessions` `agent-host/src/dev-services/store/sessions.ts:111` | a word this build does not know reads as `safe`, which asks about everything; the next write of the session from this build stores `safe` in its place ([Left](#left)) | none chosen is `normal` | (column) | `store-unreadable-rows.test.ts` |
 | Requests queued for a busy session | `queued_requests.via` | agent-host sessions | `ChildOwnershipRecords` `agent-host/src/dev-services/store/child-ownership.ts:100`; `ChildOwnership.restoreQueued` `sessions/child-ownership.ts:277`; `QueuedRequests.queuedGateError` `sessions/queued-requests.ts:197` | a `via` this build does not know is not delivered and not dropped: `restoreQueued` leaves the row in the store for a build that knows the tool, names it on stderr, and the requests behind it are delivered | — | (column) | `busy-requests.test.ts` |
 | Linked machines (#82) | `linked_machines` | agent-host store | `LinkedMachineRecords.listLinkedMachines` `agent-host/src/dev-services/store/linked-machines.ts:29` | an unknown `shell` reads as `posix` | — | (rows) | `links/*.test.ts` |
-| The highest slot handed out | `app_settings.links.slotHighWater` | agent-host store | `addLinkedMachine` `agent-host/src/dev-services/store/linked-machines.ts:62` | — | none written: the highest slot in use | a value that is not a number makes the slot NaN, and every `machines.add` fails on a raw SQL error ✗4 | none |
+| The highest slot handed out | `app_settings.links.slotHighWater` | agent-host store | `addLinkedMachine` / `slotHighWater` `agent-host/src/dev-services/store/linked-machines.ts:62`, `:82` | — | none written: the highest slot in use | a value that is not a whole number reads as none, so the next machine takes the slot after the highest in use, and the row is named on stderr | `store-unreadable-rows.test.ts` |
 | Mirrored headers | `machine_headers.info` | agent-host store | `machineHeaders` `agent-host/src/dev-services/store/linked-machines.ts:96` | kept (the remote's `SessionInfo` / project, read by the protocol's tolerant parse) | — | a header that is not JSON is skipped; the next mirror writes it again | `store-unreadable-rows.test.ts` |
 | Kept runs | `app_runs`, `app_run_failures` | agent-host store | `AppRunRecords` `agent-host/src/dev-services/store/app-runs.ts:27` | `status`, `kind`, `caller_kind` are text, passed as they are to the protocol | — | no JSON column | `external-app-runs.test.ts` |
 
@@ -93,8 +93,8 @@ anything either, so a reader whose fallback would be written back has to say it 
 
 | Shape | Where | Owner | Parser | Added | Removed | Broken | Tests |
 |---|---|---|---|---|---|---|---|
-| Lowest reader version | `app_settings.min_reader_version` | agent-host store | `ReaderGate.storedMinReader` `agent-host/src/dev-services/store/reader-gate.ts:74`; `MigrationRunner.migrate` `migrate-runner.ts:80` | — | none recorded: computed from the steps already run | a value that is not a number reads as none: the gate lets this host open the store, and `migrate` writes a floor computed from the steps this host knows. On a store a newer host wrote, that opens what this host may not read and lowers the record for good, with no word ✗4 | `store-min-reader.test.ts` (none for a broken value) |
-| Steps a swap left for later | `app_settings.deferred_migrations` | agent-host store | `storedDeferred` `agent-host/src/dev-services/store/migrate-runner.ts:296` | — | none owed | not a list reads as none owed: `user_version` is already past them, so they never run, with no word ✗4 | `store-swap.test.ts` (none for a broken value) |
+| Lowest reader version | `app_settings.min_reader_version` | agent-host store | `ReaderGate.tooNew` / `storedMinReader` `agent-host/src/dev-services/store/reader-gate.ts:95`, `:106`; `MigrationRunner.migrate` `migrate-runner.ts:82` | — | none recorded: computed from the steps already run | a value that is not a version, on a store this host knows every step of, is worked out again from the steps the store has run and named on stderr. On a store newer than this host it refuses to start with "This data was written by a newer Centralu, and which versions can read it cannot be told", naming the row and the file, and changes nothing | `store-min-reader.test.ts` (all three) |
+| Steps a swap left for later | `app_settings.deferred_migrations` | agent-host store | `storedDeferred` / `sayUnreadableDeferred` `agent-host/src/dev-services/store/migrate-runner.ts:308`, `:317` | — | none owed | a list that does not read whole is named on stderr with what it held; the steps it named do not run ([Left](#left)) | `store-swap.test.ts` (all three) |
 | An owed `VACUUM` | `app_settings.vacuum_owed` | agent-host store | `store/vacuum.ts:29` (presence) | — | — | — | `store-swap.test.ts` |
 
 ## Files and lines between processes
@@ -125,6 +125,9 @@ What this inventory found and the pull requests of #384 do not change, with the 
 - **A permission preset this build cannot read is written back as `safe`.** `upsertSession` writes the whole row, so
   keeping the newer word would mean every writer knowing which value it read rather than chose. `safe` only asks more;
   the person sets the preset again in the newer build.
+- **Steps an unreadable `deferred_migrations` named do not run.** `user_version` is past them, and a step a swap left
+  for later owes an index, a vacuum or a contraction, never data, so the open says what the row held instead of
+  guessing which steps to run again.
 
 ## An older host on a newer store, end to end
 

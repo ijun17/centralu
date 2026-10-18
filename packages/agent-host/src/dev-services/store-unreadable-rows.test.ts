@@ -3,7 +3,7 @@
  * read in. Before, `JSON.parse` ran unguarded over every row, so one row written by a crash mid-write (or a newer build
  * with a different shape) made a whole conversation page, the session list or a machine's mirrored list throw.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store } from './store.js'
@@ -105,5 +105,25 @@ describe('a value a newer build wrote that this build cannot read (#384)', () =>
     dbOf(s).prepare(`UPDATE sessions SET permission_preset = 'plan' WHERE id = 's1'`).run()
     const presets = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.permissionPreset]))
     expect(presets).toEqual({ s1: 'safe', s2: 'auto', s3: 'safe' })
+  })
+
+  /*
+   * The highest slot handed to a linked machine (#82) is a number in `app_settings`. One that is not a number made the
+   * next slot NaN, and every `machines.add` failed on the table's NOT NULL with a raw SQL error that named nothing. The
+   * mark keeps a removed machine's slot from coming back: once it cannot be read, the highest slot in use is all
+   * there is, so it is used and the row is named on stderr.
+   */
+  it('a high-water mark for linked machines that is not a number still adds the machine, past every slot in use, and says so', () => {
+    const s = seeded()
+    s.machines.addLinkedMachine({ id: 'm1', name: 'm1', sshTarget: 'h1', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    s.machines.addLinkedMachine({ id: 'm2', name: 'm2', sshTarget: 'h2', remote: { shell: 'posix' }, addedAt: 2, acceptedVersions: null })
+    s.settings.setAppSetting('links.slotHighWater', 'many')
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const m3 = s.machines.addLinkedMachine({ id: 'm3', name: 'm3', sshTarget: 'h3', remote: { shell: 'posix' }, addedAt: 3, acceptedVersions: null })
+    expect(m3.slot).toBe(3)
+    expect(s.settings.appSetting('links.slotHighWater')).toBe('3')
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.links\.slotHighWater .*"many"/)
+    said.mockRestore()
   })
 })

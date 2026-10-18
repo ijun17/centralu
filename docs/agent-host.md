@@ -2791,7 +2791,10 @@ step against:
    or any step touches the file, a host whose newest step is below the record refuses to start: "This data was
    written by a newer Centralu", naming both versions, on stderr and stdout, exit 1, the same path as a lock conflict.
    The desktop supervisor shows it at once instead of retrying. A host older than the store but at or above the
-   record opens it and runs no step it does not know.
+   record opens it and runs no step it does not know. A record that is not a version (a hand edit, a write cut short)
+   is worked out again, and said, by a host that knows every step the store has run; a host older than the store
+   refuses the same way, naming the row, since a floor worked out from fewer steps could open what it cannot read
+   (#384).
 4. **Heavy steps are marked `heavy: true`:** a step that rewrites or re-indexes every message, or `VACUUM`s (v3, v11,
    v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap runs them after the switch rather
    than during it.
