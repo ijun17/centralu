@@ -33,7 +33,6 @@ import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
   // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
-  useFocusReturn(open)
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
   const markRead = useStore((s) => s.markRead)
@@ -44,6 +43,8 @@ export function Inbox() {
   // Done removes a row, so the cursor can end up past the end: keep it on the last row
   const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
   const panelRef = useRef<HTMLDivElement>(null)
+  // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
+  useFocusReturn(open, panelRef)
   // No row answers an approval while the list is still moving (#543): the order is part of what moves it
   const settled = useRowsSettled(items.map((it) => it.id).join('|'))
 
@@ -120,6 +121,8 @@ export function Inbox() {
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"
+        // Leaving, it takes no keys and no focus (focusReturn.ts)
+        inert={leaving}
         className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
         data-testid="inbox"
       >

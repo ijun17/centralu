@@ -178,7 +178,6 @@ type Category = (typeof CATEGORIES)[number]['id']
 export function Settings() {
   const open = useStore((s) => s.settingsOpen)
   // Closing gives the keyboard back to where it was, the composer included (#115)
-  useFocusReturn(open)
   const toggle = useStore((s) => s.toggleSettings)
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)
@@ -206,6 +205,8 @@ export function Settings() {
 
   // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
   const panelRef = useRef<HTMLDivElement>(null)
+  // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
+  useFocusReturn(open, panelRef)
   const dialog = useDialogFocus(panelRef, open)
 
   // Comes down and fades in, and goes the same way (usePresence keeps it for its exit)
@@ -219,6 +220,8 @@ export function Settings() {
       }`}
       onClick={() => toggle(false)}
       data-testid="settings"
+      // Leaving, it takes no keys and no focus (focusReturn.ts)
+      inert={leaving}
     >
       <div
         ref={panelRef}

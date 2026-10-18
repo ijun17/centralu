@@ -27,7 +27,6 @@ type Item =
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   // Esc gives the keyboard back to where it was, the composer included (#115)
-  useFocusReturn(open)
   const toggle = useStore((s) => s.togglePalette)
   const sessions = useStore((s) => s.sessions)
   const projects = useStore((s) => s.projects)
@@ -253,6 +252,8 @@ export function CommandPalette() {
    * list says which option the cursor is on. The options are not Tab stops: the arrows walk them, as the footer says.
    */
   const panelRef = useRef<HTMLDivElement>(null)
+  // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
+  useFocusReturn(open, panelRef)
   const dialog = useDialogFocus(panelRef, open)
   const listId = useId()
   const optionId = (i: number) => `${listId}-${i}`
@@ -275,6 +276,8 @@ export function CommandPalette() {
       onClick={() => toggle(false)}
       data-testid="command-palette"
       data-leaving={leaving || undefined}
+      // Leaving, it takes no keys and no focus: a layer closing over it gives focus back past it (focusReturn.ts)
+      inert={leaving}
     >
       <div className={`absolute inset-x-0 bottom-0 top-9 bg-scrim backdrop-blur-[2px] ${leaving ? 'cc-fade-out' : 'cc-fade'}`} />
       <div
