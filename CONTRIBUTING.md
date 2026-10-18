@@ -225,13 +225,16 @@ numbers: [docs/ux-metrics.md](docs/ux-metrics.md).
 The principles behind those numbers (judge the path a person can see, not its shortcut) and what
 a pull request's **Usability** field holds: [docs/usability.md](docs/usability.md).
 
-**The app's JS is compared with main's, not with a fixed number** (#1181). `tooling/styles.test.ts`
-builds the release bundle, and CI's `verify` job compares it with the size main's newest run
-recorded: a change may add 30 KB without saying anything (`tooling/bundle-budget.ts`). Over that,
-find out what grew first; if the growth is meant, write `tooling/bundle-growth.json` in the same
-pull request, `{ "bytes": <beyond the allowance>, "reason": "<what grew and why>" }`, and the test's
-message gives the number. The declaration is spent once it lands: main's next record carries its
-reason. A local run has no record of main and skips the comparison, saying so.
+**The app's JS is compared with main's, and held under a ceiling** (#1181). `tooling/styles.test.ts`
+builds the release bundle, and CI's `verify` job compares it with the size main's newest push run
+recorded (or measures main when no run has a record): a change may add 30 KB without saying
+anything, and the whole may not pass the ceiling in `tooling/bundle-budget.mjs`, however small
+each step. Over either, find out what grew first; if the growth is meant, add a file of its own,
+`tooling/bundle-growth/<your-branch>.json`, `{ "bytes": <n>, "reason": "<what grew and why>" }`, in
+the same pull request (the test's message gives the number). It counts once against main, until
+main's record lists it, and raises the ceiling for good. In CI a missing or unreadable record of
+main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
+only, and says it did not compare with main.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes

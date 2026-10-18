@@ -34,10 +34,16 @@ test("the agent's words share a bubble that a tool call or reasoning splits, and
   const times = page.getByTestId('said-at')
   await expect(times).toHaveCount(2)
   await expect(page.getByTestId('msg-user').getByTestId('said-at')).toHaveText(/^\d{1,2}:\d{2}\s[AP]M$/)
+  // Rows are measured by the virtual list while it settles: wait for it, then compare until the boxes agree
+  await expect(page.getByTestId('chat-stream')).not.toHaveAttribute('data-settling', /.*/)
   const lastBubble = page.locator('[data-bubble="solo"]')
-  const underIt = (await lastBubble.boundingBox())!
-  const time = (await times.last().boundingBox())!
-  expect(time.y).toBeGreaterThanOrEqual(underIt.y + underIt.height - 1)
+  await expect
+    .poll(async () => {
+      const underIt = await lastBubble.boundingBox()
+      const time = await times.last().boundingBox()
+      return underIt && time ? time.y - (underIt.y + underIt.height) : -Infinity
+    })
+    .toBeGreaterThanOrEqual(-1)
 
   // One day so far: one divider naming it, in English
   await expect(page.getByTestId('day-divider')).toHaveCount(1)
