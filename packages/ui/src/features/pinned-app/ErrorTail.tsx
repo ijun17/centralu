@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AppErrorBundle } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatClock } from '../../app/format.js'
+import { Button } from '../../components/Button.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -119,14 +120,9 @@ export function ErrorTail({
           </time>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {here && (
-              <button
-                type="button"
-                className="rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
-                onClick={onShowRuns}
-                data-testid="error-tail-open-runs"
-              >
+              <Button variant="primary" onRaised size="sm" onClick={onShowRuns} data-testid="error-tail-open-runs">
                 Open Runs
-              </button>
+              </Button>
             )}
             <IconButton label="Hide this note" onClick={() => setDismissed(bundle.at)} testId="error-tail-dismiss" align="right">
               <CloseIcon size={12} />
@@ -169,16 +165,18 @@ export function ErrorTail({
               )}
             </span>
           ) : builder.id ? (
-            <button
-              type="button"
-              className="rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
+            <Button
+              variant="primary"
+              onRaised
+              size="sm"
               onClick={() => void send()}
-              disabled={busy}
+              busy={busy}
+              busyText="Sending…"
               title="Hand this error to the app's builder session, once"
               data-testid="error-tail-send"
             >
-              {busy ? 'Sending…' : 'Send to builder'}
-            </button>
+              Send to builder
+            </Button>
           ) : (
             <span className="text-xs text-ink-faint">Start a builder to send it.</span>
           )}

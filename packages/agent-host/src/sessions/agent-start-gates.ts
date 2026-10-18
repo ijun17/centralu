@@ -2,6 +2,7 @@ import { agentDepthRefusal } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AGENT_CEILING } from './start-agent.js'
 import { ASK_THE_PERSON, ORCHESTRATOR_PLACE } from './start-agent-terms.js'
+import { FILL, namedCall } from './tool-seats.js'
 
 /**
  * Whether a session may start an agent now (#561, #673, #867): what the start rests on in its caller, and the
@@ -82,6 +83,7 @@ export class AgentStartGates {
       this.remoteWorking(projectId)
     if (running < ceiling) return null
     const whose = projectId === ORCHESTRATOR_PLACE ? 'you started' : "started by this project's sessions"
-    return `${running} agents ${whose} are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.`
+    const wait = namedCall(this.host.toolProfileOf(callerId), 'agent_session', { sessionId: FILL, action: 'wait' })
+    return `${running} agents ${whose} are already working, the most at once. Wait for one (${wait}) or stop one, then try again.`
   }
 }

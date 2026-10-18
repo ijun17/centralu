@@ -5,6 +5,7 @@ import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
+import { Button } from '../../components/Button.jsx'
 
 /**
  * An imported app waiting on the person's confirmation (M4 E-3) — a confirmation window stands
@@ -61,15 +62,9 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
         </p>
       )}
       <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-          onClick={() => void enable()}
-          disabled={!review || busy}
-          data-testid="pinned-enable"
-        >
+        <Button variant="primary" onClick={() => void enable()} disabled={!review || busy} data-testid="pinned-enable">
           {busy ? 'Enabling…' : 'Enable'}
-        </button>
+        </Button>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@mode
 import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
+import { Button } from '../../components/Button.jsx'
 import { externalAppKey, useStore } from '../../store/store.js'
 import { viewReconnect } from '../../store/viewReconnect.js'
 import { DragRelay } from './dragRelay.js'
@@ -601,14 +602,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           <span className="min-w-0 flex-1 truncate">
             This app wants to open <span className="readout text-ink-muted">{linkAsk.url}</span>
           </span>
-          <button
-            type="button"
-            className="rounded-md border border-line px-2 py-0.5 hover:bg-surface-hover"
-            data-testid="app-frame-link-open"
-            onClick={() => settleLink(true)}
-          >
+          <Button variant="secondary" data-testid="app-frame-link-open" onClick={() => settleLink(true)}>
             Open
-          </button>
+          </Button>
           <button
             type="button"
             className="rounded-md px-2 py-0.5 text-ink-muted hover:bg-surface-hover"

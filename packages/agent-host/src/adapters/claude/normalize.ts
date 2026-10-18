@@ -138,7 +138,7 @@ export function normalizeMessage(
  * The types the survey would show or store but nobody has wired yet stay out on purpose: `system/permission_denied`,
  * `system/commands_changed` and `system/memory_recall` among them. Their log line is how a real instance gets noticed.
  */
-const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
+export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // mapped
   'assistant', 'user', 'result', 'stream_event', 'rate_limit_event', 'active_goal', 'system/init', 'system/status',
   'system/compact_boundary', 'system/local_command_output', 'system/task_notification',

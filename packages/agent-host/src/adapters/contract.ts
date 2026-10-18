@@ -15,6 +15,7 @@ import type { ToolProfile } from '../apps/contract.js'
 import type { OrchestratorTools } from './contract/orchestrator.js'
 import type { ProcessSource } from './contract/process.js'
 import type { SessionApps } from './contract/session-apps.js'
+import type { AdapterSurface } from './contract/surface.js'
 
 /**
  * The adapter contract (docs/agent-host.md §2).
@@ -35,6 +36,7 @@ import type { SessionApps } from './contract/session-apps.js'
 export * from './contract/orchestrator.js'
 export * from './contract/session-apps.js'
 export * from './contract/process.js'
+export * from './contract/surface.js'
 
 /**
  * The `state_change` reason an adapter gives a turn the tool interrupted when nobody here asked it to (#698): Codex's
@@ -322,6 +324,14 @@ export interface AgentAdapter {
    * Adapters without a fingerprint remain compatible; they simply cannot opt into that check.
    */
   launchSettingsFingerprint?(settings: LaunchSettings): string
+
+  /**
+   * What the installed tool offers, against what this adapter blocks, drops or works around (#270,
+   * `contract/surface.ts`). The weekly drift run reads it for every registered adapter and files an issue for what is
+   * new, so the tool gaining a command or a message type the adapter does not know is heard of. Optional like the rest
+   * of the contract, for test doubles; every adapter the registry ships has one (`descriptors.test.ts`).
+   */
+  readonly surface?: AdapterSurface
 
   detect(): Promise<DetectResult>
   /**

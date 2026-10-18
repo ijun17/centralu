@@ -7,6 +7,7 @@ import { computeInbox, currentWaitingId, projectLabelOf } from '../../store/sele
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Badge } from '../../components/Badge.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
@@ -326,7 +327,7 @@ export function CommandPalette() {
                   onClick={() => choose(item)}
                   data-testid={`palette-item-${item.kind}`}
                 >
-                  <span className="w-10 shrink-0 text-2xs uppercase text-ink-faint">
+                  <Badge className="w-10 shrink-0">
                     {item.kind === 'session'
                       ? 'Session'
                       : item.kind === 'project'
@@ -336,7 +337,7 @@ export function CommandPalette() {
                           : item.kind === 'app'
                             ? 'App'
                             : 'Action'}
-                  </span>
+                  </Badge>
                   <span className="truncate text-md text-ink">{item.label}</span>
                   <span className="ml-auto shrink-0 truncate text-xs text-ink-faint">{item.sub}</span>
                 </button>

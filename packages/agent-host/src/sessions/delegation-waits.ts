@@ -6,6 +6,7 @@ import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import { cleanUpDue } from './own-agents.js'
 import { turnAnswer } from './turn-answer.js'
+import { namedCall } from './tool-seats.js'
 import { raceBound } from './with-timeout.js'
 
 /** How a wait on a delegation's turn ended (`DelegationFlow.awaitTurn`), for each caller to word (#428) */
@@ -85,7 +86,7 @@ export class DelegationWaits {
     return (
       `Its own background work is still running (${taskList(running)}). If that work is a server or watcher it leaves running, ` +
       'this answer may be its final one; a final report follows only if that work ends. ' +
-      'agent_session(action="stop") on it stops that work and ends the wait.'
+      `${namedCall(this.host.toolProfileOf(callerId), 'agent_session', { action: 'stop' })} on it stops that work and ends the wait.`
     )
   }
 

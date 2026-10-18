@@ -126,7 +126,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       throw new Error(`Worktree recovery exceeds the 256 MiB input limit (tracked and non-ignored untracked files plus staged changes, including submodules). No files were staged or removed; save the work elsewhere before deleting.`)
     }
   }
-  const prepare = async (repo: string, path: string, gitlinks: string[] = []): Promise<void> => {
+  const prepare = async (repo: string, path: string, gitlinks: string[] = [], mergedOnly: ReadonlySet<string> = new Set()): Promise<void> => {
     const tip = (await git(repo, ['rev-parse', '--verify', 'HEAD'])).trim()
     const refs = ['HEAD']
     if (!path && branch) {
@@ -144,10 +144,23 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
           // Older Git ignores the lazy-fetch switch; disallow transports there too.
           env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
         })
+        const local: string[] = []
         for (const row of available.trim().split('\n')) {
           const [oid, type] = row.split(' ')
-          if (type === 'commit') refs.push(oid!)
+          if (type === 'commit') local.push(oid!)
         }
+        // Merged trunk history names every module commit its checkouts ever had, nearly all of them on
+        // the module's remotes. Only the ones no remote has are worth a ref and a place in the bundle.
+        const names = new Set(local.filter((oid) => mergedOnly.has(oid)))
+        const unpublished = new Set<string>()
+        if (names.size) {
+          const remotes = (await git(repo, ['for-each-ref', '--format=^%(objectname)', 'refs/remotes/'])).trim().split('\n').filter(Boolean)
+          // rev-list has no NUL mode: its records are lines, and gitRecords hands them over as one chunk
+          for await (const chunk of gitRecords(repo, ['rev-list', '--stdin'], [...names, ...remotes].join('\n') + '\n', filters)) {
+            for (const oid of chunk.split('\n')) if (names.has(oid)) unpublished.add(oid)
+          }
+        }
+        refs.push(...local.filter((oid) => !mergedOnly.has(oid) || unpublished.has(oid)))
       }
     }
     const baselineOid = !path
@@ -164,11 +177,18 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     const stagedNames = new Set((await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
     const modules: string[] = []
     const moduleCommits = new Map<string, Set<string>>()
+    const seen = new Set<string>()
+    const mergedNames = new Set<string>()
+    let merged = false
     const keepGitlink = (rel: string, oid: string) => {
       modules.push(rel)
       const tips = moduleCommits.get(rel) ?? new Set<string>()
       tips.add(oid)
       moduleCommits.set(rel, tips)
+      // A commit the checkout names itself is kept whatever the remotes have; one only the trunk's history names is
+      // kept when no remote has it.
+      if (!merged) seen.add(oid)
+      else if (!seen.has(oid)) mergedNames.add(oid)
     }
     const manifests = new Set<string>()
     const keepManifest = (rel: string, oid: string) => {
@@ -176,17 +196,20 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     }
     // Raw parent diffs include intermediate and merge-only gitlinks without a process per
     // commit. HEAD's tree also covers unchanged links and the no-unmerged-commits case.
-    let change: RegExpMatchArray | null = null
-    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], revisions, filters)) {
-      if (change) {
-        const [, oldMode, newMode, oldOid, newOid] = change
-        if (oldMode === '160000') keepGitlink(row, oldOid!)
-        if (newMode === '160000') keepGitlink(row, newOid!)
-        keepManifest(row, oldOid!)
-        keepManifest(row, newOid!)
-        change = null
-      } else change = row.match(/^\n*:(\d{6}) (\d{6}) ([a-f0-9]+) ([a-f0-9]+) [A-Z]$/)
+    const scanHistory = async (input: string): Promise<void> => {
+      let change: RegExpMatchArray | null = null
+      for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], input, filters)) {
+        if (change) {
+          const [, oldMode, newMode, oldOid, newOid] = change
+          if (oldMode === '160000') keepGitlink(row, oldOid!)
+          if (newMode === '160000') keepGitlink(row, newOid!)
+          keepManifest(row, oldOid!)
+          keepManifest(row, newOid!)
+          change = null
+        } else change = row.match(/^\n*:(\d{6}) (\d{6}) ([a-f0-9]+) ([a-f0-9]+) [A-Z]$/)
+      }
     }
+    await scanHistory(revisions)
     for await (const row of gitRecords(repo, ['ls-tree', '-r', '-z', 'HEAD'], undefined, filters)) {
       const tab = row.indexOf('\t')
       const [mode, , oid] = row.slice(0, tab).split(' ')
@@ -203,6 +226,14 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       if (row.startsWith('160000 ')) keepGitlink(rel, oid)
       else if (stagedNames.has(rel)) stagedObjects.push(oid)
       keepManifest(rel, oid)
+    }
+    // History already merged into the trunk is not in the scan above, yet the gitlinks it recorded still name module
+    // commits that may exist only in this worktree's private module repository (#623). Merging a gitlink does not
+    // publish the commit it names. One streamed log of the trunk, and only for a project that has modules.
+    if (baselineOid && (moduleCommits.size || manifests.size)) {
+      merged = true
+      await scanHistory(`${baselineOid}\n`)
+      merged = false
     }
     // git mv keeps the module name while changing its path. Read each distinct manifest
     // once, and associate all historical paths of a name with the initialized checkout.
@@ -245,7 +276,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       await assertExistingPath(repo, rel).catch((e) => {
         if (existsSync(join(repo, rel))) throw e
       })
-      if (existsSync(join(repo, rel, '.git'))) await prepare(join(repo, rel), path ? `${path}/${rel}` : rel, [...(moduleCommits.get(rel) ?? [])])
+      if (existsSync(join(repo, rel, '.git'))) await prepare(join(repo, rel), path ? `${path}/${rel}` : rel, [...(moduleCommits.get(rel) ?? [])], mergedNames)
     }
   }
   await prepare(cwd, '')
