@@ -71,6 +71,7 @@ export function resetStore() {
     sessions: {},
     chat: {},
     drafts: {},
+    keptDrafts: [],
     stickToBottom: {},
     searchTargets: {},
     workingSince: {},
