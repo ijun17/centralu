@@ -67,8 +67,9 @@ export function ApprovalCard({
       })
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
-      // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
-      if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always')
+      // Nor does a new project (#515), or an existing folder added as one (#1220): it is one folder, once — there is
+      // nothing to always allow
+      if ((detail.kind === 'capability' || detail.kind === 'project_create' || detail.kind === 'project_add') && action.decision === 'always')
         return
       // Nor does an edit whose file is unknown (#428): there is no path to remember
       if (!canAlways && action.decision === 'always') return
@@ -123,6 +124,17 @@ export function ApprovalCard({
   if (detail.kind === 'project_create') {
     return (
       <ProjectCreateCard
+        detail={detail}
+        busy={busy}
+        keys={keys}
+        onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
+
+  if (detail.kind === 'project_add') {
+    return (
+      <ProjectAddCard
         detail={detail}
         busy={busy}
         keys={keys}
@@ -520,6 +532,80 @@ function ProjectCreateCard({
           testId="approve-deny"
           disabled={busy}
         />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The orchestrator's add_project card (#1220): a folder that already exists becomes a project. What the folder's own
+ * machine found there is what is agreed to: the machine, the full path, that it is a folder, and whether it is a git
+ * repository and where its origin points. No "always": it is one folder, once.
+ */
+function ProjectAddCard({
+  detail,
+  busy,
+  keys,
+  onAnswer,
+}: {
+  detail: Extract<ApprovalDetail, { kind: 'project_add' }>
+  busy: boolean
+  keys: AnswerKeys
+  onAnswer: (decision: 'allow' | 'deny') => void
+}) {
+  const found = !detail.exists ? 'Nothing is there' : detail.folder ? 'A folder that exists' : 'Not a folder'
+  return (
+    <div
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
+      data-testid="approval-card"
+      data-kind="project_add"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    >
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <Pill size="label" edge="solid" tone="bright">
+          Awaiting approval
+        </Pill>
+        <span className="text-xs text-ink-faint">The orchestrator wants to add a folder as a project, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
+        Add the folder <span className="readout">{detail.name}</span>
+        {detail.machine ? (
+          <>
+            {' '}
+            on{' '}
+            <span className="readout" data-testid="approval-machine">
+              {detail.machine}
+            </span>
+          </>
+        ) : null}{' '}
+        as a project?
+      </p>
+      <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted" data-testid="approval-path">
+        {detail.path}
+      </p>
+      <ul className="mt-1 px-3 text-xs leading-body text-ink" data-testid="approval-facts">
+        <li data-testid="approval-found">{found}</li>
+        <li data-testid="approval-git">
+          {detail.git ? (
+            detail.origin ? (
+              <>
+                A git repository, origin <span className="break-all font-mono">{detail.origin}</span>
+              </>
+            ) : (
+              'A git repository with no origin'
+            )
+          ) : (
+            'Not a git repository'
+          )}
+        </li>
+      </ul>
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+        It is added to the sidebar as Add project adds a folder, not trusted until you trust it. Nothing is added unless you
+        choose Add.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey k={keys.allow} label="Add" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
   )
