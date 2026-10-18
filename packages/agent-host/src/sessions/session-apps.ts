@@ -1,4 +1,4 @@
-import { appKeyOf } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, appKeyOf } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName } from '../apps/contract.js'
@@ -178,12 +178,28 @@ const nameSlug = (name: string) =>
     .slice(0, 24)
     .replace(/-+$/, '')
 
-/** The first of `app-<id>`, `app-<id>-2`, … that `taken` does not hold */
-export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[]): string {
+/**
+ * The longest server name an app is given: `app-<id>` of the longest id (#1141, third review). A tool reads
+ * `mcp__<server>__<tool>`, which tools cap at 64 characters, so a name qualified by its project or numbered never leaves
+ * a tool less room than a plain `app-<id>` does: at most 43 characters before the tool, 21 for it.
+ */
+export const SERVER_NAME_MAX = appMcpServerName('x'.repeat(APP_ID_MAX_LENGTH)).length
+
+/**
+ * `app-<id>` when `taken` does not hold it; else, with a `qualifier` (a project's slug), `app-<id>-<qualifier>`, then
+ * `-2`, `-3`, …; without one, `app-<id>-2`, `-3`, …. Never longer than `SERVER_NAME_MAX`: the stem is cut before the
+ * number, so a long id or project name stays unique by its number.
+ */
+export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[], qualifier?: string): string {
   const has = (name: string) => (Array.isArray(taken) ? taken.includes(name) : (taken as ReadonlySet<string>).has(name))
   const base = appMcpServerName(appId)
   if (!has(base)) return base
-  for (let n = 2; ; n++) if (!has(`${base}-${n}`)) return `${base}-${n}`
+  const stem = qualifier ? `${base}-${qualifier}` : base
+  for (let n = qualifier ? 1 : 2; ; n++) {
+    const suffix = n === 1 ? '' : `-${n}`
+    const name = stem.slice(0, SERVER_NAME_MAX - suffix.length).replace(/-+$/, '') + suffix
+    if (!has(name)) return name
+  }
 }
 
 /**
@@ -213,7 +229,6 @@ export class SessionAppsHub {
       toolListWaitMs?: number
       callJoinWaitMs?: number
       onDemand?: OnDemandApps
-      boundaryOpen?: (sessionId: string) => boolean
       /** Where the names a session has seen are kept (#1141) */
       names?: AppNameBook
       /** A project's name, for the name of a later app with an id another app of the session already has */
@@ -391,11 +406,7 @@ export class SessionAppsHub {
    * then (`OnDemandApps`), and those are taken as well.
    */
   private named(session: AppSessionKey, apps: readonly ExternalAppInfo[]): Hit[] {
-    let book = this.names.get(session.id)
-    if (!book) {
-      book = { ...(this.opts.names?.load(session.id) ?? {}) }
-      this.names.set(session.id, book)
-    }
+    const book = this.bookOf(session.id)
     const taken = new Set([...Object.values(book), ...(this.opts.onDemand?.attached(session.id) ?? []).map((x) => x.server)])
     let added = false
     const hits: Hit[] = []
@@ -405,7 +416,7 @@ export class SessionAppsHub {
       if (!server) {
         const base = appMcpServerName(a.appId)
         const slug = a.projectId ? nameSlug(this.opts.projectName?.(a.projectId) ?? '') || a.projectId.slice(0, 8).toLowerCase() : 'user'
-        server = !taken.has(base) ? base : freeServerName(`${a.appId}-${slug}`, taken)
+        server = !taken.has(base) ? base : freeServerName(a.appId, taken, slug)
         book[key] = server
         taken.add(server)
         added = true
@@ -414,6 +425,35 @@ export class SessionAppsHub {
     }
     if (added) this.opts.names?.save(session.id, book)
     return hits
+  }
+
+  /** The names this session has seen its apps under, by app key (#1141): the book's, read once, and what was given since */
+  private bookOf(sessionId: string): Record<string, string> {
+    let book = this.names.get(sessionId)
+    if (!book) {
+      book = { ...(this.opts.names?.load(sessionId) ?? {}) }
+      this.names.set(sessionId, book)
+    }
+    return book
+  }
+
+  /**
+   * The server name `attach_app` gives an app (#1141, third review): the one this session saw it under before, if no other
+   * app of the session holds it now, else the first free `app-<id>`, `app-<id>-2`, …. Never a name the session's book
+   * gives another app, so an app gone for a moment (its manifest broken while it is edited) finds its name free when it
+   * returns, and the name is written in the book, so it stays with this app too. `inUse` is what the session holds now.
+   */
+  claimAttachName(sessionId: string, ref: AppRef, inUse: readonly string[]): string {
+    const book = this.bookOf(sessionId)
+    const key = appKeyOf(ref.projectId, ref.appId)
+    const taken = new Set([...inUse, ...Object.entries(book).filter(([k]) => k !== key).map(([, server]) => server)])
+    const had = book[key]
+    const server = had && !taken.has(had) ? had : freeServerName(ref.appId, taken)
+    if (had !== server) {
+      book[key] = server
+      this.opts.names?.save(sessionId, book)
+    }
+    return server
   }
 
   /**
@@ -526,7 +566,7 @@ class Attachment implements SessionApps {
      * itself keeps going in the background, and the runtime announces once the list is read.
      */
     try {
-      return withRunStatus((await withTimeout(this.hub.rt.tools(hit.ref, 'model', this.session.id), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
+      return withRunStatus((await withTimeout(this.hub.rt.tools(hit.ref, 'model'), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
     } catch (err) {
       console.error(`[apps] ${server} attached with no tools for now: ${(err as Error).message.split('\n')[0]}`)
       return withRunStatus([])

@@ -8,10 +8,10 @@ import { alive } from '../../process.test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
- * An app an `auto` session started in an untrusted project (#839, item 4). `auto` opens the trust boundary for its own
- * calls (`setSessionBoundaryPolicy`), so the app runs in a project that was never trusted. Every rescan of that project
- * (a file saved in its apps folder, a refresh) stopped it as "no longer trusted", though it had never been: a call in
- * flight was cut off and the next one started the app again. Only trust lost is a reason to stop it.
+ * An app an `auto` session started in an untrusted project (#839, item 4). `auto` opened the trust boundary for its own
+ * calls, so the app ran in a project that was never trusted, and every rescan of that project stopped it as "no longer
+ * trusted", though it had never been. Since #1141 an untrusted project's apps run for no caller, `auto` included, and the
+ * runtime asks nothing about the caller: the case cannot arise. Only trust lost is a reason to stop a running app.
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -44,8 +44,6 @@ beforeEach(() => {
     reservedIds: [],
     timing: { idleMs: 60_000, backoffBaseMs: 100, graceMs: 1_500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
-  // The session `auto-1` is auto: its calls pass the boundary
-  rt.setSessionBoundaryPolicy((sessionId) => sessionId === 'auto-1')
   rt.refresh()
 })
 
@@ -56,8 +54,8 @@ afterEach(async () => {
 
 describe('an app auto started in a project never trusted (#839)', () => {
   // An untrusted project's apps run for nobody, auto included (owner, #1141): the case #839 fixed cannot arise any more
-  it('an auto session cannot start it: its tools and its calls are refused, and no process starts', async () => {
-    await expect(rt.tools(ref, 'model', 'auto-1')).rejects.toThrow("This app's project is not trusted")
+  it('no caller can start it, an auto session included: its tools and its calls are refused, and no process starts', async () => {
+    await expect(rt.tools(ref, 'model')).rejects.toThrow("This app's project is not trusted")
     expect((await rt.call(ref, 'echo', { text: 'x' }, { kind: 'session', sessionId: 'auto-1' })).status).toBe('rejected')
     rt.refresh()
     expect(starts('notes')).toHaveLength(0)
@@ -66,7 +64,7 @@ describe('an app auto started in a project never trusted (#839)', () => {
   it('trust given and then taken away still stops it', async () => {
     trusted = true
     rt.refresh()
-    await rt.tools(ref, 'model', 'auto-1')
+    await rt.tools(ref, 'model')
     await until(() => starts('notes').length, (n) => n === 1)
     const pid = starts('notes')[0]!.pid
     trusted = false

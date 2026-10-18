@@ -122,7 +122,7 @@ export class ExternalApps {
       disposed: () => this.disposed,
       appsChanged: () => this.appsChanged(),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
-      blocker: (e, opts) => this.blocker(e, opts),
+      blocker: (e) => this.blocker(e),
       spawnSpec: (e, pipeId) => this.startEnv.spawnSpec(e, pipeId),
       snapshot: (e, stamp) => {
         if (keepsVersions(e)) this.handover.snapshot(this.holdKey(e.ref), e.dir, 'started', stamp)
@@ -154,8 +154,7 @@ export class ExternalApps {
       timing: this.timing,
       lifecycle: this.lifecycle,
       runs: this.deps.runs ?? null,
-      blocker: (e, opts) => this.blocker(e, opts),
-      boundaryOpen: (sessionId) => this.sessionBoundaryOpen(sessionId),
+      blocker: (e) => this.blocker(e),
       masker: (ref) => this.startEnv.masker(ref),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       emitChanged: (ref, caller) => this.deps.emitChanged?.(ref, caller),
@@ -314,13 +313,6 @@ export class ExternalApps {
     return out
   }
 
-  private sessionBoundaryOpen: (sessionId: string) => boolean = () => false
-
-  /** Host-owned policy; a request cannot claim an auto preset in its arguments. */
-  setSessionBoundaryPolicy(policy: (sessionId: string) => boolean): void {
-    this.sessionBoundaryOpen = policy
-  }
-
   /**
    * An app's tool list — if the app is down, **this is where it starts** (the first time it is
    * needed).
@@ -329,9 +321,9 @@ export class ExternalApps {
    * read is the place it is enforced: this list becomes the source of truth both for what attaches to
    * a session (A-5) and for the tools a screen can call.
    */
-  async tools(ref: AppRef, audience?: Audience, sessionId?: string): Promise<Tool[]> {
+  async tools(ref: AppRef, audience?: Audience): Promise<Tool[]> {
     const e = this.require(ref)
-    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [], !!sessionId && this.sessionBoundaryOpen(sessionId))
+    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [])
     return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
   }
 
@@ -831,14 +823,14 @@ export class ExternalApps {
    *
    *   invalid      the manifest did not pass validation
    *   untrusted    its project is not trusted: an untrusted project's apps run for nobody, a session under `auto`
-   *                included (owner, #1141; #603's opening no longer applies to apps, `boundaryOpen` is not read here)
+   *                included (owner, #1141; #603's opening no longer applies to apps, so no caller is asked about)
    *   unconfirmed  an imported app the person has not reviewed and enabled (E-3) — checked on every call: if server
    *                or uses changes after being enabled, it is blocked starting from the next startup
    *   removing     its folder is moving to the trash (`removeUserApp`) — nothing starts it meanwhile
    *   failed       it stopped after `maxFailures` failures in a row. `fresh` leaves this out: for a door that is
    *                about to give the app a fresh start itself (a check, a reload on changed files)
    */
-  private blocker(e: AppEntry, opts: { boundaryOpen?: boolean; fresh?: boolean } = {}): Blocker | null {
+  private blocker(e: AppEntry, opts: { fresh?: boolean } = {}): Blocker | null {
     if (!e.manifest) return { kind: 'invalid', reason: invalidReason(e) }
     if (!e.scope.trusted) {
       return { kind: 'untrusted', reason: "This app's project is not trusted, so the app does not start — trust the project and it will" }
@@ -895,7 +887,7 @@ export class ExternalApps {
         prev.scope = scope
         /*
          * An app in a project that lost trust is stopped immediately — it stays in the list. Only trust lost: an app an
-         * `auto` session started in a project never trusted (`sessionBoundaryOpen`) was stopped by every rescan (#839)
+         * `auto` session started in a project never trusted was stopped by every rescan (#839; since #1141 none starts)
          */
         if (lostTrust) void this.lifecycle.halt(prev, 'project is no longer trusted')
         // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once

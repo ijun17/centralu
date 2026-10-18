@@ -1,7 +1,7 @@
 import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, freeServerName, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
 import { listSetting } from '../dev-services/store/settings.js'
 
@@ -170,7 +170,7 @@ export class AppAccess implements OnDemandApps {
     const app = named.app
     const target: AppRef = { projectId: app.projectId, appId: app.appId }
     const has = already.find((h) => h.ref.appId === target.appId && h.ref.projectId === target.projectId)
-    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target, sessionId), when: 'now', already: true }
+    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), when: 'now', already: true }
     if (!this.candidates(session).some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
       return { ok: false, error: this.whyNot(session, app) }
     }
@@ -196,11 +196,12 @@ export class AppAccess implements OnDemandApps {
 
     // A record the person's revoked "always" left hidden is replaced, not doubled
     const kept = this.records(sessionId).filter((r) => !(r.appId === app.appId && r.projectId === app.projectId))
-    const taken = [...this.deps.hub.refsFor(session).map((h) => h.server), ...kept.map((r) => r.server)]
-    const server = this.freeServer(app.appId, taken)
+    // Nor a name the session's book gives another app, one gone for the moment included (#1141): it gets that name back
+    const inUse = [...this.deps.hub.refsFor(session).map((h) => h.server), ...kept.map((r) => r.server)]
+    const server = this.deps.hub.claimAttachName(sessionId, target, inUse)
     this.save(sessionId, [...kept, { projectId: app.projectId, appId: app.appId, server, consent, at: Date.now() }])
     const when = this.deps.attachedChanged(sessionId)
-    return { ok: true, server, tools: await this.toolNames(target, sessionId), when }
+    return { ok: true, server, tools: await this.toolNames(target), when }
   }
 
   detach(sessionId: string, ref: string): DetachOutcome {
@@ -326,17 +327,12 @@ export class AppAccess implements OnDemandApps {
     return this.deps.projects().find((p) => p.id === id)?.trusted === true
   }
 
-  /** `app-<id>`, or the first `app-<id>-<n>` no app of this session uses — the session's own app keeps the plain name */
-  private freeServer(appId: string, taken: string[]): string {
-    return freeServerName(appId, taken)
-  }
-
   /** The app's agent tools for the tool result — started here if never listed, within the hub's cap; empty on failure */
-  private async toolNames(ref: AppRef, sessionId: string): Promise<string[]> {
+  private async toolNames(ref: AppRef): Promise<string[]> {
     const known = this.deps.hub.rt.knownTools(ref, 'model')
     if (known) return known.map((t) => t.name)
     try {
-      return (await withTimeout(this.deps.hub.rt.tools(ref, 'model', sessionId), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map((t) => t.name)
+      return (await withTimeout(this.deps.hub.rt.tools(ref, 'model'), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map((t) => t.name)
     } catch {
       return []
     }

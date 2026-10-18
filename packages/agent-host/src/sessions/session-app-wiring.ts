@@ -84,7 +84,6 @@ export class SessionAppWiring {
         save: (id, names) => settings.setAppSetting(`${APP_NAMES_PREFIX}${id}`, JSON.stringify(names)),
       },
       projectName: (id) => this.host.store.projects.listProjects().find((p) => p.id === id)?.name,
-      boundaryOpen: (id) => this.host.autoBoundaryOpen(id),
       onDemand: {
         attached: (id) => this.appAccess?.attached(id) ?? [],
         /*
@@ -95,7 +94,6 @@ export class SessionAppWiring {
         allowed: (session, app) => this.host.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
       },
     })
-    rt.setSessionBoundaryPolicy((id) => this.host.autoBoundaryOpen(id))
     this.appAccess = new AppAccess({
       boundaryOpen: (id, boundary) => this.host.autoBoundaryOpen(id, boundary),
       hub: this.appsHub,

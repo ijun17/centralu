@@ -103,7 +103,9 @@ switch and the pair consent for reaching other projects.
 **Names are stable.** A session's agent calls an app by its server name (`app-<id>`), and a Codex
 thread keeps the names it started with. Once a session has seen a name, it stays bound to the same app
 for that session's life, kept with the session (`session_app_names:<session>`); a later app with the
-same id gets a name qualified by its project (`app-<id>-<project>`), never the name another app held.
+same id gets a name qualified by its project (`app-<id>-<project>`), never the name another app held,
+one gone for the moment included, and `attach_app` keeps to the same book. A name is never longer than
+`app-<id>` of the longest id, so a tool keeps the room it has under a plain name (64 characters in all).
 
 Its broker: `call_app` reaches another trusted project's root app by id after the caller's own project
 and the user folder, when exactly one has it. `host_data sessions.list` answers its own project's

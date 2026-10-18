@@ -759,7 +759,10 @@ that was detached.
 Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`. A name a session has seen stays bound to its app for the session's life (#1141,
 `session_app_names:<session>`, purged with the session): a later app with the same id (the root app of
 another project, say) gets a name qualified by its project, `app-<id>-<project>`, never a name another
-app held. **An untrusted project's apps attach nowhere**, its own project's sessions included and
+app held, one gone for the moment (its manifest broken mid-edit) included; `attach_app` keeps to the
+same book. No name is longer than `app-<id>` of the longest id (36 characters, `SERVER_NAME_MAX`), so
+`mcp__<server>__` leaves a tool 21 of the 64 characters a tool name may have: a long project name is
+cut, and a name cut short stays unique by a number. **An untrusted project's apps attach nowhere**, its own project's sessions included and
 under `auto` too (owner, #1141): #603's opening of an untrusted project's apps to an `auto` session no
 longer applies, and the runtime refuses them for every caller.
 The tool list is the last one read, so starting a session does not start every app. If none has
@@ -897,9 +900,11 @@ That smoke test ran before `ask_project` (#371 part B) was loaded on the same se
 | Detach | The proxy server is removed at once | Every call is checked against the current set, so a call by the old name is refused at once; the name leaves the thread with the same end-of-turn restart |
 
 **Names.** The app attaches as `app-<id>`, or `app-<id>-2` (and so on) when that name is taken in
-the session, for instance by its own project's app of the same id. The name is chosen when it is
-attached and kept for the session; an app that later appears in the session's own project under the
-same name keeps the name, and the attached one steps back.
+the session, for instance by its own project's app of the same id, or was ever given to another app
+of the session, one gone for the moment included (#1141, the session's book `session_app_names`,
+`SessionAppsHub.claimAttachName`). The name is written in that book, so it stays with the app for the
+session's life, and attaching it again after a detach gives it the same name; an app that later
+appears in the session's own project with the same id gets a name of its own (`app-<id>-<project>`).
 
 **Where it runs and what is recorded.** Nothing about the app changes: it runs where it lives, with
 its own folder as working directory and its own data folder, one instance per (project, app) shared
