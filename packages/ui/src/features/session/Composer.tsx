@@ -16,7 +16,7 @@ import { AutocompleteMenu, suggestionId, useAutocomplete, type Suggestion } from
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
-import { fitHeight } from './composerFit.js'
+import { fitComposerHeight } from './composerFit.js'
 import { autocompleteKeyAction, isComposerSendKey } from './composerKeys.js'
 import { composerFocusAnswer } from './composerFocus.js'
 import { composingKey } from '../../app/keys.js'
@@ -27,9 +27,6 @@ import { appReachNotice } from './appReachNotice.js'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { ComposerFooter } from './ComposerFooter.jsx'
 import { EMPTY_CHAT, EMPTY_QUESTIONS } from './empty.js'
-
-/** The maximum height the composer can grow to. Must match CSS's max-h-40 */
-const COMPOSER_MAX_H = 160
 
 /**
  * A handle that lets the composer take over handling a drop received from outside it (#116).
@@ -271,10 +268,7 @@ export const Composer = memo(function Composer({
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
-    // Not off the box's own scrollHeight, which can come out a row too many in WebKit (#744)
-    const wanted = fitHeight(el)
-    if (wanted === null) el.style.height = 'auto'
-    el.style.height = `${Math.min(wanted ?? el.scrollHeight, COMPOSER_MAX_H)}px`
+    fitComposerHeight(el)
   }, [text])
 
   // Apply the requested caret with its value, before another input event. A next-frame move
