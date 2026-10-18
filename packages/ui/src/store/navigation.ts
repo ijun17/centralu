@@ -98,7 +98,8 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
      * button would look broken; hiding the button instead would force reading the intro — squarely
      * against this onboarding's premise of never forcing a conversation.
      */
-    set({ view, introSeen: true })
+    // Another screen is another page: a file or the git screen open over the last one closes (owner, 2026-10-18)
+    set({ view, introSeen: true, overlay: null })
     get().saveWorkspace()
   },
 
