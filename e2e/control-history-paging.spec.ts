@@ -531,10 +531,12 @@ test('A loaded conversation shows the most recent messages first', async ({ page
   // The bottom (most recent) must be visible on screen
   await expect(page.getByTestId('chat-stream')).toContainText('the most recent message')
 
-  const atBottom = await page
-    .getByTestId('chat-stream')
-    .evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 80)
-  expect(atBottom).toBe(true)
+  // The list lands on the bottom after its rows are measured; wait for that, do not read the position once
+  const stream = page.getByTestId('chat-stream')
+  await expect(stream).not.toHaveAttribute('data-settling', /.*/)
+  await expect
+    .poll(() => stream.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 80))
+    .toBe(true)
 })
 
 test('A conversation continued externally shows up on screen once it comes back', async ({ page }) => {
