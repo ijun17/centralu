@@ -910,7 +910,7 @@ interface AdapterCapabilities {
 2. `@cc/protocol`의 `ToolName`에 도구를 넣고 `TOOL_META` 항목을 준다 — 표시 이름, 한 글자
    마크, 설치 명령, 로그인 명령. 그다음 `main.ts`의 `adapters` Map에 어댑터를 등록한다.
 3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증.
-4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1) —
+4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1). 계약의 `surface`(#270)도 채운다 —
    측정으로 얻은 프로토콜 지식은 그냥 두면 조용히 썩는다.
 5. 끝. **ui, core, platform은 변경되지 않고**, protocol은 2번의 두 항목만큼만 바뀐다.
    (그 이상이 필요했다면 그것은 어댑터의 잘못이 아니라 프로토콜에 개념이 부족한 것이다 —
@@ -939,6 +939,7 @@ interface AdapterCapabilities {
 | Codex | `adapters/codex/protocol-contract.json` — 우리가 보내거나 읽는 모든 RPC 메서드·알림, 승인 enum 값 | `pnpm codex:bindings --check` (설치된 CLI에서 바인딩을 재생성해 우리 이름을 대조) | 메서드/알림이 프로토콜에서 사라지는 것 (변경 축 C4) |
 | Claude | `scripts/claude-sdk-drift.mjs` 안의 이름 목록 — SDK export, 옵션 키, 응답 필드 — 과 런타임 모양 검사 하나: `permissionMode`를 생략하면 CLI에 `--permission-mode` 플래그가 아예 가지 않아야 한다 (`normal` 프리셋이 여기에 기댄다, #275) | `pnpm drift:claude [버전]` (`@latest` 또는 지정한 버전을 임시 폴더에 설치 — 워크스페이스는 건드리지 않는다) | 업그레이드가 우리에게 닿기 **전에** 이름이 `.d.ts`에서 사라지거나, SDK가 생략된 모드를 다시 `default`로 굳히는 것 |
 | Claude (재개) | 재개한 프로세스가 살아 있는 프로세스처럼 프롬프트 캐시를 읽는지 (#568, §4.6.1): 유휴 세션을 재우는 것이 공짜인 이유 | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (실제 모델, haiku, 임시 데이터 폴더. 깨운 턴이 캐시에서 90% 미만을 읽으면 1로 끝난다) | 재개할 때 요청을 다르게 짜는 CLI: 세션은 여전히 깨어나지만 더 느리고 비싸지고, 다른 무엇도 그것을 알려 주지 않는다 |
+| 모든 어댑터 (반대 방향, #270) | 계약의 `surface` (`adapters/contract/surface.ts`): 설치된 도구가 내놓는 것을 읽는 리더 (Claude: SDK의 stdout 메시지 유니온, `Options` 키, `Query` 메서드, CLI `--help`; Codex: 생성된 클라이언트 요청·알림·서버 요청 메서드, `--help`), 어댑터가 막거나 버리거나 우회하는 것(`limitations`, 각각 측정 근거와 함께), 마지막으로 검토한 표면(`adapters/<tool>/surface-baseline.ts`) | `pnpm drift:surface` (세션도 턴도 없이 최신 도구를 읽는다. `--record`는 기준선을 다시 쓰고, `--file-issue`는 주간 잡) | 아무도 검토하지 않은 새 명령·메시지 타입·기능, 근거가 사라졌을 수 있는 제한 (`/goal`은 CLI가 헤드리스로 돌린 뒤에도 몇 주간 거절됐다), 도구가 없앤 이름에 걸린 제한. 도구마다 이슈 하나로 남기고 잡은 초록으로 둔다 |
 
 둘 다 이름 검사이고 (Claude의 모양 검사 하나는 예외), 양방향으로 돈다: 벤더는 우리가 쓰는 모든 이름을 여전히 갖고
 있어야 하고, 우리 소스도 목록의 모든 이름을 여전히 써야 한다 (계약이 코드보다
