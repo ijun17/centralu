@@ -894,11 +894,15 @@ gate happens in one place, the broker desk (`desk.ts`).
   times a day filled the sidebar with sessions nobody would talk to. It stays in the list, as before,
   when the run failed, was stopped or cancelled (the person needs to see what went wrong, a schema
   mismatch included), when a card was shown during it (the person took part), when the person
-  opened it or wrote to it from the run until the delete is final, its process's close included (it
-  has become theirs), when it woke again, is waking or holds something sent to it, or when it has
-  attachments (the record copies no files). The delete is decided at the moment the session leaves
-  the lists, with nothing awaited after, so a message sent meanwhile either keeps the session or is
-  told the session is gone; a waking session is never deleted by withdrawing its wake. While it runs it is visible as any
+  opened it (its pane shown, with nothing unread too) or wrote to it from the run until the delete is
+  final, its process's close included (it has become theirs), when it woke again, is waking or
+  restarting, or holds something sent to it, or when it has attachments (the record copies no
+  files). The delete is decided at the moment the session leaves the lists, with nothing awaited
+  after, so a message sent meanwhile either keeps the session or is told the session is gone; a
+  waking session is never deleted by withdrawing its wake. A delete the person asks for while the
+  host's is under way is theirs: the session stays in the trash, its conversation file too unless
+  they chose otherwise. A draft the person had written in a session that goes is kept on screen, to
+  be copied. While it runs it is visible as any
   session: its approval cards appear there. The app has its answer once the session is gone, so a
   screen that reads `sessions.list` after its call sees it as it stays.
 - **`call_app { app, tool, args }`.** Only apps listed in `uses.apps` and only their `model` tools,
