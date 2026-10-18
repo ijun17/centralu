@@ -138,6 +138,7 @@ centralu/
 │        │  └─ store/           # Store(store.ts)를 이루는 부분. Store는 파일을 열고 마이그레이션을 돌리며 호출을 넘겨 준다
 │        │     ├─ migrations/   # 단계 목록을 버전 범위별 파일로 담는다. 새 단계가 따르는 규칙은 index.ts에 있다
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # Store가 상속하는 것: 러너(와 Store.inspect), 최소 읽기 버전 관문
+│        │     ├─ store-keys.ts  # 러너, 관문, vacuum.ts가 app_settings에 두는 관리용 키
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     └─ search-index.ts  vacuum.ts   # 단계와 위의 테이블 모듈이 함께 쓴다. vacuum.ts는 밀린 VACUUM도 돌린다

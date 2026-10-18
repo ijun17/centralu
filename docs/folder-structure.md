@@ -137,6 +137,7 @@ centralu/
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner (and `Store.inspect`), the min-reader gate
+│        │     ├─ store-keys.ts  # the bookkeeping keys the runner, the gate and vacuum.ts keep in app_settings
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM
