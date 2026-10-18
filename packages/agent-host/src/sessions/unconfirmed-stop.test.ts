@@ -68,7 +68,7 @@ describe('a Stop the tool refused (#1060)', () => {
     await new Promise((r) => setTimeout(r, 30))
     expect(info(a).state).toBe('working')
     expect(handleOf(a).sent).toHaveLength(sent)
-    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
 
     handleOf(a).answer("the person's answer")
     await w.until(() => handleOf(a).sent.length === sent + 1)

@@ -129,7 +129,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     a.claude.handles.get(child)!.answer('done here')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
   })
 
   it('reaches the parent from the next host, which adopted the kept child and found the mark in the store', async () => {
@@ -195,7 +195,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     await a.mgr.detachAll()
 
     const b = host(new Set([child]))

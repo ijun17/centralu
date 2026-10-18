@@ -231,24 +231,6 @@ export class Store extends MigrationRunner {
   setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
   }
-
-  // ── ChildOwnershipRecords (store/child-ownership.ts) ──
-
-  listReportMarks(): { sessionId: string; callerSessionId: string }[] {
-    return this.children.listReportMarks()
-  }
-
-  listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
-    return this.children.listAgentStartRequests()
-  }
-
-  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
-    return this.children.listDelegatedTurns()
-  }
-
-  listQueuedRequests(): QueuedRequest[] {
-    return this.children.listQueuedRequests()
-  }
 }
 
 /** What a reset WAL is cut back to (`journal_size_limit`) */

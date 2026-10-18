@@ -176,7 +176,7 @@ describe('a turn the network stopped (#698)', () => {
     // The work it was given finished and was reported; the mark is gone
     kid.answer('waiting on pnpm verify with a Monitor')
     await eventually(() => reportsTo(parent, child).length === 1)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
 
     kid.ownTurnFails(ECONNREFUSED)
     expect(info(a, child)).toMatchObject({ state: 'error', interruption: { reason: 'network', detail: ECONNREFUSED } })
