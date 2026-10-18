@@ -109,6 +109,24 @@ test('Keyboard input goes to the shell', async ({ page }) => {
   expect(sent).toContain('\r')
 })
 
+// #1143 U19: the error of a failed "New terminal" stayed on screen through the next success, until the project changed
+test('A terminal that could not be opened says so until the next one opens', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.getByTestId('evidence-tab-terminal').click()
+  const surfaces = page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')
+  await expect(surfaces).toHaveCount(1)
+
+  await page.evaluate(() => ((window as any).__mock.terminalCreateError = 'no more ptys'))
+  await page.getByTestId('terminal-add').click()
+  await expect(page.getByTestId('terminal-error')).toContainText('Could not open terminal — no more ptys')
+
+  await page.evaluate(() => ((window as any).__mock.terminalCreateError = null))
+  await page.getByTestId('terminal-add').click()
+  await expect(surfaces).toHaveCount(2)
+  await expect(page.getByTestId('terminal-error')).toBeHidden()
+})
+
 test('Opening and closing multiple terminals (stacked vertically)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')

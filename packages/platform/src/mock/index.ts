@@ -367,6 +367,8 @@ export class MockPlatform implements Platform {
   // terminals.ts
   get terminalState() { return this.terminalsMock.terminalState }
   set terminalState(value: TerminalsMock['terminalState']) { this.terminalsMock.terminalState = value }
+  get terminalCreateError() { return this.terminalsMock.createError }
+  set terminalCreateError(value: TerminalsMock['createError']) { this.terminalsMock.createError = value }
 
   // commands.ts
   get commandRuns() { return this.commandsMock.commandRuns }
