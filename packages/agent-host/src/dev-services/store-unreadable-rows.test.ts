@@ -145,4 +145,30 @@ describe('a value a newer build wrote that this build cannot read (#384)', () =>
     expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain(`the workspace snapshot (workspace row 1) is not a JSON object: ${JSON.stringify(text)}`)
     said.mockRestore()
   })
+
+  /*
+   * A project's remembered model and effort per tool (#107) is one JSON column, rewritten on every pick. It was rebuilt
+   * from this build's reading, so a pick dropped what a newer build kept next to a tool's model and effort, and a
+   * value that was not JSON was replaced with no word.
+   */
+  it("a pick for one tool keeps what a newer build stored for it and for the other tools", () => {
+    const s = seeded()
+    const newer = { claude: { model: 'opus', effort: 'high', verbosity: 'low' }, codex: { model: 'gpt-5', tier: 'fast' }, laterTool: { model: 'm' } }
+    dbOf(s).prepare(`UPDATE projects SET default_models = ? WHERE id = 'p1'`).run(JSON.stringify(newer))
+    s.projects.setProjectToolDefaults('p1', 'claude', { model: 'sonnet', effort: null })
+    const row = dbOf(s).prepare(`SELECT default_models FROM projects WHERE id = 'p1'`).get() as { default_models: string }
+    expect(JSON.parse(row.default_models)).toEqual({ ...newer, claude: { model: 'sonnet', effort: null, verbosity: 'low' } })
+    expect(s.projects.projectToolDefaults('p1').claude).toEqual({ model: 'sonnet', effort: null })
+  })
+
+  it('remembered tool defaults that are not JSON read as none, and are named on stderr when a pick replaces them', () => {
+    const s = seeded()
+    dbOf(s).prepare(`UPDATE projects SET default_models = '{"claude":{"model":"opus"' WHERE id = 'p1'`).run()
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(s.projects.projectToolDefaults('p1')).toEqual({})
+    s.projects.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5', effort: null })
+    expect(s.projects.projectToolDefaults('p1')).toEqual({ codex: { model: 'gpt-5', effort: null } })
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('projects.default_models of p1')
+    said.mockRestore()
+  })
 })
