@@ -1156,7 +1156,7 @@
    * One edge, not three (owner, 2026-10-18: the mark read blurry). It used to be a 1.5px ring painted as a background
    * behind a 14px chip that had its own 1px border and the keycap's inset light and drop shadow: three edges a pixel
    * apart, the shadow making the bottom heavier than the top, and the ring's corner not following the chip's.
-   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 1.5px when it says
+   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 2px when it says
    * something. No shadow: the border alone separates it from the sidebar.
    */
   display: inline-flex;
@@ -1176,14 +1176,14 @@
   box-shadow: none;
 }
 .cc-mark[data-look='answering'] > .cc-chip {
-  border: 1.5px solid var(--color-ink-muted);
+  border: 2px solid var(--color-ink-muted);
 }
 .cc-mark[data-look='waiting'] > .cc-chip {
-  border: 1.5px solid var(--color-ink-signal);
+  border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
 .cc-mark[data-look='stopped'] > .cc-chip {
-  border: 1.5px dashed var(--color-ink-signal);
+  border: 2px dashed var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
 
