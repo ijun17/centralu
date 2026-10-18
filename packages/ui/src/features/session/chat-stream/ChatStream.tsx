@@ -5,6 +5,7 @@ import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
 import { ChatSkeleton } from '../../../components/Skeleton.jsx'
 import { OverlayScrollbar } from '../../../components/OverlayScrollbar.jsx'
+import { dayKey, formatDayLong } from '../../../app/format.js'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
@@ -184,6 +185,41 @@ export function ChatStream({
     bottomPad,
   })
 
+  /*
+   * Where a new day begins (owner, 2026-10-18, as a chat app does): the first row with a time, and every row whose
+   * day differs from the last time before it. Rows with no time never start one.
+   */
+  const dayBreaks = useMemo(() => {
+    const at = new Map<number, string>()
+    let last = ''
+    chat.forEach((item, i) => {
+      if (item.at === undefined) return
+      const day = dayKey(item.at)
+      if (day === last) return
+      last = day
+      at.set(i, formatDayLong(item.at))
+    })
+    return at
+  }, [chat])
+  /*
+   * The answer's last bubble before the person speaks again (or the conversation ends): the one that carries the
+   * answer's time. A chat app writes the time once under the last of several bubbles sent together; an answer split
+   * by tool calls into several bubbles would otherwise carry the same minute under each.
+   */
+  const answerEnds = useMemo(() => {
+    const ends = new Set<number>()
+    let seen = false
+    for (let i = chat.length - 1; i >= 0; i--) {
+      const item = chat[i]!
+      if (item.kind === 'user') seen = false
+      else if (inBubble(item) && !seen) {
+        ends.add(i)
+        seen = true
+      }
+    }
+    return ends
+  }, [chat])
+
   return (
     /* The box the overlay scrollbar is placed in: the scroller's own size, so the thumb floats over its right edge */
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -286,7 +322,11 @@ export function ChatStream({
             */
               style={{ top: v.start }}
             >
-              <AnswerBubble part={bubbleOf(chat, v.index)} at={chat[v.index]?.at}>
+              {dayBreaks.has(v.index) && <DayDivider label={dayBreaks.get(v.index)!} />}
+              <AnswerBubble
+                part={bubbleOf(chat, v.index)}
+                at={answerEnds.has(v.index) ? chat[v.index]?.at : undefined}
+              >
                 <ChatRow
                   item={chat[v.index]!}
                   projectRoot={projectRoot}
@@ -374,9 +414,24 @@ function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: nu
       <div className={`min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
         {children}
       </div>
-      {/* When the answer was said, under its end, as a chat app writes it under a bubble */}
+      {/* When the answer was said, under its last bubble only (`answerEnds`), as a chat app writes it */}
       {ends && at !== undefined && <SaidAt at={at} className="pl-2 pt-1" />}
     </>
+  )
+}
+
+/** A day's name across the conversation, between two hairlines, where that day begins */
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div
+      className="flex items-center gap-3 pb-4 pt-2 text-2xs text-ink-faint"
+      data-testid="day-divider"
+      role="separator"
+    >
+      <span className="h-px flex-1 bg-line" />
+      <span className="shrink-0">{label}</span>
+      <span className="h-px flex-1 bg-line" />
+    </div>
   )
 }
 

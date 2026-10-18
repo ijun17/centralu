@@ -62,18 +62,26 @@ export function formatDuration(ms: number, { coarse = false }: { coarse?: boolea
 }
 
 /**
- * The time under a message's bubble (owner, 2026-10-18), as a chat app writes it: the clock time for today
- * ("3:42 PM"), the date with it before that ("Oct 17, 3:42 PM"), the year too when it is not this one.
+ * The time under a message's bubble (owner, 2026-10-18), as a chat app writes it: the clock time only ("3:42 PM"),
+ * since a divider in the conversation says the day (`formatDayLong`). In English whatever the system's language: the
+ * app's words are English.
  */
-export function formatSaidAt(at: number, now: number = Date.now()): string {
-  const d = new Date(at)
-  const n = new Date(now)
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  if (d.toDateString() === n.toDateString()) return time
-  const date = d.toLocaleDateString(undefined, {
-    month: 'short',
+export function formatSaidAt(at: number): string {
+  return new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
+/** The day a divider in the conversation names ("Saturday, October 18, 2026") */
+export function formatDayLong(at: number): string {
+  return new Date(at).toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
     day: 'numeric',
-    ...(d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' }),
   })
-  return `${date}, ${time}`
+}
+
+/** The local calendar day a moment falls on, for comparing two moments */
+export function dayKey(at: number): string {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }

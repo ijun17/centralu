@@ -30,87 +30,89 @@ import {
  */
 export type ChatAttachment = Attachment & { data?: string }
 
-export type ChatItem = /**
- * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
- * (`user_message`).
- * from: a message that another session sent, not the person (FR-11 — orchestrator instructions,
- * worker reports).
- */
-/**
- * attachments: things sent along with it. Images are drawn as real thumbnails (the successor to
- * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
- * could differ, causing a double render, #75).
- */
-(
-  | {
-      kind: 'user'
-      seq: number
-      text: string
-      attachments?: ChatAttachment[]
-      pending?: boolean
-      from?: { sessionId: string; name: string }
-      /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
-      fromApp?: { appId: string; projectId: string | null; name: string }
-    }
-  | { kind: 'assistant'; seq: number; text: string }
-  /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
-  | { kind: 'reasoning'; seq: number; text: string }
-  /*
-   * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
-   * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
-   */
-  | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
+export type ChatItem =
   /**
-   * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
-   * in — the full output lives in `result`.
-   * callId: the name by which the result/output finds its own row (#98) — falls back to the old
-   * positional rule (`ownerOf`) when absent.
+   * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
+   * (`user_message`).
+   * from: a message that another session sent, not the person (FR-11 — orchestrator instructions,
+   * worker reports).
    */
-  | {
-      kind: 'tool'
-      seq: number
-      tool: string
-      title: string
-      /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
-      paths?: string[]
-      /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
-      centralu?: ToolSummary['centralu']
-      callId?: string
-      result?: string
-      ok?: boolean
-      live?: string
-    }
-  | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
   /**
-   * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
-   * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
+   * attachments: things sent along with it. Images are drawn as real thumbnails (the successor to
+   * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
+   * could differ, causing a double render, #75).
    */
-  | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
-) & {
-  /**
-   * The **number within the session** the host assigned when it stored this row (the store's
-   * `messages.seq`, #79).
-   *
-   * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
-   * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
-   * merge of history with live items go **only by this number**. If the render key were to leak
-   * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
-   * session for an app's requested agent was opened, a stored 8-line session ended up with a
-   * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
-   *
-   * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
-   * from a host that sends no number. An agent's image carries its row's number since #868, as every
-   * recorded row does. A merged message carries the number of its first chunk — the same rule the
-   * host's `loadMessages` uses.
-   */
-  storedSeq?: number
-  /**
-   * When it was said (epoch ms), shown under the bubble (owner, 2026-10-18): the stored row's `ts` for history, the
-   * moment the window received it for a live row. Only on what is said (the person's message, the agent's text and
-   * reasoning); a live answer's time moves with each chunk, so it reads as when the answer was finished.
-   */
-  at?: number
-}
+  (
+    | {
+        kind: 'user'
+        seq: number
+        text: string
+        attachments?: ChatAttachment[]
+        pending?: boolean
+        from?: { sessionId: string; name: string }
+        /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
+        fromApp?: { appId: string; projectId: string | null; name: string }
+      }
+    | { kind: 'assistant'; seq: number; text: string }
+    /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
+    | { kind: 'reasoning'; seq: number; text: string }
+    /*
+     * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
+     * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
+     */
+    | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
+    /**
+     * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
+     * in — the full output lives in `result`.
+     * callId: the name by which the result/output finds its own row (#98) — falls back to the old
+     * positional rule (`ownerOf`) when absent.
+     */
+    | {
+        kind: 'tool'
+        seq: number
+        tool: string
+        title: string
+        /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
+        paths?: string[]
+        /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
+        centralu?: ToolSummary['centralu']
+        callId?: string
+        result?: string
+        ok?: boolean
+        live?: string
+      }
+    | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
+    /**
+     * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
+     * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
+     */
+    | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
+  ) & {
+    /**
+     * The **number within the session** the host assigned when it stored this row (the store's
+     * `messages.seq`, #79).
+     *
+     * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
+     * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
+     * merge of history with live items go **only by this number**. If the render key were to leak
+     * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
+     * session for an app's requested agent was opened, a stored 8-line session ended up with a
+     * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
+     *
+     * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
+     * from a host that sends no number. An agent's image carries its row's number since #868, as every
+     * recorded row does. A merged message carries the number of its first chunk — the same rule the
+     * host's `loadMessages` uses.
+     */
+    storedSeq?: number
+    /**
+     * When it was said or happened (epoch ms; owner, 2026-10-18): the stored row's `ts` for history, the moment
+     * the window received it for a live row. Shown under a bubble (the person's message, the end of the agent's
+     * answer), and read on every row for where a day begins (the conversation's day dividers). A live answer's time
+     * moves with each chunk, so it reads as when the answer was finished.
+     */
+    at?: number
+  }
 
 /**
  * The render key counter for live conversation items. ONE counter shared by every session — see
@@ -559,11 +561,9 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   return items
 }
 
-/** Marks a row that is said (see `ChatItem.at`) with when; anything else is returned as it is */
+/** Marks a row with when it was said or happened (see `ChatItem.at`) */
 export function stampSaid(item: ChatItem, at: number): ChatItem {
-  return item.kind === 'user' || item.kind === 'assistant' || item.kind === 'reasoning'
-    ? { ...item, at }
-    : item
+  return { ...item, at }
 }
 
 function pushStored(items: ChatItem[], m: StoredMessage): void {
