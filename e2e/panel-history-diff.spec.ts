@@ -229,6 +229,47 @@ test('clicking the same file again still opens it — even after switching to a 
 })
 
 /*
+ * Clicking commit A and then B: A's answer arrives last, and only the newest click may draw. The changes screen has
+ * always guarded this (its diff is the basis of an approval); the commit screen had no guard and drew A under B.
+ */
+test('the commit screen draws the commit picked last, even when an earlier one answers later', async ({ page }) => {
+  await setup(page)
+  await seedCommits(page, [
+    { sha: 'aaa1111', subject: 'first', author: 'me', daysAgo: 1 },
+    { sha: 'bbb2222', subject: 'second', author: 'me', daysAgo: 0 },
+  ])
+  await page.evaluate(() => {
+    const w = window as never as { __mock: any; __slowDone?: boolean }
+    w.__mock.gitState.diffs['aaa1111'] = ['@@ -1 +1 @@', '+diff of the slow commit'].join('\n')
+    w.__mock.gitState.diffs['bbb2222'] = ['@@ -1 +1 @@', '+diff of the quick commit'].join('\n')
+    const git = w.__mock.git
+    const real = git.commitDetail
+    // The first commit answers after the second one has
+    git.commitDetail = async (projectId: string, sha: string) => {
+      const answer = await real(projectId, sha)
+      if (sha === 'aaa1111') {
+        await new Promise((r) => setTimeout(r, 600))
+        w.__slowDone = true
+      }
+      return answer
+    }
+  })
+  await newSession(page, 'alpha', 'claude', 'task')
+
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa1111').click()
+  // The panel is open and waiting for the first commit when the second is picked
+  await expect(page.getByTestId('git-panel')).toBeVisible()
+  await page.getByTestId('history-commit-bbb2222').click()
+  await expect(page.getByTestId('diff-view')).toContainText('diff of the quick commit')
+  await page.waitForFunction(() => (window as never as { __slowDone?: boolean }).__slowDone === true)
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 100)))
+
+  await expect(page.getByTestId('diff-view')).toContainText('diff of the quick commit')
+  await expect(page.getByTestId('diff-view')).not.toContainText('diff of the slow commit')
+})
+
+/*
  * A commit diff is several files in one text — a sticky band appears at every file boundary
  * (user's choice, 2026-09-07: a row of chips breaks the UI once there are many files). Only the
  * display gets a band; data-line stays untouched, so copying still produces the original

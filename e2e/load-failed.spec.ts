@@ -152,5 +152,7 @@ test('a commit whose read fails says so, rather than asking to pick the commit j
   await page.getByTestId('evidence-tab-history').click()
   await page.getByTestId('history-commit-aaa111').click()
 
-  await expect(page.getByTestId('toast')).toContainText('Could not load the commit: git show did not answer')
+  await expect(page.getByTestId('diff-failed')).toContainText('Could not read the commit: git show did not answer')
+  // Not the empty hint that asks for the commit just picked
+  await expect(page.getByTestId('diff-empty')).toHaveCount(0)
 })
