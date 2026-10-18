@@ -25,7 +25,10 @@ export const ComposerFooter = memo(function ComposerFooter({
   const session = useStore((s) => s.sessions[sessionId])
   if (!session) return null
   // A window of 0 (a model the host could not size) has no percentage to give
-  const ctxPct = session.context && session.context.window > 0 ? Math.round((session.context.used / session.context.window) * 100) : null
+  const ctxPct =
+    session.context && session.context.window > 0
+      ? Math.round((session.context.used / session.context.window) * 100)
+      : null
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
@@ -67,8 +70,12 @@ export const ComposerFooter = memo(function ComposerFooter({
           database, so quitting and reopening the app made the value disappear. It is persisted
           now, so a blank truly only ever means "never reported at all".)
         */}
+      {/*
+        A thin bar under the number (owner, 2026-10-18), so how full it is reads at a glance: the track is a hairline,
+        the fill steps up to ink from 80% as the number does; unknown draws the track alone.
+      */}
       <span
-        className={`readout ml-auto shrink-0 text-xs ${
+        className={`readout ml-auto flex shrink-0 flex-col items-stretch gap-[3px] text-xs ${
           ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
@@ -78,7 +85,16 @@ export const ComposerFooter = memo(function ComposerFooter({
             : 'Context unknown — this session has never reported one'
         }
       >
-        Context {ctxPct === null ? '—' : `${ctxPct}%`}
+        <span>Context {ctxPct === null ? '—' : `${ctxPct}%`}</span>
+        <span className="block h-[2px] overflow-hidden rounded-full bg-line" aria-hidden>
+          {ctxPct !== null && (
+            <span
+              className={`block h-full rounded-full ${ctxPct >= 80 ? 'bg-ink' : 'bg-ink-faint'}`}
+              style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
+              data-testid="context-gauge-fill"
+            />
+          )}
+        </span>
       </span>
     </div>
   )
