@@ -1,5 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, ToolName } from '@cc/protocol'
-import type { SessionInfo } from '@cc/protocol'
+import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -325,6 +324,32 @@ export function linkedSessions(
           beforeSeq = first.seq
         }
         return { message: null }
+      })
+    },
+
+    async cards(sessionId) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      const id = m.q.strip(sessionId, 'The session')
+      return attempt(m, async () => {
+        const list = await m.call('sessions.list', {})
+        const raw = (Array.isArray(list) ? list : []).find((s) => isObj(s) && s.id === id)
+        if (!isObj(raw)) throw new Error(`${m.name} no longer has this session`)
+        // Read as the window reads them, in the hub's terms: what does not parse is no card the hub can show or answer.
+        // The ids an approval's detail names are the machine's, so they are qualified as the window's event has them
+        const card = isObj(raw.pendingApproval) ? { ...raw.pendingApproval, detail: m.q.approvalDetail(raw.pendingApproval.detail) } : null
+        const approval = SessionInfo.shape.pendingApproval.safeParse(card)
+        const questions = SessionInfo.shape.pendingQuestions.safeParse(raw.pendingQuestions ?? [])
+        return { approval: approval.success ? approval.data : null, questions: questions.success ? questions.data : [] }
+      })
+    },
+
+    async answerQuestion(sessionId, requestId, answers) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => {
+        await route('agents.answerQuestion', { sessionId, requestId, answers })
+        return {}
       })
     },
 

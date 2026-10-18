@@ -371,7 +371,8 @@ is remembered for another machine's project. The machine keeps the child one lev
 depth (`agentDepth`); a machine whose build would drop it (it has no `projects.origin`) is refused, so two machines
 linked both ways cannot start each other's sessions past the setting. The checkout is matched by its origin's
 repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
-never the address as written, which can carry a token.
+never the address as written, which can carry a token. Its caller may answer a question card of the turn it gave it
+(`agent_session answer`), never an approval card there, `auto` or not: what that computer runs is allowed there.
 
 **Proposals** (`propose_mcp_server`, `propose_skill`, #838) are approved by name, and approval installs or saves what
 is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a

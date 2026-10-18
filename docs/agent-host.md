@@ -568,10 +568,17 @@ send, so a turn that ends at once is its answer, not a report. The hub records i
 caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
-works on it through the link: `status` and `wait` (the machine's state and last words), `send` (refused while it is in
-a turn: no note crosses machines yet), `stop` (`agents.interrupt` there; nothing more is owed), `delete` (to that
-machine's trash, its worktree left there), and `list` names its machine. `answer` does not reach another machine yet:
-its cards are answered there or in the session's own window. When the link drops, a waiting call returns with that
+works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
+(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash, its worktree left there), `answer`,
+and `list` names its machine. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
+wait returns them (`asking`), `status` reads them from the machine (`LinkedSessions.cards`), and a card raised while
+no call waits is told once (`cardNotice`); each card's handle names that turn (`RemoteAgent.turn`, new with each start
+or send at rest). `answer` takes a question card's answer to the machine (`agents.answerQuestion` there). An approval
+card stays the person's on that machine, whatever the caller's preset: the child runs under `normal` at most there, and
+a caller's `auto`, which alone lets it answer a local child's approval, is never carried to another computer. `send`
+into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
+person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
+refused, as neither a queue nor a fork reaches another machine. When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
 is back, the child is read (`onReturn`): what ran there meanwhile is the caller's only if the last message the child
 took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
-import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, StartAgentOpts } from '../adapters/contract.js'
+import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
+import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedReport } from './child-ownership.js'
 import type { LinkedEvent } from './linked-reports.js'
@@ -33,6 +34,8 @@ export type RemoteAgent = {
   /** The branch of the worktree it was started in there, if one */
   worktree?: string
   startedAt: number
+  /** The turn its caller last gave it (a start, a send at rest): its cards' handles name it, as a delegated turn's do (#676) */
+  turn?: string
   /**
    * The end of the turn its caller gave it is owed to the caller (a call waits on it, or its report is armed), kept so a
    * restarted hub still reports it (`restore`); `paused`, the background work its report is held over there (#723)
@@ -85,7 +88,7 @@ export type AgentPlaces = {
 }
 
 /** How a wait on a remote child's turn ended */
-type Step = { step: 'completed' } | { step: 'failed'; error: string } | { step: 'deleted' } | { step: 'unreachable'; machine: string }
+type Step = { step: 'completed' } | { step: 'failed'; error: string } | { step: 'deleted' } | { step: 'unreachable'; machine: string } | { step: 'asking' }
 
 /** A call waiting on a remote child's turn: the turn's end as the machine's events tell it */
 type TurnWait = { busy: boolean; done: Promise<Step>; end(step: Step): void }
@@ -103,6 +106,8 @@ export class RemoteAgents {
   private readonly waits = new Map<string, TurnWait>()
   /** Children whose parent was told their link dropped, until it is back */
   private readonly toldDown = new Set<string>()
+  /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
+  private readonly toldCards = new Set<string>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -302,7 +307,7 @@ export class RemoteAgents {
     const task = remoteAgentFrame(label, opts.task)
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
-      project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task,
+      project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),
     }
     this.save([...this.records(), rec])
     // Its row came to the windows before the hub knew whose it is: now it hangs under the caller (#1038)
@@ -347,11 +352,15 @@ export class RemoteAgents {
     }
     switch (opts.action) {
       case 'answer':
-        return { ok: false, error: `A card of "${rec.name}" on ${rec.machine} is answered there or in its own window; agent_session answer does not reach another machine yet.` }
+        return this.answer(rec, opts.card, opts.text ?? '', reader)
       case 'status': {
         const now = await stateOf()
         if (!now.ok) return now
-        if (inTurn(now.state) || this.waits.has(rec.sessionId)) return this.working(rec, this.reportArmed(rec))
+        if (inTurn(now.state) || this.waits.has(rec.sessionId)) {
+          // The cards of the turn it gave are what the caller reads first, as for a local child (#676)
+          const cards = this.ownTurn(rec) ? await this.cardsOf(rec, reader) : []
+          return cards.length ? this.asking(rec, cards) : this.working(rec, this.reportArmed(rec))
+        }
         return this.atRest(rec, now.state, reader)
       }
       case 'wait': {
@@ -365,14 +374,30 @@ export class RemoteAgents {
         if (!text) return { ok: false, error: 'Give the text to send.' }
         const now = await stateOf()
         if (!now.ok) return now
-        if (inTurn(now.state)) return { ok: false, error: `"${rec.name}" is working on ${rec.machine} (${now.state}). A note into a running turn does not reach another machine yet: wait for it, or stop it, then send.` }
+        if (inTurn(now.state)) {
+          /*
+           * A note into the turn the caller gave it, as into a local child's (#646): the machine takes it into the
+           * running turn as it takes the person's message there. Nothing is armed again: the turn's end is still the one
+           * owed. Another's turn there (the person's on that machine) is not the caller's to add to, and neither a queue
+           * nor a fork reaches another machine
+           */
+          if (!this.ownTurn(rec)) {
+            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with a turn you did not give it (the person may be using it there). A queue or a fork does not reach another machine: try again once it is at rest.` }
+          }
+          const refused = this.gateError(callerId)
+          if (refused) return { ok: false, error: refused }
+          const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label, { depth: depthOf(this.host, callerId) + 1 })
+          if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+          return this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId))
+        }
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }
         // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
         const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
         if (full) return { ok: false, error: full }
+        // A new turn: its cards are new cards (#676)
         const framed = agentNoteFrame(label, text)
-        this.sentNow(rec.sessionId, framed)
+        this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
         const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
         if (!sent.ok) {
@@ -435,8 +460,12 @@ export class RemoteAgents {
     if (e.type === 'machine_resync') return void this.caughtUp(e.machineId)
     if (typeof e.sessionId !== 'string') return
     const sessionId = e.sessionId
-    if (!this.of(sessionId)) return
+    const rec = this.of(sessionId)
+    if (!rec) return
     const wait = this.waits.get(sessionId)
+    if ((e.type === 'approval_request' || e.type === 'question_request') && typeof e.requestId === 'string') {
+      this.cardRaised(rec, e.type === 'approval_request' ? 'approval' : 'question', e.requestId, !!wait)
+    }
     if (e.type === 'session_deleted') {
       this.forget(sessionId)
       wait?.end({ step: 'deleted' })
@@ -444,8 +473,14 @@ export class RemoteAgents {
     }
     if (!wait) return
     const step = linkedTurnEnd(wait.busy, e)
-    if (step?.step === 'busy') wait.busy = true
-    else if (step && step.step !== 'card_closed') {
+    if (step?.step === 'busy') {
+      wait.busy = true
+      // A card in the turn: the call waiting on it reads the card, as a local child's wait does (#676)
+      if (step.waits) {
+        this.dropWait(sessionId)
+        wait.end({ step: 'asking' })
+      }
+    } else if (step && step.step !== 'card_closed') {
       this.dropWait(sessionId)
       wait.end(step)
     }
@@ -514,6 +549,12 @@ export class RemoteAgents {
       rearm()
       return { ...this.working(rec, true), notice: `The link to ${r.machine} dropped while it worked, so it cannot be followed now. Its report comes once the link is back and its turn has ended.` }
     }
+    if (r.step === 'asking') {
+      // Its turn goes on: its end is owed again, and the cards are the answer now
+      rearm()
+      const cards = reader ? await this.cardsOf(rec, reader) : []
+      return cards.length ? this.asking(rec, cards) : this.working(rec, true)
+    }
     if (r.step === 'deleted') return { ok: false, error: `"${rec.name}" [${rec.sessionId}] was deleted on ${rec.machine} before it finished.` }
     if (r.step === 'failed') return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
     const answer = clipAnswer(reader ? await reader.lastWords(rec.sessionId, 20_000).catch(() => '') : '', rec.name)
@@ -568,6 +609,72 @@ export class RemoteAgents {
   private async atRest(rec: RemoteAgent, state: SessionState, reader: LinkedSessions): Promise<ChildRunResult> {
     const answer = clipAnswer(await reader.lastWords(rec.sessionId, 20_000).catch(() => ''), rec.name)
     return { ok: true, state: 'at_rest', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer, sessionState: state }
+  }
+
+  /** Whether the turn running there is the one its caller gave: a call waits on it, or its end is owed to the caller */
+  private ownTurn(rec: RemoteAgent): boolean {
+    return this.waits.has(rec.sessionId) || this.reportArmed(rec)
+  }
+
+  /**
+   * The cards standing in the child's turn, as its caller reads them (#676): its questions, and its approval, which is
+   * never the caller's to answer here (`answer`). Each named by a handle of the turn the caller gave it, the request and
+   * what the card asks, so an answer meant for an earlier card finds nothing on a new one
+   */
+  private async cardsOf(rec: RemoteAgent, reader: LinkedSessions): Promise<RoutedCard[]> {
+    const r = await reader.cards(rec.sessionId)
+    if (!r.ok) return []
+    const turn = this.of(rec.sessionId)?.turn ?? rec.sessionId
+    const cards: RoutedCard[] = r.questions.map((q) => ({ card: cardHandle(turn, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions }))
+    if (r.approval) cards.push({ card: cardHandle(turn, r.approval.requestId, r.approval.detail), requestId: r.approval.requestId, kind: 'approval', detail: r.approval.detail, answerable: false })
+    return cards
+  }
+
+  private asking(rec: RemoteAgent, cards: RoutedCard[]): ChildRunResult {
+    return { ok: true, state: 'asking', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, cards }
+  }
+
+  /**
+   * agent_session answer on a child of a linked machine (#1038), as on a local child's delegated turn (#676): the caller
+   * must still own the turn running there, and the card must still stand as it read it. A question takes its answer,
+   * through the machine as its window would answer it. An approval stays the person's: the child runs under at most
+   * `normal` there, and a caller's `auto` (which alone lets a caller answer a local child's approval) is never carried
+   * to another computer, so what that computer runs is allowed there, by the person
+   */
+  private async answer(rec: RemoteAgent, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
+    if (!this.ownTurn(rec)) return { ok: false, error: `"${rec.name}" on ${rec.machine} is not running a turn you gave it, so none of its cards are yours to answer.` }
+    const cards = await this.cardsOf(rec, reader)
+    const chosen = card ? cards.find((c) => c.card === card) : undefined
+    if (!chosen) {
+      return {
+        ok: false,
+        error: !card
+          ? cards.length ? `Name the card you read: ${cards.map((c) => c.card).join(', ')}.` : `"${rec.name}" has no card waiting.`
+          : `Card ${card} no longer stands in "${rec.name}" as you read it: it was answered (the person may have answered first), withdrawn, or replaced by another card. ` +
+            (cards.length ? `Read it again: ${cards.map((c) => c.card).join(', ')} stands now.` : 'Nothing is waiting now.'),
+      }
+    }
+    if (chosen.kind === 'approval') {
+      return { ok: false, error: `Only the person can answer this approval in "${rec.name}": it runs on ${rec.machine}, and your preset is not carried to another computer, so what runs there is allowed there. Tell them if it matters.` }
+    }
+    const answers = answersFrom(chosen.questions, text)
+    if ('error' in answers) return { ok: false, error: answers.error }
+    const r = await reader.answerQuestion(rec.sessionId, chosen.requestId, answers)
+    if (!r.ok) return { ok: false, error: `The question was not answered: ${bare(r.error)}.` }
+    return { ok: true, state: 'answered', card: chosen.card, sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
+  }
+
+  /**
+   * A card came up in the child (#676): in the turn its caller gave it, the caller hears of it once, by the wait on that
+   * turn when one stands (it returns the card), otherwise by a notice into its conversation, as a report is delivered
+   */
+  private cardRaised(rec: RemoteAgent, kind: 'question' | 'approval', requestId: string, waited: boolean): void {
+    if (!this.ownTurn(rec) || !this.host.meta.has(rec.callerId)) return
+    const key = `${rec.sessionId}\0${rec.turn ?? ''}\0${requestId}`
+    if (this.toldCards.has(key)) return
+    this.toldCards.add(key)
+    if (waited) return
+    void this.host.tellSession(rec.callerId, cardNotice(kind, rec.sessionId, cardCall('reader', rec.sessionId), false), { sessionId: rec.sessionId, name: rec.name }, true)
   }
 
   /** Whether the child's turn end is owed to the session that started it */
@@ -715,6 +822,7 @@ export class RemoteAgents {
   private forget(sessionId: string): void {
     if (this.records().some((r) => r.sessionId === sessionId)) this.save(this.records().filter((r) => r.sessionId !== sessionId))
     this.toldDown.delete(sessionId)
+    for (const key of [...this.toldCards]) if (key.startsWith(`${sessionId}\0`)) this.toldCards.delete(key)
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
   }
 }

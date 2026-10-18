@@ -47,6 +47,8 @@ export type LinkedEvent = {
   state?: unknown
   reason?: unknown
   error?: { message?: string }
+  /** A card's request id (`approval_request`, `question_request`) */
+  requestId?: unknown
   machine?: unknown
   machineId?: unknown
   text?: unknown
