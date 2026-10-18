@@ -81,4 +81,6 @@ export type DelegationHost = {
   linkedTasksRunning: (sessionId: string) => BackgroundTask[]
   /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
   settleLinkedTurn: (sessionId: string) => void
+  /** A linked report held over its session's background work, restored after a restart: its settle wait starts again (#1038) */
+  linkedReportRestored: (sessionId: string) => void
 }

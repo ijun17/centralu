@@ -16,6 +16,7 @@ let children: ChildOwnership
 let state: string
 let settled: string[]
 let told: string[]
+let restored: string[]
 
 const caller = { id: 'h1', name: 'Parent', projectId: 'p1', kind: 'worker', permissionPreset: 'normal', ...sessionLiveDefaults() } as unknown as SessionInfo
 const child = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1 }
@@ -35,6 +36,7 @@ function agents(): RemoteAgents {
     settleLinkedTurn: (id: string) => settled.push(id),
     linkedTasksRunning: () => [],
     tellSession: async (_to: string, text: string) => void told.push(text),
+    linkedReportRestored: (id: string) => restored.push(id),
   } as unknown as RemoteAgentsHost
   return new RemoteAgents(host, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
 }
@@ -46,8 +48,43 @@ beforeEach(() => {
   state = 'working'
   settled = []
   told = []
+  restored = []
 })
 afterEach(() => store.close())
+
+describe('what is owed of a child on a linked machine, across a hub restart (#1038)', () => {
+  const stored = () => JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]') as { sessionId: string; owed?: { paused?: unknown[] } }[]
+  const task = { id: 't1', description: 'build', status: 'running' } as never
+
+  it('keeps in the record whether its report is owed and what it is paused over, as the report changes', () => {
+    // As the host starts: restored, which also hooks the record to its report
+    agents().restore()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    expect(stored()[0]!.owed).toEqual({})
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    expect(stored()[0]!.owed).toEqual({ paused: [task] })
+    children.dropLinkedReport(child.sessionId)
+    expect(stored()[0]!.owed).toBeUndefined()
+  })
+
+  it('owes it again after a restart: read once the link is up, a paused one waiting on its work, nothing for a caller gone', async () => {
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([
+      { ...child, owed: {} },
+      { ...child, sessionId: 'm1.c2', owed: { paused: [task] } },
+      { ...child, sessionId: 'm1.c3', callerId: 'gone', owed: {} },
+    ]))
+    const ra = agents()
+    ra.restore()
+    expect([...children.linkedReports.keys()]).toEqual(['m1.c1', 'm1.c2'])
+    expect(restored).toEqual(['m1.c2'])
+    expect(stored().find((r) => r.sessionId === 'm1.c3')!.owed).toBeUndefined()
+    // The link comes up and the child is at rest: its turn ended unseen, so its report goes now
+    state = 'idle'
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await eventually(() => settled.includes('m1.c1'))
+    expect(settled).not.toContain('m1.c2')
+  })
+})
 
 describe('a child on a linked machine, as the hub follows it (#1038 review)', () => {
   // After a hub restart nothing is armed or waited on: the state is the machine's, not "finished"

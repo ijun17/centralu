@@ -577,8 +577,12 @@ is back, a child whose turn ended meanwhile is reported then. The paths its answ
 is made readable here. It counts under the caller's project's ceiling (below, "How many"), wherever it runs: the
 ceiling bounds how much one project's sessions set going at once, and the machine counts nothing for a session the
 hub started there; its start holds a place from the card's answer until its wait or report counts it, and a new
-`send` turn is checked as a local one. Not yet: a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
-stored; `list` reads its state from the machine) but no longer owes its report. A child deleted there, or whose
+`send` turn is checked as a local one. What is owed of it survives a hub restart: its record keeps `owed` (a call
+waits on its turn or its report is armed, with the background work a held report waits on), written whenever its
+report changes (`ChildOwnership.onLinkedReportChange`). The next host arms the report again for a caller still there
+(`RemoteAgents.restore`; a call that waited is gone, so the end is its report now), and once the machine's link is up
+reads the child: a turn that ended meanwhile is reported then, one still running when it ends, and a held report
+waits for its work as before (`LinkedReports.restored`). The orchestrator's own linked reports still live in memory. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
 children's records, and a handoff gives them to the heir. In the sidebar it hangs under its caller, in the caller's
 project, with its machine's tag: the hub names the caller as its `askedBy` in that machine's rows and owner events

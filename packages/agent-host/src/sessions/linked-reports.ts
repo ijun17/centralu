@@ -140,6 +140,8 @@ export class LinkedReports {
       wait.paused = [...held, ...running.filter((t) => !held.some((h) => h.id === t.id))]
       // A state the machine reports before the next turn starts is not that turn's end
       wait.busy = false
+      // Changed in place: set again, so what keeps it stored reads the pause (#1038)
+      this.host.children.setLinkedReport(sessionId, wait)
       if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false })
       return
     }
@@ -156,7 +158,10 @@ export class LinkedReports {
     if (wait?.paused) this.settleLater(sessionId, wait)
   }
 
-  /** Every settle wait ends with the host: the next host has no linked report to settle (they live in memory) */
+  /**
+   * Every settle wait ends with the host. The next host settles only what a child start_agent started on a linked
+   * machine is still owed (`RemoteAgents.restore`, #1038); the orchestrator's linked reports live in memory
+   */
   dispose(): void {
     for (const timer of this.settling.values()) clearTimeout(timer)
     this.settling.clear()

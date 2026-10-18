@@ -31,6 +31,17 @@ export type RemoteAgent = {
   /** The branch of the worktree it was started in there, if one */
   worktree?: string
   startedAt: number
+  /**
+   * The end of the turn its caller gave it is owed to the caller (a call waits on it, or its report is armed), kept so a
+   * restarted hub still reports it (`restore`); `paused`, the background work its report is held over there (#723)
+   */
+  owed?: { paused?: BackgroundTask[] }
+}
+
+/** The record with nothing owed */
+const withoutOwed = (r: RemoteAgent): RemoteAgent => {
+  const { owed: _owed, ...rest } = r
+  return rest
 }
 
 /** A machine's sentence to go inside another, without its own full stop */
@@ -57,7 +68,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
+  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn' | 'linkedReportRestored'
 >
 
 /**
@@ -93,6 +104,26 @@ export class RemoteAgents {
     private readonly host: RemoteAgentsHost,
     private readonly places: AgentPlaces,
   ) {}
+
+  /**
+   * At startup (#1038): what was owed of each child when the last host stopped is owed again, to a caller still here. A
+   * call that waited on it is gone with that host, so its end is the caller's report now. The hub has not seen the
+   * turn's end, nor whether it ended: once the machine's link is up the child is read (`caughtUp`), and a turn that
+   * ended meanwhile is reported then, one still running when it ends. A report held over the child's background work
+   * there waits for that work as before (`LinkedReports`), and settles if it ended unseen.
+   */
+  restore(): void {
+    for (const r of this.records()) {
+      if (!r.owed) continue
+      if (!this.host.meta.has(r.callerId)) {
+        this.save(this.records().map((x) => (x.sessionId === r.sessionId ? withoutOwed(x) : x)))
+        continue
+      }
+      this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
+      if (r.owed.paused) this.host.linkedReportRestored(r.sessionId)
+      else this.toldDown.add(r.sessionId)
+    }
+  }
 
   /** The hub's record of a child on a linked machine, by its qualified id */
   of(sessionId: string): RemoteAgent | undefined {
@@ -282,7 +313,7 @@ export class RemoteAgents {
     // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
     const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
-      if (waiting && this.waits.get(rec.sessionId) === waiting) this.waits.delete(rec.sessionId)
+      if (waiting && this.waits.get(rec.sessionId) === waiting) this.dropWait(rec.sessionId)
       if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
       return { ok: false, error: `The session "${rec.name}" [${rec.sessionId}] was made on ${machine.name} but did not take the task: ${bare(sent.error)}. Send it again with agent_session, or delete it.` }
     }
@@ -407,7 +438,7 @@ export class RemoteAgents {
     const step = linkedTurnEnd(wait.busy, e)
     if (step?.step === 'busy') wait.busy = true
     else if (step && step.step !== 'card_closed') {
-      this.waits.delete(sessionId)
+      this.dropWait(sessionId)
       wait.end(step)
     }
   }
@@ -460,7 +491,7 @@ export class RemoteAgents {
     if (this.reportArmed(rec)) this.host.children.dropLinkedReport(rec.sessionId)
     const r = await raceBound(wait.done, boundMs, signal)
     const rearm = () => {
-      if (this.waits.get(rec.sessionId) === wait) this.waits.delete(rec.sessionId)
+      if (this.waits.get(rec.sessionId) === wait) this.dropWait(rec.sessionId)
       this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: wait.busy })
     }
     if (r === 'bound') {
@@ -493,7 +524,24 @@ export class RemoteAgents {
     const done = new Promise<Step>((resolve) => (end = resolve))
     const wait = { busy: this.host.children.linkedReports.get(sessionId)?.busy ?? false, done, end }
     this.waits.set(sessionId, wait)
+    this.keepOwed(sessionId)
     return wait
+  }
+
+  private dropWait(sessionId: string): void {
+    this.waits.delete(sessionId)
+    this.keepOwed(sessionId)
+  }
+
+  /** What is owed of the child now, kept in its record when it changed (#1038): a wait open, or its report armed */
+  private keepOwed(sessionId: string): void {
+    const rec = this.of(sessionId)
+    if (!rec) return
+    const report = this.host.children.linkedReports.get(sessionId)
+    const armed = report?.orchestratorId === rec.callerId ? report : undefined
+    const owed = this.waits.has(sessionId) || armed ? { ...(armed?.paused ? { paused: armed.paused } : {}) } : undefined
+    if (JSON.stringify(owed) === JSON.stringify(rec.owed)) return
+    this.save(this.records().map((r) => (r.sessionId !== sessionId ? r : owed ? { ...r, owed } : withoutOwed(r))))
   }
 
   /**
@@ -532,7 +580,7 @@ export class RemoteAgents {
       if (rec.machineId !== m.id) continue
       const wait = this.waits.get(rec.sessionId)
       if (wait) {
-        this.waits.delete(rec.sessionId)
+        this.dropWait(rec.sessionId)
         wait.end({ step: 'unreachable', machine: name })
         // The call said it; what ended while the link was down is reported once it is back, seen working or not (#1038 review)
         this.toldDown.add(rec.sessionId)
@@ -572,7 +620,12 @@ export class RemoteAgents {
       const report = this.host.children.linkedReports.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || (!report.busy && !missed)) continue
       const now = await reader.read(rec.sessionId, 1)
-      if (!now.ok || inTurn((now.state ?? 'idle') as SessionState)) continue
+      if (!now.ok) continue
+      if (inTurn((now.state ?? 'idle') as SessionState)) {
+        // Seen working now (after a hub restart, say): the end of this turn is the report's, however the machine says it
+        if (this.host.children.linkedReports.get(rec.sessionId) === report) report.busy = true
+        continue
+      }
       // Read again: the turn's own end may have come in while the machine was asked
       if (this.host.children.linkedReports.get(rec.sessionId) === report) this.host.settleLinkedTurn(rec.sessionId)
     }
@@ -588,6 +641,11 @@ export class RemoteAgents {
   }
 
   private records(): RemoteAgent[] {
+    if (!this.loaded) {
+      // Whatever arms, moves or drops a child's report, here or in the linked reports, is kept in its record. Hooked on
+      // the first read (`restore` at startup does one), as nothing is armed for a child before its record is read
+      this.host.children.onLinkedReportChange((sessionId) => this.keepOwed(sessionId))
+    }
     this.loaded ??= readJsonObjects<RemoteAgent>(
       this.host.store.settings.appSetting(REMOTE_AGENTS_KEY),
       (x) => typeof x.sessionId === 'string' && typeof x.callerId === 'string' && typeof x.machineId === 'string',

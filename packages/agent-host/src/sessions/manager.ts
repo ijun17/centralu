@@ -408,6 +408,8 @@ export class SessionManager {
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     this.children.restoreReports(this.meta, keeperOpts.keptSessions)
     this.delegationFlow.starts.restoreAgentStarts()
+    // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
+    this.delegationFlow.remote.restore()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
     this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.queue.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
@@ -2230,6 +2232,7 @@ export class SessionManager {
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
+      linkedReportRestored: (sessionId) => self.linkedReports.restored(sessionId),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),

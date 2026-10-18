@@ -1812,6 +1812,38 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(records()).toEqual([])
   })
 
+  // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
+  it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
+    const { remote, hub, answer, start, reports } = await rig()
+    const begin = async (task: string) => {
+      const call = start({ task, wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      const id = r.sessionId.slice('m1.'.length)
+      await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+      return id
+    }
+    const allow = (id: string) => remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    const endsWhileDown = await begin('please approve the command')
+    const endsAfter = await begin('please approve this one as well')
+    await hub.links.stop()
+    await hub.mgr.disposeAll()
+    await hub.server.close()
+    await allow(endsWhileDown)
+    // Its turn ends there while no hub hears it
+    await eventually(() => ['idle', 'waiting_input'].includes(remote.mgr.listSessions().find((s) => s.id === endsWhileDown)?.state ?? ''))
+    // The same store, a new host: nothing of the old one's memory
+    const again = await hubHost(() => lineFor(remote.port), hub.store)
+    await eventually(() => status(again) === 'connected')
+    await eventually(() => reports() === 1)
+    await allow(endsAfter)
+    await eventually(() => reports() === 2)
+    // Each once
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(reports()).toBe(2)
+  })
+
   // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there
   it("counts a working child on the machine under its parent's project ceiling, and frees the place when its turn ends", async () => {
     const { remote, hub, answer, start, agent } = await rig()
