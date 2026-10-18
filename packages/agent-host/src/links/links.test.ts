@@ -1342,7 +1342,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
   it('creates a session in a machine’s project with its first instruction, and asks for the id when two machines share the name (step 2)', async () => {
     const { tool, remote, hub } = await rig()
     const made = await tool('create_session', { project: 'm1.p-remote', name: 'Backups', firstMessage: 'hello there' })
-    expect(made.text).toMatch(/^Created: Backups \[m1\.[0-9a-f-]+\] — sent the first instruction$/)
+    expect(made.text).toMatch(/^Created: Backups \[m1\.[0-9a-f-]+\] — sent the first instruction; you are told when its turn ends$/)
     const s = remote.mgr.listSessions().find((x) => x.name === 'Backups')!
     expect(s).toMatchObject({ projectId: 'p-remote', permissionPreset: 'normal' })
     await eventually(() => remote.store.messages.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
@@ -1355,6 +1355,23 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(both).toMatchObject({ isError: true })
     expect(both.text).toContain(`${name} [p-dup] on this computer`)
     expect(both.text).toContain(`${name} [m1.p-remote] on Remote box`)
+  })
+
+  // #1233: the first message's turn is reported there too, unless reportBack is false
+  it('tells the hub’s orchestrator when the first turn of a session it made on a machine ends, unless it opted out', async () => {
+    const { tool, remote, hub } = await rig()
+    const u = await ui(hub.port)
+    const quiet = await tool('create_session', { project: 'm1.p-remote', name: 'Quiet', firstMessage: 'keep it quiet', reportBack: false })
+    expect(quiet.text).not.toContain('you are told')
+    const q = remote.mgr.listSessions().find((x) => x.name === 'Quiet')!
+    await eventually(() => u.events().some((e) => e.type === 'turn_complete' && e.sessionId === `m1.${q.id}`))
+
+    const loud = await tool('create_session', { project: 'm1.p-remote', name: 'Loud', firstMessage: 'say when done' })
+    expect(loud.text).toContain('you are told when its turn ends')
+    await eventually(() => told(hub).some((t) => t.startsWith('[Centralu] The assigned work finished.')))
+    const reports = told(hub).filter((t) => t.startsWith('[Centralu]'))
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toContain('echo: say when done')
   })
 
   it('makes a project on a machine once the person allows the card that names it (step 2)', async () => {

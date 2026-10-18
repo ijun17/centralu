@@ -928,11 +928,12 @@ writes nothing but the ready line.
 When a session works on a turn another session gave it, the cards it raises in that turn go to that session as
 well as to the person (owner decision 2026-10-14, the child-question rule of #561 option B, scoped tightly). The turn
 is **delegated** when another session's work starts it: `ask_project` into a session at rest, `start_agent`, an
-`agent_session` send that starts a turn, and `send_to_session` to a session at rest. A task or note that joins a turn
-already running (the person's, or someone else's) gives no one that turn.
+`agent_session` send that starts a turn, `send_to_session` to a session at rest, and `create_session`'s first
+message (#1233). A task or note that joins a turn already running (the person's, or someone else's) gives no one that
+turn, and never clears a report mark someone is owed of it (#1233, `domain-model.md` Report mark).
 
 - **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
-  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session`. A card from a later turn the
+  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session` and `create_session`. A card from a later turn the
   person starts there never goes to the caller. Written to `delegated_turns` (store v51) as well as kept in memory:
   the leaving host's `detachAll` keeps the rows (`handingOver`), and the next host restores the links of sessions the
   keeper kept that are still in their turn, ending each with that turn; any other row is dropped. The kept CLI sends
@@ -2750,7 +2751,8 @@ session's own background work running included (§1.2.1 step 7, #723). The watch
 is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
-refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s
+refused with the ids. `create_session`'s first message goes as `send_to_session`'s instruction, its turn's end
+reported the same way unless `reportBack` is false (#1233). `create_project { machine }` raises the same card, naming the machine (`project_create`'s
 `machine`, additive), with the path that machine's `projects.createPreview` gives, and has that machine make it.
 
 **Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same

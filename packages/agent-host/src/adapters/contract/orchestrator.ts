@@ -180,7 +180,8 @@ export type RoutedCard = {
  * requester chooses, by calling again with `ifBusy`; nothing was sent.
  *
  *   note       add it to the running turn as a mid-turn note (#594/#606/#653): only an `auto` requester, on a CLI that
- *              takes input mid-turn; the turn's answer stays its owner's, the note's reply comes to the requester
+ *              takes input mid-turn; the turn and its answer stay its owner's. The requester hears the turn's end only
+ *              when it asks for a report (`reportBack`, #1233) and nobody else is owed it
  *   queue      hold it and deliver it as a new turn when the running one ends; the requester is told when that ends
  *   fork       a sub-session started from a copy of the session's conversation now, linked to the requester, in a
  *              worktree of its own (`fork_read`: read-only work, in the session's folder, under at most `safe`)
@@ -191,7 +192,8 @@ export type BusyAnswer =
   | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[] }
   /** `lowMemory` (#686): queued instead of the fork asked for, since memory was low; what was read */
   | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number; lowMemory?: string }
-  | { state: 'noted'; sessionId: string; sessionName: string }
+  /** `reportTaken` (#1233): a report was asked for, but another session is owed that turn's end, so it stays theirs */
+  | { state: 'noted'; sessionId: string; sessionName: string; reportTaken?: true }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
@@ -367,6 +369,11 @@ export type OrchestratorTools = {
    * With `reportBack`, the orchestrator is notified once when that session's turn ends. Off by
    * default, because waking it up on every turn end would create a loop where they wake each
    * other, and would also double the turn cost.
+   *
+   * A note (a send into a turn already running, #1233) never drops a report someone is owed, its own included:
+   * without `reportBack` it leaves the marks as they are; with it, it adds this orchestrator's, unless another
+   * session is owed that turn's end (`reportTaken`). A new instruction to a session at rest without `reportBack`
+   * still replaces this orchestrator's earlier request (#166).
    */
   sendToSession(
     sessionId: string,
@@ -428,8 +435,16 @@ export type OrchestratorTools = {
     tool?: ToolName
     /** The session name. If given, the automatic name does not override it */
     name?: string
-    /** The first instruction to send right after creation */
+    /**
+     * The first instruction to send right after creation. Its turn is the orchestrator's (#1233), as a send to a
+     * session at rest is: its cards come to the orchestrator, and its later words go in as notes with no busy answer
+     */
     firstMessage?: string
+    /**
+     * Whether the orchestrator is told once when that first turn ends (#1233). On unless false: work it hands out is
+     * work it hears the end of, as start_agent's is. Means nothing without `firstMessage`
+     */
+    reportBack?: boolean
   }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
   /**
    * Changes a session's performance settings (#30).

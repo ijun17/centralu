@@ -150,6 +150,8 @@ export const ORCHESTRATOR_TOOLS = [
       tool: ToolName.optional().describe("If omitted, the project's default tool."),
       name: z.string().optional().describe('Session name. If given, the automatic name does not override it.'),
       firstMessage: z.string().optional().describe('The first instruction to send as soon as it is created.'),
+      // #1233: work handed out is work whose end is heard, as start_agent's is; false opts out
+      reportBack: z.boolean().optional().describe('With firstMessage: false if you do not need to hear when that first turn ends.'),
     }),
   },
   {
@@ -562,6 +564,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'Use send_to_session to assign work — the target session\'s approval settings apply as they are,',
   'so a risky action will make that session ask the person for approval.',
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
+  // #1233: work handed out is heard of when it ends; more words into it do not undo that
+  "create_session's firstMessage reports back the same way unless reportBack is false; a note into a running turn never cancels a report.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows

@@ -442,11 +442,12 @@ const HANDLERS: ToolHandlers = {
   },
 
   async create_session(args, { tools }) {
-    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage })
+    // Reported unless asked not to (#1233)
+    const reportBack = args.reportBack !== false
+    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage, reportBack })
+    const sent = args.firstMessage === undefined ? '' : ' — sent the first instruction' + (reportBack ? '; you are told when its turn ends' : '')
     return {
-      text: r.ok
-        ? `Created: ${r.name} [${r.sessionId}]` + (args.firstMessage !== undefined ? ' — sent the first instruction' : '')
-        : `Could not create it — ${r.error}`,
+      text: r.ok ? `Created: ${r.name} [${r.sessionId}]${sent}` : `Could not create it — ${r.error}`,
       isError: !r.ok,
     }
   },
@@ -461,6 +462,9 @@ const HANDLERS: ToolHandlers = {
       if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
       if (b.state === 'queued') return { text: queuedText(b) }
       if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
+      if (b.reportTaken) {
+        return { text: `Added as a note to the running turn of ${sessionId}. Another session is owed that turn's report, so you are not told when it ends: read_session it later.` }
+      }
       return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
     }
     /*
