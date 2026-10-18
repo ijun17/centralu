@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -154,19 +154,12 @@ describe('which data folder the host uses (#973)', () => {
 })
 
 describe('the root of the data folder', () => {
-  const saved = process.env.CC_DATA_DIR
-  afterEach(() => {
-    if (saved === undefined) delete process.env.CC_DATA_DIR
-    else process.env.CC_DATA_DIR = saved
-  })
-
-  // The guard behind "never write to the real data folder": tests point CC_DATA_DIR at a temp folder
+  // The guard behind "never write to the real data folder": tests point CC_DATA_DIR at a temp folder.
+  // The variable is stubbed, and vitest undoes the stub (#845)
   it('is CC_DATA_DIR when it is set, and the home folder otherwise', () => {
-    process.env.CC_DATA_DIR = join(root, 'chosen')
+    vi.stubEnv('CC_DATA_DIR', join(root, 'chosen'))
     expect(dataRoot()).toBe(join(root, 'chosen'))
-    delete process.env.CC_DATA_DIR
-    expect(dataRoot()).toBe(join(homedir(), '.centralu'))
-    process.env.CC_DATA_DIR = ''
+    vi.stubEnv('CC_DATA_DIR', '')
     expect(dataRoot()).toBe(join(homedir(), '.centralu'))
   })
 })

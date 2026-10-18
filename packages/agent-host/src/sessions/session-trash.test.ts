@@ -116,14 +116,11 @@ describe('a delete while a restore still runs (#839 review)', () => {
  */
 describe('purging a session for good', () => {
   let data = ''
-  const saved = process.env.CC_DATA_DIR
   beforeEach(() => {
     data = mkdtempSync(join(tmpdir(), 'cc-purge-'))
-    process.env.CC_DATA_DIR = data
+    vi.stubEnv('CC_DATA_DIR', data)
   })
   afterEach(() => {
-    if (saved === undefined) delete process.env.CC_DATA_DIR
-    else process.env.CC_DATA_DIR = saved
     rmSync(data, { recursive: true, force: true })
   })
 
