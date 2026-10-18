@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import type { GridPanel, SessionInfo, StoredMessage } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
+import { stepsAfter } from './store-steps.test-helpers.js'
 
 /**
  * The current latest schema version, read from the step list itself. v22, v23 and v24 broke the same six
@@ -609,7 +610,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      expect(s.migrationsRun).toBe(LATEST_SCHEMA - 41)
+      expect(s.migrationsRun).toBe(stepsAfter(41))
       expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
       // Now an app can stand between them
       s.grid.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
@@ -2024,7 +2025,7 @@ describe('the trash (#204)', () => {
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      expect(s.migrationsRun).toBe(LATEST_SCHEMA - 38)
+      expect(s.migrationsRun).toBe(stepsAfter(38))
       expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['old'])
       expect(s.trash.listTrash()).toEqual([])
       s.close()

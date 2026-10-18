@@ -226,14 +226,14 @@
    "breaksOlderReaders": true
   },
   {
-   "to": 57,
+   "to": 59,
    "breaksOlderReaders": false
   }
  ],
- "version": 57,
+ "version": 59,
  "ran": 56,
  "store": {
-  "userVersion": 57,
+  "userVersion": 59,
   "master": [
    {
     "type": "index",

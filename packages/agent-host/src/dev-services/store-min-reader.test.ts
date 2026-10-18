@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store, StoreTooNewError, storeTooNewMessage } from './store.js'
+import { stepNumbersFrom, stepsAfter } from './store-steps.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 const dirs: string[] = []
@@ -132,7 +133,7 @@ describe('which builds can still read the store (#292)', () => {
     })
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(KNOWN - 31)
+    expect(s.migrationsRun).toBe(stepsAfter(31))
     expect(s.minReaderVersion).toBe(FLOOR)
     s.close()
     raw(file, (db) => expect(floorOf(db)).toBe(String(FLOOR)))
@@ -177,7 +178,7 @@ describe('which builds can still read the store (#292)', () => {
   it('every step declares whether it breaks older readers; v13, v28, v32 and v56 do, and v3, v11, v21 and v40 are heavy', () => {
     type Step = { to: number; breaksOlderReaders: boolean; heavy?: true }
     const steps = (new Store() as unknown as { migrationSteps(): Step[] }).migrationSteps()
-    expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 1 }, (_, i) => i + 2))
+    expect(steps.map((s) => s.to)).toEqual(stepNumbersFrom(2))
     expect(steps.every((s) => typeof s.breaksOlderReaders === 'boolean')).toBe(true)
     expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56])
     expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([3, 11, 21, 40])

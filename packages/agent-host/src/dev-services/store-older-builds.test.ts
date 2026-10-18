@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store } from './store.js'
+import { stepsAfter } from './store-steps.test-helpers.js'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -40,7 +41,7 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
     const store = new Store(file)
     try {
       expect(store.schemaVersion).toBe(LATEST)
-      expect(store.migrationsRun).toBe(LATEST - version)
+      expect(store.migrationsRun).toBe(stepsAfter(version))
 
       expect(store.projects.listProjects()).toEqual([expect.objectContaining({ id: 'p1', path: '/tmp/p1', name: 'alpha' })])
       const sessions = store.sessions.listSessions()

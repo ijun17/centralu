@@ -1683,7 +1683,7 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 `--rotate-token`은 토큰을 바꾸지만 돌고 있는 serve는 재시작할 때까지 이전 것을 쓰기 때문이다); `disconnected`(#1134: 일부러
 닫았고 다시 시도하지 않는다, 아래).
 
-**링크를 여는 때**(#1134, 소유자 결정 2026-10-18; `MachineInfo.connect`, `linked_machines.connect` 열, v57). 기본값 `at_start`는
+**링크를 여는 때**(#1134, 소유자 결정 2026-10-18; `MachineInfo.connect`, `linked_machines.connect` 열, v59). 기본값 `at_start`는
 예전부터 모든 기기가 하던 대로다: 허브가 시작할 때 연결하고 끊길 때마다 다시 시도해, 그 기기로 일하는 오케스트레이터가 보고와
 카드를 바로 듣는다. `when_needed`는 자주 닫혀 있는 노트북이나 일주일에 한 번 쓰는 서버를 위한 것이다: 시작할 때 연결하지
 않고, 무언가가 필요로 할 때까지 시도하지 않는다. 필요란 창이 그 기기의 프로젝트나 세션을 여는 것(`machines.need`, 열려 있는

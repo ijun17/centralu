@@ -2692,7 +2692,7 @@ the connection line is read again once at once, since `--rotate-token` changes t
 it restarts); `disconnected` (#1134: closed on purpose and not tried, below).
 
 **When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
-column, v57). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
+column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
 after every drop, so an orchestrator working through it hears reports and cards as they happen. `when_needed` is for a
 laptop that is often closed or a server used once a week: the machine is not connected at start, and no attempt is
 made until something needs it. A need is the window opening one of its projects or sessions (`machines.need`, said
