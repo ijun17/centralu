@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /*
@@ -36,12 +36,22 @@ const { assertExistingPath, assertExistingPathSync, UnsafePathError } = await im
  * sign-in before the guard refused it. A repository can carry such a symlink (git makes one where symlinks are on).
  * The links here name this machine's own administrative share, so the old guard reached only localhost.
  */
+/*
+ * Not under the system's temporary folder (#368): the walk lists every folder from the drive down, so each walk here
+ * listed it, over SMB for a project opened from a share, and a link spelled with the short name of a folder in it had
+ * its entries asked one by one. A developer's machine where many sessions run tests holds thousands of entries there,
+ * changing all the time (5,860 on one; a CI runner's is nearly empty), and these tests timed out at 15 s there, alone
+ * as well. This folder and those above it hold a few dozen entries that nothing else changes while the tests run.
+ */
+const QUIET = fileURLToPath(new URL('../../node_modules/.cache/path-guard-share/', import.meta.url))
+
 describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the path guard', () => {
   let top: string
   let root: string
   const links: string[] = []
   beforeEach(() => {
-    top = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-guard-share-')))
+    mkdirSync(QUIET, { recursive: true })
+    top = realpathSync.native(mkdtempSync(join(QUIET, 'guard-share-')))
     root = join(top, 'project')
     mkdirSync(join(root, 'inside'), { recursive: true })
     writeFileSync(join(root, 'inside', 'a.txt'), 'inside')
