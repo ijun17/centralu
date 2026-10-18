@@ -733,6 +733,8 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)
+  // The host writes the whole question with every fact the card shows (#1220)
+  if (d.kind === 'project_add') return d.text
   if (d.kind === 'agent_start') return agentStartQuestion(d)
   if (d.kind === 'centralu_update') return centraluUpdateQuestion(d)
   return d.raw

@@ -340,8 +340,10 @@ export class Qualifier {
       // `projects_changed`: a project another machine made (#515); the hub's windows re-read the merged list
       case 'external_apps_changed':
       case 'project_consents_changed':
-      case 'projects_changed':
         return base
+      // `added` (#1220): a project that machine's orchestrator added, named as the hub's windows know it
+      case 'projects_changed':
+        return typeof e.added === 'string' ? { ...base, added: this.maybeId(e.added) } : base
       default:
         return sid === undefined ? null : base
     }

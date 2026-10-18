@@ -1258,6 +1258,30 @@ clone also says "Cloning … into …" in the orchestrator's conversation once C
 swap left the orchestrator's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and
 11,770 with the clone's arguments; docs/tool-cost.md).
 
+**Adding a folder that already exists** (`add_project { path, machine? }` and `list_machines`, #1220, the first slice of
+#1219). The person linked a laptop and asked for two folders on its desktop as projects; `create_project` never reuses
+a folder, and nothing named the machines. Both are rare commands of the orchestrator (`RARE_COMMANDS`, reached through
+`centralu_run`, #1205), the central orchestrator's alone:
+
+1. The folder's machine reads it, changing nothing: `projects.inspect { path, machine? }` (additive, routed by `machine`)
+   answers the absolute path in that machine's terms (a leading `~` is its home; any other relative path is refused),
+   whether something is there and is a folder, whether it is in a git repository and that repository's `origin` (git's
+   config only, with the untrusted-project settings), and the project already kept for it (`ProjectCreation.inspectFolder`).
+2. A missing path, a file or a folder already a project is refused with that reason, before any card.
+3. The card (`project_add`, raised by `askHost` with `alwaysAsk`, so `auto` asks too) shows the machine, the path, that it
+   exists and is a folder, and the git facts; `text` carries the whole question for a window that does not know the kind
+   (#844). Allow or deny; "always" is read as allow and nothing is remembered.
+4. On Allow the folder is registered as the sidebar's Add project registers it: on this computer the facts are read again
+   (a folder gone or added meanwhile is refused) and `addProject` registers it, then the apps list is read again
+   (`ProjectCreation.registerFolder`, the steps of `projects.add`); on a linked machine, that machine's `projects.add`
+   through the router, which checks again there. New, it is untrusted. The host then sends `projects_changed` with
+   `added` (additive), and a window asks about the project's trust as it does for a folder the person added.
+
+A machine on a Centralu from before `projects.inspect` is named as too old, before any card. `list_machines` answers one
+line per machine from what `machines.list` answers (`SessionManager.useMachineList`, wired to `links.list()` in
+`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it connects at start or
+when needed (`MachineInfo.connect`, #1134).
+
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
 ```ts

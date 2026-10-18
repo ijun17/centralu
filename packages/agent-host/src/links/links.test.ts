@@ -114,6 +114,8 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   mgr.useLinkedSessions((id) => links.knowsSession(id))
   mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
+  // As main.ts wires it: the orchestrator's list_machines reads what machines.list answers (#1220)
+  mgr.useMachineList(() => links.list())
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   const port = await server.listen()
@@ -2138,5 +2140,112 @@ describe('a link to a host that can prove it holds the token', () => {
     expect(got.join('\n')).not.toContain(`"${TOKEN}"`)
     expect(got.every((g) => JSON.parse(g).kind === 'prove')).toBe(true)
     expect(status(hub)).not.toBe('connected')
+  })
+})
+
+/**
+ * The orchestrator's add_project on a linked machine, and list_machines (#1220): the folder's facts are read by that
+ * machine's host, the card names the machine, and Allow registers the folder through that machine's `projects.add`, the
+ * call its group's Add project makes.
+ */
+describe('add_project and list_machines on a linked machine (#1220)', () => {
+  /** The hub's orchestrator's add-folder card, if one stands */
+  const addCard = (hub: Hub, orcId: string) => {
+    const pending = hub.mgr.listSessions().find((s) => s.id === orcId)?.pendingApproval
+    return pending?.detail.kind === 'project_add' ? { requestId: pending.requestId, detail: pending.detail } : undefined
+  }
+  const addProject = (hub: Hub, orcId: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command: 'add_project', args })
+
+  async function linked(o: { without?: readonly string[] } = {}) {
+    const remote = await remoteHost(0, new Store(), o.without ? { without: o.without } : {})
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const orc = await hub.mgr.orchestrator()
+    return { remote, hub, orc, u: await ui(hub.port) }
+  }
+
+  it("shows the facts that machine read on the card, and on Allow registers the folder there as its Add project does", async () => {
+    const { remote, hub, orc, u } = await linked()
+    const site = join(folder(), 'site')
+    mkdirSync(site)
+    execFileSync('git', ['init', '-q', site])
+    execFileSync('git', ['-C', site, 'remote', 'add', 'origin', 'https://example.com/me/site.git'])
+    const call = addProject(hub, orc.id, { path: site, machine: 'remote box' })
+    await eventually(() => !!addCard(hub, orc.id))
+    expect(addCard(hub, orc.id)!.detail).toEqual({
+      kind: 'project_add',
+      name: 'site',
+      path: site,
+      machine: 'Remote box',
+      exists: true,
+      folder: true,
+      git: true,
+      origin: 'https://example.com/me/site.git',
+      text: `Add the existing folder ${site} on Remote box as the project site? It is a git repository (origin https://example.com/me/site.git).`,
+    })
+    // Nothing on either machine while the card stands
+    expect(remote.store.projects.listProjects()).toEqual([])
+    expect(hub.store.projects.listProjects()).toEqual([])
+
+    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
+    const r = await call
+    expect(r.isError).toBeFalsy()
+    const [kept] = remote.store.projects.listProjects()
+    expect(kept).toMatchObject({ path: site, name: 'site', trusted: false })
+    expect(hub.store.projects.listProjects()).toEqual([])
+    expect(r.text).toContain(`[m1.${kept!.id}]`)
+    expect(r.text).toContain('on Remote box')
+    // The hub's windows hear it under the id they list it by, to ask about its trust
+    await eventually(() => u.events().some((e) => e.type === 'projects_changed' && e.added === `m1.${kept!.id}`))
+    expect((await u.call('projects.list')).map((p: { id: string }) => p.id)).toContain(`m1.${kept!.id}`)
+  })
+
+  it('adds nothing there when the person denies it', async () => {
+    const { remote, hub, orc } = await linked()
+    const plain = folder()
+    const call = addProject(hub, orc.id, { path: plain, machine: 'm1' })
+    await eventually(() => !!addCard(hub, orc.id))
+    expect(addCard(hub, orc.id)!.detail).toMatchObject({ machine: 'Remote box', git: false, origin: null })
+    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'deny')
+    expect((await call).isError).toBe(true)
+    expect(remote.store.projects.listProjects()).toEqual([])
+  })
+
+  it("refuses a missing path, a file and a folder already a project there, each before any card", async () => {
+    const { remote, hub, orc } = await linked()
+    const dir = folder()
+    writeFileSync(join(dir, 'notes.txt'), 'a file')
+    const kept = await remote.mgr.addProject(join(dir))
+    for (const [path, reason] of [
+      [join(dir, 'nowhere'), /Nothing is at .* on Remote box/],
+      [join(dir, 'notes.txt'), /is a file, not a folder/],
+      [dir, /already the project "/],
+    ] as const) {
+      const r = await addProject(hub, orc.id, { path, machine: 'Remote box' })
+      expect(r.isError, path).toBe(true)
+      expect(r.text, path).toMatch(reason)
+      expect(addCard(hub, orc.id), path).toBeUndefined()
+      // The project there, by the id the hub's windows and tools know it by
+      if (path === dir) expect(r.text).toContain(`[m1.${kept.id}]`)
+    }
+    expect(remote.store.projects.listProjects().length).toBe(1)
+  })
+
+  it('names a machine on a Centralu from before it as too old, before any card', async () => {
+    const { remote, hub, orc } = await linked({ without: ['projects.inspect'] })
+    const r = await addProject(hub, orc.id, { path: folder(), machine: 'Remote box' })
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/Remote box runs a Centralu too old to check a folder/)
+    expect(addCard(hub, orc.id)).toBeUndefined()
+    expect(remote.store.projects.listProjects()).toEqual([])
+  })
+
+  it('lists the machines machines.list answers, one line each', async () => {
+    const { hub, orc, u } = await linked()
+    const listed: MachineInfo[] = await u.call('machines.list')
+    const r = await hub.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
+    const lines = r.text.split('\n').filter((l) => l.startsWith('- '))
+    expect(lines).toEqual(listed.map((m) => `- ${JSON.stringify(m.name)} [${m.id}]: ${m.status}; macOS or Linux, Unix shell; connects at start`))
+    expect(lines).toEqual(['- "Remote box" [m1]: connected; macOS or Linux, Unix shell; connects at start'])
   })
 })

@@ -192,6 +192,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.usage': { kind: 'machine', result: usageResult, sharesAccount: true },
   'agents.account': { kind: 'machine' },
   'projects.add': { kind: 'machine', result: projectInfo },
+  // What a folder there is (#1220), read by that machine's host; a project already kept for it named in the hub's terms
+  'projects.inspect': { kind: 'machine', result: fields({ project: (p, q) => (isObj(p) ? { ...p, id: q.maybeId(p.id) } : p) }) },
   // Made by the host of the machine the project lives on, in its own home and path terms (#515)
   'projects.create': { kind: 'machine', result: projectInfo },
   'projects.createPreview': { kind: 'machine' },

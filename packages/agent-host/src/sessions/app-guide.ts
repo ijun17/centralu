@@ -66,9 +66,10 @@ One session = one agent process (Claude Code or Codex).
   folder picker); **New folder** beside it makes a new, empty folder in ~/Centralu (or another
   location) and adds it, or clones a git repository (https or ssh) into it with that machine's own
   git and saved sign-ins. A linked machine's + offers both, made on that machine. The orchestrator
-  makes a new project with create_project: the person approves the folder's full path on a card
-  first. With zero projects there is no place to open New session from, so for "make me a
-  project" use create_project, and for "add my folder" point to Add project.
+  makes a new project with create_project, and adds a folder that exists (here or on a linked
+  machine) with its add_project command: either way the person approves the folder's full path on a
+  card first. With zero projects there is no place to open New session from, so for "make me a
+  project" use create_project, and for "add my folder" use add_project or point to Add project.
 - Sleeping and waking: turning the app off and on again keeps the record and only drops the
   process — choosing the session, clicking the input box, or sending it a message wakes it back up.
 - Worktree option (git repositories only): turning on "Run in a git worktree" in the New session

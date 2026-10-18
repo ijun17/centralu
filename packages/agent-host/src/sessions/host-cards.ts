@@ -20,7 +20,7 @@ import { rpcError } from '../rpc-error.js'
 export type HostAsk = {
   requestId: string
   sessionId: string
-  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' | 'centralu_update' | 'other' }>
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'project_add' | 'agent_start' | 'centralu_update' | 'other' }>
   shown: boolean
   /** The state the session rested in when the card was raised between turns (#673), to return to once it closes */
   restState?: SessionState

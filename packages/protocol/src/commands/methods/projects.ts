@@ -136,6 +136,24 @@ export const projectMethods = {
   },
   'projects.add': { params: z.object({ path: z.string(), ...machineParam }), result: ProjectInfo },
   /**
+   * What a folder is, read on the machine it is on and nothing changed (#1220): the orchestrator's add_project shows
+   * it on the person's card before `projects.add` registers the folder. `path` comes back absolute, in that machine's
+   * own terms (a leading `~` is that machine's home); a path that is not absolute is refused. `git`: the folder is in
+   * a git repository, and `origin` is that repository's `origin` remote as its config has it (no program of the
+   * repository runs). `project`: the project already registered for that folder, in whatever spelling it was kept.
+   */
+  'projects.inspect': {
+    params: z.object({ path: z.string().max(4096), ...machineParam }),
+    result: z.object({
+      path: z.string(),
+      exists: z.boolean(),
+      folder: z.boolean(),
+      git: z.boolean(),
+      origin: z.string().nullable(),
+      project: z.object({ id: z.string(), name: z.string() }).nullable(),
+    }),
+  },
+  /**
    * Makes a new project (#515): an **empty** folder named `name` (no git init, no template) inside `parent`, or
    * `~/Centralu` (`PROJECTS_DIR`) of the machine the project lives on when `parent` is absent, then registers it as `projects.add` does.
    * The machine's own host makes it. Refused with one sentence when the name is not one folder name, when `parent` is

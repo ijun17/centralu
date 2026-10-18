@@ -332,6 +332,7 @@ window of the host's build answers it:
 | `project_create` (#515) | beta.16 | drops the card |
 | `agent_start` (#561) | beta.17 | drops the card |
 | `centralu_update` (#581) | beta.18 | drops the card |
+| `project_add` (#1220) | the release after beta.29 | drops the card from before #844; from #844 on, shows the fallback with the question whole (`text`), the path and the machine |
 | a remembered `agents` consent (#561), in Settings' list of consents | beta.17 | lists it without saying what it allows |
 | the apply card (#665) and the handoff card (#694) | beta.23, beta.25 | reads them, since they ride on `other` |
 
@@ -418,7 +419,7 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   parameter, absent meaning the hub: `agents.detect`, `agents.capabilities`, `agents.models`,
   `agents.usage`, `agents.versions`, `agents.setAutoApplyVersions`, `agents.applyVersions`,
   `agents.sleepPolicy`, `agents.setSleepPolicy` (#568),
-  `projects.add`, `projects.create`, `projects.createPreview` (#515), `processes.strays`, `processes.stop`. Lists the UI rebuilds from
+  `projects.add`, `projects.create`, `projects.createPreview` (#515), `projects.inspect` (#1220), `processes.strays`, `processes.stop`. Lists the UI rebuilds from
   (`sessions.list`, `projects.list`, `trash.list`, `subagents.usage`, `messages.search`, `apps.list`,
   `approvals.rules`, `projectConsents.list`) are merged across machines. A machine that cannot be
   reached is left out of the merge; `trash.list` and `subagents.usage` name those (`unreached`, #841) and `trash.empty`

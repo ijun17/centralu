@@ -344,11 +344,13 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'workspace.load': async () => mgr.loadWorkspace(),
+    // The orchestrator's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
     'projects.add': async (p) => {
       const info = await mgr.addProject(RpcMethods['projects.add'].params.parse(p).path)
       externalApps?.refresh()
       return info
     },
+    'projects.inspect': async (p) => mgr.inspectFolder(RpcMethods['projects.inspect'].params.parse(p).path),
     'projects.create': async (p) => {
       const { name, parent, source } = RpcMethods['projects.create'].params.parse(p)
       const info = await mgr.createProject(name, parent, source)

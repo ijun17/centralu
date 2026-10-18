@@ -3,6 +3,8 @@ import type {
   BackgroundTask,
   GitSource,
   Interruption,
+  MachineInfo,
+  RpcResult,
   ApprovalDetail,
   Question,
   QuestionAnswer,
@@ -137,6 +139,13 @@ export type LinkedSessions = {
   /** Where `projects.create` would make the folder on that machine, or why it would refuse */
   previewProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ name: string; path: string }>>
   createProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ projectId: string; name: string; path: string }>>
+  /**
+   * What a folder on that machine is, as its host reads it (`projects.inspect` there, #1220). A machine on a Centralu
+   * from before it is named as too old
+   */
+  inspectFolder(machineId: string, path: string): Promise<Outcome<{ facts: RpcResult<'projects.inspect'> }>>
+  /** Registers an existing folder there as a project: that machine's `projects.add`, as its group's Add project calls it (#1220) */
+  addProject(machineId: string, path: string): Promise<Outcome<{ projectId: string; name: string; path: string }>>
   /**
    * What an ordinary session's reader view needs of a machine's session (#984), from the headers mirror: whether it is
    * an app's (its builder or an agent an app asked for, never shown to a reader) and whether its project is trusted
@@ -509,6 +518,18 @@ export type OrchestratorTools = {
     spec: { name: string; parent?: string; source?: { git: string; branch?: string }; machine?: string },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
+  /**
+   * Adds a folder that already exists as a project, on this computer or a linked machine (#1220, the add_project
+   * command), **only once the person allows the card it raises**, which shows the folder's facts as its machine read
+   * them. A path that is missing, a file or already a project is refused before any card. Absent on seats that cannot.
+   */
+  addProject?(
+    /** `machine`: a linked machine by name or id; this computer when absent */
+    spec: { path: string; machine?: string },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
+  /** The linked machines as `machines.list` answers (#1220, the list_machines command); absent on seats that cannot */
+  listMachines?(): MachineInfo[]
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

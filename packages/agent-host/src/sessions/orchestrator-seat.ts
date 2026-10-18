@@ -1,4 +1,4 @@
-import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -6,6 +6,7 @@ import { inTurn } from '../idle.js'
 import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
+import type { FolderAdded } from './project-creation.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
@@ -66,6 +67,12 @@ export type OrchestratorSeatHost = {
     spec: { name: string; parent?: string; source?: GitSource },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }>
+  /** add_project (#1220): `ProjectCreation.addFolderAsked`, a folder on this computer */
+  addFolderAsked(sessionId: string, path: string, signal?: AbortSignal): Promise<FolderAdded>
+  /** add_project on a linked machine (#1220): `ProjectCreation.addFolderOnMachine` */
+  addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded>
+  /** The linked machines as `machines.list` answers them (#1220), once wired (`useMachineList`); empty without links */
+  machineList(): MachineInfo[]
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -626,6 +633,27 @@ export function orchestratorToolsFor(
       }
       return host.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
     },
+
+    /*
+     * An existing folder as a project (#1220), made only once the person allows the card this raises in the
+     * orchestrator's own slot. The central orchestrator's alone, as the linked machines are; `machine` is resolved as
+     * create_project resolves it.
+     */
+    addProject: async (spec, signal) => {
+      if (!central) return { ok: false, error: 'Only the orchestrator adds projects' }
+      const reader = linked()
+      if (spec.machine && reader) {
+        const machine = reader.machineNamed(spec.machine)
+        if (machine) return host.addFolderOnMachine(orchestratorId, reader, machine, spec.path, signal)
+        if (!/^this computer$/i.test(spec.machine.trim())) return { ok: false, error: `No linked machine is called ${spec.machine}; list_machines names them, and leaving machine out means this computer` }
+      } else if (spec.machine && !/^this computer$/i.test(spec.machine.trim())) {
+        return { ok: false, error: 'No machine is linked to this computer; leave machine out' }
+      }
+      return host.addFolderAsked(orchestratorId, spec.path, signal)
+    },
+
+    // The linked machines (#1220): the list Settings shows, read only; the central orchestrator's alone
+    listMachines: () => (central ? host.machineList() : []),
 
     /*
      * A handoff (#694): the central orchestrator's alone (the profile gives it no other seat; checked here too, as this

@@ -1,4 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { BackgroundTask, HostReadSessionResult, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -416,6 +416,39 @@ export function linkedSessions(
       if (!m) return { ok: false, error: `No linked machine ${machineId}` }
       return attempt(m, async () => {
         const p = (await route('projects.create', { ...spec, machine: m.id })) as { id: string; name: string; path: string }
+        return { projectId: p.id, name: oneLine(p.name), path: onePath(p.path) }
+      })
+    },
+
+    async inspectFolder(machineId, path) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      const r = await attempt(m, async () => {
+        try {
+          return { raw: await route('projects.inspect', { path, machine: m.id }) }
+        } catch (err) {
+          // A machine on a Centralu from before #1220 knows no such method
+          if (err instanceof Error && /Unknown method: projects\.inspect/.test(err.message)) {
+            throw new Error(`${m.name} runs a Centralu too old to check a folder for the orchestrator; update it there, or add the folder from its group's Add project`)
+          }
+          throw err
+        }
+      })
+      if (!r.ok) return r
+      const facts = RpcMethods['projects.inspect'].result.safeParse(r.raw)
+      if (!facts.success) return { ok: false, error: `${m.name} answered something that is not a folder's facts` }
+      const project = facts.data.project
+      return {
+        ok: true,
+        facts: { ...facts.data, path: onePath(facts.data.path), origin: facts.data.origin === null ? null : oneLine(facts.data.origin, 500), project: project ? { id: project.id, name: oneLine(project.name) } : null },
+      }
+    },
+
+    async addProject(machineId, path) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      return attempt(m, async () => {
+        const p = (await route('projects.add', { path, machine: m.id })) as { id: string; name: string; path: string }
         return { projectId: p.id, name: oneLine(p.name), path: onePath(p.path) }
       })
     },

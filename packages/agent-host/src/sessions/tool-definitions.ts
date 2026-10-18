@@ -113,13 +113,13 @@ export const ORCHESTRATOR_TOOLS = [
     /*
      * Replaced propose_project (#515), which only lit up the sidebar's Add project button: asked for a project, the
      * orchestrator now makes it, behind a card the person approves. One tool for one intent, so the model is not
-     * choosing between pointing and doing, and the set does not grow. Adding a folder that already exists stays the
-     * person's (the folder picker is theirs); the instructions say where to send them. Kept short: it rides in every orchestrator request (RESIDENT_BUDGET_CHARS).
+     * choosing between pointing and doing, and the set does not grow. A folder that already exists is add_project's
+     * (#1220), a rare command. Kept short: it rides in every orchestrator request (RESIDENT_BUDGET_CHARS).
      */
     name: 'create_project',
     description:
       "Makes a new project: an empty folder, or a clone of git, in ~/Centralu or in parent. The person approves it on a card first; " +
-      'the call waits for the answer. An existing folder is never reused.',
+      'the call waits for the answer. Never reuses an existing folder: the add_project command adds one.',
     schema: z.object({
       name: z.string().optional().describe("Folder and project name; with git, the repository's if omitted."),
       parent: z.string().optional().describe('Full path of the folder to make it in.'),
@@ -128,6 +128,27 @@ export const ORCHESTRATOR_TOOLS = [
       // A linked machine (#82 phase 4), by the name list_sessions shows after "on"
       machine: z.string().optional().describe('A linked machine to make it on; this computer if omitted.'),
     }),
+  },
+  {
+    /*
+     * #1220: the person linked a laptop and asked for two folders on it as projects, which create_project could not do.
+     * A rare command (RARE_COMMANDS), not a resident tool (#1205). The card shows what the folder's machine found there.
+     */
+    name: 'add_project',
+    description:
+      'Adds a folder that already exists, on this computer or a linked machine, as a project. The person approves it on a card ' +
+      'showing the machine, the full path and whether it is a git repository; the call waits for the answer. A missing path, a file ' +
+      'or a folder that is already a project is refused first.',
+    schema: z.object({
+      path: z.string().describe("The folder's full path on that machine; ~ is that machine's home."),
+      machine: z.string().optional().describe('A linked machine, by the name list_machines gives; this computer if omitted.'),
+    }),
+  },
+  {
+    // #1220: what to pass as `machine`. Reading only, no card
+    name: 'list_machines',
+    description: 'Lists the linked machines: name, status, OS and shell, and whether each connects at start or when needed.',
+    schema: z.object({}),
   },
   {
     name: 'create_session',
@@ -566,7 +587,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
-  'Make a new project with create_project; to add an existing folder, point the person to Add project in the sidebar.',
+  'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',

@@ -543,6 +543,8 @@ mgr.useLinkedSessions((id) => links.knowsSession(id))
 mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 // The orchestrator reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
+// The orchestrator's list_machines reads the list Settings shows (#1220)
+mgr.useMachineList(() => links.list())
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity

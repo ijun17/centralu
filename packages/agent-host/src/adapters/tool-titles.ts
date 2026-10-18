@@ -76,6 +76,8 @@ const CENTRALU_LABELS: Record<string, string> = {
   app_guide: 'Read the app guide',
   handoff_session: 'Handed the session over',
   create_project: 'Asked to add a project',
+  add_project: 'Asked to add a folder as a project',
+  list_machines: 'Listed linked machines',
   propose_mcp_server: 'Proposed an MCP server',
   propose_skill: 'Proposed a skill',
   centralu_commands: 'Listed Centralu commands',

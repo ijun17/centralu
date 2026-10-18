@@ -79,13 +79,15 @@ export function currentRareTier(): RareTier {
  * In since #853: start_agent and agent_session. The orchestrator hands light work outside any project (a web search, a
  * lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its
  * every request over its ceiling, and the instructions name start_agent.
+ * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
+ * the instructions; the first of the orchestrator's window functions to come as commands (#1219).
  * Out: app_guide. It answers the person's own questions about the app, which come often and
  * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
  * too: everything the instructions tell the orchestrator to reach for first (list, read, recall, send, create
  * a session or a project).
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly (OrchestratorToolName | AgentToolName)[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session', 'start_agent', 'agent_session'],
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session', 'start_agent', 'agent_session', 'add_project', 'list_machines'],
 }
 
 /** The commands this seat reaches through centralu_run in this tier: never one its profile does not allow */

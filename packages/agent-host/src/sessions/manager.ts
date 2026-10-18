@@ -35,6 +35,7 @@ import type {
   Attachment,
   ApprovalScope,
   GridPanel,
+  MachineInfo,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -472,6 +473,18 @@ export class SessionManager {
    */
   async createWorktreeManager(_projectId: string, _baseBranch: string): Promise<SessionInfo> {
     throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
+  }
+
+  /** `ProjectCreation.inspectFolder` (project-creation.ts): `projects.inspect` (#1220) */
+  inspectFolder(...a: Parameters<ProjectCreation['inspectFolder']>): ReturnType<ProjectCreation['inspectFolder']> {
+    return this.projectCreation.inspectFolder(...a)
+  }
+
+  /** The linked machines as `machines.list` answers (#1220), for the orchestrator's list_machines; none until wired */
+  private machineList: () => MachineInfo[] = () => []
+
+  useMachineList(list: () => MachineInfo[]): void {
+    this.machineList = list
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -2390,6 +2403,9 @@ export class SessionManager {
       autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
       createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),
+      addFolderAsked: (sessionId, path, signal) => this.projectCreation.addFolderAsked(sessionId, path, signal),
+      addFolderOnMachine: (sessionId, reader, machine, path, signal) => this.projectCreation.addFolderOnMachine(sessionId, reader, machine, path, signal),
+      machineList: () => this.machineList(),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),
