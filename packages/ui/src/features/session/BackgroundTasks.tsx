@@ -22,8 +22,18 @@ import { useStore } from '../../store/store.js'
  * something still running back there".
  */
 
-const KIND: Record<BackgroundTask['kind'], string> = { agent: 'agent', shell: 'shell', mcp: 'mcp', other: 'task' }
-const STATUS: Record<BackgroundTask['status'], string> = { running: 'running', completed: 'done', failed: 'failed', stopped: 'stopped' }
+const KIND: Record<BackgroundTask['kind'], string> = {
+  agent: 'agent',
+  shell: 'shell',
+  mcp: 'mcp',
+  other: 'task',
+}
+const STATUS: Record<BackgroundTask['status'], string> = {
+  running: 'running',
+  completed: 'done',
+  failed: 'failed',
+  stopped: 'stopped',
+}
 
 /** What the badge says: the running count, or — once nothing runs — how the listed ones ended */
 function badgeText(tasks: readonly BackgroundTask[]): string {
@@ -79,15 +89,20 @@ export function BackgroundTasksBadge({
     <span className="flex shrink-0 items-center">
       {/*
         The top bar's capsule shape (owner, 2026-10-18): an icon and a number, the words in the tooltip. Running work
-        has the strong hairline (owner: the brighter border stood out too much) and a steady white dot; ended work stays quiet until it is cleared. A failure is dashed, as an
-        error is on the inbox's capsule.
+        has the plain hairline (owner, twice: a brighter border stood out too much) and a steady white dot, which is
+        what says it runs; ended work stays quiet until it is cleared. A failure is dashed, as an error is on the
+        inbox's capsule.
       */}
       <Tooltip
         align="right"
         content={
           <span className="block">
-            <span className="block text-ink">{running ? `${count} background task${count === 1 ? '' : 's'} running` : 'Background tasks'}</span>
-            <span className="mt-1 block text-ink-faint">{running ? 'Open the list to follow or stop them' : badgeText(tasks)}</span>
+            <span className="block text-ink">
+              {running ? `${count} background task${count === 1 ? '' : 's'} running` : 'Background tasks'}
+            </span>
+            <span className="mt-1 block text-ink-faint">
+              {running ? 'Open the list to follow or stop them' : badgeText(tasks)}
+            </span>
           </span>
         }
       >
@@ -101,9 +116,11 @@ export function BackgroundTasksBadge({
           data-testid="background-badge"
           data-count={count}
           className={`flex h-6 shrink-0 items-center gap-1.5 rounded-full border bg-surface-hover/30 px-2 transition-colors hover:bg-surface-hover/60 hover:text-ink ${
-            failed > 0 && !running ? 'border-dashed border-line-strong text-ink-muted'
-            : running ? 'border-line-strong text-ink'
-            : 'border-line text-ink-faint'
+            failed > 0 && !running
+              ? 'border-dashed border-line-strong text-ink-muted'
+              : running
+                ? 'border-line text-ink'
+                : 'border-line/60 text-ink-faint'
           } ${open ? 'bg-surface-hover/60' : ''}`}
         >
           <BackgroundIcon />
@@ -111,10 +128,16 @@ export function BackgroundTasksBadge({
             <>
               <span className="readout translate-y-px text-xs leading-none">{count}</span>
               {/* Steady white while work runs (owner, 2026-10-18): a lit dot, not a blinking one */}
-              <span className="size-1.5 rounded-full bg-white" aria-hidden data-testid="background-running-dot" />
+              <span
+                className="size-1.5 rounded-full bg-white"
+                aria-hidden
+                data-testid="background-running-dot"
+              />
             </>
           ) : (
-            <span className="readout translate-y-px text-2xs leading-none">{failed > 0 ? `${failed} failed` : 'done'}</span>
+            <span className="readout translate-y-px text-2xs leading-none">
+              {failed > 0 ? `${failed} failed` : 'done'}
+            </span>
           )}
         </button>
       </Tooltip>
@@ -179,7 +202,9 @@ function BackgroundTaskList({
       {/* The inbox's and usage's dropdown shape (owner, 2026-10-18): a title, its count, one quiet action */}
       <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-sm font-medium text-ink">Background</h2>
-        <span className="readout text-xs text-ink-faint">{running > 0 ? `${running} running` : `${tasks.length}`}</span>
+        <span className="readout text-xs text-ink-faint">
+          {running > 0 ? `${running} running` : `${tasks.length}`}
+        </span>
         {hasEnded && (
           <button
             type="button"
@@ -218,9 +243,19 @@ function BackgroundTaskRow({
    * What Stop on the turn would do to it, as measured for its tool — the same fact the Stop control sums up. Said per
    * row too, because a list where some rows survive Stop and some do not reads the same at a glance otherwise.
    */
-  const withTurn = !running ? null : task.stopsWithTurn === true ? 'stops with the turn' : task.stopsWithTurn === false ? 'survives Stop' : null
+  const withTurn = !running
+    ? null
+    : task.stopsWithTurn === true
+      ? 'stops with the turn'
+      : task.stopsWithTurn === false
+        ? 'survives Stop'
+        : null
   return (
-    <li className="px-4 py-2 transition-colors hover:bg-surface-hover/20" data-testid={`background-task-${task.id}`} data-status={task.status}>
+    <li
+      className="px-4 py-2 transition-colors hover:bg-surface-hover/20"
+      data-testid={`background-task-${task.id}`}
+      data-status={task.status}
+    >
       <div className="flex items-center gap-2.5">
         {/*
           The task's state as a mark, the capsule's grammar: a steady white dot while it runs, a hollow ring once done,
@@ -244,7 +279,10 @@ function BackgroundTaskRow({
             {task.description}
           </span>
           <span className="readout mt-0.5 block truncate text-2xs text-ink-faint">
-            {KIND[task.kind]} · <span data-testid={`background-status-${task.id}`}>{task.ambient && running ? 'ambient' : STATUS[task.status]}</span>
+            {KIND[task.kind]} ·{' '}
+            <span data-testid={`background-status-${task.id}`}>
+              {task.ambient && running ? 'ambient' : STATUS[task.status]}
+            </span>
             {withTurn && <span data-testid={`background-note-${task.id}`}> · {withTurn}</span>}
           </span>
         </span>
@@ -264,7 +302,10 @@ function BackgroundTaskRow({
         )}
       </div>
       {!running && task.summary && task.summary !== task.description && (
-        <p className="mt-1 line-clamp-2 pl-[22px] text-2xs leading-body text-ink-faint" data-testid={`background-note-${task.id}`}>
+        <p
+          className="mt-1 line-clamp-2 pl-[22px] text-2xs leading-body text-ink-faint"
+          data-testid={`background-note-${task.id}`}
+        >
           {task.summary}
         </p>
       )}
