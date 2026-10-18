@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal as Xterm } from '@xterm/xterm'
 import type { CommandRunInfo, TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
+import { CloseIcon, PlusIcon, RestartIcon, StopIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { CommandLogView } from '../../components/CommandLogView.jsx'
 import { mountXterm } from '../../components/xterm.js'
 import { useStore } from '../../store/store.js'
@@ -148,9 +150,19 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       </TabActions>
 
       {error && (
-        <p className="px-3 py-2 text-xs leading-body text-ink-muted" data-testid="terminal-error">
-          Could not open terminal — {error}
-        </p>
+        <LoadFailed
+          what="the terminal"
+          error={error}
+          onRetry={() => {
+            setError(null)
+            void load()
+          }}
+          className="px-3 py-2"
+          testId="terminal-error"
+        />
+      )}
+      {terminals === null && !error && (
+        <SkeletonLines lines={3} className="px-3 py-2" label="Opening the terminal" />
       )}
 
       <div className="flex min-h-0 flex-1 flex-col" data-testid="terminal-stack">
@@ -198,20 +210,20 @@ function CommandTerminal({ projectId, run }: { projectId: string; run: CommandRu
       className="flex min-h-0 flex-1 flex-col border-b border-line last:border-b-0"
       data-testid={`cmd-term-${run.command}`}
     >
-      <div className="flex items-center gap-1.5 px-2 py-0.5">
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ink" aria-label="running" />
+      <div className="flex items-center gap-1.5 px-3 py-1">
+        <span className="breathe size-1.5 shrink-0 rounded-full bg-ink" role="img" aria-label="A command is running" />
         {label && <span className="truncate text-2xs text-ink-muted">{label}</span>}
         <span className="readout truncate text-2xs text-ink-faint" title={run.command}>
           {run.command}
         </span>
         <span className="ml-auto">
           <IconButton
-            label="Stop the command (the log stays in the run window)"
+            label="Stop command (the log stays in the run window)"
             onClick={() => void stopCommand(projectId, run.command)}
             testId={`cmd-term-stop-${run.command}`}
             align="right"
           >
-            <CloseIcon size={11} />
+            <StopIcon />
           </IconButton>
         </span>
       </div>
@@ -341,16 +353,16 @@ function TerminalView({
       className="flex min-h-0 flex-1 flex-col border-b border-line last:border-b-0"
       data-testid={`terminal-${info.terminalId}`}
     >
-      <div className="flex items-center gap-1.5 px-2 py-0.5">
+      <div className="flex items-center gap-1.5 px-3 py-1">
         <span className="readout truncate text-2xs text-ink-faint">{info.title}</span>
         {dead && (
-          <button
-            className="rounded-md px-1 text-2xs text-ink-muted transition-colors hover:text-ink"
-            data-testid={`terminal-restart-${info.terminalId}`}
+          <IconButton
+            label="Restart the shell"
             onClick={() => void restart()}
+            testId={`terminal-restart-${info.terminalId}`}
           >
-            Restart
-          </button>
+            <RestartIcon size={12} />
+          </IconButton>
         )}
         <span className="ml-auto">
           <IconButton
@@ -364,7 +376,7 @@ function TerminalView({
           </IconButton>
         </span>
       </div>
-      <div ref={hostRef} className="min-h-0 flex-1 px-1 pb-1" data-testid={`terminal-surface-${info.terminalId}`} />
+      <div ref={hostRef} className="min-h-0 flex-1 px-3 pb-1" data-testid={`terminal-surface-${info.terminalId}`} />
     </div>
   )
 }

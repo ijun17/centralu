@@ -290,11 +290,11 @@ export function ChatStream({
               ref={virtualizer.measureElement}
               data-index={v.index}
               /*
-              More margin is added at turn boundaries. If every row had the same spacing, my
-              message and the model's answer would look like a single block, making it
-              impossible to find where my turn started after a long response. There is generous
-              space before my message (separating it from the previous turn) and only a little
-              after it (grouping it with the answer that follows).
+              My message stands as far from what follows as from what precedes it (owner,
+              2026-10-19): above, the previous row's 12px bottom and this row's 12px top make 24px;
+              below, 24px after the time line under the bubble (set off from the bubble as the
+              agent's time is: 4px, ChatRow's user row), so the time reads as part of the bubble and the space around the
+              pair is the same on both sides.
             */
               /*
               Since the banner takes up space in the flow and pushes the rest of the list down
@@ -306,7 +306,7 @@ export function ChatStream({
             */
               className={`absolute left-0 w-full min-w-0 ${
                 chat[v.index]?.kind === 'user'
-                  ? 'pb-4 pt-6'
+                  ? 'pb-6 pt-3'
                   : joinsNext(bubbleOf(chat, v.index))
                     ? ''
                     : 'pb-3'

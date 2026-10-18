@@ -266,42 +266,45 @@ describe('ChatRow: rows that point elsewhere', () => {
   it('draws a worktree proposal as a line naming the branch', () => {
     const { html, text } = row(tool({ tool: 'mcp__centralu__propose_worktree_session', title: 'feat/rows' }))
     expect(testIds(html)).toEqual(['worktree-proposal'])
-    expect(text).toBe("↖ Branch feat/rows proposed — New session in this project's ⋯ menu opens the prefilled dialog")
+    expect(text).toBe("Branch feat/rows proposed. New session in this project's ⋯ menu opens the prefilled dialog.")
   })
 
   it('says a worktree session was proposed when the title is only the tool name', () => {
     const { text } = row(tool({ tool: 'propose_worktree_session', title: 'propose_worktree_session' }))
-    expect(text).toBe("↖ A worktree session was proposed — New session in this project's ⋯ menu opens the prefilled dialog")
+    expect(text).toBe("A worktree session was proposed. New session in this project's ⋯ menu opens the prefilled dialog.")
   })
 
-  it('draws an ask_project call still running with no way in yet', () => {
+  it('draws an ask_project call as a Centralu call, still running with no way in yet', () => {
     const { html, text } = row(tool({ tool: 'mcp__centralu__ask_project', title: 'Docs' }))
-    expect(testIds(html)).toEqual(['ask-project-card', 'ask-project-toggle', 'ask-project-status'])
-    expect(text).toBe('↗ Asked Docs · working…')
+    expect(testIds(html)).toEqual(['ask-project-card', 'ask-project-toggle', 'centralu-call-mark', 'centralu-call-label', 'ask-project-status'])
+    expect(html).toContain('data-centralu-call="centralu"')
+    expect(text).toBe('Asked Docs working…')
   })
 
   it('links the session doing the work once the answer names it, and keeps the answer behind the toggle', () => {
     state = { sessions: { d1: session('d1', { projectId: 'p2', name: 'Docs worker' }) } }
     const { html, text } = row(tool({ tool: 'ask_project', title: 'Docs', result: 'Answer from [d1] in Docs: it is on page 3', ok: true }))
-    expect(testIds(html)).toEqual(['ask-project-card', 'ask-project-toggle', 'ask-project-status', 'ask-project-open'])
-    expect(text).toBe('↗ Asked Docs · answered Open session →')
-    expect(html).toContain('title="Docs worker"')
+    expect(testIds(html)).toEqual(['ask-project-card', 'ask-project-toggle', 'centralu-call-mark', 'centralu-call-label', 'ask-project-status', 'ask-project-open'])
+    expect(text).toBe('Asked Docs answered Docs worker →')
+    expect(html).toContain('title="Open Docs worker"')
   })
 
   it('tells a refusal, a session still working and the other project state apart', () => {
-    expect(row(tool({ tool: 'ask_project', title: 'ask_project', result: 'No such project', ok: false })).text).toBe('↗ Asked another project · did not finish')
+    const refused = row(tool({ tool: 'ask_project', title: 'ask_project', result: 'No such project', ok: false }))
+    expect(refused.text).toBe('Asked another project did not finish')
+    expect(refused.html).toContain('border-dashed')
     state = { sessions: { d1: session('d1', { projectId: 'p2' }) } }
     // The host's wording (orchestrator-tools.ts): the session's name and id, then the project
     const pending = 'Docs is still working on it in the session "Docs worker" [d1] in Docs. Ask again later.'
     expect(row(tool({ tool: 'ask_project', title: 'Docs', result: pending })).text).toBe(
-      '↗ Asked Docs · still working Open session →',
+      'Asked Docs still working Session d1 →',
     )
     state = {
       projects: { p2: project('p2', 'Docs') },
       sessions: { d1: session('d1', { projectId: 'p2', state: 'waiting_approval' }) },
       chat: { d1: [{ kind: 'user', seq: 1, text: "A task sent through Centralu's ask_project", from: { sessionId: 's1', name: 'Me' } }] },
     }
-    expect(row(tool({ tool: 'ask_project', title: 'Docs' })).text).toBe('↗ Asked Docs · waiting for approval there Open session →')
+    expect(row(tool({ tool: 'ask_project', title: 'Docs' })).text).toBe('Asked Docs waiting for approval there Session d1 →')
   })
 })
 
