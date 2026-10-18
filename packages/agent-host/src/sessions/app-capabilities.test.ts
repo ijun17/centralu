@@ -153,6 +153,32 @@ describe('a chain started from the UI — that app\'s question', () => {
     await expect(w.rpc('apps.answerQuestion', { questionId: q!.id, decision: 'allow' })).rejects.toThrow('That question is no longer open')
   })
 
+  /*
+   * A decision a newer build recorded in a word this one does not know (#384) is a permission this build cannot read:
+   * it refuses, as it does for anything but `allow`, and the record stays as it is for the build that wrote it.
+   */
+  it('a stored decision this build does not know refuses, without asking, and is left as it was', async () => {
+    w.plant('project', 'notes', { agent: true })
+    w.rt.refresh()
+    answerAgent()
+    const call = () => w.rt.call(APP(), 'ask_broker', { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } }, { kind: 'view' })
+    const first = call()
+    const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
+    await w.rpc('apps.answerQuestion', { questionId: q!.id, decision: 'allow' })
+    const said = async (r: ReturnType<typeof call>) => (await r).result!.structuredContent as { isError: boolean; text: string }
+    expect((await said(first)).isError).toBe(false)
+
+    const key = `${w.projectId}/notes`
+    const stored = w.store.permissions.getAppPermission(key, 'agent:claude')!
+    // The type holds this build's words only; a newer build's row holds another
+    w.store.permissions.putAppPermission(key, w.projectId, { ...stored, decision: 'allow-this-week' as 'allow' })
+    const asked = w.events.filter((e) => e.type === 'external_app_questions_changed').length
+    expect(await said(call())).toMatchObject({ isError: true, text: expect.stringContaining('run_agent refused: the person did not allow') })
+    expect(w.mgr.appQuestionList()).toEqual([])
+    expect(w.events.filter((e) => e.type === 'external_app_questions_changed')).toHaveLength(asked)
+    expect(w.store.permissions.getAppPermission(key, 'agent:claude')).toMatchObject({ decision: 'allow-this-week' })
+  })
+
   it('if the manifest\'s uses changes, a stored answer becomes stale and it asks again — forgetting it also asks again', async () => {
     const dir = w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
