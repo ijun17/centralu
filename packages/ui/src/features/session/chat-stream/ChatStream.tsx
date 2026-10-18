@@ -371,11 +371,11 @@ export function ChatStream({
 }
 
 /**
- * Where a row stands in the agent's answer bubble (owner, 2026-10-18): what the agent says (its text and its
- * reasoning) stands in a bubble on the left, like the person's own message on the right. Rows of text in a row
- * share one bubble. Tool calls, images, approvals and markers (compaction, handoff, an error line) are what it did
- * or what happened, not what it said, so they stand outside, on the page, and split it (owner: a tool card inside
- * the bubble read as a box in a box).
+ * Where a row stands in the agent's answer bubble (owner, 2026-10-18): what the agent says to the person stands in a
+ * bubble on the left, like the person's own message on the right. Rows of text in a row share one bubble. Tool calls,
+ * images, approvals, markers (compaction, handoff, an error line) and reasoning summaries (Codex's "Tuning preview
+ * size") are what it did, thought or what happened, not what it said, so they stand outside, on the page, and split
+ * it (owner: a tool card inside the bubble read as a box in a box; a reasoning line inside it read as a message).
  *
  * The list is virtual, so the bubble is drawn in pieces, one per row: the first rounds the top, the last the
  * bottom, the ones between carry only the sides. No gap between rows inside a bubble: the spacing is the piece's
@@ -384,7 +384,7 @@ export function ChatStream({
 type BubblePart = 'solo' | 'first' | 'mid' | 'last'
 
 function inBubble(item: ChatItem | undefined): boolean {
-  return item?.kind === 'assistant' || item?.kind === 'reasoning'
+  return item?.kind === 'assistant'
 }
 
 /** Whether the row's bubble runs on into the next row, so no gap may stand between them */
