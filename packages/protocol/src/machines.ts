@@ -29,8 +29,12 @@ export type MachineId = z.infer<typeof MachineId>
  *   updating         the hub is stopping, switching or removing the Centralu it installed there
  *                    (`machines.update` / `rollback` / `uninstall`; `operation` says which step). The
  *                    link waits meanwhile. An older window reads it as unreachable
+ *   disconnected     the hub keeps no link open and tries none (#1134): the person disconnected it, or it
+ *                    connects when needed (`connect`) and nothing needs it now. Its sessions keep running
+ *                    there; what they say arrives once the link is up again. An older window reads it as
+ *                    unreachable
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating'])
+export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected'])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({
@@ -115,6 +119,21 @@ export const MachineAutostart = z.object({
 })
 export type MachineAutostart = z.infer<typeof MachineAutostart>
 
+/**
+ * When the hub opens a machine's link (#1134), the person's choice per machine:
+ *
+ *   at_start     when the hub starts, and again after every drop, for as long as it runs. The default, and what
+ *                every machine did before: an orchestrator working through it hears its reports and cards as they
+ *                happen
+ *   when_needed  not at start. The hub connects when something needs the machine: the window opens one of its
+ *                projects or sessions, or an agent is started there or sent work there. It disconnects again once
+ *                nothing has needed it for a while and no session there is in a turn
+ *
+ * Additive: an older host treats every machine as `at_start`, and an older window does not show it
+ */
+export const MachineConnect = z.enum(['at_start', 'when_needed'])
+export type MachineConnect = z.infer<typeof MachineConnect>
+
 export const MachineInfo = z.object({
   id: MachineId,
   /** What the person calls it; shown as the group header in the sidebar */
@@ -192,6 +211,8 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
+  /** When the hub opens the link (`MachineConnect`, #1134). Additive: an older hub sends nothing, which is `at_start` */
+  connect: MachineConnect.catch('at_start').default('at_start'),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
 

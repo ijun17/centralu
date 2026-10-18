@@ -211,6 +211,9 @@ class WebAgentPort implements AgentPort {
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit = SUBAGENT_STEPS_PAGE) {
     return this.rpc.call('messages.subagent', { sessionId, parentCallId, afterSeq, limit })
   }
+  subagentTrashed(sessionId: string, parentCallId: string) {
+    return this.rpc.call('messages.subagentTrashed', { sessionId, parentCallId })
+  }
   messageImage(sessionId: string, path: string) {
     return this.rpc.call('messages.image', { sessionId, path })
   }
@@ -519,6 +522,16 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('trash.purge', { sessionId })
       },
       empty: () => rpc.call('trash.empty', {}),
+      readRun: (runId, limit, beforeSeq, machine) => rpc.call('trash.readRun', { runId, limit, beforeSeq, ...(machine ? { machine } : {}) }),
+      purgeRuns: (runIds, machine) => rpc.call('trash.purgeRuns', { runIds, ...(machine ? { machine } : {}) }),
+      subagentUsage: () => rpc.call('subagents.usage', {}),
+      trashSubagentSteps: (sessionId) => rpc.call('subagents.trash', { sessionId }),
+      restoreSubagentSteps: async (sessionId) => {
+        await rpc.call('trash.restoreSubagentSteps', { sessionId })
+      },
+      purgeSubagentSteps: async (sessionId, upTo) => {
+        await rpc.call('trash.purgeSubagentSteps', { sessionId, upTo })
+      },
     },
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
@@ -619,6 +632,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('machines.remove', { machineId })
       },
       reconnect: (machineId) => rpc.call('machines.reconnect', { machineId }),
+      disconnect: (machineId) => rpc.call('machines.disconnect', { machineId }),
+      setConnect: (machineId, connect) => rpc.call('machines.setConnect', { machineId, connect }),
+      need: (machineId, repeat) => rpc.call('machines.need', repeat ? { machineId, repeat } : { machineId }),
       acceptVersions: (machineId) => rpc.call('machines.acceptVersions', { machineId }),
       install: (machineId) => rpc.call('machines.install', { machineId }),
       update: (machineId) => rpc.call('machines.update', { machineId }),

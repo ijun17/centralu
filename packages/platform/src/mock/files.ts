@@ -15,8 +15,14 @@ export class FilesMock {
   readonly revealed: string[] = []
   readonly revealedImages: string[] = []
 
+  /** For tests: when set, the file search fails with this reason */
+  searchError: string | null = null
+
   readonly fs = {
-    search: async (_projectId: string, query: string, limit = 20) => this.memoryFs.search(query, limit),
+    search: async (_projectId: string, query: string, limit = 20) => {
+      if (this.searchError !== null) throw new Error(this.searchError)
+      return this.memoryFs.search(query, limit)
+    },
     listDir: async (_projectId: string, path: string) => this.memoryFs.listDir(path),
     // Only records the watch set — tests check the screen's reaction by emitting fs_changed directly
     watch: async (projectId: string, paths: string[]) => {

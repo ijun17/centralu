@@ -144,6 +144,23 @@ export function themeTests() {
     expect(JSON.parse((await fileText(page, 'dark-copy'))!).tokens['surface-floor']).toBe('#202830')
   })
 
+  test('a theme renamed by hand while its editor is open keeps the new name when the name field is left', async ({ page }) => {
+    await openDemo(page)
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: {} })
+    await openAppearance(page)
+    await page.getByTestId('theme-edit-mine').click()
+    const name = page.getByTestId('theme-name-mine')
+    await expect(name).toHaveValue('Mine')
+
+    await writeFile(page, 'mine', { name: 'Renamed', base: 'dark', tokens: {} })
+    await expect(name).toHaveValue('Renamed')
+    // Focusing the field and leaving it must not write the old name back over the edit
+    await name.click()
+    await name.press('Tab')
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 100)))
+    expect(JSON.parse((await fileText(page, 'mine'))!).name).toBe('Renamed')
+  })
+
   test('a theme file edited by hand updates the page live; a broken save keeps the last good theme and says why', async ({ page }) => {
     await openDemo(page)
     await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { 'surface-floor': '#101820' } })

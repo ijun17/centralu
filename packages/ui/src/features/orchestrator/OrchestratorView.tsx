@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
 import { composingKey } from '../../app/keys.js'
+import { fitComposerHeight } from '../session/composerFit.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
+import { guiCommandFor } from '../session/guiCommands.js'
 
 /**
  * The orchestrator screen — **control by talking**.
@@ -243,11 +245,22 @@ function OrchestratorEmpty() {
   const waking = useStore((s) => s.orchestratorWaking)
   const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const [text, setText] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  // The box grows with its text, as the session's composer does (#1143 U17)
+  useLayoutEffect(() => {
+    if (inputRef.current) fitComposerHeight(inputRef.current)
+  }, [text])
 
   const submit = () => {
     const t = text.trim()
     if (!t || waking) return
     setText('')
+    /*
+     * /usage opens its screen here as it does in a session's composer, rather than becoming the orchestrator's first
+     * message (#1143 U17). A command that acts on a session (/model) has none yet, so it goes as text, as before.
+     */
+    const gui = guiCommandFor(t, false)
+    if (gui) return gui.run({ sessionId: null })
     /*
      * If it never got born, the first question is put back (#180). A send failure after birth
      * is restored by send into the real session's draft, but a failure before birth never
@@ -267,6 +280,7 @@ function OrchestratorEmpty() {
       {/* Dressed identically to the real composer — a moment later, SessionPane's composer stands in this exact spot */}
       <div className="shrink-0 px-4 pb-4">
         <textarea
+          ref={inputRef}
           rows={1}
           value={text}
           disabled={waking}
@@ -281,7 +295,7 @@ function OrchestratorEmpty() {
             }
           }}
           placeholder="Ask the orchestrator anything…"
-          className="w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
+          className="max-h-40 w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
           data-testid="orchestrator-input"
         />
       </div>

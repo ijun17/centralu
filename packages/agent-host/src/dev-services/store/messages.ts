@@ -39,7 +39,7 @@ function payloadColumn(opts: ReadOpts): string {
  * conversation (`more: msgs.length >= HISTORY_PAGE`). An empty payload is what every reader already tolerates: no
  * text, no summary.
  */
-function readRows(raw: (StoredMessage & { payload: string })[]): StoredMessage[] {
+export function readRows(raw: (StoredMessage & { payload: string })[]): StoredMessage[] {
   return raw.map((r) => {
     const payload = parseJson(r.payload)
     return { ...r, payload: payload === undefined ? {} : payload }
@@ -186,7 +186,7 @@ export class MessageRecords {
            WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0
          UNION ALL
          SELECT payload FROM subagent_messages
-           WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0`,
+           WHERE session_id = ? AND trashed_at IS NULL AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0`,
       )
       .all(sessionId, escaped, sessionId, escaped) as { payload: string }[]
     const texts: string[] = []
@@ -275,7 +275,8 @@ export class MessageRecords {
    * is the step's number within that launch.
    *
    * The only reader of `subagent_messages`, and it names one launch card: nothing reads a session's subagent steps by
-   * the way. A tool step reads as its card unless `full` is asked for, the same as `loadMessages`.
+   * the way. A tool step reads as its card unless `full` is asked for, the same as `loadMessages`. Steps moved to the
+   * trash without their session (#418, `SubagentStepRecords`) are not read.
    */
   loadSubagentMessages(
     sessionId: string,
@@ -285,7 +286,7 @@ export class MessageRecords {
     const raw = this.db
       .prepare(
         `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM subagent_messages
-         WHERE session_id = ? AND parent_call_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
+         WHERE session_id = ? AND parent_call_id = ? AND seq > ? AND trashed_at IS NULL ORDER BY seq ASC LIMIT ?`,
       )
       .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1) as (StoredMessage & { payload: string })[]
     return readRows(raw)

@@ -176,6 +176,14 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**A conflict with main in the queue** (#1182): the queue merges main into your branch itself. When
+only files a command regenerates conflict (the lockfile, the schema doc, the migration goldens,
+Tauri's generated permissions: `queue.conflicts` in the board app's `project.json`), it regenerates
+them and pushes the merge, which runs CI again. Anything else, the UX baseline and store migration
+steps always, comes back to the session that opened the pull request (`queue_merge` `author`) as
+"merge main and push again; conflicted files: …". Merge main and push; the fixed pull request goes
+to the front of the queue.
+
 **A stack's lower pull requests are drafts** (#1066). The merge queue lands a stack through its top
 (`queue_merge` with `lowers`), on the top's run and its batch, which test the whole stack; a lower's
 own run only waits in line for runners. A draft runs no CI but the `changes` job. So open every
@@ -224,6 +232,17 @@ cost more raises its budget in the same pull request and says why. How to write 
 numbers: [docs/ux-metrics.md](docs/ux-metrics.md).
 The principles behind those numbers (judge the path a person can see, not its shortcut) and what
 a pull request's **Usability** field holds: [docs/usability.md](docs/usability.md).
+
+**The app's JS is compared with main's, and held under a ceiling** (#1181). `tooling/styles.test.ts`
+builds the release bundle, and CI's `verify` job compares it with the size main's newest push run
+recorded (or measures main when no run has a record): a change may add 30 KB without saying
+anything, and the whole may not pass the ceiling in `tooling/bundle-budget.mjs`, however small
+each step. Over either, find out what grew first; if the growth is meant, add a file of its own,
+`tooling/bundle-growth/<your-branch>.json`, `{ "bytes": <n>, "reason": "<what grew and why>" }`, in
+the same pull request (the test's message gives the number). It counts once against main, until
+main's record lists it, and raises the ceiling for good. In CI a missing or unreadable record of
+main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
+only, and says it did not compare with main.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
@@ -284,7 +303,28 @@ inherits PATH from your terminal, so it will never reproduce that class of bug.
 
 ## Before opening a pull request
 
-Ask these against your change. Put anything you could not check in **Not exercised**.
+**Run `pnpm pre-pr` first** (#1181). It checks what reviewers kept sending back that a machine can
+see, on your branch's commits (not the working tree), each in a temporary worktree:
+
+- `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
+  so it must build on its own;
+- dependency-cruiser's orphans as errors (`pnpm verify` only warns);
+- each new or changed test file, run with every other change of the pull request reverted to its
+  base: a new test that passes there protects nothing, and is reported;
+- and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
+  and what a merge would conflict on.
+
+`pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
+checks a branch other than the one checked out. When one check's finding stands for a reason (a
+test that cannot fail without the change, and why), leave that check out with the reason:
+`--exempt revert="<why>"` (or `tsc`, `orphans`). The board's `open_pr` runs it on the pushed branch
+and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
+`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
+worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
+delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees link to your checkout's
+`node_modules`, and on Windows such a delete follows the links.
+
+Then ask these against your change. Put anything you could not check in **Not exercised**.
 
 - **What earlier state could still be there?** The keeper could still report a stale swap
   ([#621](https://github.com/ijun17/centralu/pull/621)).
@@ -301,14 +341,42 @@ Ask these against your change. Put anything you could not check in **Not exercis
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
 
+### Situations checked
+
+Before opening a pull request that changes behaviour, attack it yourself: walk each situation
+below and write what your change does in it, one line each, under **Situations checked** in the
+pull request. Review rounds were the largest delay in landing work, and much of what reviewers
+sent back was one of these (#1181). "Does not apply, because …" is an answer; a blank is not. A
+change with no behaviour (documents, a pure refactor) writes n/a.
+
+- **Host swap.** An older build is still serving the same store while the new one starts
+  (`Store.migrate()`, [docs/agent-host.md](docs/agent-host.md)). What does each of them do with
+  what the other wrote?
+- **Link loss and reconnect.** The window, a remote or a child loses its connection in the middle
+  of this and comes back. What is resent, what is lost, what is done twice?
+- **An older build reading what this one writes.** A field, a message or a file this change adds,
+  read by the build before it (a rollback, a remote not yet updated).
+- **Two of the same thing at once.** Two sends, two deletes, two sessions, two windows doing this
+  at the same moment ([the interleaving rule above](#what-has-to-pass-before-you-send-it)).
+- **The person using the same session.** They type, approve, stop or switch while this runs.
+- **Data loss.** What is deleted, what is kept, and what a crash halfway through leaves behind.
+
 ## Commits and pull requests
 
 - Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):
   Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
   fit the subject.
-- Pull requests use the template (Why / What changed / Verified / Usability / Not exercised / Closes).
+- Pull requests use the template (Why / What changed / Verified / Situations checked / Usability /
+  Not exercised / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
+- **A move-only refactor lands when nothing is in its way.** A pull request that relocates or
+  splits files (moving a module, splitting a test file) conflicts with every open pull request that
+  touches those files, and each of them has to be redone by hand. Land it when the merge queue is
+  empty, or after checking that no open pull request touches the files it moves:
+  `gh pr list --state open --json number,files --jq '.[] | select(any(.files[]; .path == "<path>")) | .number'`
+  for each moved path. Keep it move-only, so whoever does have to rebase over it can redo the
+  move instead of reading a diff.
 
 ## Running things safely
 

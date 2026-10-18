@@ -47,7 +47,11 @@ export function RowMenu({
    * closes the other.
    */
   // The anchor is the box that holds the button (it places the menu); the button is what takes the keyboard back
-  useDismiss({ onClose, refs: [ref], returnFocusTo: anchorEl?.querySelector('button') ?? anchorEl })
+  /*
+   * The trigger is inside `refs`: its click toggles the menu (`setMenuOpen(v => !v)`), so pressing it must not also count as
+   * a press outside, or the menu closes on mousedown and the click opens it again.
+   */
+  useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: anchorEl?.querySelector('button') ?? anchorEl })
 
   return (
     <div

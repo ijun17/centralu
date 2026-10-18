@@ -228,13 +228,31 @@
   {
    "to": 57,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 58,
+   "breaksOlderReaders": false
+  },
+  {
+   "to": 59,
+   "breaksOlderReaders": false
+  },
+  {
+   "to": 60,
+   "breaksOlderReaders": false
   }
  ],
- "version": 57,
- "ran": 56,
+ "version": 60,
+ "ran": 59,
  "store": {
-  "userVersion": 57,
+  "userVersion": 60,
   "master": [
+   {
+    "type": "index",
+    "name": "idx_app_run_records_app",
+    "tbl_name": "app_run_records",
+    "sql": "CREATE INDEX idx_app_run_records_app ON app_run_records(app_id, project_id, started_at)"
+   },
    {
     "type": "index",
     "name": "idx_app_runs_app",
@@ -269,6 +287,24 @@
     "type": "index",
     "name": "sqlite_autoindex_app_run_failures_1",
     "tbl_name": "app_run_failures",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_app_run_messages_1",
+    "tbl_name": "app_run_messages",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_app_run_records_1",
+    "tbl_name": "app_run_records",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_app_run_subagent_messages_1",
+    "tbl_name": "app_run_subagent_messages",
     "sql": null
    },
    {
@@ -386,6 +422,12 @@
     "sql": null
    },
    {
+    "type": "index",
+    "name": "subagent_messages_trash",
+    "tbl_name": "subagent_messages",
+    "sql": "CREATE INDEX subagent_messages_trash ON subagent_messages(session_id, trashed_at, parent_call_id)"
+   },
+   {
     "type": "table",
     "name": "agent_start_requests",
     "tbl_name": "agent_start_requests",
@@ -405,9 +447,27 @@
    },
    {
     "type": "table",
+    "name": "app_run_messages",
+    "tbl_name": "app_run_messages",
+    "sql": "CREATE TABLE app_run_messages (\n              run_id  TEXT NOT NULL,\n              seq     INTEGER NOT NULL,\n              role    TEXT NOT NULL,\n              kind    TEXT NOT NULL,\n              payload TEXT NOT NULL,\n              ts      INTEGER NOT NULL,\n              PRIMARY KEY (run_id, seq)\n            )"
+   },
+   {
+    "type": "table",
+    "name": "app_run_records",
+    "tbl_name": "app_run_records",
+    "sql": "CREATE TABLE app_run_records (\n              run_id       TEXT PRIMARY KEY,\n              project_id   TEXT,\n              project_name TEXT,\n              app_id       TEXT NOT NULL,\n              app_name     TEXT NOT NULL,\n              session_id   TEXT NOT NULL,\n              session_name TEXT NOT NULL,\n              tool         TEXT NOT NULL,\n              status       TEXT NOT NULL,\n              duration_ms  INTEGER,\n              tokens_in    INTEGER,\n              tokens_out   INTEGER,\n              request      TEXT NOT NULL,\n              answer       TEXT NOT NULL,\n              output       TEXT,\n              started_at   INTEGER NOT NULL,\n              kept_at      INTEGER NOT NULL\n            )"
+   },
+   {
+    "type": "table",
+    "name": "app_run_subagent_messages",
+    "tbl_name": "app_run_subagent_messages",
+    "sql": "CREATE TABLE app_run_subagent_messages (\n              run_id         TEXT NOT NULL,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (run_id, parent_call_id, seq)\n            )"
+   },
+   {
+    "type": "table",
     "name": "app_runs",
     "tbl_name": "app_runs",
-    "sql": "CREATE TABLE app_runs (\n              id                TEXT PRIMARY KEY,\n              project_id        TEXT,\n              app_id            TEXT NOT NULL,\n              tool              TEXT NOT NULL,\n              caller_kind       TEXT NOT NULL,\n              caller_session_id TEXT,\n              parent_run_id     TEXT,\n              status            TEXT NOT NULL,\n              duration_ms       INTEGER,\n              args_digest       TEXT NOT NULL,\n              args_summary      TEXT NOT NULL,\n              error             TEXT,\n              created_at        INTEGER NOT NULL\n            , kind TEXT NOT NULL DEFAULT 'tool', session_id TEXT, tokens_in INTEGER, tokens_out INTEGER)"
+    "sql": "CREATE TABLE app_runs (\n              id                TEXT PRIMARY KEY,\n              project_id        TEXT,\n              app_id            TEXT NOT NULL,\n              tool              TEXT NOT NULL,\n              caller_kind       TEXT NOT NULL,\n              caller_session_id TEXT,\n              parent_run_id     TEXT,\n              status            TEXT NOT NULL,\n              duration_ms       INTEGER,\n              args_digest       TEXT NOT NULL,\n              args_summary      TEXT NOT NULL,\n              error             TEXT,\n              created_at        INTEGER NOT NULL\n            , kind TEXT NOT NULL DEFAULT 'tool', session_id TEXT, tokens_in INTEGER, tokens_out INTEGER, request TEXT, answer TEXT, output TEXT)"
    },
    {
     "type": "table",
@@ -455,7 +515,7 @@
     "type": "table",
     "name": "linked_machines",
     "tbl_name": "linked_machines",
-    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , asks INTEGER NOT NULL DEFAULT 0)"
+    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , connect TEXT, asks INTEGER NOT NULL DEFAULT 0)"
    },
    {
     "type": "table",
@@ -551,7 +611,7 @@
     "type": "table",
     "name": "subagent_messages",
     "tbl_name": "subagent_messages",
-    "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
+    "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL, trashed_at INTEGER,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
    },
    {
     "type": "table",
@@ -561,6 +621,26 @@
    }
   ],
   "indexes": [
+   {
+    "name": "idx_app_run_records_app",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 3,
+      "name": "app_id"
+     },
+     {
+      "seqno": 1,
+      "cid": 1,
+      "name": "project_id"
+     },
+     {
+      "seqno": 2,
+      "cid": 15,
+      "name": "started_at"
+     }
+    ]
+   },
    {
     "name": "idx_app_runs_app",
     "list": [
@@ -600,12 +680,35 @@
       "name": "project_id"
      }
     ]
+   },
+   {
+    "name": "subagent_messages_trash",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 0,
+      "name": "session_id"
+     },
+     {
+      "seqno": 1,
+      "cid": 7,
+      "name": "trashed_at"
+     },
+     {
+      "seqno": 2,
+      "cid": 1,
+      "name": "parent_call_id"
+     }
+    ]
    }
   ],
   "foreignKeys": {
    "agent_start_requests": [],
    "app_permissions": [],
    "app_run_failures": [],
+   "app_run_messages": [],
+   "app_run_records": [],
+   "app_run_subagent_messages": [],
    "app_runs": [],
    "app_settings": [],
    "approval_rules": [],
@@ -773,6 +876,51 @@
     ],
     "rows": []
    },
+   "app_run_messages": {
+    "columns": [
+     "run_id TEXT notnull=1 default=null pk=1",
+     "seq INTEGER notnull=1 default=null pk=2",
+     "role TEXT notnull=1 default=null pk=0",
+     "kind TEXT notnull=1 default=null pk=0",
+     "payload TEXT notnull=1 default=null pk=0",
+     "ts INTEGER notnull=1 default=null pk=0"
+    ],
+    "rows": []
+   },
+   "app_run_records": {
+    "columns": [
+     "run_id TEXT notnull=0 default=null pk=1",
+     "project_id TEXT notnull=0 default=null pk=0",
+     "project_name TEXT notnull=0 default=null pk=0",
+     "app_id TEXT notnull=1 default=null pk=0",
+     "app_name TEXT notnull=1 default=null pk=0",
+     "session_id TEXT notnull=1 default=null pk=0",
+     "session_name TEXT notnull=1 default=null pk=0",
+     "tool TEXT notnull=1 default=null pk=0",
+     "status TEXT notnull=1 default=null pk=0",
+     "duration_ms INTEGER notnull=0 default=null pk=0",
+     "tokens_in INTEGER notnull=0 default=null pk=0",
+     "tokens_out INTEGER notnull=0 default=null pk=0",
+     "request TEXT notnull=1 default=null pk=0",
+     "answer TEXT notnull=1 default=null pk=0",
+     "output TEXT notnull=0 default=null pk=0",
+     "started_at INTEGER notnull=1 default=null pk=0",
+     "kept_at INTEGER notnull=1 default=null pk=0"
+    ],
+    "rows": []
+   },
+   "app_run_subagent_messages": {
+    "columns": [
+     "run_id TEXT notnull=1 default=null pk=1",
+     "parent_call_id TEXT notnull=1 default=null pk=2",
+     "seq INTEGER notnull=1 default=null pk=3",
+     "role TEXT notnull=1 default=null pk=0",
+     "kind TEXT notnull=1 default=null pk=0",
+     "payload TEXT notnull=1 default=null pk=0",
+     "ts INTEGER notnull=1 default=null pk=0"
+    ],
+    "rows": []
+   },
    "app_runs": {
     "columns": [
      "id TEXT notnull=0 default=null pk=1",
@@ -791,7 +939,10 @@
      "kind TEXT notnull=1 default='tool' pk=0",
      "session_id TEXT notnull=0 default=null pk=0",
      "tokens_in INTEGER notnull=0 default=null pk=0",
-     "tokens_out INTEGER notnull=0 default=null pk=0"
+     "tokens_out INTEGER notnull=0 default=null pk=0",
+     "request TEXT notnull=0 default=null pk=0",
+     "answer TEXT notnull=0 default=null pk=0",
+     "output TEXT notnull=0 default=null pk=0"
     ],
     "rows": []
    },
@@ -900,6 +1051,7 @@
      "slot INTEGER notnull=1 default=null pk=0",
      "added_at INTEGER notnull=1 default=null pk=0",
      "accepted_versions TEXT notnull=0 default=null pk=0",
+     "connect TEXT notnull=0 default=null pk=0",
      "asks INTEGER notnull=1 default=0 pk=0"
     ],
     "rows": []
@@ -1256,7 +1408,8 @@
      "role TEXT notnull=1 default=null pk=0",
      "kind TEXT notnull=1 default=null pk=0",
      "payload TEXT notnull=1 default=null pk=0",
-     "ts INTEGER notnull=1 default=null pk=0"
+     "ts INTEGER notnull=1 default=null pk=0",
+     "trashed_at INTEGER notnull=0 default=null pk=0"
     ],
     "rows": []
    },

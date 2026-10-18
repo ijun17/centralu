@@ -1,5 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RpcMethods, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { AppToolResult } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
@@ -34,6 +35,16 @@ const plant = (where: 'project' | 'user', id: string, uses: Record<string, unkno
 const callFromSession = (session: SessionInfo, server: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult> =>
   w.callFromSession(session, server, args, signal)
 const agentSessions = () => w.agentSessions()
+/**
+ * Every agent session an app stood up, as it was made, including those deleted once their run ended cleanly (#378):
+ * what a test reads of one after its run reads it from here, or from its kept record
+ */
+const agentsMade = (): SessionInfo[] =>
+  events.flatMap((e) => {
+    if (e.type !== 'session_created') return []
+    const s = e.session as SessionInfo
+    return s.appId !== null && !s.parentSessionId ? [s] : []
+  })
 
 beforeEach(async () => {
   w = await brokerWorld({ plantApp, PROJECT_APPS })
@@ -45,7 +56,7 @@ afterEach(async () => {
 })
 
 describe('run_agent — a fresh session per assignment, owned by that app', () => {
-  it('the agent stands up as safe even when called from an auto-running session (the person\'s global bypass does not carry over to an app\'s instruction), the app\'s text is framed as the app\'s text, and the session that hands back an answer goes idle', async () => {
+  it('the agent stands up as safe even when called from an auto-running session (the person\'s global bypass does not carry over to an app\'s instruction), the app\'s text is framed as the app\'s text, and the session that hands back an answer goes idle, then is deleted with its record kept (#378)', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
@@ -57,9 +68,10 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const r = brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize the notes.' } }))
     expect(r).toEqual({ isError: false, text: 'The notes say hello.', structured: null })
 
-    const [agent] = agentSessions()
-    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'safe', state: 'idle', live: false, autoNamed: false })
-    expect(agent!.name).toMatch(/^App notes · agent \d\d:\d\d$/)
+    const [agent] = agentsMade()
+    expect(agent).toMatchObject({ projectId, appId: 'notes', kind: 'worker', tool: 'claude', permissionPreset: 'safe' })
+    const name = (events.filter((e) => e.type === 'session_title' && e.sessionId === agent!.id).at(-1) as { title: string } | undefined)?.title
+    expect(name).toMatch(/^App notes · agent \d\d:\d\d$/)
     const opts = claude.opened.find((o) => o.sessionId === agent!.id)!
     // At the project root, with no tool profile and no apps — an app's agent only works through the one piece of text the app assigned it
     expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'safe', undefined, undefined, undefined])
@@ -67,7 +79,8 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const h = claude.handles.get(agent!.id)!
     expect(h.sent).toHaveLength(1)
     // In the conversation it is kept as text the app sent (the UI renders it differently from the person's own words), and it goes to the agent wrapped as the app's text
-    const firstUser = (await mgr.loadMessages(agent!.id, 50)).find((m) => m.role === 'user')!
+    const [kept] = store.keptRuns.listKeptRuns()
+    const firstUser = store.keptRuns.readKeptRun(kept!.runId, 50)!.messages.find((m) => m.role === 'user')!
     expect(firstUser.payload).toEqual({ text: 'Summarize the notes.', fromApp: { appId: 'notes', projectId, name: 'App notes' } })
     expect(h.sent[0]).toBe(
       '[Centralu] The app "App notes" (app-notes) asked for this work through Centralu. The person did not write or read it. ' +
@@ -79,6 +92,10 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     // The session that handed back the answer closes its process and goes idle — it is not a turn waiting on a person's reply, so it does not stand in the inbox (waiting_input)
     expect(h.disposed).toBe(true)
     expect(events.filter((e) => e.sessionId === agent!.id && e.type === 'state_change').at(-1)).toMatchObject({ state: 'idle', reason: 'app_agent_finished' })
+    // Then it goes, by the time the app has its answer: nobody will talk to it, and its record is kept (#378)
+    expect(agentSessions()).toEqual([])
+    expect(store.trash.trashedIds().has(agent!.id)).toBe(false)
+    expect(kept).toMatchObject({ appId: 'notes', appName: 'App notes', sessionId: agent!.id, sessionName: name, status: 'ok' })
   })
 
   it("auto session control observes an app agent without replacing the app request's completion watcher or raising safe", async () => {
@@ -154,15 +171,16 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     }
     const r = brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Two primary colors', schema } }))
     expect(r).toEqual({ isError: false, text: '{"colors":["red","yellow"]}', structured: { colors: ['red', 'yellow'] } })
-    const agent = agentSessions()[0]!
+    const agent = agentsMade()[0]!
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.outputSchema).toEqual(schema)
 
-    // An outcome that does not match the schema is not handed back
+    // An outcome that does not match the schema is not handed back, and its session stays for the person to see why (#378)
     claude.onSend = (h) => h.done({ colors: 'red' })
     const bad = brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'again', schema } }))
     expect(bad.isError).toBe(true)
     expect(bad.text).toContain("run_agent: the agent's answer does not match the schema")
     expect(bad.text).toContain('The answer was: {"colors":"red"}')
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[1]!.id])
   })
 
   it('Codex receives outputSchema on every turn, and its last message is the JSON itself', async () => {
@@ -177,7 +195,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     }
     const r = brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize', tool: 'codex', schema } }))
     expect(r).toEqual({ isError: false, text: '{"summary":"short"}', structured: { summary: 'short' } })
-    const agent = agentSessions()[0]!
+    const agent = agentsMade()[0]!
     expect(agent.tool).toBe('codex')
     expect(codex.opened.find((o) => o.sessionId === agent.id)!.outputSchema).toEqual(schema)
     // A tool the app chose does not move the person's default
@@ -207,7 +225,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     }
     const r = brokerSaid(await callFromSession(orchestrator, 'app-timer', { args: { prompt: 'x' } }))
     expect(r).toEqual({ isError: false, text: 'Done.', structured: null })
-    const agent = agentSessions()[0]!
+    const agent = agentsMade()[0]!
     expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'safe' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
   })
@@ -261,7 +279,9 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
 
     const runs = RpcMethods['apps.runs'].result.parse(await rpc('apps.runs', { appId: 'notes', projectId }))
-    expect(runs.find((r) => r.kind === 'broker')).toMatchObject({ tool: 'run_agent', status: 'ok', tokens: { input: 28_200, output: 80 }, sessionId: agentSessions()[0]!.id })
+    // Its session is deleted once the run ends cleanly (#378): the run keeps its tokens, and its record waits in the trash
+    expect(runs.find((r) => r.kind === 'broker')).toMatchObject({ tool: 'run_agent', status: 'ok', tokens: { input: 28_200, output: 80 }, sessionId: null, kept: true })
+    expect(store.keptRuns.listKeptRuns()[0]).toMatchObject({ tokens: { input: 28_200, output: 80 } })
     const use = RpcMethods['apps.usage'].result.parse(await rpc('apps.usage', { appId: 'notes', projectId }))
     expect(use.day).toMatchObject({ runs: 1, tokens: { input: 28_200, output: 80 } })
     expect(use.month).toEqual(use.day)
@@ -308,6 +328,8 @@ describe('run_agent — stopping and cancellation', () => {
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     claude.onSend = (h) => {
+      // The person opened it while it ran, so it stays theirs once the run ends (#378)
+      void rpc('sessions.markRead', { sessionId: h.sessionId, seq: 0 })
       h.say('ok')
       h.done()
     }
@@ -339,5 +361,274 @@ describe('the frame and the final answer', () => {
     expect(turnAnswer([row(1, 'user', 'text', 'q'), row(2, 'assistant', 'text', 'plan'), row(3, 'system', 'tool_result')])).toBe('')
     // A queued turn has no user row of its own: only the rows after the previous answer are its own (#428)
     expect(turnAnswer([row(1, 'user', 'text', 'q1'), row(2, 'user', 'text', 'q2'), row(3, 'assistant', 'text', 'one'), row(4, 'assistant', 'text', 'two')], { afterSeq: 3 })).toBe('two')
+  })
+})
+
+/*
+ * #378: every run_agent call stood up a session that stayed in the list once the app had its answer, and an app calling
+ * it a few dozen times a day filled the sidebar. A run that ends cleanly now takes its session with it; what the session
+ * did is kept as the run's record in the trash (the whole conversation, owner decision 2026-10-06).
+ */
+describe('run_agent — a finished session goes, its record stays in the trash (#378)', () => {
+  const answering = (text: string) => (h: { say: (t: string) => void; done: (o?: unknown) => void }) => {
+    h.say(text)
+    h.done()
+  }
+
+  it('a clean run deletes its session and keeps the request, the answer and the conversation, which the person reads and deletes in the trash', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    claude.onSend = (h) => {
+      h.emit({ type: 'tool_call', sessionId: h.sessionId, callId: 'c1', summary: { tool: 'Read', title: 'Read notes.md', readOnly: true, paths: ['notes.md'] }, input: { file_path: 'notes.md' } })
+      h.emit({ type: 'tool_result', sessionId: h.sessionId, callId: 'c1', ok: true, summary: 'read', output: 'hello' })
+      answering('The notes say hello.')(h)
+    }
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize the notes.' } })).text).toBe('The notes say hello.')
+    const agent = agentsMade()[0]!
+
+    // Gone from every list, and not left in the trash as a session: the record is what stays
+    expect(agentSessions()).toEqual([])
+    expect(events.some((e) => e.type === 'session_deleted' && e.sessionId === agent.id)).toBe(true)
+    const trash = RpcMethods['trash.list'].result.parse(await rpc('trash.list', {}))
+    expect(trash.sessions).toEqual([])
+    expect(trash.runs).toHaveLength(1)
+    const [run] = trash.runs
+    expect(run).toMatchObject({ app: { id: 'notes', name: 'App notes', projectId }, tool: 'claude', status: 'ok', requestPreview: 'Summarize the notes.' })
+    expect(run!.messages).toBeGreaterThanOrEqual(4)
+    expect(trash.bytes).toBe(run!.bytes)
+
+    // The whole run reads back: request, answer, and the tool calls between them
+    const read = RpcMethods['trash.readRun'].result.parse(await rpc('trash.readRun', { runId: run!.runId }))
+    expect([read.request, read.answer]).toEqual(['Summarize the notes.', 'The notes say hello.'])
+    expect(read.messages.map((m) => m.kind)).toEqual(expect.arrayContaining(['text', 'tool_call', 'tool_result']))
+
+    // The app's run log keeps the line, pointing at the trash instead of a session
+    const logged = async () => RpcMethods['apps.runs'].result.parse(await rpc('apps.runs', { appId: 'notes', projectId })).find((r) => r.id === run!.runId)
+    expect(await logged()).toMatchObject({ status: 'ok', sessionId: null, kept: true })
+
+    // Deleted for good from the trash: the record goes, the line stays with its status
+    expect(await rpc('trash.purgeRuns', { runIds: [run!.runId] })).toEqual({ purged: 1 })
+    expect(RpcMethods['trash.list'].result.parse(await rpc('trash.list', {})).runs).toEqual([])
+    await expect(rpc('trash.readRun', { runId: run!.runId })).rejects.toThrow('Not in the trash')
+    expect(await logged()).toMatchObject({ status: 'ok', kept: false })
+    expect(store.appRuns.appRun(run!.runId)).toMatchObject({ request: '', answer: null })
+    // Still an agent the app started, in its usage
+    expect(RpcMethods['apps.usage'].result.parse(await rpc('apps.usage', { appId: 'notes', projectId })).day.runs).toBe(1)
+  })
+
+  it('a run that failed keeps its session: the person needs to see what went wrong', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    claude.onSend = (h) => h.emit({ type: 'error', sessionId: h.sessionId, error: { code: 'internal', message: 'boom', retryable: false } })
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(true)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it('a run the person was asked about during it keeps its session', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    claude.onSend = (h) => {
+      h.emit({ type: 'approval_request', sessionId: h.sessionId, requestId: 'req-1', detail: { kind: 'command', command: 'touch notes.md', cwd: repo } })
+      queueMicrotask(() => answering('Done.')(h))
+    }
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Write it down.' } })).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it.each(['opened', 'wrote'] as const)('a run whose session the person %s while it ran stays theirs', async (how) => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    let first = true
+    claude.onSend = (h) => {
+      if (!first) return
+      first = false
+      h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
+    }
+    const call = callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
+    const agent = await until(() => agentSessions()[0], (s) => s !== undefined && claude.handles.get(s.id)?.sent.length === 1)
+    if (how === 'opened') await rpc('sessions.markRead', { sessionId: agent!.id, seq: 0 })
+    else await rpc('agents.send', { sessionId: agent!.id, text: 'and add a title' }).catch(() => {})
+    answering('Done.')(claude.handles.get(agent!.id)!)
+    expect(brokerSaid(await call).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agent!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  /*
+   * #378 review: the person's part was heard only while the run's wait was tracked and once the desk's verdict came. Opened
+   * or written to while the process was closing (hundreds of ms to seconds with a real CLI), or written to between the
+   * check and the move to the trash, the session was deleted anyway: the person's message was lost, or its wake cancelled
+   * ("The session was deleted while waking"). The gaps are driven here by a close and a wake the test holds.
+   */
+  const held = () => {
+    let release!: () => void
+    const promise = new Promise<void>((r) => (release = r))
+    return { promise, release }
+  }
+  /** Starts a run whose process close the test holds, and returns once that close has begun */
+  const runWithHeldClose = async () => {
+    const close = held()
+    claude.onSend = (h) => {
+      h.closing = close.promise
+      answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const call = callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
+    const agent = await until(() => agentSessions()[0], (s) => s !== undefined && claude.handles.get(s.id)?.disposed === true)
+    return { call, agent: agent!, close, caller }
+  }
+
+  it('a session the person opened while its process was closing stays theirs', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const { call, agent, close } = await runWithHeldClose()
+    await rpc('sessions.markRead', { sessionId: agent.id, seq: 0 })
+    close.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it('a message the person sent while its process was closing wakes the session, which stays, and the message is not lost', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const { call, agent, close } = await runWithHeldClose()
+    // The wake the message starts is held until the desk's verdict has begun, so the verdict comes while it is under way
+    const wake = held()
+    claude.starting = wake.promise
+    claude.onSend = () => {}
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation((run) => {
+      const decided = verdict(run as Parameters<typeof verdict>[0])
+      wake.release()
+      return decided
+    })
+    const sent = rpc('agents.send', { sessionId: agent.id, text: 'and add a title' }).then(
+      () => 'sent',
+      (e: Error) => e.message,
+    )
+    close.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    expect(await sent).toBe('sent')
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+    expect(claude.handles.get(agent.id)!.sent).toEqual([expect.stringContaining('and add a title')])
+  })
+
+  it('a session another session woke between the answer and the verdict stays, and its turn goes on', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      if (h.sent.length === 1) answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    // Not the person: a message from another session (an orchestrator's send_to_session) is not "taking part"
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
+      await mgr.send(run.sessionId, 'one more thing', undefined, { sessionId: caller.id, name: caller.name })
+      return verdict(run as Parameters<typeof verdict>[0])
+    })
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    const agent = agentsMade()[0]!
+    expect(agentSessions().map((s) => s.id)).toEqual([agent.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+    expect(claude.handles.get(agent.id)!.sent.at(-1)).toContain('one more thing')
+  })
+
+  /*
+   * #378 review (LOW): a restart applied at the turn's end (a setting changed during the run) was not counted as in use.
+   * Deleted while it ran, the restart's late dispose found a session that was gone and said restart_failed for it.
+   */
+  it('a session whose restart at the turn end is still under way stays', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const restarts = (mgr as unknown as { restartPolicy: { deferredRestarts: Map<string, Promise<void>> } }).restartPolicy.deferredRestarts
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    const restart = held()
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
+      restarts.set(run.sessionId, restart.promise)
+      try {
+        return await verdict(run as Parameters<typeof verdict>[0])
+      } finally {
+        restarts.delete(run.sessionId)
+        restart.release()
+      }
+    })
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  /*
+   * #378 review (LOW): the person's delete that joined the host's own delete under way ended as the host's purge, so a
+   * session the person moved to the trash was gone for good, its conversation file with it
+   */
+  it('a session the person deletes while the host is deleting it stays in the trash, with its conversation file', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const removed: string[] = []
+    Object.assign(claude, { deleteExternalConversation: async (id: string) => void removed.push(id) })
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    // The host's move into the trash is held once the session has left the lists, so the person's delete joins it
+    const move = held()
+    const moving = held()
+    const trashSession = store.trash.trashSession.bind(store.trash)
+    vi.spyOn(store.trash, 'trashSession').mockImplementationOnce(async (...a) => {
+      moving.release()
+      await move.promise
+      return trashSession(...a)
+    })
+    const call = callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
+    await moving.promise
+    const agent = agentsMade()[0]!
+    const deleted = rpc('agents.deleteSession', { sessionId: agent.id })
+    move.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    await deleted
+
+    expect(agentSessions()).toEqual([])
+    const trashed = store.trash.listTrash().find((t) => t.id === agent.id)
+    expect(trashed?.record.removeExternal).toBe(false)
+    expect(removed).toEqual([])
+    // The run's record was kept as well: the conversation is in both, and the person deletes either
+    expect(store.keptRuns.listKeptRuns()).toHaveLength(1)
+  })
+
+  it('a session holding an attachment stays: the record copies the conversation, not files', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      mkdirSync(join(dataRoot, 'attachments', h.sessionId), { recursive: true })
+      writeFileSync(join(dataRoot, 'attachments', h.sessionId, 'shot.png'), 'png')
+      answering('Done.')(h)
+    }
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  it('a session whose record could not be saved stays', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const keep = vi.spyOn(store.keptRuns, 'keepRun').mockReturnValue(false)
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(keep).toHaveBeenCalledTimes(1)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.trash.listTrash()).toEqual([])
   })
 })
