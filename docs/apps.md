@@ -1065,7 +1065,9 @@ commits that touched `.centralu/apps/<id>` (read by the host core with `git log 
 
 A **root app** in a repository is versioned by git the same way, over the whole repository (its folder
 is the project). Outside a repository it keeps copies like a user-folder app, under
-`<data folder>/app-versions/<project id>/<id>/` (#1141).
+`<data folder>/app-versions/<project id>/<id>/` (#1141). Its folder is the person's whole project,
+so a restore writes the version's files back and **deletes nothing** the version lacks, and it is
+refused when the copy of the current files it takes first cannot be made (over 64 MiB, a disk error).
 
 A **user-folder app** (imported ones included) has no git, so the host keeps copies. Each time the
 app starts on code it has not kept yet, and when an app is imported, its folder is copied to

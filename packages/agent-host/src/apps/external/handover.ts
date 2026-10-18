@@ -266,10 +266,20 @@ export class AppHandover {
    * folder as a version too (so a restore can itself be undone). Restarting the app is the caller's
    * job (the runtime): that is where the rules for in-progress calls and reflecting changes live.
    */
-  restore(key: string, id: string, dir: string): Snapshot {
-    this.snapshot(key, dir, 'before restore')
+  restore(key: string, id: string, dir: string, opts: { root?: boolean } = {}): Snapshot {
+    if (opts.root) {
+      /*
+       * A root app's folder is the person's whole project (#1141): the copy of the current files is the only way back
+       * from a restore, so a restore without it is refused rather than run. And nothing the version lacks is deleted
+       */
+      try {
+        this.versions.capture(key, dir, 'before restore')
+      } catch (e) {
+        throw new ImportRefused(`Could not keep a copy of the current files first (${(e as Error).message}), so nothing was restored`)
+      }
+    } else this.snapshot(key, dir, 'before restore')
     try {
-      return this.versions.restore(key, id, dir)
+      return this.versions.restore(key, id, dir, { keepOthers: opts.root === true })
     } catch (e) {
       throw new ImportRefused((e as Error).message)
     }

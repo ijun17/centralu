@@ -671,7 +671,7 @@ export class ExternalApps {
     this.rescanScopeOf(ref)
     if (!this.keepsVersions(ref)) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
     const before = this.require(ref)
-    this.handover.restore(this.holdKey(ref), id, before.dir)
+    this.handover.restore(this.holdKey(ref), id, before.dir, { root: before.found.root === true })
     // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
     this.rescanScopeOf(ref, { now: ref.appId })
     const e = this.require(ref)

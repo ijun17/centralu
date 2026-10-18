@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -160,6 +160,35 @@ describe('versions of a root app', () => {
     expect(out.status).toBe('ok')
     expect(rt.snapshots(ref)).toEqual([expect.objectContaining({ reason: 'started', current: true })])
     expect(existsSync(join(dataRoot, 'app-versions', 'p1', 'board'))).toBe(true)
+  })
+
+  it('restoring a version writes its files back and deletes nothing the version lacks: the folder is the whole project', { timeout: 15_000 * SLOW }, async () => {
+    writeManifest()
+    writeFileSync(join(projRoot, 'version.txt'), 'v1')
+    rt.refresh()
+    expect((await rt.call(ref, 'version', {}, { kind: 'view' })).status).toBe('ok')
+    const [v1] = rt.snapshots(ref)
+    // The person's own work in the project since, not part of that version
+    writeFileSync(join(projRoot, 'version.txt'), 'v2')
+    writeFileSync(join(projRoot, 'notes-for-me.md'), 'mine')
+    rt.restoreVersion(ref, v1!.id)
+    expect(readFileSync(join(projRoot, 'version.txt'), 'utf8')).toBe('v1')
+    expect(readFileSync(join(projRoot, 'notes-for-me.md'), 'utf8')).toBe('mine')
+    // And the state before the restore was kept first, so the restore can be undone
+    expect(rt.snapshots(ref).map((s) => s.reason)).toContain('before restore')
+  })
+
+  it('a restore whose copy of the current files cannot be made is refused, and nothing is written', { timeout: 30_000 * SLOW }, async () => {
+    writeManifest()
+    writeFileSync(join(projRoot, 'version.txt'), 'v1')
+    rt.refresh()
+    expect((await rt.call(ref, 'version', {}, { kind: 'view' })).status).toBe('ok')
+    const [v1] = rt.snapshots(ref)
+    writeFileSync(join(projRoot, 'version.txt'), 'v2')
+    // Past what a version may hold (64 MiB), so the copy taken before a restore fails
+    writeFileSync(join(projRoot, 'big.bin'), Buffer.alloc(65 * 1024 * 1024))
+    expect(() => rt.restoreVersion(ref, v1!.id)).toThrow(/Could not keep a copy of the current files first .*so nothing was restored/)
+    expect(readFileSync(join(projRoot, 'version.txt'), 'utf8')).toBe('v2')
   })
 
   it('in a git repository its versions are git\'s, and no copy is kept', () => {

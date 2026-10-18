@@ -154,8 +154,11 @@ export class AppVersions {
    * fingerprint measures): code files not in the version are deleted, and the version's files are
    * written back including their timestamps. Names starting with a dot and `node_modules` are left
    * untouched — the version never had them, so this does not treat that as deleting them.
+   *
+   * `keepOthers` (a root app, #1141): the app's folder is the person's whole project, so nothing the version lacks is
+   * deleted — only the version's own files are written back.
    */
-  restore(appId: string, id: string, dir: string): Snapshot {
+  restore(appId: string, id: string, dir: string, opts: { keepOthers?: boolean } = {}): Snapshot {
     const snap = this.list(appId).find((s) => s.id === id)
     if (!snap) throw new Error('That version is no longer kept')
     const files = join(this.root, appId, id, 'files')
@@ -164,7 +167,7 @@ export class AppVersions {
     walkCode(files, { unreadable: () => {}, more: () => {}, dir: (r) => void wantDirs.add(r), file: (r) => void want.add(r) })
     // Delete code files not in the version — the fingerprint of the restored folder must match the version's fingerprint. Only as deep as the version looked (`depth`)
     const extraDirs: string[] = []
-    walkCode(
+    if (!opts.keepOthers) walkCode(
       dir,
       {
         unreadable: () => {},
