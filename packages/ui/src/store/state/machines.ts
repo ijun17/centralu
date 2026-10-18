@@ -44,7 +44,7 @@ export type MachinesSlice = {
    * The window needs the machine now (#1134): one of its projects or sessions is open. Quiet: a host that does not take
    * it (an older one) is left alone, and the row says how the link stands
    */
-  needMachine(machineId: string): Promise<void>
+  needMachine(machineId: string, repeat?: boolean): Promise<void>
   acceptMachineVersions(machineId: string): Promise<void>
   /**
    * Installs, updates, rolls back or removes the Centralu this computer installs on a machine

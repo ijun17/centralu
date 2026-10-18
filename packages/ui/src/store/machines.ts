@@ -109,9 +109,9 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     }
   },
 
-  async needMachine(machineId) {
+  async needMachine(machineId, repeat = false) {
     try {
-      await get().platform!.machines.need(machineId)
+      await get().platform!.machines.need(machineId, repeat)
     } catch {
       // An older host has no such call; its machines connect at start anyway
     }

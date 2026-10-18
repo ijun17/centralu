@@ -19,19 +19,26 @@ export function neededKey(s: Pick<AppState, 'focusedSessionId' | 'focusedProject
 }
 
 /**
+ * Says the needs of one set of machines (`neededKey`): at once, as opening something of them, and every
+ * `NEED_REPEAT_MS` after as a repeat, which does not bring back a machine the person disconnected (#1134 review M3).
+ * Answers the stop
+ */
+export function sayNeeds(key: string, say: (machineId: string, repeat: boolean) => void): () => void {
+  if (!key) return () => {}
+  const ids = key.split(' ')
+  for (const id of ids) say(id, false)
+  const timer = setInterval(() => {
+    for (const id of ids) say(id, true)
+  }, NEED_REPEAT_MS)
+  return () => clearInterval(timer)
+}
+
+/**
  * Tells the host which machines that connect when needed this window needs (#1134): the one a focused session runs
  * on, and the one whose project is open. Said when that changes and again every `NEED_REPEAT_MS` while it stays so; a
  * machine connected at start is never named, so an older host is never asked
  */
 export function useMachineNeeds(): void {
   const key = useStore(neededKey)
-  useEffect(() => {
-    if (!key) return
-    const say = () => {
-      for (const id of key.split(' ')) void useStore.getState().needMachine(id)
-    }
-    say()
-    const timer = setInterval(say, NEED_REPEAT_MS)
-    return () => clearInterval(timer)
-  }, [key])
+  useEffect(() => sayNeeds(key, (id, repeat) => void useStore.getState().needMachine(id, repeat)), [key])
 }

@@ -34,8 +34,11 @@ export interface MachinesPort {
   disconnect(machineId: string): Promise<MachineInfo>
   /** When the host opens the link: at start, or when needed (#1134) */
   setConnect(machineId: string, connect: MachineConnect): Promise<MachineInfo>
-  /** This window needs the machine now: one of its projects or sessions is open (#1134). Answers at once */
-  need(machineId: string): Promise<MachineInfo>
+  /**
+   * This window needs the machine now: one of its projects or sessions is open (#1134). Answers at once. `repeat`: said
+   * again while the same thing stays open, which leaves a machine the person disconnected as it is
+   */
+  need(machineId: string, repeat?: boolean): Promise<MachineInfo>
   /** Connects although the versions differ (one protocol only): the person declined to align them (plan §4) */
   acceptVersions(machineId: string): Promise<MachineInfo>
   /**

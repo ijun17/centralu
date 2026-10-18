@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MachineInfo, ProjectInfo } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { useStore } from '../../store/store.js'
 import { resetStore } from '../../store/store.test-helpers.js'
-import { neededKey } from './useMachineNeeds.js'
+import { NEED_REPEAT_MS, neededKey, sayNeeds } from './useMachineNeeds.js'
 
 /**
  * Which machines the window says it needs (#1134): the machine of the focused session, of the focused project and of the
@@ -54,5 +54,36 @@ describe('the machines the window needs (#1134)', () => {
     }
     await useStore.getState().needMachine('lap')
     expect(useStore.getState().toast).toBeFalsy()
+  })
+})
+
+describe("the window's repeat (#1134 review M3)", () => {
+  beforeEach(() => resetStore())
+  afterEach(() => vi.useRealTimers())
+
+  it('says a need at once, then again as a repeat while the set stays, and nothing once it changes', () => {
+    vi.useFakeTimers()
+    const said: string[] = []
+    const stop = sayNeeds('box lap', (id, repeat) => said.push(`${id}${repeat ? ' again' : ''}`))
+    expect(said).toEqual(['box', 'lap'])
+    vi.advanceTimersByTime(NEED_REPEAT_MS)
+    expect(said).toEqual(['box', 'lap', 'box again', 'lap again'])
+    stop()
+    vi.advanceTimersByTime(NEED_REPEAT_MS * 3)
+    expect(said).toHaveLength(4)
+    expect(sayNeeds('', () => said.push('x'))).toBeTypeOf('function')
+    expect(said).toHaveLength(4)
+  })
+
+  it("a repeat does not bring back a machine the person disconnected; opening something of it again does", async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.machinesList = [{ ...(await mock.machines.add({ name: 'Lap', sshTarget: 'me@lap', shell: 'posix' })), connect: 'when_needed' }]
+    await useStore.getState().disconnectMachine('lap')
+    await useStore.getState().needMachine('lap', true)
+    expect(mock.machinesList[0]!.status).toBe('disconnected')
+    expect(mock.machinesNeeded).toEqual(['lap (again)'])
+    await useStore.getState().needMachine('lap')
+    expect(mock.machinesList[0]!.status).toBe('connected')
   })
 })
