@@ -79,12 +79,13 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 |---|---|---|---|
 | App | A small MCP server with optional views, identified by (project, id). A person uses its views, agents call its tools: one call path | [apps.md](apps.md); `packages/agent-host/src/apps/external/runtime.ts` | plugin, extension, mod |
 | Manifest | `centralu.app.json`, the file that makes a folder an app | `packages/agent-host/src/apps/external/manifest.ts` | |
-| Project app | An app in `<project>/.centralu/apps/<id>/`, committed with the repository. Runs only in a trusted project | `packages/agent-host/src/apps/external/discovery.ts` | |
-| User-folder app | An app in `<data>/apps/<id>/` (project null): used across projects, imported, or an approved MCP server | `packages/agent-host/src/apps/external/discovery.ts` | global app |
+| Root app | A project whose own folder has the manifest at its root: the project is the app. Key `<project id>/<manifest id>`; trust, sessions and state follow the project. Added and removed with the file (#1141) | `root` on `ExternalAppInfo`; `packages/agent-host/src/apps/external/discovery.ts`; [plans/root-apps.md](plans/root-apps.md) | app project |
+| Project app | An app in `<project>/.centralu/apps/<id>/`, committed with the repository. Runs only in a trusted project. A root app is also its project's app | `packages/agent-host/src/apps/external/discovery.ts` | |
+| User-folder app | An app in `<data>/apps/<id>/` (project null). Since #1141 each is registered as a project in place and becomes a root app; one stays a user-folder app only until that happens, or on a linked machine running an older build | `packages/agent-host/src/apps/external/discovery.ts` | global app |
 | Shared app | A project app its project lets other projects' sessions attach | `app_shared:<project>/<app>` setting, `packages/agent-host/src/sessions/app-access.ts` | public |
 | Attach | Giving a session an app's tools on demand (`find_apps`, `attach_app`, `detach_app`), beyond the ones it gets by default | `packages/agent-host/src/sessions/app-access.ts`, `session-apps.ts`; [apps.md](apps.md) §9.4 | install |
 | App status | Derived each time, first match wins: `invalid`, `untrusted`, `unconfirmed`, `failed`, `running`, `starting`, `crashed`, `stopped` | `ExternalAppStatus`, `entities/apps.ts`; `ExternalApps.status`, `runtime.ts` | |
-| Unconfirmed | An imported user-folder app the person has not enabled, or whose `server` or `uses` changed since | `packages/agent-host/src/apps/external/import-book.ts` | |
+| Unconfirmed | An imported user-folder app the person has not enabled, or whose `server` or `uses` changed since. An import now lands as a root app, whose project's trust is its enabling | `packages/agent-host/src/apps/external/import-book.ts` | |
 | View | An app's screen (an MCP Apps `ui://` resource). An open one is a **view instance** with its own id | `packages/agent-host/src/views/view-host.ts` | iframe |
 | Inline view | A view opened under the tool card of the call that produced it | `app_view` event, `events.ts`; `packages/agent-host/src/inline-views.ts` | |
 | Pinned view | The view the manifest's `home` tool opens in the app's screen (and reused by the project screen's panel) | `packages/agent-host/src/app-home-view.ts` | home page |
@@ -94,7 +95,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Broker | The MCP server the host offers an app on fd 3: `run_agent`, `call_app`, `host_data` | `packages/agent-host/src/apps/external/broker.ts`, `desk.ts` | |
 | Capability | What an app may ask the broker for: `agent:<tool>`, `app:<scope>/<id>`, `host:<name>`. Declared in the manifest's `uses`, granted by the person once per app | `packages/agent-host/src/apps/external/capabilities.ts`; `AppPermission`, `entities/apps.ts` | permission (that is an approval) |
 | App secret | A value an app's manifest names; kept on this machine in `<data>/app-secrets.json`, never in the store | `packages/agent-host/src/apps/external/secrets.ts` | |
-| App version | A kept copy of a user-folder app (5 kept), or the git history of a project app | `packages/agent-host/src/apps/external/versions.ts` | |
+| App version | A kept copy of a user-folder app or of a root app outside git (5 kept), or the git history of a project app | `packages/agent-host/src/apps/external/versions.ts` | |
 | App guide | Centralu's own user guide as a tool (`app_guide`), not a guide to one app | `packages/agent-host/src/sessions/app-guide.ts` | |
 
 ### 1.4 Screens
@@ -321,7 +322,7 @@ classDiagram
   class AppAgentSession {
     <<role>>
   }
-  Project "0..1" o-- "*" App : project apps, or user folder when null
+  Project "0..1" o-- "*" App : project apps (inner or root), or user folder when null
   App "1" o-- "*" ViewInstance : open
   ViewInstance <|-- InlineView
   ViewInstance <|-- PinnedView
@@ -341,8 +342,8 @@ Which apps a session gets (`givesApp`, `session-apps.ts`; `allowed`, `app-access
 
 | Session | Gets by default | May attach |
 |---|---|---|
-| Orchestrator | user-folder apps | |
-| Session in a trusted project | that project's apps | user-folder apps; another project's app if it is shared and the project consent (`apps`) is given |
+| Orchestrator | user-folder apps and root apps | |
+| Session in a trusted project | that project's apps | user-folder apps and other projects' root apps; another project's inner app if it is shared and the project consent (`apps`) is given |
 | Builder | its own app, too | as above |
 | App-agent session | none | none |
 
@@ -357,7 +358,8 @@ Where it is stored:
 - `app_run_failures`: the raw arguments and result of an app's latest failed calls (20 kept), for its builder.
 - `app_permissions`: a person's answer per app and capability, with the `uses` fingerprint it was given for.
 - `app_settings`: host-owned settings as key and value; for apps the builder map (`apps.builders`), sharing
-  (`app_shared:*`), on-demand attachments (`session_apps:*`), view ports and the view handover. Also the store's own
+  (`app_shared:*`), on-demand attachments (`session_apps:*`), view ports, the view handover and the user-folder apps
+  registered as projects (`apps.adoptedUserApps`). Also the store's own
   bookkeeping (`min_reader_version`, deferred migrations) and settings such as updates.
 
 Outside the store: the app's code (its folder), data (`<data>/app-data/`), secrets (`<data>/app-secrets.json`),

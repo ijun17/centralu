@@ -81,12 +81,13 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 |---|---|---|---|
 | 앱 | 화면을 가질 수 있는 작은 MCP 서버. (프로젝트, id)로 구별한다. 사람은 화면을 쓰고 에이전트는 도구를 부른다. 호출 경로는 하나다 | [apps.ko.md](apps.ko.md); `packages/agent-host/src/apps/external/runtime.ts` | 플러그인, 확장, 모드 |
 | 매니페스트 | 폴더를 앱으로 만드는 파일, `centralu.app.json` | `packages/agent-host/src/apps/external/manifest.ts` | |
-| 프로젝트 앱 | `<project>/.centralu/apps/<id>/`에 있어 저장소와 함께 커밋되는 앱. 신뢰한 프로젝트에서만 돈다 | `packages/agent-host/src/apps/external/discovery.ts` | |
-| 사용자 폴더 앱 | `<data>/apps/<id>/`에 있는 앱(프로젝트 없음): 여러 프로젝트에서 쓰는 것, 가져온 것, 승인한 MCP 서버 | `packages/agent-host/src/apps/external/discovery.ts` | 전역 앱 |
+| 루트 앱 | 자기 폴더 맨 위에 매니페스트가 있는 프로젝트: 그 프로젝트가 곧 앱이다. 키는 `<project id>/<manifest id>`. 신뢰, 세션, 상태는 프로젝트를 따른다. 파일을 두면 앱이 되고 지우면 돌아간다(#1141) | `ExternalAppInfo`의 `root`; `packages/agent-host/src/apps/external/discovery.ts`; [plans/root-apps.md](plans/root-apps.md) | 앱 프로젝트 |
+| 프로젝트 앱 | `<project>/.centralu/apps/<id>/`에 있어 저장소와 함께 커밋되는 앱. 신뢰한 프로젝트에서만 돈다. 루트 앱도 그 프로젝트의 앱이다 | `packages/agent-host/src/apps/external/discovery.ts` | |
+| 사용자 폴더 앱 | `<data>/apps/<id>/`에 있는 앱(프로젝트 없음). #1141부터 하나하나 제자리에서 프로젝트로 등록되어 루트 앱이 된다. 그 전까지, 또는 옛 빌드를 돌리는 연결된 기기에서만 사용자 폴더 앱으로 남는다 | `packages/agent-host/src/apps/external/discovery.ts` | 전역 앱 |
 | 공유한 앱 | 자기 프로젝트가 다른 프로젝트의 세션도 붙일 수 있게 열어 둔 프로젝트 앱 | 설정 `app_shared:<project>/<app>`, `packages/agent-host/src/sessions/app-access.ts` | 공개 앱 |
 | 붙이기 | 세션이 기본으로 받는 것 말고도, 필요할 때 앱의 도구를 주는 것(`find_apps`, `attach_app`, `detach_app`) | `packages/agent-host/src/sessions/app-access.ts`, `session-apps.ts`; [apps.ko.md](apps.ko.md) §9.4 | 설치 |
 | 앱 상태 | 매번 새로 따진다. 처음 맞는 것이 이긴다: `invalid`, `untrusted`, `unconfirmed`, `failed`, `running`, `starting`, `crashed`, `stopped` | `ExternalAppStatus`, `entities/apps.ts`; `ExternalApps.status`, `runtime.ts` | |
-| 확인 전 | 사람이 아직 켜지 않은, 또는 그 뒤 `server`나 `uses`가 바뀐 가져온 사용자 폴더 앱 | `packages/agent-host/src/apps/external/import-book.ts` | |
+| 확인 전 | 사람이 아직 켜지 않은, 또는 그 뒤 `server`나 `uses`가 바뀐 가져온 사용자 폴더 앱. 이제 가져온 앱은 루트 앱으로 들어오고, 그 프로젝트를 신뢰하는 것이 켜는 것이다 | `packages/agent-host/src/apps/external/import-book.ts` | |
 | 화면 | 앱의 화면(MCP Apps `ui://` 리소스). 열린 하나하나는 자기 id를 가진 **화면 인스턴스**다 | `packages/agent-host/src/views/view-host.ts` | iframe |
 | 대화 안 화면 | 그 화면을 낸 호출의 도구 카드 아래에 열리는 화면 | `app_view` 이벤트, `events.ts`; `packages/agent-host/src/inline-views.ts` | |
 | 고정 화면 | 매니페스트의 `home` 도구가 앱 화면에 여는 화면(프로젝트 화면의 패널도 이것을 같이 쓴다) | `packages/agent-host/src/app-home-view.ts` | 홈 페이지 |
@@ -320,7 +321,7 @@ classDiagram
   class AppAgentSession {
     <<role>>
   }
-  Project "0..1" o-- "*" App : project apps, or user folder when null
+  Project "0..1" o-- "*" App : project apps (inner or root), or user folder when null
   App "1" o-- "*" ViewInstance : open
   ViewInstance <|-- InlineView
   ViewInstance <|-- PinnedView
@@ -340,8 +341,8 @@ classDiagram
 
 | 세션 | 기본으로 받는 것 | 붙일 수 있는 것 |
 |---|---|---|
-| 오케스트레이터 | 사용자 폴더 앱 | |
-| 신뢰한 프로젝트의 세션 | 그 프로젝트의 앱 | 사용자 폴더 앱. 다른 프로젝트의 앱은 공유되어 있고 프로젝트 동의(`apps`)가 있을 때 |
+| 오케스트레이터 | 사용자 폴더 앱과 루트 앱 | |
+| 신뢰한 프로젝트의 세션 | 그 프로젝트의 앱 | 사용자 폴더 앱과 다른 프로젝트의 루트 앱. 다른 프로젝트 안쪽의 앱은 공유되어 있고 프로젝트 동의(`apps`)가 있을 때 |
 | 빌더 | 자기 앱도 | 위와 같다 |
 | 앱 에이전트 세션 | 없음 | 없음 |
 
@@ -356,7 +357,8 @@ classDiagram
 - `app_run_failures`: 앱의 최근 실패한 호출의 원래 인자와 결과(20개까지). 빌더를 위해.
 - `app_permissions`: 앱과 능력마다 사람이 한 답, 그리고 그 답을 준 때의 `uses` 지문.
 - `app_settings`: 호스트가 가진 설정을 키와 값으로. 앱에 관해서는 빌더 지도(`apps.builders`), 공유
-  (`app_shared:*`), 필요할 때 붙인 앱(`session_apps:*`), 화면 포트, 화면 인계. 스토어 자신의 장부
+  (`app_shared:*`), 필요할 때 붙인 앱(`session_apps:*`), 화면 포트, 화면 인계, 프로젝트로 등록한 사용자 폴더 앱
+  (`apps.adoptedUserApps`). 스토어 자신의 장부
   (`min_reader_version`, 미뤄 둔 마이그레이션)와 업데이트 같은 설정도 여기 있다.
 
 스토어 밖: 앱의 코드(그 폴더), 데이터(`<data>/app-data/`), 비밀(`<data>/app-secrets.json`), 가져오기 확인
