@@ -614,6 +614,14 @@ and "Send to builder".
   `.centralu` link pointing outside the project stops it). The template is expanded into a hidden
   folder, which discovery skips, then renamed into place. The data folder is created. Nothing is
   started.
+- **Without a project** (#1141) the app becomes a project of its own: a new folder `<parent>/<id>`
+  (`~/Centralu` unless a parent is given, with a new project's rules: the default is made when
+  missing, a chosen parent must exist, nothing of that name may be there), the template written
+  there through a dot-named sibling, then registered as a **trusted** project (Centralu made it, as
+  an empty project folder, #655) whose root is the app. A folder that fails to register is removed.
+  The builder works in that project, at its root. The orchestrator's `create_app` without `project`
+  raises create_project's card for the folder first, since it is the one thing it makes outside a
+  project.
 - **New app** (the UI's door to the same function): "New app…" in each project's menu, and a + on
   the "Your apps" group, which now always stands so the first user-folder app has somewhere to be
   made. The dialog asks for a name and the agent that builds it. It derives the id from the name

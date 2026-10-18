@@ -59,6 +59,8 @@ export type OrchestratorSeatHost = {
     spec: { name: string; parent?: string; source?: GitSource },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }>
+  /** create_app without a project (#1141): create_project's card for the folder it makes (`ProjectCreation.askAppProject`) */
+  askAppProject(sessionId: string, spec: { id: string; parent?: string }, signal?: AbortSignal): Promise<string | null>
   createProjectOnMachine(
     sessionId: string,
     reader: LinkedSessions,
@@ -87,6 +89,7 @@ export type OrchestratorSeatHost = {
     name: string
     description?: string
     tool?: ToolName
+    parent?: string
   }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }>
 }
 
@@ -665,15 +668,26 @@ export function orchestratorToolsFor(
 
     // Creates a new app (M4 C-1b) — a project is referenced by name or id (same as create_session). Rules
     // are enforced by the runtime's own gate
-    createApp: async (spec) => {
+    createApp: async (spec, signal) => {
       let projectId: string | null = null
       if (spec.project) {
         const project = host.store.projects.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
         if (!project) return { ok: false, error: `No such project: ${spec.project}` }
         projectId = project.id
+      } else {
+        // Without a project it makes a folder and a project (#1141): the person allows that on create_project's card
+        const refused = await host.askAppProject(orchestratorId, { id: spec.id, ...(spec.parent ? { parent: spec.parent } : {}) }, signal)
+        if (refused) return { ok: false, error: refused }
       }
       try {
-        const { app, builder, builderError } = await host.createApp({ projectId, id: spec.id, name: spec.name, description: spec.description, tool: spec.tool })
+        const { app, builder, builderError } = await host.createApp({
+          projectId,
+          id: spec.id,
+          name: spec.name,
+          description: spec.description,
+          tool: spec.tool,
+          ...(projectId === null && spec.parent ? { parent: spec.parent } : {}),
+        })
         return {
           ok: true,
           appId: app.appId,

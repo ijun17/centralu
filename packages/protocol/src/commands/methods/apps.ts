@@ -286,8 +286,10 @@ export const appMethods = {
   /**
    * Creates a new app from a template (M4 C-1b) — called by the "new app" button. The same door
    * as the orchestrator's `create_app`. If `projectId` is given, it is created at
-   * `.centralu/apps/<id>/` in that project (only if trusted); if null, it goes in the user
-   * folder. `id` is both the folder name and becomes `app-<id>` in a session: lowercase, digits
+   * `.centralu/apps/<id>/` in that project (only if trusted); if null, it becomes a new project of
+   * its own (#1141): a new folder `<parent>/<id>` (`~/Centralu` without `parent`, as for a new
+   * project), registered trusted, whose root is the app (`root: true`). An older host given null
+   * puts it in its user folder. `id` is both the folder name and becomes `app-<id>` in a session: lowercase, digits
    * and hyphens, up to 32 characters, may not start with `centralu` or `app-`. An id that
    * already exists, an untrusted project, or an invalid name fails with a reason and creates
    * nothing. The app is not started — it starts only the first time it is actually needed.
@@ -300,6 +302,8 @@ export const appMethods = {
       description: z.string().optional(),
       /** The tool for the building session (C-2). If omitted, the project's default tool (for a user-folder app, the orchestrator's tool) */
       tool: ToolName.optional(),
+      /** With `projectId` null (#1141): the full path of the folder the new app project's folder goes in. Absent: `~/Centralu` */
+      parent: z.string().max(4096).optional(),
     }),
     /**
      * Creating an app also stands up its building session (C-2). If that session fails to stand

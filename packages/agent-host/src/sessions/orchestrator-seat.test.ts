@@ -55,6 +55,7 @@ beforeEach(() => {
     forkFor: vi.fn(),
     autoBoundaryOpen: vi.fn(() => true),
     createProjectAsked: vi.fn(),
+    askAppProject: vi.fn(async () => null),
     createProjectOnMachine: vi.fn(),
     startAgent: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     agentSession: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),

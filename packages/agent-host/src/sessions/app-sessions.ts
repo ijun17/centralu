@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs'
 import { orchestratorHome } from './orchestrator-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
@@ -10,6 +11,7 @@ import type {
   ExternalAppInfo,
   NormalizedEvent,
   PermissionPreset,
+  ProjectInfo,
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
@@ -57,6 +59,10 @@ export type AppSessionsHost = {
   readonly appsHub: SessionAppsHub | null
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; }) => Promise<SessionInfo>
   defaultToolFor: (projectId: string | null) => ToolName | null
+  /** Where a new app project's folder goes (#1141): `ProjectCreation.appProjectTarget` */
+  appProjectTarget: (id: string, parent?: string) => { path: string; isDefault: boolean }
+  /** Registers a folder made for a new app as a trusted project, and tells the windows: `ProjectCreation.registerMadeFolder` */
+  registerMadeFolder: (path: string) => Promise<ProjectInfo>
   readonly delegationFlow: DelegationFlow
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string; } | undefined, relayed: boolean, fromApp?: AppMessageSource, fromAppVia?: AppMessageVia, sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>
   readonly handles: Map<string, SessionHandle>
@@ -97,8 +103,14 @@ export class AppSessions {
    * Creates a new app (M4 C-1b) — the single path both `apps.create` and the orchestrator's
    * `create_app` go through.
    *
+   *   With a project      an app inside it, `.centralu/apps/<id>/` (`ExternalApps.createApp`)
+   *   Without one         a new app project (#1141): a new folder `<parent>/<id>` (`~/Centralu` unless a parent is
+   *                       given, as for a new project), the template written there, registered as a trusted project
+   *                       whose root is the app. A folder that fails to register is removed again: it held only the
+   *                       template
+   *
    * Checking the name, trust and whether an id already exists is the runtime's own gate's job
-   * (`ExternalApps.createApp`). Writing that check a second time here would produce two sets of
+   * (`ExternalApps.createApp`, `writeAppProject`). Writing that check a second time here would produce two sets of
    * rules, and whichever one is looser becomes the hole (#93).
    */
   async createApp(params: {
@@ -107,10 +119,11 @@ export class AppSessions {
     name: string
     description?: string
     tool?: ToolName
+    parent?: string
   }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }> {
     const rt = this.host.appsHub?.rt
     if (!rt) throw rpcError('External apps are unavailable — there is nowhere to make an app')
-    const app = rt.createApp(params)
+    const app = params.projectId === null ? await this.createAppProject(rt, params) : rt.createApp(params)
     /*
      * Creating an app also stands up its builder session (C-2). Even if that session fails to come up
      * (the tool is missing, or not logged in), **the app still exists** — its folder was already
@@ -122,6 +135,26 @@ export class AppSessions {
     } catch (e) {
       return { app, builder: null, builderError: (e as Error).message }
     }
+  }
+
+  /** A new app project (#1141): see `createApp` */
+  private async createAppProject(
+    rt: NonNullable<AppSessionsHost['appsHub']>['rt'],
+    params: { id: string; name: string; description?: string; parent?: string },
+  ): Promise<ExternalAppInfo> {
+    const target = this.host.appProjectTarget(params.id, params.parent)
+    rt.writeAppProject(target, params)
+    let projectId: string
+    try {
+      projectId = (await this.host.registerMadeFolder(target.path)).id
+    } catch (e) {
+      rmSync(target.path, { recursive: true, force: true })
+      throw e
+    }
+    rt.refresh()
+    const app = rt.list().find((a) => a.projectId === projectId && a.root === true)
+    if (!app) throw rpcError(`The app folder was made and registered, but discovery did not find its app: ${target.path}`)
+    return app
   }
 
   /**

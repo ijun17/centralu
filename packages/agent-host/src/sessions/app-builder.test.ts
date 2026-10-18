@@ -96,6 +96,8 @@ beforeEach(async () => {
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
+  // Where an app made without a project goes (#1141): this test's ~/Centralu
+  mgr.useProjectsHome(() => join(root, 'Centralu'))
   rt = new ExternalApps({
     projects: () => store.projects.projectRoots(),
     dataRoot,
@@ -148,12 +150,12 @@ describe('creating an app stands up its building session', () => {
     }
   })
 
-  it('a user-folder app: cwd is the app folder, and there is no project', async () => {
+  it('an app made without a project (#1141): it is a project of its own, and its builder works in that project, at its root', async () => {
     const { app, builder } = await create({ projectId: null, id: 'timer', name: 'Timer' })
-    expect(builder).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker' })
+    expect(app).toMatchObject({ root: true, dir: join(root, 'Centralu', 'timer') })
+    expect(builder).toMatchObject({ projectId: app.projectId, appId: 'timer', kind: 'worker' })
     expect(claude.last().cwd).toBe(app.dir)
-    expect(app.dir).toBe(join(dataRoot, 'apps', 'timer'))
-    expect(builder!.roleAppend).toContain(`Your working folder is the app folder: ${app.dir}`)
+    expect(builder!.roleAppend).toContain(`This project is the app: its manifest stands at the project's root, so your working folder is the app folder: ${app.dir}`)
   })
 
   it('the caller picks the tool, and the project\'s default tool is used if none is picked', async () => {
@@ -190,12 +192,12 @@ describe('creating an app stands up its building session', () => {
 describe('it is found by that app\'s building session', () => {
   it('apps.builder returns that session, and there is one building session per app', async () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
-    await create({ projectId: null, id: 'notes', name: 'Notes (mine)' })
+    const mine = await create({ projectId: null, id: 'notes', name: 'Notes (mine)' })
     expect(((await rpc('apps.builder', { appId: 'notes', projectId })) as SessionInfo).id).toBe(builder!.id)
-    // The same id in the user folder is a different app — it has its own building session too
-    const userBuilder = (await rpc('apps.builder', { appId: 'notes', projectId: null })) as SessionInfo
-    expect(userBuilder.id).not.toBe(builder!.id)
-    expect(userBuilder.projectId).toBeNull()
+    // The same id as a project of its own is a different app — it has its own building session too
+    const ownBuilder = (await rpc('apps.builder', { appId: 'notes', projectId: mine.app.projectId })) as SessionInfo
+    expect(ownBuilder.id).not.toBe(builder!.id)
+    expect(ownBuilder.projectId).toBe(mine.app.projectId)
     const again = (await rpc('apps.createBuilder', { appId: 'notes', projectId })) as SessionInfo
     expect(again.id).toBe(builder!.id)
   })
@@ -248,7 +250,7 @@ describe('a building session tries out its own app (C-3)', () => {
     await expect(mgr.runOrchestratorTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
   })
 
-  it('a user-folder app\'s building session: only its own app attaches (other user-folder apps belong to the orchestrator)', async () => {
+  it('an app project\'s building session: only its own project\'s app attaches (another app project is another project)', async () => {
     await create({ projectId: null, id: 'helper', name: 'Helper' })
     const { builder } = await create({ projectId: null, id: 'timer', name: 'Timer' })
     expect(servers(claude.last())).toEqual(['app-timer'])

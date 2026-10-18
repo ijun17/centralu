@@ -8,7 +8,7 @@ import { memoryCapabilityBook } from './capabilities.js'
 import type { AppCheckReport } from './check.js'
 import { AppCalls, type AppCallOptions } from './app-calls.js'
 import { checkApp } from './app-check.js'
-import { createApp, installUserApp, removeUserApp, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
+import { createApp, installUserApp, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
@@ -506,6 +506,15 @@ export class ExternalApps {
    */
   createApp(spec: NewAppSpec): ExternalAppInfo {
     return createApp(this.folderHost, spec)
+  }
+
+  /**
+   * Writes a new app project's folder from the template (#1141) — the New app dialog, `apps.create` and `create_app`
+   * without a project. The host registers it as a project afterwards; the app is then that project's root app. **This
+   * never starts it.** The body and what it refuses: `writeAppProject` in `app-folders.ts`.
+   */
+  writeAppProject(target: AppProjectTarget, spec: { id: string; name: string; description?: string }): void {
+    writeAppProject(this.folderHost, target, spec)
   }
 
   /**
