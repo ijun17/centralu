@@ -4,6 +4,7 @@ import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SettingsSelect } from './OtherChoice.jsx'
 import { isPlainEnter } from '../../app/keys.js'
+import { useFollowed } from '../../app/useFollowed.js'
 import {
   INK_ORDER,
   READING_SURFACES,
@@ -299,7 +300,8 @@ function urgencyOf(file: ThemeFileEntry): string[] {
 function TokenEditor({ file }: { file: ThemeFileEntry }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
-  const [name, setName] = useState(file.name)
+  // Follows the file's name when it is changed outside (the file edited by hand), as a token row follows its value
+  const [name, setName] = useFollowed(file.name)
   if (file.broken) {
     return <p className="mt-2 text-xs text-ink-faint">Fix the file (Open file) to edit it here.</p>
   }
@@ -372,13 +374,8 @@ function TokenRow({
   value: string
   onCommit: (value: string) => void
 }) {
-  const [draft, setDraft] = useState(value)
-  const [lastValue, setLastValue] = useState(value)
   // A change from outside (the file edited by hand) replaces the draft
-  if (value !== lastValue) {
-    setLastValue(value)
-    setDraft(value)
-  }
+  const [draft, setDraft] = useFollowed(value)
   const valid = draft.trim() === '' || isValidTokenValue(tokenKey, draft.trim())
   const commit = () => {
     const next = draft.trim()

@@ -51,7 +51,7 @@ export function Modal({
 }) {
   useOpenLayer()
   // Escape only: the scrim below takes the outside press, and a modal stays up when the window loses focus
-  useDismiss({ onClose })
+  useDismiss({ onClose, closeOverWindow: false })
   // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
   const panelRef = useRef<HTMLDivElement>(null)
   const dialog = useDialogFocus(panelRef)

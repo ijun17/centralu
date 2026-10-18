@@ -32,17 +32,20 @@ export function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
 export function TrashRuns({
   runs,
   busy,
+  confirming,
+  onConfirming,
   onRead,
   onPurge,
 }: {
   runs: readonly TrashedRun[]
   busy: boolean
+  /** The confirmation open on this list: a record by its id, or a whole app's by its group key. The screen holds it, so only one confirmation is open across all of its lists */
+  confirming: string | null
+  onConfirming: (key: string | null) => void
   onRead: (run: TrashedRun) => void
   /** Deletes these for good; `at` is the row or app a refusal is shown next to */
   onPurge: (runs: readonly TrashedRun[], at: string) => Promise<void>
 }) {
-  /** The one confirmation open: a record by its id, or a whole app's by its group key */
-  const [confirming, setConfirming] = useState<string | null>(null)
   if (runs.length === 0) return null
   return (
     <div className="mt-4" data-testid="trash-runs">
@@ -62,7 +65,7 @@ export function TrashRuns({
               type="button"
               className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-40"
               disabled={busy}
-              onClick={() => setConfirming(g.key)}
+              onClick={() => onConfirming(g.key)}
               data-testid={`trash-runs-purge-app-${g.key}`}
             >
               Delete all…
@@ -74,8 +77,8 @@ export function TrashRuns({
               yesLabel="Delete for good"
               tone="danger"
               busy={busy}
-              onYes={() => void onPurge(g.runs, g.key).finally(() => setConfirming(null))}
-              onNo={() => setConfirming(null)}
+              onYes={() => void onPurge(g.runs, g.key).finally(() => onConfirming(null))}
+              onNo={() => onConfirming(null)}
               testId="trash-confirm"
             />
           )}
@@ -102,7 +105,7 @@ export function TrashRuns({
                     type="button"
                     className="text-ink-faint hover:text-danger disabled:opacity-40"
                     disabled={busy}
-                    onClick={() => setConfirming(r.runId)}
+                    onClick={() => onConfirming(r.runId)}
                     data-testid={`trash-run-purge-${r.runId}`}
                   >
                     Delete for good…
@@ -114,8 +117,8 @@ export function TrashRuns({
                     yesLabel="Delete for good"
                     tone="danger"
                     busy={busy}
-                    onYes={() => void onPurge([r], r.runId).finally(() => setConfirming(null))}
-                    onNo={() => setConfirming(null)}
+                    onYes={() => void onPurge([r], r.runId).finally(() => onConfirming(null))}
+                    onNo={() => onConfirming(null)}
                     testId="trash-confirm"
                   />
                 )}

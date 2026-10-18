@@ -72,8 +72,11 @@ MCP server) follows while the host runs. Its state is carried from `_user/<id>` 
 | Attachments (`session_apps:*`), grid panels, view origin port, the window's spans and open app | Rewritten or copied to the new key |
 | Trust | Trusted, except an imported app the person never enabled (untrusted: trusting it is enabling it) |
 
-The adopted folders are recorded (`apps.adoptedUserApps`, bound to the folder's inode), so a project
-the person later deletes is not brought back at the next start.
+The adopted folders are recorded (`apps.adoptedUserApps`, bound to a random mark written in the folder,
+`.centralu/adopted`), so a project the person later deletes is not brought back at the next start, and a
+different folder made later under the same name is adopted. Not the folder's inode: ext4 gives a folder
+made where one was just removed the same inode and the same birth time (a coarse clock), which #1152's
+full tier on Linux showed.
 
 **A previous build during a swap** (agent-host.md §5.1) still finds the folder in `<data>/apps/` and
 keeps working on the `_user` copies, which this build leaves in place; it shows the app's sessions under

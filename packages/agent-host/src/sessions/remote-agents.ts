@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import { NOT_REACHABLE } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
@@ -1061,6 +1062,12 @@ export class RemoteAgents {
     // A build from before #1038 would not keep the child within the agent depth: a loop of starts between machines
     if (read.some(({ r }) => !r.ok && 'olderBuild' in r)) {
       return { error: `${machine.name} runs an older Centralu, which would not keep a session started from here within the agent depth, so nothing was started there. Update Centralu on ${machine.name}, then try again.` }
+    }
+    // Asked and not reached (#1134): a machine that connects when needed lists its projects as last known, and the link
+    // its reads opened failed. That is the machine away, not a machine without the checkout
+    const unreached = read.map(({ r }) => (!r.ok && r.error.includes(NOT_REACHABLE) ? r.error : null))
+    if (read.length > 0 && unreached.every((e) => e !== null)) {
+      return { error: `${machine.name} cannot be reached (${NOT_REACHABLE}), so nothing was started there. Try again once its link is back.` }
     }
     const same = read.filter(({ r }) => r.ok && r.origin && gitRemoteKey(r.origin) === key).map(({ p }) => p)
     const chosen = same.length === 1 ? same[0] : same.filter((p) => p.name === project.name).length === 1 ? same.find((p) => p.name === project.name) : undefined

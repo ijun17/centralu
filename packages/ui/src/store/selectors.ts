@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
-import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
+import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, listedState, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
+import { sidebarProjectOf } from './sidebarTree.js'
 
 /**
  * All derived state is computed here (docs/state-management.md §3) — never stored.
@@ -17,7 +18,8 @@ import type { SessionSummary } from '@cc/core'
  */
 const toCandidate = (x: SessionSummary) => ({
   id: x.id, projectId: x.projectId, name: x.name,
-  state: x.state !== 'error' && x.pendingQuestions.length > 0 ? ('waiting_approval' as const) : x.state,
+  state: listedState(x),
+  asking: x.pendingQuestions.length > 0,
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
   preview: x.preview, interruption: x.interruption ?? null,
 })
@@ -99,25 +101,7 @@ export function useSessionsOf(projectId: string): SessionSummary[] {
   )
 }
 
-/**
- * The project a session's row stands under in the sidebar (#1038). Its own, except for a child started on another
- * machine than the session that started it (start_agent with a machine): that child is a session of the machine's
- * checkout, but it hangs under its parent, as a local child does, so it goes to its parent's project. What it started
- * in its own project goes with it. An ask_project session (`askedBy` of another project on the same machine) stays in
- * its own project, as before; a loop in the links (which the host never makes) stops where it closes.
- */
-export function sidebarProjectOf(s: SessionSummary, sessions: Readonly<Record<string, SessionSummary>>): string | null {
-  const seen = new Set<string>()
-  let cur = s
-  for (;;) {
-    seen.add(cur.id)
-    const parent = cur.askedBy ? sessions[cur.askedBy] : undefined
-    if (!parent || seen.has(parent.id)) return cur.projectId
-    const otherMachine = (parent.machine ?? null) !== (cur.machine ?? null)
-    if (!otherMachine && parent.projectId !== cur.projectId) return cur.projectId
-    cur = parent
-  }
-}
+export { sidebarProjectOf }
 
 /** The sessions whose rows stand under a project in the sidebar (`sidebarProjectOf`), in the host's order */
 export function useSidebarSessionsOf(projectId: string): SessionSummary[] {
