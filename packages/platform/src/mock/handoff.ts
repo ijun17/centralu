@@ -1,6 +1,7 @@
 import { isInTurn, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
+import { mockError } from './mock-error.js'
 
 /** Handoff notes and records (#78, #102, #142), written to the host's data folder rather than the project */
 export class HandoffMock {
@@ -21,7 +22,7 @@ export class HandoffMock {
      */
     exportHandoffRecord: async (sessionId: string, toTool?: ToolName) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
       const text = `# CentralU Handoff Record (automatic)\n\npredecessor "${s.name}" (${s.tool}${toTool ? ` → ${toTool}` : ''}) — mock record for ${sessionId}`
       return { text, path: this.placeHandoffNote(s, text) }
     },
@@ -33,7 +34,7 @@ export class HandoffMock {
      */
     exportHandoffNote: async (sessionId: string, afterSeq: number) => {
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
       if (isInTurn(s.state)) return null
       let note = ''
       let asked = false

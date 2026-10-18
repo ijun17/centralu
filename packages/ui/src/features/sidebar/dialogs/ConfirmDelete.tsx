@@ -3,6 +3,7 @@ import type { ToolName } from '@cc/protocol'
 import { usePlatform } from '../../../app/PlatformProvider.jsx'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Modal } from '../../../components/Modal.jsx'
+import { Button } from '../../../components/Button.jsx'
 import { formatChangedCount } from '../../../app/format.js'
 import { useLoad } from '../../../app/useLoad.js'
 
@@ -129,13 +130,9 @@ export function ConfirmDelete({
           <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink hover:border-line-strong"
-            onClick={() => onConfirm(deleteWorktree, deleteExternal)}
-            data-testid="confirm-delete-yes"
-          >
+          <Button variant="primary" onClick={() => onConfirm(deleteWorktree, deleteExternal)} data-testid="confirm-delete-yes">
             Move to trash
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>
