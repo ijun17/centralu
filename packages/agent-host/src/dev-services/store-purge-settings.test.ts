@@ -54,6 +54,21 @@ describe('purging a session deletes the settings it keeps', () => {
     s.close()
   })
 
+  // #1142: matched by a trailing :<id>, a session whose id ends in another's lost its keys with it
+  it('keeps the keys of a session whose id ends in the purged id', async () => {
+    const s = new Store()
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    session(s, 'b')
+    session(s, 'a:b')
+    s.settings.setAppSetting('tool_prefix:b', '1')
+    s.settings.setAppSetting('tool_prefix:a:b', '2')
+    await s.trash.trashSession('b', KEEP_ALL)
+    expect(await s.trash.purgeSession('b')).toBe(true)
+    expect(s.settings.appSetting('tool_prefix:b')).toBeNull()
+    expect(s.settings.appSetting('tool_prefix:a:b')).toBe('2')
+    s.close()
+  })
+
   it('a session that stays in the trash keeps them, for a restore', async () => {
     const s = new Store()
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
