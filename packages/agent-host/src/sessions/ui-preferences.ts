@@ -58,7 +58,8 @@ export class UiPreferenceStore {
      * the snapshot's step and writes it into the record, and from then on the record has the
      * field, so a snapshot an older window still writes never overrides a size chosen since.
      */
-    if (!('textSize' in stored)) {
+    // Not over a broken row (#384): it has no `textSize` either, and a read must not replace what it could not read
+    if (!('textSize' in stored) && !this.brokenRow()) {
       const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
       if (legacy !== null) {
         prefs.textSize = legacy
@@ -101,4 +102,10 @@ export class UiPreferenceStore {
   }
 
   private brokenPrefsSaid = false
+
+  /** Whether the row is there but is not a JSON object */
+  private brokenRow(): boolean {
+    const raw = this.host.store.settings.appSetting(UI_PREFS_KEY)
+    return raw !== null && !isObj(parseJson(raw))
+  }
 }

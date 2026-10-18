@@ -39,7 +39,7 @@ function payloadColumn(opts: ReadOpts): string {
  * conversation (`more: msgs.length >= HISTORY_PAGE`). An empty payload is what every reader already tolerates: no
  * text, no summary.
  */
-function readRows(raw: (StoredMessage & { payload: string })[]): StoredMessage[] {
+export function readRows(raw: (StoredMessage & { payload: string })[]): StoredMessage[] {
   return raw.map((r) => {
     const payload = parseJson(r.payload)
     return { ...r, payload: payload === undefined ? {} : payload }

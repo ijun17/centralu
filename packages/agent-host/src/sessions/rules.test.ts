@@ -136,6 +136,27 @@ describe('approval rules persist (C-2)', () => {
   })
 
   /*
+   * A newer build may store a rule this one cannot read (#384): another decision, or another scope. A rule is a
+   * permission, so one that cannot be read allows nothing; the rules this build can read still apply.
+   */
+  it('a rule with a decision or scope this build does not know allows nothing, and the others still apply', async () => {
+    const { store, project } = await setup()
+    store.permissions.addApprovalRule({ scope: 'project', projectId: project.id, matcher: 'git status', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: project.id, matcher: 'rm -rf build', decision: 'deny' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: project.id, matcher: 'npm publish', decision: 'ask' })
+    store.permissions.addApprovalRule({ scope: 'machine', projectId: project.id, matcher: 'curl example.com', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'everywhere', matcher: 'make deploy', decision: 'allow' })
+
+    const f2 = fake()
+    const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
+    await mgr2.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const outside = await mgr2.createSession({ projectId: null, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    expect(outside.projectId).toBeNull()
+    expect(f2.applied[0]).toEqual(['git status'])
+    expect(f2.applied[1]).toEqual([])
+  })
+
+  /*
    * A session outside any project (an orchestrator, #994) has no project to remember for: ⌥ Always there used to be
    * stored as a project rule with no project, which `rulesFor` then matched for every other session with no project.
    */

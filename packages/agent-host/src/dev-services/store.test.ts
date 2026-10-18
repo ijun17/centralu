@@ -1937,7 +1937,7 @@ describe('the trash (#204)', () => {
     s.close()
   })
 
-  it('purging takes only a session in the trash, with every row that points at it and nothing else', async () => {
+  it('purging takes only a session in the trash, with every row that points at it and nothing else; its app runs stay unlinked (#378)', async () => {
     const s = seeded()
     session(s, 's2', 'p1')
     for (const id of ['s1', 's2']) {
@@ -1965,12 +1965,17 @@ describe('the trash (#204)', () => {
       [`SELECT COUNT(*) as n FROM approval_rules WHERE session_id = ?`, 0],
       [`SELECT COUNT(*) as n FROM commit_sessions WHERE session_id = ?`, 0],
       [`SELECT COUNT(*) as n FROM app_runs WHERE ? IN (session_id, caller_session_id)`, 0],
-      [`SELECT COUNT(*) as n FROM app_run_failures WHERE run_id = 'called-' || ?`, 0],
     ] as const) {
       expect([sql, count(sql, 's1')]).toEqual([sql, left])
       // the other session's rows are all still there
       expect([sql, count(sql, 's2')]).not.toEqual([sql, 0])
     }
+    // The app's run log keeps the runs it started or ran in, the link cleared, with a kept failure's text (#378)
+    const runs = s.appRuns.listAppRuns('p1', 'notes', 10)
+    expect(runs.filter((r) => r.id.endsWith('-s1')).map((r) => [r.id, r.sessionId, r.callerSessionId, !!r.failure]).sort()).toEqual([
+      ['called-s1', null, null, true],
+      ['ran-s1', null, null, false],
+    ])
     expect(s.trash.listTrash()).toEqual([])
     s.close()
   })

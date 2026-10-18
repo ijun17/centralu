@@ -800,6 +800,12 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'trash.empty': async () => mgr.emptyTrash(),
+    // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
+    'trash.readRun': async (p) => {
+      const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)
+      return mgr.readTrashedRun(runId, limit, beforeSeq)
+    },
+    'trash.purgeRuns': async (p) => mgr.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
     'machines.list': async () => machines?.list() ?? [],
     'machines.add': async (p) => {

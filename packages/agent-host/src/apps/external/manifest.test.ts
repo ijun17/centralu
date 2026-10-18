@@ -149,6 +149,30 @@ describe('manifest', () => {
     const b = parseManifest('[]')
     expect(b.ok).toBe(false)
   })
+
+  /*
+   * A manifest another Centralu wrote, older or newer (#384). Both directions of `manifestVersion` are refused with the
+   * versions named, so a field whose meaning moved is never run with the other meaning; JSON that is not an object
+   * names the file, as text that is not JSON does.
+   */
+  it('names both versions for an older or newer manifestVersion, and the field for a missing or mistyped one', () => {
+    for (const v of [0, MANIFEST_VERSION + 1]) {
+      const r = parse({ manifestVersion: v })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain(`this Centralu reads manifestVersion ${MANIFEST_VERSION} only (got ${v})`)
+    }
+    const { manifestVersion: _dropped, ...without } = base
+    for (const r of [parseManifest(JSON.stringify(without)), parse({ manifestVersion: String(MANIFEST_VERSION) })]) {
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('manifestVersion')
+    }
+  })
+
+  it('names the file for JSON that is not an object, whatever it is', () => {
+    for (const text of ['[]', 'null', '3', '"centralu"', 'true']) {
+      expect(parseManifest(text)).toEqual({ ok: false, error: 'centralu.app.json must be a JSON object', warnings: [] })
+    }
+  })
 })
 
 describe('tool naming rule', () => {

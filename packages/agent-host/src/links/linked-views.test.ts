@@ -259,6 +259,30 @@ describe('the hub serves a linked machine’s app views (plan §11)', () => {
     await expect(h.views.frame({ app: HUB_BOARD, instanceId: 'm1.aaaaaaaaaaaaaaaaaaaaaa', hostOrigin: HOST_ORIGIN })).rejects.toThrow(/Update Centralu there/)
   })
 
+  /*
+   * A machine on a newer Centralu (#384) may answer with a field or an origin mode this hub does not know. The answer
+   * was parsed strictly, so the view did not open at all, with a parse error. It is read as the window reads a newer
+   * host's answers, and an origin mode this hub cannot read is `opaque`, the one that shares nothing.
+   */
+  it('a newer machine’s answer opens, and an origin mode the hub does not know is opaque', async () => {
+    const remote = machine({})
+    remote.m.answer = () => ({
+      appId: 'board',
+      projectId: 'p1',
+      uri: 'ui://board/main',
+      origin: 'per-session',
+      resource: { contents: [{ uri: 'ui://board/main', mimeType: VIEW_MIME_TYPE, text: '<p id="from-a-newer-machine">b</p>' }] },
+      laterField: { a: 1 },
+    })
+    const h = await hub(remote.m)
+    const frame = await h.views.frame({ app: HUB_BOARD, instanceId: 'm1.aaaaaaaaaaaaaaaaaaaaaa', hostOrigin: HOST_ORIGIN })
+    const page = await get(frame.url)
+    expect(page.status).toBe(200)
+    expect(pageConfig(page.body)).toMatchObject({ mode: 'opaque' })
+    expect(pageConfig(page.body).html).toContain('from-a-newer-machine')
+    expect(h.book.assigned()).toEqual({})
+  })
+
   it('an id of a machine that is not linked is not open, and nothing is asked', async () => {
     const remote = machine({})
     const h = await hub(remote.m)

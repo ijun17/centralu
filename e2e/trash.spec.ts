@@ -154,3 +154,51 @@ test('restoring a worktree session offers its recovery patch and bundle in the c
   await expect(page.getByTestId('msg-mark')).toContainText('/tmp/recovery/0.bundle')
   await expect(page.getByTestId('msg-mark')).toContainText('git apply')
 })
+
+/*
+ * App-agent run records (#378): a session an app stood up with run_agent is deleted once its run ends cleanly, and what
+ * it did waits in the trash, grouped by app. The host's side (when a session goes, what the record keeps) is held by
+ * app-agents.test.ts; the mock never runs an app's agent, so the records are put in it directly.
+ */
+test('the records of finished app-agent runs are listed by app, read, and deleted for good from the trash', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    const project = mock.projectsList[0]
+    const msg = (seq: number, role: string, kind: string, payload: unknown) => ({ sessionId: 's-gone', seq, role, kind, payload, ts: 1 })
+    for (const [runId, ask, at] of [['run_a', 'Summarize the notes', 2], ['run_b', 'List the open tasks', 3]] as const) {
+      mock.keepRun({
+        run: { runId, app: { id: 'notes', name: 'Notes', projectId: project.id, projectName: 'alpha' }, sessionName: `Notes · agent 10:0${at}`,
+          tool: 'claude', status: 'ok', startedAt: Date.now(), keptAt: at, durationMs: 4000, tokens: { input: 1200, output: 80 } },
+        request: ask,
+        answer: `Answer to: ${ask}`,
+        messages: [msg(1, 'user', 'text', { text: ask }), msg(2, 'assistant', 'tool_call', { callId: 'c1', summary: { tool: 'Read', title: 'Read notes.md', readOnly: true, paths: [] } }),
+          msg(3, 'assistant', 'text', { text: `Answer to: ${ask}` })],
+      })
+    }
+  })
+  await openTrash(page)
+  await expect(page.getByTestId('trash-total')).toContainText('0 sessions · 2 app runs')
+  const group = page.getByTestId(`trash-runs-app-${await page.evaluate(() => (window as any).__mock.projectsList[0].id)}/notes`)
+  await expect(group).toContainText('Notes')
+  await expect(group).toContainText('2 runs')
+  await expect(page.getByTestId('trash-run-request-run_a')).toHaveText('Summarize the notes')
+
+  // Read: what the app asked, what came back, and the conversation between
+  await page.getByTestId('trash-run-read-run_a').click()
+  await expect(page.getByTestId('trash-run-asked')).toHaveText('Summarize the notes')
+  await expect(page.getByTestId('trash-run-answer')).toContainText('Answer to: Summarize the notes')
+  await expect(page.getByTestId('trash-reader-messages')).toContainText('Read notes.md')
+  await page.getByTestId('trash-reader-back').click()
+
+  // One for good, then the trash emptied takes the other with it
+  await page.getByTestId('trash-run-purge-run_a').click()
+  await expect(page.getByTestId('trash-confirm')).toContainText('This cannot be undone')
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId('trash-run-run_a')).toHaveCount(0)
+  await expect(page.getByTestId('trash-total')).toContainText('1 app run')
+  await page.getByTestId('trash-empty').click()
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId('trash-list-empty')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.keptRuns.size)).toBe(0)
+})
