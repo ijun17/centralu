@@ -1,5 +1,5 @@
 import { Fragment, memo, useRef, type ReactNode } from 'react'
-import ReactMarkdown, { defaultUrlTransform, type UrlTransform } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Options, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
@@ -58,6 +58,13 @@ export const Markdown = memo(function Markdown({
   )
 })
 
+/*
+ * GitHub's Markdown, except that only a double tilde strikes text through (owner, 2026-10-18). GFM's default also
+ * strikes `~text~`, and Korean writes a range with one tilde: "1~3일, 5~7일" struck "3일, 5" through. `~~text~~` still
+ * strikes, as it does on GitHub. One array for every block, so react-markdown does not see new plugins each render.
+ */
+const REMARK_PLUGINS: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
+
 /** One run of top-level blocks; memoised on its text, so a finished block is not parsed again */
 export const MarkdownBlock = memo(function MarkdownBlock({
   text,
@@ -72,7 +79,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
 }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={REMARK_PLUGINS}
       urlTransform={keepLocalImages}
       components={{
         /*
