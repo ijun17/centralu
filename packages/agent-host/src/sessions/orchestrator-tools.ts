@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
+import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type AgentToolName, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
@@ -32,9 +33,6 @@ type ToolCall = { tools: OrchestratorTools; caller: ToolCaller; signal?: AbortSi
 export type OrchestratorToolArgs = { [N in keyof typeof TOOL_ARGS]: z.output<(typeof TOOL_ARGS)[N]> }
 
 type ToolHandlers = { [N in keyof OrchestratorToolArgs]: (args: OrchestratorToolArgs[N], call: ToolCall) => Promise<ToolOutput> | ToolOutput }
-
-/** A string with something in it, trimmed; an empty or blank one is the same as none */
-const filled = (v: string | undefined) => (v?.trim() ? v.trim() : undefined)
 
 /** A schema's complaints, one per argument, the same way for a tool and for a command run through centralu_run */
 function issuesText(error: z.ZodError): string {
@@ -142,7 +140,7 @@ const HANDLERS: ToolHandlers = {
     const project = args.project.trim()
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
     const task = args.task?.trim() ? args.task : undefined
-    const session = filled(args.session)
+    const session = trimmed(args.session)
     const { ifBusy } = args
     return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
   },
@@ -150,13 +148,13 @@ const HANDLERS: ToolHandlers = {
   async start_agent(args, { tools, signal, caller }) {
     const task = args.task.trim() ? args.task : undefined
     if (!task) return { text: 'Give a task: what the new session should do.', isError: true }
-    const tool = filled(args.tool)
-    const model = filled(args.model)
-    const effort = filled(args.effort)
+    const tool = trimmed(args.tool)
+    const model = trimmed(args.model)
+    const effort = trimmed(args.effort)
     const { difficulty } = args
-    const branch = filled(args.branch)
-    const name = filled(args.name)
-    const machine = filled(args.machine)
+    const branch = trimmed(args.branch)
+    const name = trimmed(args.name)
+    const machine = trimmed(args.machine)
     return agentCallsFor(caller, agentRunText(
       await tools.startAgent(
         {
@@ -178,14 +176,14 @@ const HANDLERS: ToolHandlers = {
   },
 
   async agent_session(args, { tools, signal, caller }) {
-    const sessionId = filled(args.sessionId)
+    const sessionId = trimmed(args.sessionId)
     const { action, ifBusy } = args
     if (action === 'list') return agentCallsFor(caller, agentListText(await tools.listAgents()))
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
     const text = args.text?.trim() ? args.text : undefined
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
-    const card = filled(args.card)
+    const card = trimmed(args.card)
     return agentCallsFor(caller, agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal)))
   },
 
@@ -215,7 +213,7 @@ const HANDLERS: ToolHandlers = {
     const sessionId = args.sessionId.trim()
     const text = args.text.trim()
     if (!sessionId || !text) return { text: 'Give sessionId and text: the session and your answer.', isError: true }
-    const card = filled(args.card)
+    const card = trimmed(args.card)
     const r = await tools.answerQuestion({ sessionId, text, ...(card ? { card } : {}) })
     if (!r.ok) return { text: r.error, isError: true }
     return { text: `Answered card ${r.state === 'answered' ? r.card : ''} in "${r.sessionName}" [${r.sessionId}]; it goes on.` }
@@ -223,7 +221,7 @@ const HANDLERS: ToolHandlers = {
 
   async read_session(args, { tools, caller }) {
     // The reader set has no list_sessions — listing is read_session without an id (#320, see READER_TOOLS)
-    if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller, filled(args.project))
+    if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller, trimmed(args.project))
     const r = await tools.readSession(args.sessionId ?? '', args.limit, {
       around: args.around,
       tools: args.tools === true,
@@ -263,12 +261,12 @@ const HANDLERS: ToolHandlers = {
      * path on it. The names come back JSON-quoted: the folder's name is whatever the model was given.
      */
     const folder = args.name ?? ''
-    const git = filled(args.git)
+    const git = trimmed(args.git)
     if (!folder.trim() && !git) return { text: 'Give a name — the new folder is named by it, and so is the project.', isError: true }
-    const parent = filled(args.parent)
-    const branch = git ? filled(args.branch) : undefined
+    const parent = trimmed(args.parent)
+    const branch = git ? trimmed(args.branch) : undefined
     const source = git ? { git, ...(branch ? { branch } : {}) } : undefined
-    const machine = filled(args.machine)
+    const machine = trimmed(args.machine)
     const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}), ...(source ? { source } : {}), ...(machine ? { machine } : {}) }, signal)
     if (!r.ok) return { text: `No project was made: ${r.error}`, isError: true }
     return {
@@ -281,7 +279,7 @@ const HANDLERS: ToolHandlers = {
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
-    const waitFor = filled(args.waitFor)
+    const waitFor = trimmed(args.waitFor)
     if (!sessionId && !waitFor) return { text: 'Give sessionId: the session to hand off, from list_sessions.', isError: true }
     const { tool, mode } = args
     const instructions = args.instructions?.trim() ? args.instructions : undefined
@@ -343,7 +341,7 @@ const HANDLERS: ToolHandlers = {
   },
 
   async create_app(args, { tools }) {
-    const spec = { id: args.id.trim(), name: args.name.trim(), project: filled(args.project), description: args.description, tool: args.tool }
+    const spec = { id: args.id.trim(), name: args.name.trim(), project: trimmed(args.project), description: args.description, tool: args.tool }
     if (!spec.id || !spec.name) return { text: 'Give id and name — a folder name and a name to show the person are needed for the app to stand.', isError: true }
     const r = await tools.createApp(spec)
     if (!r.ok) return { text: `Could not create it — ${r.error}`, isError: true }

@@ -1,5 +1,6 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import { planUpdate } from '../plan.js'
+import { asObj } from '../../json-value.js'
 import { str, type Json } from './json.js'
 
 /**
@@ -26,7 +27,7 @@ export class ClaudeTaskPlan {
   /** A call was made; the plan tools are remembered until their result */
   call(callId: string, name: string, input: unknown): void {
     if (name !== 'TaskCreate' && name !== 'TaskUpdate' && name !== 'TaskList') return
-    this.open.set(callId, { name, input: (typeof input === 'object' && input !== null ? input : {}) as Json })
+    this.open.set(callId, { name, input: asObj(input) })
     if (this.open.size > 64) this.open.delete(this.open.keys().next().value!)
   }
 

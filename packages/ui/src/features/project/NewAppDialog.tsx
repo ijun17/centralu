@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { newAppIdProblem } from '@cc/protocol'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
@@ -44,7 +45,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
    * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
    * different tool than the one shown selected.
    */
-  const { tool, setTool, toolMeta, tools, info, usable, blocked } = useToolChoice(
+  const { tool, setTool, toolMeta, tools, info, usable, blocked, detectError, redetect } = useToolChoice(
     (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
   )
   const [name, setName] = useState('')
@@ -159,6 +160,9 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
                   ? `${toolMeta.label} needs a login. Run ${toolMeta.login} in a terminal, then open this again.`
                   : `${toolMeta.label} is not installed (${info(tool)?.detail ?? 'not found'}).`}
               </p>
+            )}
+            {detectError && (
+              <LoadFailed what="which tools are installed" error={detectError} onRetry={() => void redetect()} className="mt-1.5" testId="new-app-tool-detect-failed" />
             )}
             {!blocked && (
               <p className="mt-1.5 text-xs leading-body text-ink-faint">

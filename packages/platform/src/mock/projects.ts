@@ -128,8 +128,11 @@ export class ProjectsMock {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
       if (at === -1) throw projectNotFound(projectId)
       // Swaps in a new object — the screen holds onto the object `add` returned as-is, so mutating it would let a value that never crossed the wire leak into the screen (the real thing's response is always a new object)
+      const was = this.projectStore.list[at]!.trusted
       this.projectStore.list[at] = { ...this.projectStore.list[at]!, trusted }
       this.trustCalls.push({ projectId, trusted })
+      // Every window re-reads the project, as the host has them (manager.setProjectTrusted, #719)
+      if (was !== trusted) this.emit({ type: 'projects_changed' })
       const mine = this.registry.externalAppList.filter((a) => a.projectId === projectId)
       if (mine.length === 0) return
       for (const a of mine) {
@@ -174,12 +177,15 @@ export class ProjectsMock {
     setCommands: async (projectId: string, commands: SavedCommand[]) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
       if (!p) throw projectNotFound(projectId)
+      const was = JSON.stringify(p.commands)
       p.commands = commands.flatMap((c): SavedCommand[] => {
         const command = c.command.trim()
         if (!command) return []
         const label = c.label?.trim()
         return [{ command, ...(label ? { label } : {}) }]
       })
+      // The Run menu of every other window reads them, as the host tells it (manager.setProjectCommands, #719)
+      if (was !== JSON.stringify(p.commands)) this.emit({ type: 'projects_changed' })
       return [...p.commands]
     },
     // The same rule as the real thing (#69): an empty setup lays down as null — a mock that is more forgiving would split the contract apart
@@ -189,7 +195,9 @@ export class ProjectsMock {
       const clean = setup
         ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
         : null
+      const was = JSON.stringify(p.worktreeSetup)
       p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
+      if (was !== JSON.stringify(p.worktreeSetup)) this.emit({ type: 'projects_changed' })
     },
     /** The project's worktree trunk (#76), as the real host's `worktrees.setTrunk` sets it */
     setWorktreeTrunk: async (projectId: string, baseBranch: string) => {
@@ -198,6 +206,7 @@ export class ProjectsMock {
       const branch = baseBranch.trim()
       if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
       p.worktreeManager = { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch: branch }
+      this.emit({ type: 'projects_changed' })
     },
   }
 

@@ -117,7 +117,11 @@ export class SessionsMock {
       this.store.sessions.set(id, info)
       // The same rule as the real thing: the last tool chosen becomes that project's default (manager.createSession)
       const owner = this.projectStore.list.find((p) => p.id === params.projectId)
-      if (owner) owner.defaultTool = params.tool
+      if (owner && owner.defaultTool !== params.tool) {
+        owner.defaultTool = params.tool
+        // Every window's project shows its default, as the host tells them (session-start.ts)
+        this.emit({ type: 'projects_changed' })
+      }
       /*
        * The same order as the real thing (#172): once the host creates a session, it broadcasts
        * `session_created` first, and only after broadcasting the handoff marker and the first

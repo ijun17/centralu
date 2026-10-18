@@ -128,7 +128,11 @@ export function UsageDonuts() {
               .catch((e: Error) => put({ usage: null, reason: e.message }))
           }
         })
-        .catch(() => patch({ live: [] }))
+        /*
+         * A detection that failed is no answer (#850 item 8): it used to read as an empty list, and the strip said "No
+         * agent, install or sign in" of a machine that had not answered. What it said last stays; before any answer, nothing
+         */
+        .catch(() => {})
     },
     [platform],
   )
