@@ -10,6 +10,7 @@ import {
   detachCommand,
   lastLine,
   parseConnectionLine,
+  powershell,
   serveCommand,
   shimNames,
   SSH_COMMAND_TIMEOUT_MS,
@@ -616,12 +617,36 @@ describe('the remote command per shell (#82)', () => {
     expect(lastLine("node:internal/modules/cjs/loader:1386\nError: Cannot find module '/var/tmp/x.mjs'\n    at Module._resolveFilename (node:internal)\n\nNode.js v22.23.3\n")).toBe(
       "Error: Cannot find module '/var/tmp/x.mjs'",
     )
-    expect(lastLine('#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">Cloning into x</S></Objs>')).toBe('')
-    // The kept tail can begin after the header, inside the XML: it is still XML to the end
+    // An error record is PowerShell's way of saying what went wrong: its text is read, not dropped with the XML (#1081)
+    expect(lastLine('#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">Cloning into x</S></Objs>')).toBe('Cloning into x')
+    // The kept tail can begin after the header, inside the XML: up to its end the XML is dropped, a record cut in two too
     expect(lastLine('ssh: connect to host x port 22: Connection refused\nrest of the message_x000D__x000A_</S><S S="Error">Cloning into x</S></Objs>')).toBe('ssh: connect to host x port 22: Connection refused')
     expect(lastLine('Cloning into x_x000D__x000A_</S></Objs>')).toBe('')
     expect(lastLine('some error text that was cut_x000D__x000A_')).toBe('')
-    expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('')
+    expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('Cloning into x')
+  })
+
+  /*
+   * #1081: Windows PowerShell writes its `#< CLIXML` header before its first progress record, so what a command it runs
+   * writes to stderr after that comes after the header, and its own error records are inside the XML. Both were dropped
+   * with everything from the header on. Measured with Windows PowerShell 5.1 on Windows 11 (2026-10-18), on a machine
+   * whose display language is Korean: the first progress record is PowerShell's own "Preparing modules for first use".
+   */
+  it("keeps what a command wrote after PowerShell's CLIXML header, and the text of its error records (measured)", () => {
+    const progress =
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>처음 사용하기 위해 모듈을 준비하는 중입니다.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><Obj S="progress" RefId="1"><TNRef RefId="0" /><MS><I64 N="SourceId">0</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Processing</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>'
+    expect(lastLine(`#< CLIXML\r\nstand-in failure on stop\n${progress}`)).toBe('stand-in failure on stop')
+    // `throw 'download node'` under $ErrorActionPreference = 'Stop': the message, not PowerShell's position and category lines
+    const thrown =
+      '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">download node_x000D__x000A_</S><S S="Error">At line:4 char:1_x000D__x000A_</S><S S="Error">+ throw \'download node\'_x000D__x000A_</S><S S="Error">+ ~~~~~~~~~~~~~~~~~~~~~_x000D__x000A_</S><S S="Error">    + CategoryInfo          : OperationStopped: (download node:String) [], RuntimeException_x000D__x000A_</S><S S="Error">    + FullyQualifiedErrorId : download node_x000D__x000A_</S><S S="Error"> _x000D__x000A_</S></Objs>'
+    expect(lastLine(thrown)).toBe('download node')
+    // The position line is in the machine's language (measured on the same machine, through the hub's PS_PREAMBLE)
+    expect(lastLine(thrown.replace('At line:4 char:1', '위치 줄:4 문자:1'))).toBe('download node')
+    // The XML's escapes are read back, and text around and between blocks is kept
+    expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">the &lt;thing&gt; &amp; _x005F_its file could not be read_x000D__x000A_</S></Objs>')).toBe('the <thing> & _its file could not be read')
+    expect(lastLine(`before\n#< CLIXML\r\n${progress}\nafter the progress\n#< CLIXML\r\n${progress}`)).toBe('after the progress')
+    // A stream that ends inside the XML keeps its whole records and drops the rest
+    expect(lastLine('#< CLIXML\r\nnot found: x\n<Objs Version="1.1.0.1"><S S="Error">Access is denied_x000D__x000A_</S><Obj S="progress" RefId="0"><TN')).toBe('Access is denied')
   })
 
   /*
@@ -651,6 +676,39 @@ describe('the remote command per shell (#82)', () => {
       expect(why).not.toMatch(/\\[0-7]{3}/)
     },
     40_000 * SLOW,
+  )
+
+  /*
+   * #1081 for real: the hub's own `powershell -EncodedCommand`, through cmd.exe as Windows OpenSSH runs it, with a
+   * progress record first (as "Preparing modules for first use" is on a cold machine) and a Node script that fails on
+   * stderr after it, as the stand-in `serve --stop` of #845 did.
+   */
+  it.runIf(process.platform === 'win32')(
+    "on Windows, the reason a command gives after PowerShell's CLIXML header reaches the person",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cc-clixml-'))
+      try {
+        const js = join(dir, 'fail.js')
+        writeFileSync(js, "process.stderr.write('stand-in failure on stop\\n'); process.exit(1)\n")
+        const script = `Write-Progress -Activity 'Preparing modules for first use.' -Status ' '\n& '${process.execPath}' '${js}'\nexit $LASTEXITCODE`
+        const cmd = process.env.ComSpec ?? 'cmd.exe'
+        const run = spawnSync(cmd, ['/d', '/s', '/c', powershell(script)], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 60_000 * SLOW })
+        expect(run.status).toBe(1)
+        expect(run.stderr).toContain('#< CLIXML')
+        expect(lastLine(run.stderr)).toBe('stand-in failure on stop')
+        const thrown = spawnSync(cmd, ['/d', '/s', '/c', powershell("$ErrorActionPreference = 'Stop'\nthrow 'download node'")], {
+          encoding: 'utf8',
+          windowsHide: true,
+          windowsVerbatimArguments: true,
+          timeout: 60_000 * SLOW,
+        })
+        expect(thrown.stderr).toContain('<S S="Error">')
+        expect(lastLine(thrown.stderr)).toBe('download node')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    150_000 * SLOW,
   )
 })
 

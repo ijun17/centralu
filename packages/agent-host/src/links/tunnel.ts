@@ -749,24 +749,81 @@ export const SSH_EXEC_TIMEOUT_MS = 30 * 60_000
 /** How much of the end of the forward's stderr is kept, for as long as the link lives */
 const FORWARD_STDERR_KEEP = 16 * 1024
 
+/** A tag or an escape of PowerShell's CLIXML (`_x000D__x000A_` is a line break) */
+const CLIXML_MARK = /<\/?(?:Objs|Obj|S|MS|PR|TN|TNRef|Props|I32|I64|B|AV)[\s>/]|_x000[0-9A-F]_/
+
 /**
- * What a stderr says once PowerShell's CLIXML is taken out. The XML is the last thing a failing
- * PowerShell writes, from its `#< CLIXML` header to the end. A kept tail (`Tail`) can start after
- * that header, in the middle of the XML, and then only its tags and escapes (`_x000D__x000A_` is a
- * line break) say what it is: from the start of the first line that shows either, the rest is XML.
+ * The lines PowerShell writes under an error's message to say where in the script it happened:
+ * `At line:4 char:1` (in the machine's language: `위치 줄:4 문자:1` on a Korean one, measured), and
+ * `+ throw 'x'`, `+ ~~~~`, `+ CategoryInfo : …`, `+ FullyQualifiedErrorId : …`
+ */
+function powershellErrorTrailer(line: string): boolean {
+  const l = line.trim()
+  return l === '+' || l.startsWith('+ ') || /:\d+ \S+:\d+$/.test(l)
+}
+
+/**
+ * The text of the whole error records (`<S S="Error">`) in a piece of CLIXML, its escapes read back
+ * and without the lines that say where in the script the error was
+ */
+function clixmlErrorText(xml: string): string {
+  return [...xml.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)]
+    .map((m) =>
+      m[1]!
+        .replace(/_x([0-9A-Fa-f]{4})_/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/&(lt|gt|quot|apos|amp);/g, (_, e: string) => ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' })[e]!),
+    )
+    .join('')
+    .split(/\r?\n/)
+    .filter((l) => !powershellErrorTrailer(l))
+    .join('\n')
+}
+
+/** Text outside the XML, up to the first line that shows a tag or an escape: from there it is XML that was cut */
+function plainPart(text: string): string {
+  const mark = text.search(CLIXML_MARK)
+  return mark < 0 ? text : text.slice(0, text.lastIndexOf('\n', mark) + 1)
+}
+
+/**
+ * What a stderr says once PowerShell's CLIXML is read (#1081). Windows PowerShell writes its `#< CLIXML`
+ * header before its first record, often a progress record ("Preparing modules for first use") at the
+ * start, and the records as `<Objs>…</Objs>` blocks. What a command it runs writes to stderr itself
+ * comes between the header and the blocks, and its own errors are the blocks' `<S S="Error">` records.
+ * So the header and the progress go, the text around and between the blocks and the error records'
+ * text are kept. A kept tail (`Tail`) can start in the middle of a block, and then only its tags and
+ * escapes say what it is: from the start of the first line that shows either up to that block's end,
+ * it is XML, and only the whole error records in it are read.
  */
 function withoutClixml(s: string): string[] {
-  let text = s.replace(/#< CLIXML[\s\S]*$/, '')
-  const xml = text.search(/<\/?(?:Objs|Obj|S|MS|PR|TN|TNRef|Props|I32|I64|B|AV)[\s>/]|_x000[0-9A-F]_/)
-  if (xml >= 0) text = text.slice(0, text.lastIndexOf('\n', xml) + 1)
-  return text.split(/\r?\n/)
+  let text = s.replace(/^#< CLIXML\r?$/gm, '')
+  const parts: string[] = []
+  const firstEnd = text.indexOf('</Objs>')
+  const firstOpen = text.search(/<Objs[\s>]/)
+  if (firstEnd >= 0 && (firstOpen < 0 || firstEnd < firstOpen)) {
+    const cut = plainPart(text.slice(0, firstEnd))
+    parts.push(cut, '\n', clixmlErrorText(text.slice(cut.length, firstEnd)), '\n')
+    text = text.slice(firstEnd + '</Objs>'.length)
+  }
+  for (;;) {
+    const open = text.search(/<Objs[\s>]/)
+    if (open < 0) break
+    parts.push(plainPart(text.slice(0, open)), '\n')
+    const end = text.indexOf('</Objs>', open)
+    // A stream that stops inside a block (the process was ended mid-write) keeps the block's whole records
+    parts.push(clixmlErrorText(end < 0 ? text.slice(open) : text.slice(open, end)), '\n')
+    text = end < 0 ? '' : text.slice(end + '</Objs>'.length)
+  }
+  parts.push(plainPart(text))
+  return parts.join('').split(/\r?\n/)
 }
 
 /**
  * The one line of a remote's stderr that says why, for the person. Measured on a Windows laptop
  * (2026-10-05): ssh prefixes its own `** WARNING` lines about key exchange, PowerShell wraps an
- * error in CLIXML when its output is not a console, and a Node crash ends with `Node.js v22.x`,
- * which says nothing. Those are skipped; a line that names an error wins over the last one.
+ * error in CLIXML when its output is not a console (read by `withoutClixml`), and a Node crash ends
+ * with `Node.js v22.x`, which says nothing. Those are skipped; a line that names an error wins over
+ * the last one.
  */
 export function lastLine(s: string, ansi: (bytes: Buffer) => string | null = ansiText): string {
   const lines = withoutClixml(s)
