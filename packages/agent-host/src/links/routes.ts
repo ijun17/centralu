@@ -289,6 +289,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.probe': HUB,
   'machines.remove': HUB,
   'machines.reconnect': HUB,
+  'machines.disconnect': HUB,
+  'machines.setConnect': HUB,
+  'machines.need': HUB,
   // Stopping a remote host is `centralu serve --stop` over ssh, never a call through the link
   'host.stop': HUB,
   'machines.acceptVersions': HUB,

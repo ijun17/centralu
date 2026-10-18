@@ -70,6 +70,23 @@ export class StepsV55 extends MigrationRange {
           this.db.exec(`DROP TABLE IF EXISTS usage_facts`)
         },
       },
+      {
+        to: 57,
+        breaksOlderReaders: false,
+        /**
+         * When the hub opens a linked machine's link (#1134): `linked_machines.connect` is `when_needed` for a machine
+         * the hub connects only when something needs it, and null for one it connects at start, which is what every
+         * machine did before the column.
+         *
+         * **Expand only (#292's rule).** A nullable column. An older host names its columns in every read and insert,
+         * so it neither reads this one nor fails on it, and connects every machine at start as it always did; a machine
+         * it adds gets null, which is `at_start`. `IF` because a store from a test's partial schema has no such table.
+         */
+        run: () => {
+          const cols = new Set((this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]).map((c) => c.name))
+          if (cols.size > 0 && !cols.has('connect')) this.db.exec(`ALTER TABLE linked_machines ADD COLUMN connect TEXT`)
+        },
+      },
     ]
   }
 }

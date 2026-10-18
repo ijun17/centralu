@@ -6,6 +6,7 @@ import {
   HostRecallHit,
   HostSessionRow,
   MachineAutostartResult,
+  MachineConnect,
   MachineId,
   MachineInfo,
   MachineInstallResult,
@@ -115,8 +116,26 @@ export const hostMethods = {
   'machines.probe': { params: z.object({ sshTarget: z.string().min(1).max(255) }), result: MachineProbe },
   /** Unlinks a machine: its sessions and projects leave this computer's lists. Nothing on the machine changes */
   'machines.remove': { params: z.object({ machineId: MachineId }), result: z.object({ ok: z.literal(true) }) },
-  /** Tries the link again now instead of waiting out its backoff */
+  /**
+   * Tries the link again now instead of waiting out its backoff. A disconnected machine is connected (the row's
+   * Connect, #1134), and stays connected until `machines.disconnect` or the hub stops, whatever its `connect` says
+   */
   'machines.reconnect': { params: z.object({ machineId: MachineId }), result: MachineInfo },
+  /**
+   * Closes the link and tries none until the person connects it again, something needs a machine that connects when
+   * needed, or the hub starts again (#1134). The machine stays linked, with its sessions and projects listed as last
+   * known; they keep running there. Additive
+   */
+  'machines.disconnect': { params: z.object({ machineId: MachineId }), result: MachineInfo },
+  /** When the hub opens the link: at start, or when needed (`MachineConnect`, #1134). Kept with the machine. Additive */
+  'machines.setConnect': { params: z.object({ machineId: MachineId, connect: MachineConnect }), result: MachineInfo },
+  /**
+   * The window needs the machine now: one of its projects is open, or one of its sessions is focused (#1134). A machine
+   * that connects when needed is connected, and kept so for a while after the last of these; the window says it again
+   * while that project or session stays open. Answers at once, not when the link is up. Any other machine is left as
+   * it is. Additive: a window ignores an older host's refusal
+   */
+  'machines.need': { params: z.object({ machineId: MachineId }), result: MachineInfo },
   /**
    * Connects although the two sides run different versions of one protocol: the person declined to
    * align them (plan §4). Remembered for this pair of versions only; when either side moves, the

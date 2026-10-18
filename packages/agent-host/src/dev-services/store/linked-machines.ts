@@ -12,6 +12,8 @@ export type LinkedMachineRow = {
   slot: number
   addedAt: number
   acceptedVersions: string | null
+  /** When the hub opens its link (#1134, v57); absent or null in the column: at start */
+  connect?: 'at_start' | 'when_needed'
 }
 
 /** The highest slot ever handed to a linked machine (#82) */
@@ -19,6 +21,9 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
 
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
+
+/** `connect` as the column keeps it: null for the default, so a store an older host wrote reads the same (v57) */
+const connectColumn = (c: LinkedMachineRow['connect']): string | null => (c === 'when_needed' ? c : null)
 
 /** Linked machines (#82, v46) and the session and project headers mirrored from them */
 export class LinkedMachineRecords {
@@ -29,7 +34,7 @@ export class LinkedMachineRecords {
   listLinkedMachines(): LinkedMachineRow[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions
+        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect
            FROM linked_machines ORDER BY added_at, id`,
       )
       .all() as {
@@ -42,6 +47,7 @@ export class LinkedMachineRecords {
       slot: number
       added_at: number
       accepted_versions: string | null
+      connect: string | null
     }[]
     return rows.map((r) => ({
       id: r.id,
@@ -51,6 +57,8 @@ export class LinkedMachineRecords {
       slot: r.slot,
       addedAt: r.added_at,
       acceptedVersions: r.accepted_versions,
+      // Anything but the one other value is the default, as a window reads an unknown one (`MachineConnect`)
+      connect: r.connect === 'when_needed' ? 'when_needed' : 'at_start',
     }))
   }
 
@@ -65,12 +73,12 @@ export class LinkedMachineRecords {
       const slot = Math.max(used, Number(this.settings.appSetting(LINK_SLOT_KEY) ?? 0)) + 1
       this.db
         .prepare(
-          `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions)
+        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions, connectColumn(m.connect))
       this.settings.setAppSetting(LINK_SLOT_KEY, String(slot))
-      return { ...m, slot }
+      return { ...m, connect: m.connect ?? 'at_start', slot }
     })()
   }
 
@@ -88,6 +96,11 @@ export class LinkedMachineRecords {
 
   setLinkedMachineAcceptedVersions(id: string, key: string | null): void {
     this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
+  }
+
+  /** When the hub opens the machine's link (#1134) */
+  setLinkedMachineConnect(id: string, connect: 'at_start' | 'when_needed'): void {
+    this.db.prepare(`UPDATE linked_machines SET connect = ? WHERE id = ?`).run(connectColumn(connect), id)
   }
 
   /**

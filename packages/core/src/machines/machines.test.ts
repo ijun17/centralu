@@ -18,6 +18,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   hostStarted: null,
   install: null,
   operation: null,
+  connect: 'at_start',
   autostart: null,
   elevated: null,
   ...patch,
@@ -249,5 +250,12 @@ describe('a machine whose host runs with administrator rights (#702)', () => {
     expect(elevatedNote(machine({ elevated: true }))?.title).toBe('Agents on Box run with administrator rights: its host runs as root.')
     expect(elevatedNote(machine({ elevated: false }))).toBeNull()
     expect(elevatedNote(machine({ elevated: null }))).toBeNull()
+  })
+})
+
+describe('a machine that connects when needed (#1134)', () => {
+  it('is disconnected without a problem to fix, and the row says so', () => {
+    expect(machineProblem(machine({ status: 'disconnected' }))).toBeNull()
+    expect(MACHINE_STATUS_LABEL.disconnected).toBe('disconnected')
   })
 })

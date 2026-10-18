@@ -224,12 +224,16 @@
   {
    "to": 56,
    "breaksOlderReaders": true
+  },
+  {
+   "to": 57,
+   "breaksOlderReaders": false
   }
  ],
- "version": 56,
- "ran": 55,
+ "version": 57,
+ "ran": 56,
  "store": {
-  "userVersion": 56,
+  "userVersion": 57,
   "master": [
    {
     "type": "index",
@@ -445,7 +449,7 @@
     "type": "table",
     "name": "linked_machines",
     "tbl_name": "linked_machines",
-    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            )"
+    "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            , connect TEXT)"
    },
    {
     "type": "table",
@@ -861,7 +865,8 @@
      "command TEXT notnull=0 default=null pk=0",
      "slot INTEGER notnull=1 default=null pk=0",
      "added_at INTEGER notnull=1 default=null pk=0",
-     "accepted_versions TEXT notnull=0 default=null pk=0"
+     "accepted_versions TEXT notnull=0 default=null pk=0",
+     "connect TEXT notnull=0 default=null pk=0"
     ],
     "rows": []
    },

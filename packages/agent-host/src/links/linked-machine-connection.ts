@@ -1,6 +1,17 @@
 import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
-import type { MachineInfo, MachineOperation, MachineSide, MachineStatus, MachineVersions, NormalizedEvent } from '@cc/protocol'
+import {
+  isInTurn,
+  transition,
+  type MachineConnect,
+  type MachineInfo,
+  type MachineOperation,
+  type MachineSide,
+  type MachineStatus,
+  type MachineVersions,
+  type NormalizedEvent,
+  type SessionState,
+} from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
 import { nodeFloor } from './install.js'
@@ -38,6 +49,26 @@ function hiddenKind(s: unknown): boolean {
  * a machine that comes back waits at most 5 minutes, or none at all with Reconnect
  */
 const RETRY_MS: [number, number] = [2_000, 5 * 60_000]
+
+/**
+ * A machine that connects when needed (#1134) stays connected this long after the last thing that needed it, and
+ * longer while a session there is in a turn. A window that keeps one of its projects or sessions open says so again
+ * well within it (every 2 minutes, `machines.need`)
+ */
+const NEED_HOLD_MS = 10 * 60_000
+/** How often such a machine is looked at for having been idle that long */
+const IDLE_CHECK_MS = 30_000
+/**
+ * How long an agent's call waits for such a machine to connect before it is answered as not reachable. Connecting
+ * took 2.1 to 4.3 s on a LAN (docs/agent-host.md §4.7); starting a host there adds its start. A machine that cannot
+ * be reached answers sooner: ssh fails
+ */
+const NEED_WAIT_MS = 60_000
+
+/** Where an attempt to connect ended, one way or the other: what a call waiting on `need` waits for */
+const SETTLED: ReadonlySet<MachineStatus> = new Set(['connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'disconnected'])
+/** Statuses a need tries again now, instead of waiting out the backoff */
+const RETRYING: ReadonlySet<MachineStatus> = new Set(['unreachable', 'not_running', 'refused'])
 
 export abstract class LinkedMachineConnection implements RoutedMachine {
   readonly q: Qualifier
@@ -91,6 +122,25 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private elevated: boolean | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
+  /**
+   * The link was closed on purpose and none is tried (#1134, status `disconnected`): by the person, at start for a
+   * machine that connects when needed, or because nothing needed it. `stopped` is set with it, so every path that
+   * opens or retries ends as after a removal; `connect`, `need` and `start` open it again
+   */
+  private parked = false
+  /** The person connected it (`connect`): it stays up until they disconnect it, whatever `connect` says */
+  private pinned = false
+  /** When something last needed it (`need`), for a machine that connects when needed */
+  private neededAt = 0
+  private idleTimer: ReturnType<typeof setInterval> | undefined
+  /** Calls waiting on `need` for the attempt to connect to end */
+  private statusWaiters = new Set<() => void>()
+  /**
+   * Each shown session's state as the hub last heard it (#1134): from the lists, then followed event by event by the
+   * rule both sides run (`transition`). The mirror's `state` follows explicit `state_change` events only, which a turn
+   * need not send. Kept while the link is away, so a turn that was open when it dropped still counts
+   */
+  private states = new Map<string, SessionState>()
 
   constructor(
     protected record: MachineRecord,
@@ -98,7 +148,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     protected readonly deps: LinkDeps,
   ) {
     this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
-    for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
+    for (const s of deps.mirror.read(record.id, 'sessions') ?? []) {
+      this.classify(s)
+      this.noteState(s)
+    }
     tunnel.onDown((reason) => this.transportDown(reason))
   }
 
@@ -110,6 +163,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
   get reachable(): boolean {
     return this.status === 'connected' && this.client?.connected === true
+  }
+  /** When the hub opens this link (#1134) */
+  get connectMode(): MachineConnect {
+    return this.record.connect ?? 'at_start'
+  }
+  /**
+   * Not connected, and connected when something needs it: what the mirror holds stands for it until then (#1134). A
+   * machine the person disconnected that connects at start is not: nothing but Connect brings it back
+   */
+  get onDemand(): boolean {
+    return this.parked && this.connectMode === 'when_needed'
   }
 
   info(): MachineInfo {
@@ -131,6 +195,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       operation: this.operation,
       autostart: this.bootStart,
       elevated: this.elevated,
+      connect: this.connectMode,
     }
   }
 
@@ -155,7 +220,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (kind === 'sessions') {
       this.shown.clear()
       this.hidden.clear()
-      for (const s of list) this.classify(s)
+      this.states.clear()
+      for (const s of list) {
+        this.classify(s)
+        this.noteState(s)
+      }
       this.deps.mirror.replace(this.id, 'sessions', list.filter((s) => !hiddenKind(s)))
     } else {
       this.deps.mirror.replace(this.id, 'projects', list)
@@ -170,7 +239,125 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   start(): void {
     this.stopped = false
+    this.parked = false
+    this.neededAt = Date.now()
+    this.watchIdle()
     void this.open()
+  }
+
+  /** Not connected at start: the machine connects when needed (#1134). Nothing is opened or tried */
+  park(): void {
+    this.stopped = true
+    this.parked = true
+    this.setStatus('disconnected', null)
+  }
+
+  /**
+   * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link.
+   * It stays up until they disconnect it, as a machine that connects at start does
+   */
+  connect(): void {
+    this.pinned = true
+    if (this.parked) return this.start()
+    this.reconnect()
+  }
+
+  /**
+   * Something needs the machine now (#1134): the window opened one of its projects or sessions, or an agent is started
+   * or sent work there. A machine that connects when needed is connected, or tried again now when it was away, and
+   * is kept up for `NEED_HOLD_MS` after this. Resolves once the attempt ended (connected, or why not) or after
+   * `waitMs`; never rejects. Any other machine is left as it is
+   */
+  need(waitMs = this.deps.needWaitMs ?? NEED_WAIT_MS): Promise<void> {
+    if (this.connectMode !== 'when_needed') return Promise.resolve()
+    this.neededAt = Date.now()
+    if (this.reachable) return Promise.resolve()
+    if (this.parked) {
+      this.deps.log?.(`[links] ${this.name}: needed; connecting`)
+      this.start()
+    } else if (!this.stopped && !this.opening && RETRYING.has(this.status)) {
+      this.reconnect()
+    }
+    const settled = () => this.stopped || this.reachable || SETTLED.has(this.status)
+    if (settled()) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer)
+        this.statusWaiters.delete(waiter)
+        resolve()
+      }
+      const waiter = () => {
+        if (settled()) done()
+      }
+      const timer = setTimeout(done, waitMs)
+      this.statusWaiters.add(waiter)
+    })
+  }
+
+  /**
+   * Closes the link and tries none until it is connected or needed again (#1134). The machine stays linked; its
+   * sessions keep running there, and the mirror lists them as last known
+   */
+  async disconnect(why?: string): Promise<void> {
+    this.pinned = false
+    this.parked = true
+    this.stopped = true
+    clearTimeout(this.retryTimer)
+    this.stopIdle()
+    this.client?.close()
+    this.client = null
+    if (why) this.deps.log?.(`[links] ${this.name}: ${why}`)
+    this.setStatus('disconnected', null)
+    await this.tunnel.close()
+  }
+
+  /** When the hub opens the link (#1134), as the registry now keeps it */
+  setConnect(connect: MachineConnect): void {
+    this.record = { ...this.record, connect }
+    if (connect === 'at_start') {
+      this.stopIdle()
+      // At start means whenever the hub runs: a machine down for want of a need comes up now
+      if (this.parked) this.start()
+    } else if (!this.parked) {
+      // Counted as needed now, so it does not drop the moment the setting changes
+      this.neededAt = Date.now()
+      this.watchIdle()
+    }
+  }
+
+  /** An install, update or other operation the person started holds the machine; it is not idle meanwhile */
+  protected operating(): boolean {
+    return this.held
+  }
+
+  /**
+   * Nothing needs the machine (#1134): it connects when needed, the person did not connect it themselves, nothing
+   * needed it for `NEED_HOLD_MS`, no operation runs, and no session there is in a turn as the hub last heard. A
+   * child working there keeps the link, also while it is away, so its report arrives
+   */
+  private idle(): boolean {
+    if (this.connectMode !== 'when_needed' || this.pinned || this.parked || this.stopped || this.operating()) return false
+    if (Date.now() - this.neededAt < (this.deps.needHoldMs ?? NEED_HOLD_MS)) return false
+    return ![...this.states.values()].some((state) => isInTurn(state))
+  }
+
+  /** A shown session's state from a list row or a `session_created` */
+  private noteState(s: unknown): void {
+    if (isObj(s) && typeof s.id === 'string' && typeof s.state === 'string' && !hiddenKind(s)) this.states.set(s.id, s.state as SessionState)
+  }
+
+  private watchIdle(): void {
+    if (this.connectMode !== 'when_needed' || this.idleTimer) return
+    // Also while it is away: a machine nothing needs is not tried every few minutes for as long as the hub runs
+    this.idleTimer = setInterval(() => {
+      if (this.idle()) void this.disconnect('nothing has needed it for a while and no session there is working; disconnected until something needs it')
+    }, this.deps.idleCheckMs ?? IDLE_CHECK_MS)
+    this.idleTimer.unref?.()
+  }
+
+  private stopIdle(): void {
+    clearInterval(this.idleTimer)
+    this.idleTimer = undefined
   }
 
   /** Opens again now, forgetting the backoff (`machines.reconnect`, or the person accepted the versions) */
@@ -196,6 +383,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   async stop(): Promise<void> {
     this.stopped = true
     clearTimeout(this.retryTimer)
+    this.stopIdle()
     this.client?.close()
     this.client = null
     await this.tunnel.close()
@@ -442,10 +630,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (sid !== null) {
       if (raw.type === 'session_created') {
         this.classify(raw.session)
+        this.noteState(raw.session)
         if (isObj(raw.session) && !hiddenKind(raw.session)) this.deps.mirror.upsertSession(this.id, raw.session)
       }
       if (!this.shown.has(sid)) return
+      const was = this.states.get(sid)
+      if (was !== undefined) this.states.set(sid, transition(was, raw as NormalizedEvent).state)
       if (raw.type === 'session_deleted') {
+        this.states.delete(sid)
         this.shown.delete(sid)
         this.deps.mirror.removeSession(this.id, sid)
       } else if (raw.type === 'session_title' && typeof raw.title === 'string') {
@@ -493,6 +685,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (changed) {
       if (error) this.deps.log?.(`[links] ${this.name}: ${status}: ${error}`)
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      for (const w of [...this.statusWaiters]) w()
     }
   }
 }

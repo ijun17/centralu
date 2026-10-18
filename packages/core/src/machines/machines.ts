@@ -34,6 +34,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   refused: 'refused',
   starting: 'starting',
   updating: 'updating',
+  disconnected: 'disconnected',
 }
 
 export type MachineProblem = {
@@ -49,7 +50,8 @@ export type MachineProblem = {
  * time, each with the one step that fixes it. Anything not recognised is shown as the host said it.
  */
 export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell'>>): MachineProblem | null {
-  if (m.status === 'connected') return null
+  // Disconnected on purpose (#1134): nothing is wrong, and the row says how it connects again
+  if (m.status === 'connected' || m.status === 'disconnected') return null
   const e = m.error ?? ''
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
