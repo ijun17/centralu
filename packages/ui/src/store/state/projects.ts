@@ -126,6 +126,11 @@ export type ProjectsSlice = {
   runCommand(projectId: string, command: string): Promise<void>
   /** Stops a dev server — the outcome comes back through `terminal.onExit` and is recorded in `commandRuns`. The log survives */
   stopCommand(projectId: string, command: string): Promise<void>
+  /**
+   * Has the host watch these folders of the project for changes made outside (#34): the file tree's open folders. A
+   * registration that fails is said once until one succeeds again (#841); the tree itself still works
+   */
+  watchProjectDirs(projectId: string, dirs: string[]): Promise<void>
   /** Sidebar order (set by the person dragging) */
   reorderProjects(orderedIds: string[]): Promise<void>
 }

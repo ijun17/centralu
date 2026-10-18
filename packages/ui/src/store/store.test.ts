@@ -899,6 +899,27 @@ describe('what the window could not read is said', () => {
     expect(useStore.getState().toast).toBeNull()
   })
 
+  it('a folder watch the host refuses is said once, and again only after one worked (#841)', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    let refuse = true
+    mock.fs.watch = async () => {
+      if (refuse) throw new Error('too many open files')
+      return { watched: 1 }
+    }
+    useStore.setState({ toast: null })
+    await useStore.getState().watchProjectDirs('p-watch', [''])
+    expect(useStore.getState().toast).toBe('The file tree will not follow changes made outside it: too many open files')
+    useStore.setState({ toast: null })
+    await useStore.getState().watchProjectDirs('p-watch', ['', 'src'])
+    expect(useStore.getState().toast).toBeNull()
+    refuse = false
+    await useStore.getState().watchProjectDirs('p-watch', [''])
+    refuse = true
+    await useStore.getState().watchProjectDirs('p-watch', [''])
+    expect(useStore.getState().toast).toBe('The file tree will not follow changes made outside it: too many open files')
+  })
+
   it('a startup that read everything says nothing', async () => {
     useStore.setState({ toast: null })
     await useStore.getState().attach(new MockPlatform())
