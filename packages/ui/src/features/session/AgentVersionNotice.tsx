@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { runsOlderCli } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
+import { Button } from '../../components/Button.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
@@ -49,14 +50,16 @@ export function AgentVersionNotice({ session }: { session: SessionSummary }) {
       >
         {text}
       </span>
-      <button
-        className="shrink-0 rounded-md border border-line px-1.5 text-2xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+      <Button
+        variant="quiet"
+        size="xs"
+        className="shrink-0"
         data-testid="agent-version-apply"
         title="Restart every idle session on the installed version. Busy sessions keep running."
         onClick={() => void apply(machine)}
       >
         Update idle sessions
-      </button>
+      </Button>
     </span>
   )
 }
