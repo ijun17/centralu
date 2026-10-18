@@ -221,6 +221,7 @@ type ApprovalDetail =
 | 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
 | 잠드는 유휴 세션 | `agents.sleepPolicy, agents.setSleepPolicy` | #568: "Put idle sessions to sleep after" `{ afterMinutes }`, 기본 15, null은 끄기. 호스트가 재운 세션은 `session_live`(`live: false, reason: 'asleep'`)를 보내고, 모든 재개는 `live: true`를 보낸다. 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 설정을 숨긴다([agent-host.ko.md](agent-host.ko.md) §4.6.1) |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty, trash.readRun, trash.purgeRuns` | 휴지통에서 나오는 길 (FR-22). 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다. `trash.list`는 지운 앱 에이전트 세션의 기록(`runs`, #378)도 싣고, 그 기록은 그 앱이 돈 기계에서(`machine`, 휴지통의 세션처럼) `trash.readRun`으로 읽고 `trash.purgeRuns`로 지운다. `trash.empty`는 기록을 창에 맡긴다 |
+| subagent steps | `subagents.usage, subagents.trash, trash.restoreSubagentSteps, trash.purgeSubagentSteps, messages.subagentTrashed` | #418: 살아 있는 세션마다 서브에이전트 단계가 차지하는 것(`{ sessions: SubagentStepsHeld[] }`: 실행, 단계, 바이트, 큰 것부터); 세션은 두고 한 세션의 단계를 휴지통으로 옮기기(옮긴 `{ steps, bytes }`를 답한다); 되돌리기, 영구 삭제. 휴지통에서는 `trash.list`의 `subagentSteps`(`TrashedSubagentSteps[]`)이고, 바이트는 합계에 든다. `trash.empty`는 실행 기록(#378)처럼 건드리지 않는다: 창이 보여 준 항목마다 `trash.purgeSubagentSteps { sessionId, upTo }`로 지우고, `upTo`는 창이 보여 준 `deletedAt`이라 창이 휴지통을 읽은 뒤에 옮겨진 단계는 남는다. `messages.subagentTrashed { sessionId, parentCallId }`는 띄운 카드 하나의 단계 중 몇 개가 휴지통에 있는지 `{ steps }`로 답해서, 카드가 단계가 어디로 갔는지 말한다. 휴지통처럼 사람만 쓴다. 덧붙임: 옛 호스트의 창은 답을 받지 못하고 아무것도 보이지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search, messages.image` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색; 답장이 적은 로컬 이미지(`![a](/path/shot.png)`). 창은 파일 경로를 직접 읽을 수 없어 세션의 호스트가 읽는다: `{ sessionId, path }`, `path`는 답장에 적힌 그대로. 답은 `{ ok: true, mime, data, file? }` 또는 `{ ok: false, reason, message, file? }`. `reason`은 `not_mentioned`(이 세션의 어느 답장에도 없다. 아무것도 건드리지 않는다), `not_found`, `not_an_image`(바이트로 판단: PNG, JPEG, GIF, WebP만), `too_large`(`IMAGE_PREVIEW_MAX_BYTES`, 10 MB), `unreadable`. `file`은 호스트 기기에서 해석한 경로로, 파일 관리자에서 보여 줄 때 쓴다. 거절은 오류가 아니라 답이다. 추가만 한 것이라 이전 호스트는 "Unknown method"로 답하고, 창은 그것을 이미지 자리에 보인다([security-boundaries.md](security-boundaries.md), "Images a reply names") |
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
 | host | `host.stop` | #82: 이 호스트를 시그널처럼 끝낸다. 먼저 답한다. `centralu serve --stop`용([agent-host.md](agent-host.md) §4.7)이고, 앱이 돌리는 호스트는 거절한다. 전달되지 않는다. 추가만 |
@@ -388,9 +389,9 @@ type ProtocolError = {
   `agents.setAutoApplyVersions`, `agents.applyVersions`, `agents.sleepPolicy`, `agents.setSleepPolicy`(#568),
   `projects.add`, `projects.create`,
   `projects.createPreview`(#515), `processes.strays`,
-  `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`,
+  `processes.stop`. UI가 다시 쌓는 목록(`sessions.list`, `projects.list`, `trash.list`, `subagents.usage`,
   `messages.search`, `apps.list`, `approvals.rules`, `projectConsents.list`)은 기기를 가로질러
-  합친다. 닿지 않는 기기는 합친 결과에서 빠진다. `trash.list`는 그런 기기를 이름으로 알리고(`unreached`, #841)
+  합친다. 닿지 않는 기기는 합친 결과에서 빠진다. `trash.list`와 `subagents.usage`는 그런 기기를 이름으로 알리고(`unreached`, #841)
   `trash.empty`는 각각을 실패로 적으므로, 어느 쪽도 휴지통 전체로 읽히지 않는다. 메서드마다 한 줄인 표는 `packages/agent-host/src/links/routes.ts`이고, 프로토콜에 더한
   메서드는 거기서 분류되기 전까지 컴파일되지 않는다.
 - **숫자.** 다른 기기의 승인 규칙 id는 음수로 접힌다(기기마다 구간 하나). 그 값으로 부른

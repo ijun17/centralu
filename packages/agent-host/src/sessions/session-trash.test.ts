@@ -55,7 +55,7 @@ describe('one restore or delete at a time', () => {
 
 describe('the trash itself', () => {
   it('emptying goes on past a failure and says which', async () => {
-    const store = { trash: { listTrash: () => [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }] } } as unknown as Store
+    const store = { trash: { listTrash: () => [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }] }, subagentSteps: { listTrashed: () => [] } } as unknown as Store
     const trash = trashWith({ store })
     trash.purgeSession = async (id: string) => {
       if (id === 'b') throw new Error('the folder is in use')

@@ -1178,6 +1178,31 @@ export class SessionManager {
     return this.trash.emptyTrash(...a)
   }
 
+  /** `SessionTrash.subagentUsage` (session-trash.ts, #418), kept on the manager for its callers */
+  subagentUsage(...a: Parameters<SessionTrash['subagentUsage']>): ReturnType<SessionTrash['subagentUsage']> {
+    return this.trash.subagentUsage(...a)
+  }
+
+  /** `SessionTrash.trashSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
+  trashSubagentSteps(...a: Parameters<SessionTrash['trashSubagentSteps']>): ReturnType<SessionTrash['trashSubagentSteps']> {
+    return this.trash.trashSubagentSteps(...a)
+  }
+
+  /** `SessionTrash.restoreSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
+  restoreSubagentSteps(...a: Parameters<SessionTrash['restoreSubagentSteps']>): ReturnType<SessionTrash['restoreSubagentSteps']> {
+    return this.trash.restoreSubagentSteps(...a)
+  }
+
+  /** `SessionTrash.purgeSubagentSteps` (session-trash.ts, #418), kept on the manager for its callers */
+  purgeSubagentSteps(...a: Parameters<SessionTrash['purgeSubagentSteps']>): ReturnType<SessionTrash['purgeSubagentSteps']> {
+    return this.trash.purgeSubagentSteps(...a)
+  }
+
+  /** `SessionTrash.subagentTrashed` (session-trash.ts, #418), kept on the manager for its callers */
+  subagentTrashed(...a: Parameters<SessionTrash['subagentTrashed']>): ReturnType<SessionTrash['subagentTrashed']> {
+    return this.trash.subagentTrashed(...a)
+  }
+
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
