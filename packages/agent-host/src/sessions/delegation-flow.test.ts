@@ -9,6 +9,7 @@ import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import type { AgentRunWait } from './app-agents.js'
 import { ChildOwnership, pausedReportKey, type Delegation } from './child-ownership.js'
 import { DelegationFlow, type DelegationHost } from './delegation-flow.js'
+import { ORCHESTRATOR_PLACE } from './start-agent-terms.js'
 
 /*
  * The delegation flow over a host it reaches only through `DelegationHost` (#428). The host here is a proxy that fails
@@ -89,7 +90,7 @@ describe('what a handoff gave away', () => {
 
 describe('the place a start holds', () => {
   it("a project's running children and its reserved starts count against the ceiling together", () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 2 }) as never }))
+    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 2 }) as never, toolProfileOf: () => 'scoped' }))
     const ceiling = flow.starts.agentCeilingError.bind(flow.starts)
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     expect(ceiling('caller', 'p1')).toBeNull()
@@ -97,7 +98,7 @@ describe('the place a start holds', () => {
     const place = reserve('caller', 'p1')
     if (!('release' in place)) throw new Error('no place')
     const full =
-      '2 agents started by this project\'s sessions are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.'
+      '2 agents started by this project\'s sessions are already working, the most at once. Wait for one (agent_session(sessionId=…, action="wait")) or stop one, then try again.'
     expect(ceiling('caller', 'p1')).toBe(full)
     expect(reserve('caller', 'p1')).toEqual({ error: full })
     place.release()
@@ -105,8 +106,20 @@ describe('the place a start holds', () => {
     expect(ceiling('caller', 'p1')).toBeNull()
   })
 
+  // #850: the orchestrator reaches agent_session only through centralu_run, and a bare call it copied from here was refused
+  it('names the wait in the form the orchestrator calls it', () => {
+    meta.set('orch', session('orch', { kind: 'orchestrator', projectId: null }))
+    meta.set('kid', session('kid', { projectId: null }))
+    children.setDelegation('orch>kid', { callerId: 'orch', sessionId: 'kid', agent: true, settled: false } as unknown as Delegation)
+    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 1 }) as never, toolProfileOf: () => 'orchestrator' }))
+    expect(flow.starts.agentCeilingError('orch', ORCHESTRATOR_PLACE)).toBe(
+      '1 agents you started are already working, the most at once. ' +
+        'Wait for one (centralu_run(command="agent_session", args={sessionId: …, action: "wait"})) or stop one, then try again.',
+    )
+  })
+
   it('releasing a place twice gives back one place, not two', () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 3 }) as never }))
+    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 3 }) as never, toolProfileOf: () => 'scoped' }))
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     children.setDelegation('caller>child', { callerId: 'caller', sessionId: 'child', agent: true, settled: false } as unknown as Delegation)
     const a = reserve('caller', 'p1')
@@ -172,6 +185,7 @@ describe("a child's turn and the call waiting on it", () => {
       routedCards: () => cards,
       untilCard: () => ({ asked: new Promise<'asked'>((resolve) => (raiseCard = () => resolve('asked'))), done: () => {} }),
       ownTasksRunning: () => running,
+      toolProfileOf: () => 'scoped',
       pauseReport: (id, tasks) => children.pauseReport(id, tasks),
       reportBackIfAwaited: async (sessionId, ending) => void reported.push({ sessionId, type: ending.type }),
     }
@@ -309,6 +323,18 @@ describe("a child's turn and the call waiting on it", () => {
     expect(r).not.toHaveProperty('cleanUp')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
     expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
+  })
+
+  // #850: the stop it names is one the caller can make; the orchestrator reaches agent_session only through centralu_run
+  it('names the stop of the held work in the form the caller calls it', async () => {
+    const flow = flowWith({ toolProfileOf: () => 'orchestrator' })
+    const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
+    const waiting = flow.awaitAgent('caller>child', d)
+    running = [{ id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }]
+    finishes('verify is running in the background')
+    expect(await waiting).toMatchObject({
+      notice: expect.stringContaining('centralu_run(command="agent_session", args={action: "stop"}) on it stops that work and ends the wait.'),
+    })
   })
 
   it("new work from the same caller ends its pause; another caller's pause stands", () => {
