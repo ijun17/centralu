@@ -445,8 +445,11 @@ describe("an agent's work on a machine that connects when needed connects it (#1
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
     seedSession(hubStore, 'p-hub', 'h2', 'worker', 'ext-h2')
     // `openMs`: how long the link takes to open, as an ssh to a machine that has to start its host does
+    // `net.down`: ssh no longer reaches the machine, as a laptop that was closed
+    const net = { down: false }
     const slow = (line: () => ConnectionLine) => new CountingTunnel(async () => {
       await new Promise((r) => setTimeout(r, o.openMs ?? 0))
+      if (net.down) throw new Error('ssh: connect to host laptop port 22: Operation timed out')
       return line()
     })
     const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, tunnel: slow, ...(o.deps ? { deps: o.deps } : {}) })
@@ -468,7 +471,7 @@ describe("an agent's work on a machine that connects when needed connects it (#1
     // As the machine names its project: the folder's name
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-app')!.name
     const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
-    return { remote, hub, hubStore, opens, answered, name, reader }
+    return { remote, hub, hubStore, opens, answered, name, reader, net }
   }
 
   it('start_agent with the machine connects it, starts the child there and gets its answer', async () => {
@@ -528,6 +531,16 @@ describe("an agent's work on a machine that connects when needed connects it (#1
     expect(asked).toMatchObject({ ok: true, state: 'done' })
     expect(started).toMatchObject({ ok: true, state: 'done' })
     expect(hub.row().status).toBe('connected')
+  })
+
+  // #1134 re-review: every read of its projects failed for the link, and the answer said it had no checkout to clone
+  it('start_agent on it while ssh cannot reach it says it cannot be reached, not that it lacks the checkout', async () => {
+    const { hub, answered, net } = await rig()
+    net.down = true
+    const r = await answered(hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' }))
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Laptop cannot be reached') })
+    expect((r as { error: string }).error).not.toContain('clone')
+    expect(hub.row().status).toBe('unreachable')
   })
 
   // #1134 review M1: the hold ran from when the link came up, not from the agent's work on it
