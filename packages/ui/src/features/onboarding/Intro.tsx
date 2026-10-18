@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
 import type { ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 
 /**
  * The intro screen (#63) — exactly once, on the very first run: "meet your orchestrator."
@@ -22,19 +23,13 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 export function Intro() {
   const platform = usePlatform()
   const completeIntro = useStore((s) => s.completeIntro)
-  const [tools, setTools] = useState<ToolStatus[] | null>(null)
-
-  const detect = useCallback(async () => {
-    try {
-      setTools(await platform.agents.detect())
-    } catch {
-      setTools([])
-    }
-  }, [platform])
-
-  useEffect(() => {
-    void detect()
-  }, [detect])
+  /*
+   * A detection that fails is not "no tool is ready" (#850 item 8): it used to read as an empty list, which drew no card
+   * and told the person to run a command "above" that was not there. It says what failed, with the same way to ask again.
+   */
+  const detected = useLoad<ToolStatus[]>(() => platform.agents.detect(), [platform])
+  const tools = detected.data ?? null
+  const detect = detected.reload
 
   const ready = (t: ToolStatus) => t.installed && t.loggedIn
   const anyReady = (tools ?? []).some(ready)
@@ -101,11 +96,14 @@ export function Intro() {
         {/* A low-stakes choice is what makes a click happen — this pick does not nail anything down */}
         <p className="mt-2 text-xs text-ink-faint">You can change this later in Settings.</p>
 
-        {tools === null ? (
+        {tools === null && detected.error === null ? (
           <p className="mt-4 text-xs text-ink-faint">Looking for Claude Code and Codex…</p>
         ) : (
           <>
-            {!anyReady && (
+            {detected.error !== null && (
+              <LoadFailed what="which tools are installed" error={detected.error} className="mt-4" testId="intro-detect-failed" />
+            )}
+            {tools !== null && !anyReady && (
               <p className="mt-4 text-xs leading-body text-ink-muted" data-testid="intro-blocked">
                 No tool is ready yet — run a command above in your terminal, then check again.
               </p>

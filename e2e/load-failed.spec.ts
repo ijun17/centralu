@@ -8,7 +8,7 @@ import { newSession, setup } from './fixtures/project-screen.js'
  */
 
 /** Makes one port call fail until the returned function is called */
-async function failing(page: Page, port: 'git' | 'rules', method: string, message: string): Promise<() => Promise<void>> {
+async function failing(page: Page, port: 'git' | 'rules' | 'agents', method: string, message: string): Promise<() => Promise<void>> {
   await page.evaluate(
     ([port, method, message]) => {
       const target = (window as any).__mock[port]
@@ -88,4 +88,35 @@ test('a refresh of the changes that fails keeps the last list, with the error be
   })
   await expect(page.getByTestId('evidence-git-failed')).toContainText('git did not answer')
   await expect(page.getByTestId('evidence-git').getByText('a.ts')).toBeVisible()
+})
+
+test('the intro says a failed tool check failed, not that no tool is ready', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro-card-claude')).toBeVisible()
+  const heal = await failing(page, 'agents', 'detect', 'detect did not answer')
+  await page.getByTestId('redetect').click()
+
+  await expect(page.getByTestId('intro-detect-failed')).toContainText('detect did not answer')
+  await expect(page.getByTestId('intro-blocked')).toHaveCount(0)
+  // The last answer stays: a card that was ready is still there to pick
+  await expect(page.getByTestId('intro-card-claude')).toBeEnabled()
+
+  await heal()
+  await page.getByTestId('redetect').click()
+  await expect(page.getByTestId('intro-detect-failed')).toHaveCount(0)
+})
+
+test('the new session dialog says a failed tool check failed, and does not call the tool missing', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const heal = await failing(page, 'agents', 'detect', 'detect did not answer')
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('new-session-alpha').click()
+
+  await expect(page.getByTestId('tool-detect-failed')).toContainText('detect did not answer')
+  await expect(page.getByTestId('tool-blocked')).toHaveCount(0)
+  await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
+
+  await heal()
+  await page.getByTestId('tool-detect-failed-retry').click()
+  await expect(page.getByTestId('tool-detect-failed')).toHaveCount(0)
 })
