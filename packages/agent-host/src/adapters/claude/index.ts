@@ -19,6 +19,7 @@ import { raceTimeout } from '../../timing.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import { ClaudeSession, type ClaudeLaunch } from './session.js'
 import { personsDefaultMode } from './permissions.js'
+import { CLAUDE_SURFACE } from './surface.js'
 
 export { personsDefaultMode }
 
@@ -166,6 +167,8 @@ const STOP_CONFIRM_MS = 10_000
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
+  /** What Claude Code offers against what this adapter limits (#270) */
+  readonly surface = CLAUDE_SURFACE
   private readonly launch: ClaudeLaunch
   private readonly probeAskMs: number
   private readonly probeRetryMs: number

@@ -951,7 +951,6 @@ describe('machines.update never installs an older release than the remote runs (
 
 describe('machines.update through the link (#82, plan §10.5)', () => {
   const NODE = '24.21.0'
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
   /** What each remote command is, read back from the script the hub sent */
   const classify = (cmd: string): string => {
     if (cmd.includes('serve --stop')) return 'stop'
@@ -990,9 +989,9 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
         case 'stop': {
           await running.close()
           line = { ...line, hostRunning: false }
-          // The person presses Reconnect while the host is down: the link must not open, or start a host, now
-          hub!.links.reconnect('m1')
-          await sleep(200)
+          // The person presses Reconnect while the host is down: the link must not open, or start a host, now. An open
+          // that is not held says `connecting` before its first wait, so the answer shows it with no time to wait (#845 item 9)
+          expect(hub!.links.reconnect('m1').status).toBe('updating')
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
         }
         case 'pointers':
