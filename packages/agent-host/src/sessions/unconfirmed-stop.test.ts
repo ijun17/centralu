@@ -25,7 +25,7 @@ describe('a Stop the tool refused (#1060)', () => {
     (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: preset })).id
   /** B with a child A it started and is working on */
   const child = async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = await session()
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)

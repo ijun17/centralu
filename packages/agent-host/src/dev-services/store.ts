@@ -225,12 +225,6 @@ export class Store extends MigrationRunner {
   appSetting(key: string): string | null {
     return this.settings.appSetting(key)
   }
-
-  // ── PermissionRecords (store/permissions.ts) ──
-
-  setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
-  }
 }
 
 /** What a reset WAL is cut back to (`journal_size_limit`) */
