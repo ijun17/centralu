@@ -7,7 +7,15 @@ import { useStore } from '../../store/store.js'
 import { projectLabelOf, useInbox } from '../../store/selectors.js'
 import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
-import { CONTINUE_TEXT, Kbd, StateDot, canContinue, formatWaiting, interruptionLabel, waitingTone } from '../../components/primitives.jsx'
+import {
+  CONTINUE_TEXT,
+  Kbd,
+  StateDot,
+  canContinue,
+  formatWaiting,
+  interruptionLabel,
+  waitingTone,
+} from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 
@@ -75,7 +83,9 @@ export function Inbox() {
          * that shows Open, has not settled, is already answering, or whose line does not fit (RowApproval).
          */
         const button = item
-          ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-row-answer="${action}"][data-session="${CSS.escape(item.id)}"]`)
+          ? panelRef.current?.querySelector<HTMLButtonElement>(
+              `[data-row-answer="${action}"][data-session="${CSS.escape(item.id)}"]`,
+            )
           : null
         if (button && !button.disabled) button.click()
       } else toggle(false)
@@ -96,17 +106,28 @@ export function Inbox() {
         On the press, not the click, and marked data-no-drag: this sits inside the top bar's window drag region, and on
         Windows a window drag swallows the mouseup, so a click never came and the inbox stayed open (#365, DragRegion.tsx).
       */}
-      {!leaving && <div className="fixed inset-0 z-30" onMouseDown={() => toggle(false)} data-no-drag data-testid="inbox-backdrop" />}
+      {!leaving && (
+        <div
+          className="fixed inset-0 z-30"
+          onMouseDown={() => toggle(false)}
+          data-no-drag
+          data-testid="inbox-backdrop"
+        />
+      )}
       <div
         ref={panelRef}
         data-no-drag
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"
-        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
+        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-[14px] border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
         data-testid="inbox"
       >
-        <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+        {/*
+          The conversation's shapes (owner, 2026-10-18): a 14px card, its rows rounded inside a 4px inset, the row the
+          keys are on filled (no edge bar), the row's actions as capsules.
+        */}
+        <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
           <h2 className="text-sm font-medium text-ink">Waiting</h2>
           <span className="readout text-xs text-ink-faint">{items.length}</span>
           <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
@@ -124,17 +145,17 @@ export function Inbox() {
             <span className="mt-1 block text-xs text-ink-faint">Finished agents collect here</span>
           </p>
         ) : (
-          <ul className="max-h-[calc(56vh/var(--text-zoom))] overflow-y-auto">
+          <ul className="flex max-h-[calc(56vh/var(--text-zoom))] flex-col gap-0.5 overflow-y-auto p-1">
             {items.map((it, i) => (
               <li
                 key={it.id}
-                className={`border-l-2 transition-colors ${
-                  i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
+                className={`rounded-[10px] transition-colors ${
+                  i === cursor ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
                 }`}
               >
                 <div className="flex items-center">
                   <button
-                    className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-4 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left"
                     onClick={() => {
                       openWaiting(it.id, { preferGrid: true })
                       toggle(false)
@@ -149,7 +170,9 @@ export function Inbox() {
                       {projectLabelOf(projects, it.projectId)}
                     </span>
                     {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
-                    {!it.proposal && <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />}
+                    {!it.proposal && (
+                      <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
+                    )}
                     <span className="ml-auto flex shrink-0 items-center gap-2.5">
                       <span className="text-xs text-ink-faint">
                         {/* Why the turn stopped says more than the state it stopped in (#698) */}
@@ -173,7 +196,7 @@ export function Inbox() {
                   */}
                   {canContinue(it.interruption) && !isInTurn(it.state) && (
                     <button
-                      className="mr-1.5 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink hover:bg-surface-hover"
+                      className="mr-1.5 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink transition-colors hover:bg-surface-hover"
                       onClick={() => void send(it.id, CONTINUE_TEXT)}
                       aria-label={`Continue: ${it.name}`}
                       title={`Sends "${CONTINUE_TEXT}"`}
@@ -185,7 +208,7 @@ export function Inbox() {
                   {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
                   {doneable(it) && (
                     <button
-                      className="mr-3 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-hover hover:text-ink"
+                      className="mr-2 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
                       onClick={() => void markRead(it.id)}
                       aria-label={`Done: ${it.name}`}
                       data-testid={`inbox-done-${it.id}`}
@@ -217,12 +240,14 @@ export function Inbox() {
 }
 
 function WaitingTime({ since }: { since: number | null }) {
-  const next = useCallback((now: number) => since === null ? null : nextWaitingTick(since, now), [since])
+  const next = useCallback((now: number) => (since === null ? null : nextWaitingTick(since, now)), [since])
   const now = useLabelNow(since === null ? null : next)
   const elapsed = since === null ? 0 : Math.max(0, now - since)
-  return <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>
-    {formatWaiting(elapsed)}
-  </span>
+  return (
+    <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>
+      {formatWaiting(elapsed)}
+    </span>
+  )
 }
 
 /** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread */
