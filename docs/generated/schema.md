@@ -269,6 +269,7 @@ erDiagram
     TEXT kind
     TEXT payload
     INTEGER ts
+    INTEGER trashed_at
   }
   workspace {
     INTEGER id PK
@@ -653,6 +654,11 @@ Added in v41.
 | `kind` | TEXT | no |  |  | v41 |
 | `payload` | TEXT | no |  |  | v41 |
 | `ts` | INTEGER | no |  |  | v41 |
+| `trashed_at` | INTEGER | yes |  |  | v58 |
+
+Indexes:
+
+- `subagent_messages_trash`: `session_id`, `trashed_at`, `parent_call_id`
 
 ### `workspace`
 

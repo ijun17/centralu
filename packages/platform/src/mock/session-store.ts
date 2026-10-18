@@ -23,6 +23,11 @@ export class SessionStore {
   messages = new Map<string, StoredMessage[]>()
   /** A subagent's steps per launch card (#222), keyed `<session id> <launch call id>` — left open like `messages` */
   subagentMessages = new Map<string, StoredMessage[]>()
+  /**
+   * When a subagent step went to the trash without its session (#418), keyed `<session id> <launch call id> <seq>`. The
+   * step stays in `subagentMessages`, as the host keeps its row with `trashed_at` set, so later steps number after it
+   */
+  subagentTrashedAt = new Map<string, number>()
   /** How many times a launch card's steps were read — a test checks they are read only when opened */
   subagentReads = 0
   /** The row of text currently streaming, per session — the very row inside `messages` (growing it also grows the record) */
@@ -49,7 +54,8 @@ export class SessionStore {
     if (!keepsSubagentStep(step)) return null
     const key = `${event.sessionId} ${event.parentCallId}`
     const rows = this.subagentMessages.get(key) ?? []
-    const stepSeq = rows.length + 1
+    // After the last one kept, as the host numbers them (`MAX(seq) + 1`): a step deleted from the trash frees no number before it
+    const stepSeq = (rows.at(-1)?.seq ?? 0) + 1
     rows.push({ sessionId: event.sessionId, seq: stepSeq, ...subagentStepRow(step), payload: step, ts: this.clock.now() })
     this.subagentMessages.set(key, rows)
     return stepSeq

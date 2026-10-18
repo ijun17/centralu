@@ -2,8 +2,10 @@ import type {
   ProjectInfo,
   SessionInfo,
   StoredMessage,
+  SubagentStepsHeld,
   TrashedRun,
   TrashedSession,
+  TrashedSubagentSteps,
 } from '@cc/protocol'
 
 /** Conversation search and approval-rule management (E-1, E-4) */
@@ -34,9 +36,17 @@ export interface ApprovalRulesPort {
 export interface TrashPort {
   /**
    * `runs`: the records of deleted app-agent sessions (#378), each with its machine; `bytes` counts them too.
-   * `unreached`: linked machines whose trash could not be read, so the list is not the whole trash (#841)
+   * `unreached`: linked machines whose trash could not be read, so the list is not the whole trash (#841).
+   * `subagentSteps`: sessions' subagent steps in the trash without their session (#418), their bytes in `bytes`; absent
+   * from a host before it
    */
-  list(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number; unreached?: { machineId: string; name: string }[] }>
+  list(): Promise<{
+    sessions: TrashedSession[]
+    runs: TrashedRun[]
+    bytes: number
+    unreached?: { machineId: string; name: string }[]
+    subagentSteps?: TrashedSubagentSteps[]
+  }>
   /** A trashed conversation, read-only — pages like `AgentPort.loadMessages` */
   read(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /** Back as it was. `project` is set when its project had been deleted and restoring registered the folder again */
@@ -52,4 +62,15 @@ export interface TrashPort {
   readRun(runId: string, limit?: number, beforeSeq?: number, machine?: string | null): Promise<{ request: string; answer: string; output?: unknown; messages: StoredMessage[] }>
   /** Deletes app-agent run records for good (#378), all of one machine (`machine`, as `readRun`) */
   purgeRuns(runIds: string[], machine?: string | null): Promise<{ purged: number }>
+  /** What each live session's subagent steps take (#418), largest first; Settings → Trash lists them */
+  subagentUsage(): Promise<{ sessions: SubagentStepsHeld[]; unreached?: { machineId: string; name: string }[] }>
+  /** Moves a live session's subagent steps to the trash (#418); the conversation and its launch cards stay */
+  trashSubagentSteps(sessionId: string): Promise<{ steps: number; bytes: number }>
+  /** Puts a session's trashed subagent steps back under their cards (#418) */
+  restoreSubagentSteps(sessionId: string): Promise<void>
+  /**
+   * Deletes a session's trashed subagent steps for good (#418), those moved there at or before `upTo`: the entry's
+   * `deletedAt` as listed, so steps moved after the list was read stay. `empty` leaves them; the session stays
+   */
+  purgeSubagentSteps(sessionId: string, upTo: number): Promise<void>
 }

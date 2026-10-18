@@ -211,6 +211,9 @@ class WebAgentPort implements AgentPort {
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit = SUBAGENT_STEPS_PAGE) {
     return this.rpc.call('messages.subagent', { sessionId, parentCallId, afterSeq, limit })
   }
+  subagentTrashed(sessionId: string, parentCallId: string) {
+    return this.rpc.call('messages.subagentTrashed', { sessionId, parentCallId })
+  }
   messageImage(sessionId: string, path: string) {
     return this.rpc.call('messages.image', { sessionId, path })
   }
@@ -521,6 +524,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       empty: () => rpc.call('trash.empty', {}),
       readRun: (runId, limit, beforeSeq, machine) => rpc.call('trash.readRun', { runId, limit, beforeSeq, ...(machine ? { machine } : {}) }),
       purgeRuns: (runIds, machine) => rpc.call('trash.purgeRuns', { runIds, ...(machine ? { machine } : {}) }),
+      subagentUsage: () => rpc.call('subagents.usage', {}),
+      trashSubagentSteps: (sessionId) => rpc.call('subagents.trash', { sessionId }),
+      restoreSubagentSteps: async (sessionId) => {
+        await rpc.call('trash.restoreSubagentSteps', { sessionId })
+      },
+      purgeSubagentSteps: async (sessionId, upTo) => {
+        await rpc.call('trash.purgeSubagentSteps', { sessionId, upTo })
+      },
     },
     fs: {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),

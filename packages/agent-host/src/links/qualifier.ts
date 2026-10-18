@@ -195,6 +195,17 @@ export class Qualifier {
     return { ...t, app: isObj(t.app) ? { ...t.app, projectId: this.maybeId(t.app.projectId) } : t.app, machine: this.machine }
   }
 
+  /** `SubagentStepsHeld` and `TrashedSubagentSteps` (#418) */
+  subagentSteps(t: unknown): unknown {
+    if (!isObj(t)) return t
+    return {
+      ...t,
+      sessionId: this.maybeId(t.sessionId),
+      project: isObj(t.project) ? { ...t.project, id: this.maybeId(t.project.id) } : t.project,
+      machine: this.machine,
+    }
+  }
+
   /** `ExternalAppInfo`: a project app is that project's; a user-folder app says which machine's folder */
   app(a: unknown): unknown {
     return isObj(a) ? { ...a, projectId: this.maybeId(a.projectId), machine: this.machine } : a
