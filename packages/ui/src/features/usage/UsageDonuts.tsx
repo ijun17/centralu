@@ -387,7 +387,7 @@ function MachineGroup({
   const live = group.live
   return (
     <span
-      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line pl-2 pr-0.5"
+      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -507,8 +507,10 @@ function Donut({
         /*
          * A linked machine's donuts sit in a capsule drawn by its outline only (owner, 2026-10-18): a filled capsule
          * left the hover's fill nothing to stand out from. The hover is a full step, so it shows on either ground.
+         * Inside that capsule the donut has no padding of its own and the capsule keeps 2px on every side, so its
+         * hover circle stands the same distance from the outline above, below and beside it (owner).
          */
-        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-surface-hover ${
+        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'p-0.5'} transition-colors hover:bg-surface-hover ${
           active ? 'bg-surface-hover' : ''
         }`}
       >
