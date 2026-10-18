@@ -310,8 +310,8 @@ export function createRpcHandler(
       return { watched: mgr.watchDirs(projectId, paths, ctx?.client) }
     },
     'fs.readFile': async (p) => {
-      const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
-      return mgr.readTextFile(projectId, path)
+      const { projectId, path, sessionId } = RpcMethods['fs.readFile'].params.parse(p)
+      return mgr.readTextFile(projectId, path, sessionId)
     },
     'fs.move': async (p) => {
       const { projectId, from, toDir } = RpcMethods['fs.move'].params.parse(p)
@@ -322,8 +322,8 @@ export function createRpcHandler(
       return mgr.importFile(projectId, toDir, name, dataBase64)
     },
     'fs.resolve': async (p) => {
-      const { projectId, path, purpose } = RpcMethods['fs.resolve'].params.parse(p)
-      return { path: await mgr.resolveFile(projectId, path, purpose) }
+      const { projectId, path, purpose, sessionId } = RpcMethods['fs.resolve'].params.parse(p)
+      return { path: await mgr.resolveFile(projectId, path, purpose, sessionId) }
     },
     'messages.search': async (p) => {
       const { query, limit } = RpcMethods['messages.search'].params.parse(p)
