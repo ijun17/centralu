@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use content_verify::{remove_content, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
+use content_verify::{hex, remove_content, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -20,10 +20,7 @@ use crate::keeper::source::{BuildSource, Copies};
 const PLATFORM: &str = "test-platform";
 
 fn key() -> SigningKey {
-    let mut seed = [0u8; 32];
-    use std::io::Read;
-    fs::File::open("/dev/urandom").unwrap().read_exact(&mut seed).unwrap();
-    SigningKey::from_bytes(&seed)
+    SigningKey::from_bytes(&crate::os::random_bytes::<32>().unwrap())
 }
 
 fn trusted(k: &SigningKey) -> TrustedKey {
@@ -47,10 +44,6 @@ impl Drop for Temp {
     fn drop(&mut self) {
         let _ = remove_content(&self.0);
     }
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// Content in `dir`: `files` (path, bytes, executable), with a manifest for `version` signed by `k`.

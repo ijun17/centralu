@@ -132,7 +132,7 @@ test.describe('C-1: new app', () => {
     await expect(dialog.getByTestId('new-app-id')).toHaveValue('team-notes')
     await expect(dialog.getByTestId('new-app-id-problem')).toHaveCount(0)
     // The default is the project's default tool — here the other one is picked
-    await expect(dialog.getByTestId('new-app-tool-claude')).toHaveAttribute('aria-pressed', 'true')
+    await expect(dialog.getByTestId('new-app-tool-claude')).toHaveAttribute('aria-checked', 'true')
     await dialog.getByTestId('new-app-tool-codex').click()
     await dialog.getByTestId('new-app-create').click()
     await expect(dialog).toHaveCount(0)

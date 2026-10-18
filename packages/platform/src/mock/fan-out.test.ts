@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { MockPlatform } from './index.js'
 
@@ -8,8 +8,12 @@ import { MockPlatform } from './index.js'
  * so a test could see a screen break that the app would not.
  */
 describe('the mock fan-out', () => {
-  const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
-  afterEach(() => quiet.mockClear())
+  // Put back after each test (#845 item 15): made once for the file, the spy outlived it
+  let quiet: MockInstance<typeof console.error>
+  beforeEach(() => {
+    quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => quiet.mockRestore())
   const boom = () => {
     throw new Error('subscriber broke')
   }

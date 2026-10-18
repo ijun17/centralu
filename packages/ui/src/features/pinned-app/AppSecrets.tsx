@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { Badge } from '../../components/Badge.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
@@ -127,7 +130,9 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
             if (draft && !busy && stuck === null) void write(draft)
           }}
         >
-          <input
+          <TextInput
+            size="sm"
+            surface="side"
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -135,7 +140,7 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
             onChange={(e) => setDraft(e.target.value)}
             placeholder={set ? 'New value' : 'Value'}
             aria-label={`Value for ${name}`}
-            className="min-w-0 flex-1 rounded-md border border-line bg-surface-side px-2 py-1 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            className="min-w-0 flex-1"
             data-testid="secret-input"
           />
           {editing && (
@@ -151,14 +156,17 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
               Cancel
             </button>
           )}
-          <button
-            className="shrink-0 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            className="shrink-0"
             disabled={!draft || busy || stuck !== null}
             title={stuck ?? undefined}
             data-testid="secret-save"
           >
             {busy ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
         </form>
       )}
       {error && (
@@ -175,7 +183,7 @@ export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="secrets-panel" aria-label="Secrets">
       <header className="flex h-8 shrink-0 items-center border-b border-line px-3">
-        <span className="readout text-2xs uppercase text-ink-faint">Secrets</span>
+        <Badge readout>Secrets</Badge>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <AppSecrets app={app} />

@@ -1,5 +1,6 @@
 import type { ProjectInfo } from '@cc/protocol'
 import { useStore } from '../../../store/store.js'
+import { Button } from '../../../components/Button.jsx'
 
 /**
  * Trust asked once at registration (M4, decision 3).
@@ -36,14 +37,15 @@ export function TrustAsk({ project }: { project: ProjectInfo }) {
         >
           Not now
         </button>
-        <button
-          type="button"
-          className="rounded-md border border-line bg-surface-floor px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+        <Button
+          variant="primary"
+          onRaised
+          size="sm"
           onClick={() => void answer(true)}
           data-testid={`trust-ask-yes-${project.name}`}
         >
           Trust
-        </button>
+        </Button>
       </div>
     </div>
   )
