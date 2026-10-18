@@ -537,8 +537,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       search: (projectId, query, limit) => rpc.call('files.search', { projectId, query, limit }),
       listDir: (projectId, path) => rpc.call('fs.listDir', { projectId, path }),
       watch: (projectId, paths) => rpc.call('fs.watch', { projectId, paths }),
-      readFile: (projectId, path) => rpc.call('fs.readFile', { projectId, path }),
-      resolve: (projectId, path) => rpc.call('fs.resolve', { projectId, path }),
+      readFile: (projectId, path, sessionId) => rpc.call('fs.readFile', { projectId, path, ...(sessionId ? { sessionId } : {}) }),
+      resolve: (projectId, path, sessionId) => rpc.call('fs.resolve', { projectId, path, ...(sessionId ? { sessionId } : {}) }),
       move: (projectId, from, toDir) => rpc.call('fs.move', { projectId, from, toDir }),
       importFile: (projectId, toDir, name, dataBase64) =>
         rpc.call('fs.importFile', { projectId, toDir, name, dataBase64 }),
@@ -561,9 +561,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await opts.nativeFiles.trash(abs)
         return { supported: true }
       },
-      reveal: async (projectId, path) => {
+      reveal: async (projectId, path, sessionId) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
-        const { path: abs } = await rpc.call('fs.resolve', { projectId, path, purpose: 'reveal' })
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path, purpose: 'reveal', ...(sessionId ? { sessionId } : {}) })
         await opts.nativeFiles.reveal(abs)
         return { supported: true }
       },

@@ -262,6 +262,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     notices: [] as Notice[],
     viewerPath: null,
     viewerProjectId: null,
+    viewerSessionId: null,
     paletteOpen: false,
     openLayers: 0,
     approvalsInFlight: {} as Record<string, true>,

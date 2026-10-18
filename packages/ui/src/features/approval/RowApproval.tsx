@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { wireJoin, wireSegments, type ApprovalDetail } from '@cc/protocol'
 import { answersInPlace, type SessionSummary } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
+import { useSessionFolder } from '../../store/selectors.js'
 import { Kbd, Tooltip } from '../../components/primitives.jsx'
 import { detailText } from './ApprovalCard.jsx'
 
@@ -45,10 +46,7 @@ export function RowApproval({
   const others = useStore((s) => s.sessions[sessionId]?.pendingQuestions.length ?? 0)
   const name = useStore((s) => s.sessions[sessionId]?.name ?? '')
   // The folder the session works in: its worktree, or its project's
-  const root = useStore((s) => {
-    const x = s.sessions[sessionId]
-    return x?.worktree?.path ?? (x?.projectId ? s.projects[x.projectId]?.path : undefined) ?? null
-  })
+  const root = useSessionFolder(sessionId)
   const busy = useStore((s) =>
     pending ? !!s.approvalsInFlight[inFlightKey(sessionId, pending.requestId)] : false,
   )

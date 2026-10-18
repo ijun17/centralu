@@ -139,6 +139,18 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     ])
   })
 
+  it("reads a session's file with the session's id that machine knows, and refuses a session of another (#1209)", async () => {
+    const { router, m1 } = rig()
+    m1.answers['fs.readFile'] = { text: 'x', truncated: false, binary: false, bytes: 1 }
+    await router.handle('fs.readFile', { projectId: 'm1.p1', path: 'a.ts', sessionId: 'm1.s1' })
+    await router.handle('fs.readFile', { projectId: 'm1.p1', path: 'a.ts' })
+    expect(m1.calls.map((c) => c.params)).toEqual([
+      { projectId: 'p1', path: 'a.ts', sessionId: 's1' },
+      { projectId: 'p1', path: 'a.ts' },
+    ])
+    await expect(router.handle('fs.readFile', { projectId: 'm1.p1', path: 'a.ts', sessionId: 's-hub' })).rejects.toThrow(/another machine/)
+  })
+
   it('qualifies the id of the open session a past conversation is already imported as (#701)', async () => {
     const { router, m1 } = rig()
     m1.answers['agents.listExternalSessions'] = {
