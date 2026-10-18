@@ -699,6 +699,10 @@ export function createRpcHandler(
       const { sessionId, parentCallId, afterSeq, limit } = RpcMethods['messages.subagent'].params.parse(p)
       return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },
+    'messages.subagentTrashed': async (p) => {
+      const { sessionId, parentCallId } = RpcMethods['messages.subagentTrashed'].params.parse(p)
+      return mgr.subagentTrashed(sessionId, parentCallId)
+    },
     'agents.commands': async (p) =>
       mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
     'agents.usage': async (p) => {
@@ -800,6 +804,18 @@ export function createRpcHandler(
       return mgr.readTrashedRun(runId, limit, beforeSeq)
     },
     'trash.purgeRuns': async (p) => mgr.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
+    // A session's subagent steps, to the trash without it and back (#418): the person's too, like the rest of the trash
+    'subagents.usage': async () => mgr.subagentUsage(),
+    'subagents.trash': async (p) => mgr.trashSubagentSteps(RpcMethods['subagents.trash'].params.parse(p).sessionId),
+    'trash.restoreSubagentSteps': async (p) => {
+      await mgr.restoreSubagentSteps(RpcMethods['trash.restoreSubagentSteps'].params.parse(p).sessionId)
+      return { ok: true as const }
+    },
+    'trash.purgeSubagentSteps': async (p) => {
+      const { sessionId, upTo } = RpcMethods['trash.purgeSubagentSteps'].params.parse(p)
+      await mgr.purgeSubagentSteps(sessionId, upTo)
+      return { ok: true as const }
+    },
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
     'machines.list': async () => machines?.list() ?? [],
     'machines.add': async (p) => {

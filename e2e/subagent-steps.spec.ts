@@ -89,3 +89,75 @@ test('only a launch card offers steps, and one with none recorded says so', asyn
   await old.getByTestId('subagent-steps-toggle').click()
   await expect(old.getByTestId('subagent-steps-empty')).toBeVisible()
 })
+
+/**
+ * #418: a session's subagent steps go to the trash without the session, from Settings → Trash, where what they take is
+ * shown; the launch card then says where they went, and they come back under it or leave for good from the trash.
+ */
+test("a session's subagent steps go to the trash and back from Settings, and the card says where they are", async ({ page }) => {
+  await setup(page)
+  const sessionId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+  await emit(page, { type: 'tool_call', callId: AGENT, summary: { tool: 'Agent', title: 'Research the boundaries', paths: [] } })
+  await emit(page, step({ type: 'message_delta', role: 'assistant', text: 'The boundaries test holds.' }))
+  await emit(page, step({ type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'rg boundaries', paths: [] } }))
+  await emit(page, { type: 'turn_complete' })
+
+  const card = page.getByTestId('tool-card').filter({ hasText: 'Research the boundaries' })
+  await card.getByTestId('subagent-steps-toggle').click()
+  const list = card.getByTestId('subagent-steps-list')
+  await expect(list.getByTestId('msg-assistant')).toContainText('The boundaries test holds.')
+
+  const openTrash = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-trash').click()
+    await expect(page.getByTestId('settings-trash')).toBeVisible()
+  }
+  const closeSettings = () => page.evaluate(() => (window as any).__store.getState().toggleSettings(false))
+
+  // What the session's steps take, and the way to move them
+  await openTrash()
+  await expect(page.getByTestId(`subagent-steps-take-${sessionId}`)).toContainText('1 run · 2 steps ·')
+  await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
+  await page.getByTestId('subagent-steps-confirm-yes').click()
+  await expect(page.getByTestId('subagent-steps-held-empty')).toBeVisible()
+  const row = page.getByTestId(`trash-steps-row-${sessionId}`)
+  await expect(row).toContainText('Subagent steps of')
+  await expect(page.getByTestId(`trash-steps-holds-${sessionId}`)).toContainText('1 run · 2 steps ·')
+  await expect(page.getByTestId('trash-total')).toContainText('0 sessions · subagent steps of 1 session')
+
+  // The session and its conversation stayed; the open card says where its steps went
+  await closeSettings()
+  await expect(page.getByTestId(`session-row-${sessionId}`)).toBeVisible()
+  await expect(card.getByTestId('subagent-steps-trashed')).toHaveText('The steps were moved to the trash. Settings → Trash restores them.')
+  await expect(list.getByTestId('msg-assistant')).toHaveCount(0)
+
+  // Restored, they are under the card again
+  await openTrash()
+  await page.getByTestId(`trash-steps-restore-${sessionId}`).click()
+  await expect(row).toHaveCount(0)
+  await expect(page.getByTestId(`subagent-steps-take-${sessionId}`)).toContainText('1 run · 2 steps ·')
+  await closeSettings()
+  await expect(list.getByTestId('msg-assistant')).toContainText('The boundaries test holds.')
+  await expect(card.getByTestId('subagent-steps-trashed')).toHaveCount(0)
+
+  // Moved again; then another window moves a later step there, after this screen read the trash
+  await openTrash()
+  await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
+  await page.getByTestId('subagent-steps-confirm-yes').click()
+  await expect(page.getByTestId(`trash-steps-holds-${sessionId}`)).toContainText('1 run · 2 steps ·')
+  await emit(page, { ...step({ type: 'message_delta', role: 'assistant', text: 'One more thing.' }), parentCallId: 'toolu_later' })
+  await page.evaluate((id: string) => (window as any).__mock.trash.trashSubagentSteps(id), sessionId)
+
+  // Emptying the trash deletes what this screen listed, never the step moved since (#418 review)
+  await page.getByTestId('trash-empty').click()
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId(`trash-steps-holds-${sessionId}`)).toContainText('1 run · 1 step ·')
+
+  // Deleted for good from its row: the session still stands
+  await page.getByTestId(`trash-steps-purge-${sessionId}`).click()
+  await expect(page.getByTestId('trash-confirm')).toContainText('the session and its conversation stay')
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId('trash-list-empty')).toBeVisible()
+  await closeSettings()
+  await expect(page.getByTestId(`session-row-${sessionId}`)).toBeVisible()
+})

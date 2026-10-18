@@ -116,6 +116,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'sessions.markRead': session(),
   'messages.load': session(messages),
   'messages.subagent': session(messages),
+  'messages.subagentTrashed': session(),
   // Read on the machine the session runs on; the path it resolved is that machine's, so there is nothing to reveal here
   'messages.image': session((r) => {
     if (!isObj(r) || !('file' in r)) return r
@@ -125,6 +126,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'trash.read': session(messages),
   'trash.restore': session(fields({ session: sessionInfo, project: projectInfo })),
   'trash.purge': session(),
+  'subagents.trash': session(),
+  'trash.restoreSubagentSteps': session(),
+  'trash.purgeSubagentSteps': session(),
   'sessions.reorder': project(
     (r, q) => q.sessions(r),
     (p, q) => ({ ...p, orderedIds: Array.isArray(p.orderedIds) ? p.orderedIds.map((id) => q.strip(id, 'A session in the order')) : p.orderedIds }),
@@ -208,6 +212,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // The records of deleted app-agent sessions (#378), on the machine whose app ran (`trash.list` names it)
   'trash.readRun': { kind: 'machine', result: fields({ messages }) },
   'trash.purgeRuns': { kind: 'machine' },
+  'subagents.usage': MERGE,
 
   // ── Apps: a project app routes with its project; a user-folder app by `machine` where the call takes it ──
   'apps.runs': app(each((r, q) => q.appRun(r))),

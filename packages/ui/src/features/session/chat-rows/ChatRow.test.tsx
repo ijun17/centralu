@@ -225,13 +225,35 @@ describe('ChatRow: tool cards', () => {
     state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [] } } } }
     const empty = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))
     expect(testIds(empty.html)).toContain('subagent-steps-empty')
-    expect(empty.text).toContain('No steps were recorded for this agent.')
+    expect(empty.text).toContain('No steps are kept for this agent: it ran before Centralu kept them, or its steps were deleted from the trash.')
 
     state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: 'host went away', rows: [] } } } }
     const failed = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))
     expect(testIds(failed.html)).toContain('subagent-steps-error')
     expect(failed.text).toContain('Could not load the steps — host went away Try again')
     expect(testIds(failed.html)).not.toContain('subagent-steps-empty')
+  })
+
+  // #418: a card whose steps the person moved to the trash read as one that never kept any
+  it('says the steps were moved to the trash, all of them or the earlier ones, and where they come back from', () => {
+    state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [], trashed: 12 } } } }
+    const all = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))
+    expect(testIds(all.html)).toContain('subagent-steps-trashed')
+    expect(testIds(all.html)).not.toContain('subagent-steps-empty')
+    expect(all.text).toContain('The steps were moved to the trash. Settings → Trash restores them.')
+
+    state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [stored(13, 'text', { text: 'Later' })], trashed: 1 } } } }
+    const some = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))
+    expect(some.text).toContain('Later 1 earlier step was moved to the trash. Settings → Trash restores it.')
+
+    // One step is "it", and a count goes through the shared formatter (#418 review)
+    state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [], trashed: 1 } } } }
+    expect(row(tool({ tool: 'Agent', title: 'x', callId: 'c1' })).text).toContain('The step was moved to the trash. Settings → Trash restores it.')
+    state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [stored(1500, 'text', { text: 'Later' })], trashed: 1499 } } } }
+    expect(row(tool({ tool: 'Agent', title: 'x', callId: 'c1' })).text).toContain('1.5k earlier steps were moved to the trash. Settings → Trash restores them.')
+
+    state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [], trashed: 0 } } } }
+    expect(testIds(row(tool({ tool: 'Agent', title: 'x', callId: 'c1' })).html)).not.toContain('subagent-steps-trashed')
   })
 })
 

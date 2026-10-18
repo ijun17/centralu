@@ -5,6 +5,7 @@ import { RECOVERY_RETRY_MS } from './connection.js'
 import { inlineViewsFromHistory, mergeInlineHistory, syncInlineViews } from './apps.js'
 import { omitKey } from './patch.js'
 import { bumpChatKeysAbove, messagesToChat } from './transcript.js'
+import { formatCount } from '../app/format.js'
 
 /**
  * Reading a conversation's history from the host's store: its newest page, the page around a search
@@ -19,6 +20,8 @@ type HistoryActions = Pick<
   | 'loadOlder'
   | 'toggleSubagentSteps'
   | 'loadMoreSubagentSteps'
+  | 'trashSubagentSteps'
+  | 'restoreSubagentSteps'
 >
 
 export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => ({
@@ -177,12 +180,25 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     const after = cur.rows.at(-1)?.seq ?? 0
     set((s) => putSubagentSteps(s.subagentSteps, sessionId, callId, { ...cur, loading: true, error: null }))
     try {
-      const page = await platform.agents.loadSubagentMessages(sessionId, callId, after, SUBAGENT_STEPS_PAGE)
+      /*
+       * With the first page, how many of the card's steps are in the trash (#418), so an empty card says where they went
+       * rather than that none were recorded. A host before it does not answer, and the card reads as before.
+       */
+      const [page, trashed] = await Promise.all([
+        platform.agents.loadSubagentMessages(sessionId, callId, after, SUBAGENT_STEPS_PAGE),
+        after === 0 ? platform.agents.subagentTrashed(sessionId, callId).then((r) => r.steps, () => cur.trashed) : cur.trashed,
+      ])
       set((s) => {
         const now = s.subagentSteps[sessionId]?.[callId] ?? cur
         // A live step may have joined while the page was on its way: one row per number, in order
         const rows = mergeBySeq(now.rows, page)
-        return putSubagentSteps(s.subagentSteps, sessionId, callId, { ...now, rows, more: page.length >= SUBAGENT_STEPS_PAGE, loading: false })
+        return putSubagentSteps(s.subagentSteps, sessionId, callId, {
+          ...now,
+          rows,
+          more: page.length >= SUBAGENT_STEPS_PAGE,
+          loading: false,
+          ...(trashed === undefined ? {} : { trashed }),
+        })
       })
     } catch (e) {
       set((s) =>
@@ -194,4 +210,49 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       )
     }
   },
+
+  async trashSubagentSteps(sessionId) {
+    const platform = get().platform
+    if (!platform) return 'Not connected'
+    try {
+      const { steps } = await platform.trash.trashSubagentSteps(sessionId)
+      rereadSubagentSteps(sessionId, set, get)
+      const name = get().sessions[sessionId]?.name ?? 'the session'
+      /*
+       * The person is on Settings → Trash, where the entry now stands with its Restore: the toast says what moved and
+       * points nowhere (docs/ux-writing.md §1.1)
+       */
+      set({ toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the trash` })
+      return null
+    } catch (e) {
+      return (e as Error).message
+    }
+  },
+
+  async restoreSubagentSteps(sessionId) {
+    const platform = get().platform
+    if (!platform) return 'Not connected'
+    try {
+      await platform.trash.restoreSubagentSteps(sessionId)
+      rereadSubagentSteps(sessionId, set, get)
+      return null
+    } catch (e) {
+      return (e as Error).message
+    }
+  },
 })
+
+/**
+ * After a session's subagent steps went to the trash or came back (#418), its launch cards read them again: what an
+ * open card shows is no longer what the host keeps under it. An open card reads at once and stays open; a closed one
+ * forgets what it read, and reads when it is opened.
+ */
+function rereadSubagentSteps(sessionId: string, set: StoreSet, get: StoreGet): void {
+  const cards = get().subagentSteps[sessionId]
+  if (!cards) return
+  const open = Object.entries(cards).filter(([, c]) => c.open)
+  set((s) => ({
+    subagentSteps: { ...s.subagentSteps, [sessionId]: Object.fromEntries(open.map(([callId]) => [callId, { ...SUBAGENT_STEPS_UNREAD, open: true }])) },
+  }))
+  for (const [callId] of open) void get().loadMoreSubagentSteps(sessionId, callId)
+}

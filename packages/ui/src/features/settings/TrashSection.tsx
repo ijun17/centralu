@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { TrashedRun, TrashedSession } from '@cc/protocol'
+import type { SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay } from '../../app/format.js'
@@ -7,6 +7,7 @@ import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './TrashReaderItem.jsx'
 import { TrashRunReader, TrashRuns } from './TrashRuns.jsx'
+import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsTrash.jsx'
 
 /**
  * Settings → Trash (#204): the way out of a deleted session, built in the same change as the way in.
@@ -34,6 +35,8 @@ export function TrashUnreached({ unreached }: { unreached?: readonly { name: str
 export function TrashSection() {
   const platform = usePlatform()
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
+  const trashSubagentSteps = useStore((s) => s.trashSubagentSteps)
+  const restoreSubagentSteps = useStore((s) => s.restoreSubagentSteps)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof platform.trash.list>> | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reading, setReading] = useState<TrashedSession | null>(null)
@@ -45,6 +48,14 @@ export function TrashSection() {
   /** A refusal stays next to the row it is about — a toast is gone before it is read */
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
   const [emptyReport, setEmptyReport] = useState<string | null>(null)
+  /**
+   * The confirmation open on a session's subagent steps (#418): `steps:<id>` for its entry in the trash, `held:<id>` for
+   * moving them there
+   */
+  const [confirmingSteps, setConfirmingSteps] = useState<string | null>(null)
+  /** What each live session's subagent steps take (#418); `undefined` when this computer's host is older and says nothing */
+  const [held, setHeld] = useState<{ sessions: SubagentStepsHeld[]; unreached?: { machineId: string; name: string }[] } | null | undefined>(null)
+  const [heldError, setHeldError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     platform.trash
@@ -54,6 +65,17 @@ export function TrashSection() {
         setLoadError(null)
       })
       .catch((e: Error) => setLoadError(e.message))
+    platform.trash
+      .subagentUsage()
+      .then((h) => {
+        setHeld(h)
+        setHeldError(null)
+      })
+      .catch((e: Error) => {
+        // A host before #418 has no such list: nothing to show, rather than a failure to read it
+        if (e.message.startsWith('Unknown method: subagents.usage')) setHeld(undefined)
+        else setHeldError(e.message)
+      })
   }, [platform])
 
   useEffect(load, [load])
@@ -72,9 +94,23 @@ export function TrashSection() {
     } finally {
       setBusy(false)
       setConfirming(null)
+      setConfirmingSteps(null)
       load()
     }
   }
+  const errorOf = (id: string) => (rowError?.id === id ? rowError.text : null)
+  /*
+   * A session's subagent steps in the trash (#418), deleted up to the `deletedAt` this screen listed: steps moved there
+   * after it read the trash (another window, a machine not reached then) are not deleted unseen
+   */
+  const purgeStepsOf = (t: TrashedSubagentSteps) => platform.trash.purgeSubagentSteps(t.sessionId, t.deletedAt)
+  const purgeSteps = (t: TrashedSubagentSteps) =>
+    act(`steps:${t.sessionId}`, () =>
+      purgeStepsOf(t).then(
+        () => null,
+        (e: Error) => e.message,
+      ),
+    )
   const purge = (s: TrashedSession) =>
     act(s.id, () =>
       platform.trash.purge(s.id).then(
@@ -96,12 +132,14 @@ export function TrashSection() {
       ),
     )
   /*
-   * The sessions, then the run records this screen listed (#378): `trash.empty` leaves the records alone, so a linked
-   * machine's are never deleted unseen
+   * The sessions, then the run records and the subagent steps this screen listed (#378, #418): `trash.empty` leaves both
+   * alone, so what a linked machine or another window put in the trash since is never deleted unseen. A trash holding
+   * only records or steps is emptied too: `trash.empty` is asked only when there are sessions
    */
   const emptyAll = () =>
     act(null, async () => {
       const listed = trash?.runs ?? []
+      const listedSteps = trash?.subagentSteps ?? []
       const failed: string[] = []
       if (sessions.length) {
         await platform.trash.empty().then(
@@ -112,12 +150,16 @@ export function TrashSection() {
         )
       }
       if (listed.length) await purgeRunsOf(listed).catch((e: Error) => failed.push(`The app runs stayed: ${e.message}`))
+      for (const t of listedSteps) {
+        await purgeStepsOf(t).catch((e: Error) => failed.push(`The subagent steps of ${t.name} stayed: ${e.message}`))
+      }
       return failed.length ? failed.join(' ') : null
     })
 
   const sessions = trash?.sessions ?? []
   const runs = trash?.runs ?? []
-  const nothing = sessions.length === 0 && runs.length === 0
+  const steps = trash?.subagentSteps ?? []
+  const nothing = sessions.length === 0 && runs.length === 0 && steps.length === 0
   return (
     <section data-testid="settings-trash">
       <p className="text-xs leading-body text-ink-faint">
@@ -136,7 +178,9 @@ export function TrashSection() {
         <span className="readout text-sm text-ink-muted" data-testid="trash-total">
           {trash === null
             ? 'Loading…'
-            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''} · ${formatBytes(trash.bytes)}`}
+            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''}${
+                steps.length ? ` · subagent steps of ${stepsCount(steps.length, 'session', 'sessions')}` : ''
+              } · ${formatBytes(trash.bytes)}`}
         </span>
         <button
           type="button"
@@ -151,7 +195,9 @@ export function TrashSection() {
 
       {confirming === 'all' && (
         <Confirm
-          text={`Delete all ${sessions.length + runs.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below${runs.length ? ', and the kept app runs' : ''}. This cannot be undone.`}
+          text={`Delete all ${sessions.length + runs.length + steps.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below${runs.length ? ', and the kept app runs' : ''}${
+            steps.length ? ', and the subagent steps listed' : ''
+          }. This cannot be undone.`}
           busy={busy}
           onYes={emptyAll}
           onNo={() => setConfirming(null)}
@@ -230,11 +276,41 @@ export function TrashSection() {
           ))}
         </ul>
       )}
+      {steps.length > 0 && (
+        <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid="trash-steps-list">
+          {steps.map((t) => (
+            <TrashedSubagentStepsRow
+              key={`${t.machine ?? ''}/${t.sessionId}`}
+              entry={t}
+              busy={busy}
+              confirming={confirmingSteps === `steps:${t.sessionId}`}
+              error={errorOf(`steps:${t.sessionId}`)}
+              onRestore={() => void act(`steps:${t.sessionId}`, () => restoreSubagentSteps(t.sessionId))}
+              onAskPurge={() => setConfirmingSteps(`steps:${t.sessionId}`)}
+              onPurge={() => void purgeSteps(t)}
+              onCancel={() => setConfirmingSteps(null)}
+            />
+          ))}
+        </ul>
+      )}
       <TrashRuns runs={runs} busy={busy} onRead={setReadingRun} onPurge={purgeRuns} />
       {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
         <p className="mt-1.5 text-xs leading-body text-ink" data-testid="trash-runs-error">
           {rowError.text}
         </p>
+      )}
+
+      {held !== undefined && (
+        <SubagentStepsHeldList
+          sessions={held?.sessions ?? null}
+          unreached={held?.unreached ?? []}
+          error={heldError}
+          onRetry={load}
+          row={(id) => ({ busy, confirming: confirmingSteps === `held:${id}`, error: errorOf(`held:${id}`) })}
+          onAsk={(id) => setConfirmingSteps(`held:${id}`)}
+          onMove={(h) => void act(`held:${h.sessionId}`, () => trashSubagentSteps(h.sessionId))}
+          onCancel={() => setConfirmingSteps(null)}
+        />
       )}
     </section>
   )
