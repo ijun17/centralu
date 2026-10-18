@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import type { SessionSummary } from '@cc/core'
@@ -192,6 +192,34 @@ export function ChatStream({
   })
 
   /*
+   * The conversation fades in as it opens (owner, 2026-10-18), started by hand when the list stops hiding. A CSS
+   * transition on the class was not enough: when the list settled within one frame (already at the bottom), the hidden
+   * state was never painted, so there was nothing to transition from, and some opens (the orchestrator's, often) just
+   * appeared.
+   */
+  const wasSettling = useRef(false)
+  const fadeIn = useCallback(() => {
+    const el = scrollRef.current
+    if (el && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' })
+    }
+  }, [scrollRef])
+  useLayoutEffect(() => {
+    if (wasSettling.current && !settling) fadeIn()
+    wasSettling.current = settling
+  }, [settling, fadeIn])
+  /*
+   * An open that never settles (nothing to land on, or a screen such as the orchestrator's that shows a conversation
+   * already in place) fades in too: one frame after it opens, unless a landing has started by then, whose end fades it.
+   */
+  useLayoutEffect(() => {
+    const f = requestAnimationFrame(() => {
+      if (!wasSettling.current) fadeIn()
+    })
+    return () => cancelAnimationFrame(f)
+  }, [sessionId, fadeIn])
+
+  /*
    * Where a new day begins (owner, 2026-10-18, as a chat app does): the first row with a time, and every row whose
    * day differs from the last time before it. Rows with no time never start one.
    */
@@ -261,7 +289,7 @@ export function ChatStream({
          */
         className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
           bottomPeek ? 'pb-14' : 'pb-4'
-        } ${settling ? 'invisible opacity-0' : 'opacity-100 transition-opacity duration-200 ease-out motion-reduce:transition-none'}`}
+        } ${settling ? 'invisible' : ''}`}
         /* The empty space the card will settle onto. Follows size, not state, so there is no
       transition or animation */
         style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
