@@ -882,6 +882,23 @@ describe('what the window could not read is said', () => {
     expect(toast).toContain('the app list')
   })
 
+  it('a machine list that could not be read is said, while a host from before machines says nothing (#841 item 10)', async () => {
+    const mock = new MockPlatform()
+    mock.machines.list = async () => {
+      throw new Error('RPC timed out')
+    }
+    useStore.setState({ toast: null })
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().toast).toBe('Could not read the linked machines; shown empty or as defaults until read again')
+    const older = new MockPlatform()
+    older.machines.list = async () => {
+      throw new Error('Unknown method: machines.list. This Centralu host does not have it; the window may be from another build.')
+    }
+    useStore.setState({ toast: null })
+    await useStore.getState().attach(older)
+    expect(useStore.getState().toast).toBeNull()
+  })
+
   it('a startup that read everything says nothing', async () => {
     useStore.setState({ toast: null })
     await useStore.getState().attach(new MockPlatform())
