@@ -140,7 +140,7 @@ describe('emptying the trash', () => {
     expect(full.bytes).toBeGreaterThan(0)
 
     expect(await rpc('trash.empty', {})).toEqual({ purged: 2, failed: [] })
-    expect(await trash()).toEqual({ sessions: [], runs: [], bytes: 0 })
+    expect(await trash()).toEqual({ sessions: [], runs: [], bytes: 0, subagentSteps: [] })
     expect(await rpc('messages.load', { sessionId: a.id, limit: 10 })).toEqual([])
   })
 })

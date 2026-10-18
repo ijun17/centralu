@@ -488,3 +488,33 @@ export const TrashedRun = z.object({
   ...machineField,
 })
 export type TrashedRun = z.infer<typeof TrashedRun>
+
+/**
+ * What one session's subagent steps take (#418): the steps the native subagents it launched took (Claude Code's
+ * `Agent`, Codex's `spawn_agent`), kept under their launch cards (#222). They are often most of what a long session
+ * holds (the measured case: 46 MB of a 237 MB store, all from one session still in use), so Settings shows them per
+ * session and lets them go to the trash without the conversation.
+ *
+ *   runs    the launch cards whose steps these are
+ *   steps   the steps, every run together
+ *   bytes   their size in the store
+ */
+export const SubagentStepsHeld = z.object({
+  sessionId: SessionId,
+  name: z.string(),
+  tool: ToolName,
+  project: z.object({ id: z.string(), name: z.string() }).nullable(),
+  runs: z.number(),
+  steps: z.number(),
+  bytes: z.number(),
+  ...machineField,
+})
+export type SubagentStepsHeld = z.infer<typeof SubagentStepsHeld>
+
+/**
+ * A session's subagent steps in the trash (#418), while the session itself stays. `deletedAt` is the latest move: steps
+ * moved there twice are one entry. Restoring puts them back under their cards; deleting them for good is the trash's
+ * rule, as for a session (only the person, from Settings, one at a time or by emptying the trash).
+ */
+export const TrashedSubagentSteps = SubagentStepsHeld.extend({ deletedAt: z.number() })
+export type TrashedSubagentSteps = z.infer<typeof TrashedSubagentSteps>

@@ -230,12 +230,16 @@
    "breaksOlderReaders": false
   },
   {
+   "to": 58,
+   "breaksOlderReaders": false
+  },
+  {
    "to": 59,
    "breaksOlderReaders": false
   }
  ],
  "version": 59,
- "ran": 57,
+ "ran": 58,
  "store": {
   "userVersion": 59,
   "master": [
@@ -406,6 +410,12 @@
     "name": "sqlite_autoindex_subagent_messages_1",
     "tbl_name": "subagent_messages",
     "sql": null
+   },
+   {
+    "type": "index",
+    "name": "subagent_messages_trash",
+    "tbl_name": "subagent_messages",
+    "sql": "CREATE INDEX subagent_messages_trash ON subagent_messages(session_id, trashed_at, parent_call_id)"
    },
    {
     "type": "table",
@@ -585,7 +595,7 @@
     "type": "table",
     "name": "subagent_messages",
     "tbl_name": "subagent_messages",
-    "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
+    "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL, trashed_at INTEGER,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
    },
    {
     "type": "table",
@@ -652,6 +662,26 @@
       "seqno": 0,
       "cid": 1,
       "name": "project_id"
+     }
+    ]
+   },
+   {
+    "name": "subagent_messages_trash",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 0,
+      "name": "session_id"
+     },
+     {
+      "seqno": 1,
+      "cid": 7,
+      "name": "trashed_at"
+     },
+     {
+      "seqno": 2,
+      "cid": 1,
+      "name": "parent_call_id"
      }
     ]
    }
@@ -1329,7 +1359,8 @@
      "role TEXT notnull=1 default=null pk=0",
      "kind TEXT notnull=1 default=null pk=0",
      "payload TEXT notnull=1 default=null pk=0",
-     "ts INTEGER notnull=1 default=null pk=0"
+     "ts INTEGER notnull=1 default=null pk=0",
+     "trashed_at INTEGER notnull=0 default=null pk=0"
     ],
     "rows": []
    },

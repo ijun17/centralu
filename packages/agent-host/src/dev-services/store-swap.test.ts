@@ -12,7 +12,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './store.js'
-import { stepNumbersFrom, stepsAfter } from './store-steps.test-helpers.js'
 
 const dirs: string[] = []
 function currentStore(): string {
@@ -49,7 +48,7 @@ describe('migrations during a host swap (#280 step 3)', () => {
 
     const s = new Store(file, { swap: true })
     // v40 is heavy and v56 breaks older readers (#423): both wait for after the swap
-    expect(s.migrationsRun).toBe(stepsAfter(38) - 2)
+    expect(s.migrationsRun).toBe(KNOWN - 38 - 2)
     expect(s.schemaVersion).toBe(KNOWN)
     expect(s.deferredSteps).toEqual([40, 56])
     // The host works on the expanded store before the heavy step has run
@@ -130,7 +129,7 @@ describe('migrations during a host swap (#280 step 3)', () => {
     const file = currentStore()
     raw(file, (db) => db.pragma('user_version = 38'))
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(stepsAfter(38))
+    expect(s.migrationsRun).toBe(KNOWN - 38)
     expect(s.deferredSteps).toEqual([])
     s.close()
   })
@@ -144,7 +143,7 @@ describe('migrations during a host swap (#280 step 3)', () => {
     expect(seen.exists).toBe(true)
     expect(seen.userVersion).toBe(38)
     expect(seen.tooNew).toBeNull()
-    expect(seen.pending.map((p) => p.to)).toEqual(stepNumbersFrom(39))
+    expect(seen.pending.map((p) => p.to)).toEqual(Array.from({ length: KNOWN - 38 }, (_, i) => 39 + i))
     expect(seen.pending.find((p) => p.to === 40)).toMatchObject({ heavy: true, breaksOlderReaders: false })
     // Still at 38: nothing ran
     expect(raw(file, (db) => db.pragma('user_version', { simple: true }))).toBe(38)

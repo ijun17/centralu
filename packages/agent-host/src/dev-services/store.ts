@@ -22,6 +22,7 @@ import { StoreTooNewError, storeTooNewMessage } from './store/reader-gate.js'
 import { SessionRecords } from './store/sessions.js'
 import { SettingsRecords } from './store/settings.js'
 import { TrashRecords, type TrashedRow, type TrashRecord } from './store/trash.js'
+import { SubagentStepRecords } from './store/subagent-steps.js'
 
 // The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
 export type {
@@ -76,6 +77,8 @@ export class Store extends MigrationRunner {
   readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
   readonly trash: TrashRecords
+  /** A session's subagent steps moved to the trash without it (#418) */
+  readonly subagentSteps: SubagentStepRecords
   readonly settings: SettingsRecords
   readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
@@ -98,6 +101,7 @@ export class Store extends MigrationRunner {
     this.handoffs = new HandoffMarkers(this.db)
     this.settings = new SettingsRecords(this.db)
     this.trash = new TrashRecords(this.db, this.sessions)
+    this.subagentSteps = new SubagentStepRecords(this.db)
     this.permissions = new PermissionRecords(this.db)
     this.appRuns = new AppRunRecords(this.db)
     this.keptRuns = new KeptRuns(this.db)

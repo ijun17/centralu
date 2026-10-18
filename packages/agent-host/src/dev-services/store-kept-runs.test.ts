@@ -63,6 +63,17 @@ describe('the record of a deleted app-agent session (#378)', () => {
     s.close()
   })
 
+  // #418 review: steps the person moved to the trash came back in the record, and outlived their own purge there
+  it('leaves out the subagent steps the person moved to the trash, and still keeps the record whole', async () => {
+    const s = seeded()
+    await s.subagentSteps.trash('s1', 5)
+    s.messages.appendSubagentMessage('s1', 'toolu_agent', { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'after the move' }, ts: 6 })
+    expect(keep(s)).toBe(true)
+    const steps = db(s).prepare(`SELECT seq, payload FROM app_run_subagent_messages WHERE run_id = 'run1' ORDER BY seq`).all() as { seq: number; payload: string }[]
+    expect(steps.map((r) => [r.seq, (JSON.parse(r.payload) as { text: string }).text])).toEqual([[3, 'after the move']])
+    s.close()
+  })
+
   it('the run log’s retention takes the steps with the record', () => {
     const s = seeded()
     expect(keep(s)).toBe(true)

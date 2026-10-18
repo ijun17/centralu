@@ -21,7 +21,11 @@ export type KeptDraft = { sessionId: string; name: string | null; text: string }
  *   loading  a page is being read
  *   error    why the last read failed, shown in place of the steps
  */
-export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null }
+/**
+ * A launch card's steps as the window holds them (#222). `trashed`: how many of them are in the trash without their
+ * session (#418), read with the first page; absent until then, and from a host before it.
+ */
+export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null; trashed?: number }
 
 /** One conversation on screen: transcript, drafts, scroll position, history paging, sending and answering. */
 export type ConversationSlice = {
@@ -129,6 +133,12 @@ export type ConversationSlice = {
   toggleSubagentSteps(sessionId: string, callId: string): void
   /** Reads the next page of a launch card's steps */
   loadMoreSubagentSteps(sessionId: string, callId: string): Promise<void>
+  /**
+   * Moves a session's subagent steps to the trash, or puts them back (#418), and has its launch cards read them again:
+   * an open card reads at once, a closed one when it is opened. Returns an error message, or null when it is done.
+   */
+  trashSubagentSteps(sessionId: string): Promise<string | null>
+  restoreSubagentSteps(sessionId: string): Promise<string | null>
   /**
    * Approval requests that have had a response sent but not yet answered (#158) — `inFlightKey(sessionId, requestId)`
    * → `true`. Keyed by the session too (#683 review): a request id is unique only within a session's process, so two

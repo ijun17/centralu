@@ -33,7 +33,9 @@ export type KeptRunRow = {
  * A record holds the whole conversation (owner decision, 2026-10-06), copied from `messages` and its subagents' steps
  * from `subagent_messages` (#222) in SQLite without passing through the host, and everything the trash lists, so it
  * needs neither the session nor the run log line to be read. The purge that follows deletes both tables' rows of the
- * session, so the copy is what is left of them.
+ * session, so the copy is what is left of them. Subagent steps the person moved to the trash (#418, `trashed_at`) are
+ * not copied: the person put them out of the conversation, and the record must not bring them back or outlive their
+ * purge.
  */
 export class KeptRuns {
   constructor(private readonly db: Database.Database) {}
@@ -68,13 +70,13 @@ export class KeptRuns {
       const steps = this.db
         .prepare(
           `INSERT INTO app_run_subagent_messages (run_id, parent_call_id, seq, role, kind, payload, ts)
-           SELECT ?, parent_call_id, seq, role, kind, payload, ts FROM subagent_messages WHERE session_id = ?`,
+           SELECT ?, parent_call_id, seq, role, kind, payload, ts FROM subagent_messages WHERE session_id = ? AND trashed_at IS NULL`,
         )
         .run(r.runId, r.sessionId).changes
       const has = this.db
         .prepare(
           `SELECT (SELECT COUNT(*) FROM messages WHERE session_id = @s) as messages,
-                  (SELECT COUNT(*) FROM subagent_messages WHERE session_id = @s) as steps,
+                  (SELECT COUNT(*) FROM subagent_messages WHERE session_id = @s AND trashed_at IS NULL) as steps,
                   (SELECT COUNT(*) FROM app_run_messages WHERE run_id = @r) as keptMessages,
                   (SELECT COUNT(*) FROM app_run_subagent_messages WHERE run_id = @r) as keptSteps`,
         )

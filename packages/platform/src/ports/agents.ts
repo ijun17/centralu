@@ -147,6 +147,11 @@ export interface AgentPort {
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
   /**
+   * How many of one launch card's steps are in the trash (#418), so the card says they were moved there rather than
+   * that none were recorded. A host before it does not answer.
+   */
+  subagentTrashed(sessionId: string, parentCallId: string): Promise<{ steps: number }>
+  /**
    * A local image one of this session's replies names, read by the host the session runs on (`messages.image`). The
    * window cannot load a file path itself; the host reads only a path a reply wrote, only a real PNG, JPEG, GIF or WebP,
    * and at most 10 MB, and says why when it does not (docs/security-boundaries.md, "Images a reply names").
