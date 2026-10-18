@@ -89,8 +89,9 @@ export function BackgroundTasksBadge({
     <span className="flex shrink-0 items-center">
       {/*
         The top bar's capsule shape (owner, 2026-10-18): an icon and a number, the words in the tooltip. Running work
-        has the plain hairline (owner, twice: a brighter border stood out too much) and a steady white dot, which is
-        what says it runs; ended work stays quiet until it is cleared. A failure is dashed, as an error is on the
+        has the plain hairline (owner, twice: a brighter border stood out too much) and brighter ink with its count; no
+        dot (owner, 2026-10-18: it drew the eye to something that needs nothing). Ended work stays quiet until it is
+        cleared. A failure is dashed, as an error is on the
         inbox's capsule.
       */}
       <Tooltip
@@ -125,15 +126,7 @@ export function BackgroundTasksBadge({
         >
           <BackgroundIcon />
           {running ? (
-            <>
-              <span className="readout translate-y-px text-xs leading-none">{count}</span>
-              {/* Steady white while work runs (owner, 2026-10-18): a lit dot, not a blinking one */}
-              <span
-                className="size-1.5 rounded-full bg-ink-signal"
-                aria-hidden
-                data-testid="background-running-dot"
-              />
-            </>
+            <span className="readout translate-y-px text-xs leading-none">{count}</span>
           ) : (
             <span className="readout translate-y-px text-2xs leading-none">
               {failed > 0 ? `${failed} failed` : 'done'}
