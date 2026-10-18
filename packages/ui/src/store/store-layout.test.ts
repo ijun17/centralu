@@ -840,6 +840,45 @@ describe('restoring the workspace saves nothing until it is done', () => {
 })
 
 /*
+ * A snapshot that could not be read (#384): `workspace.load` failed (a timeout under load, a host that threw), or the
+ * restore threw partway. The screen came up as the defaults with no word, and the next change saved those defaults
+ * over the stored snapshot, which held settings as well as the layout (the notification switches, the app spans,
+ * `introSeen`). Now it is said, and nothing is saved over the stored snapshot until it has been read.
+ */
+describe('a workspace snapshot that could not be read', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true }
+
+  it('is said, and a change made meanwhile is not saved over it', async () => {
+    const mock = new MockPlatform()
+    await mock.workspace.save(stored)
+    const load = mock.workspace.load
+    // The mock's preferences read the snapshot too (an old text size); only the snapshot's own read fails here
+    const prefs = await mock.prefs.load()
+    mock.prefs.load = async () => prefs
+    mock.workspace.load = async () => {
+      throw Object.assign(new Error('RPC timed out: workspace.load'), { code: 'timeout', retryable: true })
+    }
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().toast).toContain('Could not read the window layout')
+
+    useStore.getState().toggleProjectFold('new-fold')
+    await tick()
+    expect(mock.workspaceSnapshot).toEqual(stored)
+
+    // Read on the next attach, it is restored and saved as usual again
+    mock.workspace.load = load
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().foldedProjects).toEqual(['kept-fold'])
+    useStore.getState().toggleProjectFold('after-read')
+    await tick()
+    expect((mock.workspaceSnapshot as { foldedProjects?: string[] }).foldedProjects).toEqual(['kept-fold', 'after-read'])
+  })
+})
+
+/*
  * A failed save is retried, not dropped (`workspaceSave` in store.ts). On 2026-09-30 the machine froze for hours,
  * the person folded every project during that time, every save timed out, and after a restart the folds were gone:
  * the stored snapshot never received them.

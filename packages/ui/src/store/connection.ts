@@ -56,6 +56,14 @@ import { settleUnsureSends } from './sessions/send.js'
 export let restoringWorkspace = false
 
 /**
+ * True when the last `attach` could not read the workspace snapshot, or its restore threw partway (#384).
+ * `saveWorkspace` does nothing then, until an attach reads it: the screen is on its defaults, and a save would write
+ * them over the stored snapshot, which holds settings as well as the layout (the notification switches, the app
+ * spans, `introSeen`). A layout changed meanwhile is not kept; the stored one comes back with the next read.
+ */
+let workspaceUnread = false
+
+/**
  * The waits before reading again what a reconnect has to re-read (the session list, a conversation page) when the
  * read fails. Same steps as a failed workspace save: a host that fails every read is not helped by being asked
  * forever, and the next reconnect or opening the conversation reads again.
@@ -366,6 +374,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     let migratedProjectPanels = false
     try {
       const snap = await platform.workspace.load()
+      workspaceUnread = false
       if (snap) {
         /*
          * Folded projects are restored **first of all** (#205). `focusSession` right below this
@@ -502,8 +511,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
         migratedProjectPanels = Object.values(arrangements).some((saved) => saved.panels === undefined)
       }
-    } catch {
-      /* The app works normally even with no snapshot */
+    } catch (e) {
+      // The app works normally even with no snapshot, but it is said, and not saved over (`workspaceUnread`)
+      workspaceUnread = true
+      set({ toast: `Could not read the window layout (${(e as Error).message}); it is shown as the defaults, and not saved over until it is read again` })
     } finally {
       restoringWorkspace = false
     }
@@ -534,8 +545,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
    * it, so a save that fails is sent again rather than dropped (see `workspaceSave`).
    */
   saveWorkspace() {
-    // Nothing is saved while the snapshot is being restored: see `restoringWorkspace`
-    if (restoringWorkspace) return
+    // Nothing is saved while the snapshot is being restored, or when it could not be read: see `restoringWorkspace`, `workspaceUnread`
+    if (restoringWorkspace || workspaceUnread) return
     const s = get()
     if (!s.platform) return
     workspaceSave.pending = {

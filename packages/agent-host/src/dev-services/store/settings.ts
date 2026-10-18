@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 
 /**
@@ -65,11 +66,26 @@ export class SettingsRecords {
       .run(JSON.stringify(layout), Date.now())
   }
 
+  /**
+   * The snapshot, or null for none. One that is not a JSON object (a write cut short, a hand edit) reads as none too,
+   * and is named on stderr with what it held (#384): the window comes up as its defaults and its next change replaces
+   * the row, so the line is what is left of it.
+   */
   loadWorkspace<T = unknown>(): T | null {
     const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
       { layout: string } | undefined
-    return (parseJson(row?.layout) ?? null) as T | null
+    if (!row) return null
+    const v = parseJson(row.layout)
+    if (isObj(v)) return v as T
+    // Once per row text: the screen preferences read it too, on every read until an old text size has moved (#312)
+    if (this.brokenWorkspaceSaid !== row.layout) {
+      this.brokenWorkspaceSaid = row.layout
+      console.error(`[store] the workspace snapshot (workspace row 1) is not a JSON object: ${JSON.stringify(row.layout.slice(0, 2000))}; the window opens as its defaults`)
+    }
+    return null
   }
+
+  private brokenWorkspaceSaid: string | null = null
 
   /**
    * A setting that belongs to this install rather than to any project or session (#43).

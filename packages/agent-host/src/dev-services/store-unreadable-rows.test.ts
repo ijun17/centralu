@@ -126,4 +126,23 @@ describe('a value a newer build wrote that this build cannot read (#384)', () =>
     expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.links\.slotHighWater .*"many"/)
     said.mockRestore()
   })
+
+  /*
+   * The workspace snapshot is the window's, written whole. A row that is not JSON read as none with no word, and one that
+   * is JSON but not an object went to the window as it was; either way the window came up as its defaults and saved
+   * them over the row with its next change. It reads as none in both cases, and the row is named on stderr, with
+   * what it held, so a person can find what was lost.
+   */
+  it.each([
+    ['not JSON', '{"view":"grid","foldedProjects":['],
+    ['JSON but not an object', '["grid"]'],
+  ])('a workspace snapshot that is %s reads as none, and is named on stderr', (_label, text) => {
+    const s = seeded()
+    s.settings.saveWorkspace({ view: 'grid' })
+    dbOf(s).prepare(`UPDATE workspace SET layout = ? WHERE id = 1`).run(text)
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(s.settings.loadWorkspace()).toBeNull()
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain(`the workspace snapshot (workspace row 1) is not a JSON object: ${JSON.stringify(text)}`)
+    said.mockRestore()
+  })
 })
