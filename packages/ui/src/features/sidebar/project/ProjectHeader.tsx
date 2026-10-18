@@ -166,8 +166,8 @@ export function ProjectHeader({
           project={project}
           anchorEl={menuAnchor.current}
           onClose={() => setMenuOpen(false)}
-          onNewSession={() => void startSessionNow(projectId)}
-          onNewSessionWith={() => openNewSession(projectId)}
+          // A worktree proposal (#69) waits in the new-session window with its branch filled in; otherwise start at once
+          onNewSession={() => (proposalHere ? openNewSession(projectId) : void startSessionNow(projectId))}
           // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
           onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
           onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
