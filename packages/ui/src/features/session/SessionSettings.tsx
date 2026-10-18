@@ -134,7 +134,7 @@ function MenuRow({
       data-testid={testId}
       title={title}
       onClick={onPick}
-      className={`flex w-full items-baseline gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors ${
+      className={`flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
         selected
           ? 'text-ink hover:bg-surface-hover/50'
           : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink'
@@ -157,7 +157,7 @@ function MenuRow({
 }
 
 /*
- * The menu in the conversation's shapes (owner, 2026-10-18): a 14px card, rows on an 8px rounded hover inside its
+ * The menu in the conversation's shapes (owner, 2026-10-18): a 14px card, rows on an 8px (rounded-lg) hover inside its
  * 4px inset, the chosen row marked by its check and brighter ink (a fill would read as the hover); group names in sentence case, not small capitals; hints in the UI face.
  */
 function MenuSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
@@ -315,7 +315,7 @@ export function SessionSettings({
           onAnimationEnd={() => {
             if (!open) setClosing(false)
           }}
-          className={`absolute bottom-full left-0 z-30 mb-1 max-h-80 w-60 overflow-y-auto overflow-x-hidden rounded-[14px] border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
+          className={`absolute bottom-full left-0 z-30 mb-1 max-h-80 w-60 overflow-y-auto overflow-x-hidden rounded-bubble border border-line bg-surface-raised shadow-(--shadow-popover-up) ${
             open ? 'cc-hang' : 'cc-hang-out pointer-events-none'
           }`}
         >

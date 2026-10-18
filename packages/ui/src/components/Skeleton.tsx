@@ -62,11 +62,11 @@ export function ChatSkeleton({
           {/* The conversation's shapes: the person's bubble on the right, the answer's full-width bubble on the left */}
           <div className="flex justify-end pb-4 pt-6">
             <div
-              className="h-10 animate-pulse rounded-[14px] bg-surface-hover/50"
+              className="h-10 animate-pulse rounded-bubble bg-surface-hover/50"
               style={{ width: turn === 0 ? '38%' : '26%' }}
             />
           </div>
-          <div className="mb-3 flex flex-col gap-2 rounded-[14px] border border-line bg-surface-raised px-4 py-3.5">
+          <div className="mb-3 flex flex-col gap-2 rounded-bubble border border-line bg-surface-raised px-4 py-3.5">
             {(turn === 0 ? [92, 84, 96, 48] : [88, 70]).map((w, i) => (
               <div key={i} className={`h-3 ${BAR}`} style={{ width: `${w}%` }} />
             ))}

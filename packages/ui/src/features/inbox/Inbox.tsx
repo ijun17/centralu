@@ -120,7 +120,7 @@ export function Inbox() {
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"
-        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-[14px] border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
+        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
         data-testid="inbox"
       >
         {/*
@@ -149,7 +149,7 @@ export function Inbox() {
             {items.map((it, i) => (
               <li
                 key={it.id}
-                className={`rounded-[10px] transition-colors ${
+                className={`rounded-field transition-colors ${
                   i === cursor ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
                 }`}
               >
