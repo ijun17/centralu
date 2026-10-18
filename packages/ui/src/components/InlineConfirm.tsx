@@ -60,10 +60,10 @@ export function InlineConfirm({
       type="button"
       className={
         inline
-          ? 'text-xs text-danger hover:text-ink disabled:opacity-40'
+          ? 'text-xs text-danger hover:text-ink disabled:opacity-50'
           : tone === 'danger'
-            ? 'rounded-md border border-danger/40 px-2 py-0.5 text-xs text-danger transition-colors hover:border-danger/70 disabled:opacity-40'
-            : 'rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:text-ink-signal disabled:opacity-40'
+            ? 'rounded-md border border-danger/40 px-2 py-0.5 text-xs text-danger transition-colors hover:border-danger/70 disabled:opacity-50'
+            : 'rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:text-ink-signal disabled:opacity-50'
       }
       disabled={busy}
       onClick={onYes}

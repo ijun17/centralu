@@ -63,7 +63,7 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+          className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
           onClick={() => void enable()}
           disabled={!review || busy}
           data-testid="pinned-enable"

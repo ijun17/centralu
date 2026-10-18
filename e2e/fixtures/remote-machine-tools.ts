@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { setup } from './control.js'
+import { openSessionDialog } from './new-session.js'
 
 /**
  * Phase 2 of linked machines on the mock platform (#82, docs/plans/remote-hub.md §6): usage gauges per machine, and
@@ -42,7 +43,7 @@ async function usageCalls(page: Page, machine: string | null): Promise<number> {
 
 export function remoteMachineToolsTests(): void {
   test.describe('usage per machine (#82)', () => {
-    test('each connected machine gets its own donuts after this computer, and a machine that is away is named, not asked', async ({ page }) => {
+    test('each connected machine gets its own donuts after this computer, and a machine that is away is left out, not asked', async ({ page }) => {
       await page.clock.install()
       await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate((w) => {
@@ -71,9 +72,14 @@ export function remoteMachineToolsTests(): void {
         await expect(page.getByTestId('usage-donut-box.claude')).toHaveAttribute('aria-label', /on Box/)
       })
 
-      await test.step('a machine that is away says so, and is never asked', async () => {
-        await expect(page.getByTestId('usage-machine-laptop')).toHaveAttribute('data-status', 'unreachable')
-        await expect(page.getByTestId('usage-machine-state-laptop')).toHaveText('away')
+      /*
+       * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected is left out,
+       * not drawn as "away"; Settings → Machines still lists it with its state
+       */
+      await test.step('a machine that is away is left out, and is never asked', async () => {
+        await expect(page.getByTestId('usage-machine-box')).toBeVisible()
+        await expect(page.getByTestId('usage-machine-laptop')).toHaveCount(0)
+        await expect(page.getByTestId('usage-machine-state-laptop')).toHaveCount(0)
         await expect(page.locator('[data-testid^="usage-donut-laptop."]')).toHaveCount(0)
       })
 
@@ -92,6 +98,8 @@ export function remoteMachineToolsTests(): void {
         const before = await usageCalls(page, 'laptop')
         await setMachine(page, 'laptop', { status: 'connected' })
         await expect.poll(() => usageCalls(page, 'laptop')).toBeGreaterThan(before)
+        // Connected again, it is back in the bar
+        await expect(page.getByTestId('usage-machine-laptop')).toBeVisible()
         await expect(page.getByTestId('usage-donut-laptop.claude')).toHaveAttribute('data-percent', '88')
       })
 
@@ -178,14 +186,27 @@ export function remoteMachineToolsTests(): void {
       await expect.poll(() => usageCalls(page, null)).toBeGreaterThan(before)
     })
 
-    test('a machine with no usable agent says so in its group, and this computer with none still shows the machines', async ({ page }) => {
+    test('a machine with no usable agent is left out, and this computer with none keeps its mark beside the machines', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
         m.machineDetected = { box: [] }
+        // Which machines were asked, so the absence below is read after the answer, not before the question
+        const real = m.agents.detect.bind(m.agents)
+        m.asked = []
+        m.agents.detect = async (machine?: string) => {
+          const out = await real(machine)
+          m.asked.push(machine ?? null)
+          return out
+        }
       })
       await link(page, { name: 'Box', sshTarget: 'me@box' })
-      await expect(page.getByTestId('usage-machine-no-agent-box')).toHaveText('No agent')
+      // Asked, and nothing there can run: no group, no "No agent" words (owner, 2026-10-18)
+      await expect.poll(() => page.evaluate(() => (window as unknown as MockWindow).__mock.asked.includes('box'))).toBe(true)
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
+      await expect(page.getByTestId('usage-machine-box')).toHaveCount(0)
+      await expect(page.getByTestId('usage-machine-no-agent-box')).toHaveCount(0)
 
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
@@ -194,7 +215,9 @@ export function remoteMachineToolsTests(): void {
         m.detected = [{ ...claude, loggedIn: false }]
       })
       await reconnectHost(page)
+      // This computer with no tool keeps its local No agent mark, the machine its donuts
       await expect(page.getByTestId('usage-no-agent')).toBeVisible()
+      await expect(page.getByTestId('usage-machine-box')).toBeVisible()
       await expect(page.getByTestId('usage-donut-box.claude')).toBeVisible()
       await expect(page.getByTestId('usage-donut-claude')).toHaveCount(0)
     })
@@ -212,8 +235,7 @@ export function remoteMachineToolsTests(): void {
     }
 
     async function openSession(page: Page, project: string) {
-      await page.getByTestId(`project-menu-${project}`).click()
-      await page.getByTestId(`new-session-${project}`).click()
+      await openSessionDialog(page, project)
       await page.getByTestId('tool-option-claude').click()
       await page.getByTestId('create-session-confirm').click()
       await expect(page.getByTestId('new-session-dialog')).toBeHidden()

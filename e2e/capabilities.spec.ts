@@ -1,13 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
-import { newSession as openSession } from './fixtures/control.js'
-
-/** A new session in `project` with no first instruction (fixtures/control.ts), once its view is up and has the keyboard */
-async function newSession(page: Page, project: string): Promise<string> {
-  const id = await openSession(page, project)
-  await expect(page.getByTestId('session-view')).toBeVisible()
-  return id
-}
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Where capability approval shows up (M4 D-4) — real UI on a mock platform.
@@ -67,6 +60,12 @@ async function trustedProject(page: Page, path: string): Promise<string> {
   await page.getByTestId(`trust-ask-yes-${name}`).click()
   await expect.poll(() => trustCalls(page)).toContainEqual({ projectId: pid, trusted: true })
   return pid
+}
+
+async function newSession(page: Page, project: string): Promise<string> {
+  await startSession(page, project)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+  return page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 }
 
 test('chain started from a session: the question shows as that session\'s approval card (with no always-allow), and answering y continues the gated call', async ({ page }) => {

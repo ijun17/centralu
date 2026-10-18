@@ -149,7 +149,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             type="submit"
             disabled={!armed || busy}
             data-testid="delete-project-confirm"
-            className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger transition-colors hover:border-danger/70 disabled:opacity-40"
+            className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger transition-colors hover:border-danger/70 disabled:opacity-50"
           >
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
           </button>

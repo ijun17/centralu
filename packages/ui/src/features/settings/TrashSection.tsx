@@ -112,7 +112,7 @@ export function TrashSection() {
         </span>
         <button
           type="button"
-          className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-40 disabled:hover:text-ink-faint"
+          className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-50 disabled:hover:text-ink-faint"
           disabled={sessions.length === 0 || busy}
           onClick={() => setConfirming('all')}
           data-testid="trash-empty"
@@ -168,7 +168,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-ink-faint hover:text-ink disabled:opacity-40"
+                  className="text-ink-faint hover:text-ink disabled:opacity-50"
                   disabled={busy}
                   onClick={() => void act(s.id, () => restoreFromTrash(s.id))}
                   data-testid={`trash-restore-${s.id}`}
@@ -177,7 +177,7 @@ export function TrashSection() {
                 </button>
                 <button
                   type="button"
-                  className="text-ink-faint hover:text-danger disabled:opacity-40"
+                  className="text-ink-faint hover:text-danger disabled:opacity-50"
                   disabled={busy}
                   onClick={() => setConfirming(s)}
                   data-testid={`trash-purge-${s.id}`}

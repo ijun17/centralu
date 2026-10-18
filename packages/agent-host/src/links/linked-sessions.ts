@@ -1,5 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, ToolName } from '@cc/protocol'
-import type { SessionInfo } from '@cc/protocol'
+import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -303,6 +302,53 @@ export function linkedSessions(
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       return attempt(m, async () => {
         await route('agents.deleteSession', { sessionId })
+        return {}
+      })
+    },
+
+    async lastUserMessage(sessionId) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => {
+        // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
+        let beforeSeq: number | undefined
+        for (let page = 0; page < 5; page++) {
+          const list = await route('messages.load', { sessionId, limit: 200, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
+          if (!Array.isArray(list) || list.length === 0) break
+          for (const raw of [...list].reverse()) {
+            if (!isObj(raw) || raw.role !== 'user' || raw.kind !== 'text' || !isObj(raw.payload)) continue
+            return { message: { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null } }
+          }
+          const first: unknown = list[0]
+          if (!isObj(first) || typeof first.seq !== 'number') break
+          beforeSeq = first.seq
+        }
+        return { message: null }
+      })
+    },
+
+    async cards(sessionId) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      const id = m.q.strip(sessionId, 'The session')
+      return attempt(m, async () => {
+        const list = await m.call('sessions.list', {})
+        const raw = (Array.isArray(list) ? list : []).find((s) => isObj(s) && s.id === id)
+        if (!isObj(raw)) throw new Error(`${m.name} no longer has this session`)
+        // Read as the window reads them, in the hub's terms: what does not parse is no card the hub can show or answer.
+        // The ids an approval's detail names are the machine's, so they are qualified as the window's event has them
+        const card = isObj(raw.pendingApproval) ? { ...raw.pendingApproval, detail: m.q.approvalDetail(raw.pendingApproval.detail) } : null
+        const approval = SessionInfo.shape.pendingApproval.safeParse(card)
+        const questions = SessionInfo.shape.pendingQuestions.safeParse(raw.pendingQuestions ?? [])
+        return { approval: approval.success ? approval.data : null, questions: questions.success ? questions.data : [] }
+      })
+    },
+
+    async answerQuestion(sessionId, requestId, answers) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      return attempt(m, async () => {
+        await route('agents.answerQuestion', { sessionId, requestId, answers })
         return {}
       })
     },

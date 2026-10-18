@@ -50,6 +50,11 @@ export type LinkDeps = {
   registry: MachineRegistry
   tunnelFor: (record: MachineRecord) => Tunnel
   log?: (line: string) => void
+  /**
+   * The hub's session a linked machine's session is a child of (#1038, `SessionManager.remoteAgentParent`), by its
+   * hub-side id; none for a session no session here started. Its rows reach the windows with that parent as `askedBy`
+   */
+  ownerOf?: (sessionId: string) => string | undefined
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value */

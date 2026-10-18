@@ -1062,6 +1062,64 @@ describe('back and forward between screens (#374)', () => {
     expect(st()).toMatchObject({ settingsOpen: false, focusedSessionId: 'nav-a' })
   })
 
+  /*
+   * A file and the git screen are pages of their own (owner, 2026-10-18): opened over a screen, back closes them onto
+   * it, forward opens them again, closing one (Esc, its close button) is a step back, and going to another screen
+   * closes them.
+   */
+  describe('a file or the git screen as a page', () => {
+    const page = () => ({ overlay: st().overlay?.kind ?? null, viewerPath: st().viewerPath, view: st().view, session: st().focusedSessionId })
+    // Each from an empty history: the store is one module for the file, and resetStore leaves `nav` as it was
+    beforeEach(() => useStore.setState({ nav: { entries: [], index: -1 }, overlay: null }))
+
+    it('back closes a file onto the session it was opened from, and forward opens it again', async () => {
+      await live()
+      st().focusSession('nav-a')
+      st().openFile('src/a.ts', 'p1')
+      expect(page()).toMatchObject({ overlay: 'viewer', viewerPath: 'src/a.ts', session: 'nav-a' })
+      expect(st().nav.entries.map((e) => e.kind)).toEqual(['session', 'file'])
+
+      st().goBack()
+      expect(page()).toMatchObject({ overlay: null, view: 'focus', session: 'nav-a' })
+      st().goForward()
+      expect(page()).toMatchObject({ overlay: 'viewer', viewerPath: 'src/a.ts', session: 'nav-a' })
+    })
+
+    it('back closes the git screen onto the session it was opened from, and forward opens it again', async () => {
+      await live()
+      st().focusSession('nav-b')
+      st().openGit()
+      expect(page()).toMatchObject({ overlay: 'git', session: 'nav-b' })
+
+      st().goBack()
+      expect(page()).toMatchObject({ overlay: null, session: 'nav-b' })
+      st().goForward()
+      expect(page()).toMatchObject({ overlay: 'git', session: 'nav-b' })
+    })
+
+    it('closing a page (Esc) is a step back, so forward opens it again and nothing is recorded twice', async () => {
+      await live()
+      st().focusSession('nav-a')
+      st().openFile('src/b.ts', 'p1')
+      st().closeOverlay()
+      expect(st().nav).toMatchObject({ index: 0 })
+      expect(st().nav.entries.map((e) => e.kind)).toEqual(['session', 'file'])
+      st().goForward()
+      expect(page()).toMatchObject({ overlay: 'viewer', viewerPath: 'src/b.ts' })
+    })
+
+    it('going to the grid closes a page, and back returns to it over its session', async () => {
+      await live()
+      st().focusSession('nav-c')
+      st().openGit()
+      st().setView('grid')
+      expect(page()).toMatchObject({ overlay: null, view: 'grid' })
+
+      st().goBack()
+      expect(page()).toMatchObject({ overlay: 'git', view: 'focus', session: 'nav-c' })
+    })
+  })
+
   it('starts after a restart at the restored screen, not at the steps the restore took', async () => {
     const mock = await live()
     mock.workspaceSnapshot = { focusedSessionId: 'nav-a', view: 'grid' } as never

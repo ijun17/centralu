@@ -35,6 +35,7 @@ fn main() {
             "file_manager_name",
             "focus_window",
             "window_controls_inset",
+            "window_controls_drawn",
             "shortcut_keys",
             "quit_app",
             "take_app_links",

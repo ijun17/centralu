@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The window's shortcuts and the layers over it (#842). A key is typed the way a person types it (`page.keyboard`), so
@@ -22,8 +23,7 @@ test('global shortcuts do not reach the screen under settings or a modal (#842 i
   await expect(page.getByTestId('settings')).toHaveCount(0)
 
   // A modal (the new-session dialog) keeps the keyboard the same way
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await page.keyboard.press('Meta+k')
   await expect(page.getByTestId('command-palette')).toHaveCount(0)
@@ -60,8 +60,7 @@ test('a modal and Settings are dialogs: focus starts inside and Tab stays there 
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
 
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   const modal = page.getByTestId('new-session-dialog').getByRole('dialog')
   await expect(modal).toHaveAttribute('aria-modal', 'true')
   await expect(modal).toHaveAccessibleName(/.+/)

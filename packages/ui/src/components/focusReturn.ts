@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 
 /**
  * A layer gives focus back to what held it before the layer opened (#115).
@@ -31,8 +31,13 @@ import { useEffect, useState } from 'react'
  * Given back in a passive (`useEffect`) cleanup: it runs after React has removed the layer's DOM,
  * so `document.activeElement` already tells whether focus fell out. A layout cleanup runs while the
  * layer and its focused element are still in the document.
+ *
+ * A layer that stays on screen for its exit (usePresence: the palette, settings, the inbox) is still in
+ * the document when it closes, its field or panel holding focus, and goes 150 ms later, dropping focus
+ * on `<body>` with nobody left to give it back. Such a layer passes itself as `layer`: focus inside it
+ * counts as fallen out the moment it closes, so the keyboard is back before the exit has finished.
  */
-export function useFocusReturn(open: boolean): void {
+export function useFocusReturn(open: boolean, layer?: RefObject<HTMLElement | null>): void {
   const [wasOpen, setWasOpen] = useState(false)
   const [before, setBefore] = useState<readonly Element[]>([])
   if (open !== wasOpen) {
@@ -41,10 +46,12 @@ export function useFocusReturn(open: boolean): void {
   }
   useEffect(() => {
     if (!open) return
+    // The layer as it stands while open: the node that keeps focus through its exit
+    const node = layer?.current ?? null
     return () => {
-      returnFocus(before)
+      returnFocus(before, node)
     }
-  }, [open, before])
+  }, [open, before, layer])
 }
 
 /**
@@ -75,15 +82,21 @@ function focusedSoFar(): Element[] {
 
 /**
  * Puts focus back on the latest of `before` still in the document, if focus has fallen to the page
- * since. Returns whether it did.
+ * since, or is still inside the closing `layer`. Returns whether it did.
  */
-export function returnFocus(before: readonly Element[]): boolean {
+export function returnFocus(before: readonly Element[], layer: Element | null = null): boolean {
   if (typeof document === 'undefined') return false
   const now = document.activeElement
-  if (now && now !== document.body && now.isConnected) return false
+  /*
+   * Still inside the leaving layer: let go of it first, so whatever asks for the keyboard next (a composer the palette
+   * opened, #528) finds the page holding it rather than the layer's field, and keys typed meanwhile do not land there
+   */
+  if (now instanceof HTMLElement && layer?.contains(now)) now.blur()
+  else if (now && now !== document.body && now.isConnected) return false
   for (let i = before.length - 1; i >= 0; i--) {
     const el = before[i]
     if (!(el instanceof HTMLElement) || el === document.body || !el.isConnected || el.closest('[inert]')) continue
+    if (layer?.contains(el)) continue
     el.focus({ preventScroll: true })
     if (document.activeElement === el) return true
   }

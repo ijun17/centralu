@@ -8,7 +8,7 @@ import { serveBroker } from './broker.js'
 import type { BrokerDesk } from './desk.js'
 import type { AppRef } from './ref.js'
 import type { ExternalAppsDeps, RuntimeTiming } from './runtime-types.js'
-import { redactor, type SecretStore } from './secrets.js'
+import { redactor, type Redact, type SecretStore } from './secrets.js'
 import { AppUnavailableError } from './unavailable.js'
 
 /**
@@ -104,7 +104,7 @@ export class AppStartEnv {
    * its name survives. Built from the stored values at the moment it is asked for: a tool call's row,
    * a broker request's row and a starting process each take their own.
    */
-  masker(ref: AppRef): (text: string) => string {
+  masker(ref: AppRef): Redact {
     return redactor(this.secrets.all(this.appKey(ref)))
   }
 

@@ -22,12 +22,20 @@ export function AwayNote({ machine }: { machine: string | null }) {
   )
 }
 
-export function InterruptedNote({ sessionId, interruption }: { sessionId: string; interruption: Interruption }) {
+export function InterruptedNote({
+  sessionId,
+  interruption,
+}: {
+  sessionId: string
+  interruption: Interruption
+}) {
   const send = useStore((s) => s.send)
   const why =
-    interruption.reason === 'network' ? 'A network error ended the last turn before it finished.'
-    : interruption.reason === 'quit' ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
-    : 'The agent tool interrupted the last turn before it finished.'
+    interruption.reason === 'network'
+      ? 'A network error ended the last turn before it finished.'
+      : interruption.reason === 'quit'
+        ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
+        : 'The agent tool interrupted the last turn before it finished.'
   return (
     <p
       className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
@@ -59,7 +67,7 @@ export function InterruptedNote({ sessionId, interruption }: { sessionId: string
  * resume it on its own. This just quietly says so (so it comes as no surprise).
  *
  * Since #568 the usual reason is sleep: the host ends an idle session's process after 15 minutes. The
- * composer taking the keyboard wakes it (and so does a message), so "type to it" is the whole story;
+ * composer taking the keyboard wakes it (and so does a message), so nothing is said while it sleeps;
  * while it starts the line says "Waking".
  */
 export function DormantNote({ sessionId }: { sessionId: string }) {
@@ -105,9 +113,15 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
     )
   }
 
+  /*
+   * Asleep says nothing (owner, 2026-10-18): sleep needs nothing from the person, typing wakes it, so a standing line
+   * only took the conversation's room. What stays is what they would want to know: that it is waking, and (above)
+   * why it could not.
+   */
+  if (!waking) return null
   return (
     <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="dormant-note">
-      {waking ? 'Waking session…' : 'Asleep — it wakes when you type to it'}
+      Waking session…
     </p>
   )
 }

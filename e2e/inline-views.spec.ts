@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * App views inline in a conversation (M4 B-1) — real UI on a mock platform, a real ViewHost, and
@@ -89,9 +90,7 @@ async function sessionWithApp(page: Page): Promise<{ pid: string; sid: string }>
     () => (Object.values((window as any).__store.getState().projects) as { id: string; path: string }[]).find((x) => x.path === '/tmp/alpha')!.id,
   )
   await page.evaluate((l) => (window as any).__mock.setExternalApps(l), [app('viewer', pid, { name: 'Viewer' })])
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
   return { pid, sid }
 }

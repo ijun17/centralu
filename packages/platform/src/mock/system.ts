@@ -1,4 +1,4 @@
-import type { AlertKind, SystemPort } from '../ports/index.js'
+import type { AlertKind, SystemPort, WindowAction } from '../ports/index.js'
 import { badgeCount } from '../capabilities.js'
 import { deliver } from '../deliver.js'
 
@@ -30,6 +30,8 @@ export class SystemMock {
   /** Addresses opened in the outside browser (#159) — tests check that terminal and app-screen links pass through this door */
   readonly openedUrls: string[] = []
   badge = 0
+  /** What the top bar's own window controls asked for, in order */
+  windowActions: WindowAction[] = []
   readonly system: SystemPort = {
     notify: async (title: string, body: string) => {
       this.notifications.push({ title, body })
@@ -39,6 +41,9 @@ export class SystemMock {
     },
     setBadge: async (count: number) => {
       this.badge = badgeCount(count)
+    },
+    windowAction: async (action: WindowAction) => {
+      this.windowActions.push(action)
     },
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })

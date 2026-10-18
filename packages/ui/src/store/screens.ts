@@ -32,7 +32,10 @@ export function projectScreenOf(
  * screen is not showing.
  */
 export function openProjectOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
+  s: Pick<
+    AppState,
+    'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'
+  >,
 ): string | null {
   /*
    * An app open in the app view belongs to its project the way a session does: the person is inside that project, so
@@ -55,7 +58,10 @@ export function openProjectOf(
  * last, then the first one. null only when there is no project at all, and the palette then does not offer it.
  */
 export function newSessionProjectOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
+  s: Pick<
+    AppState,
+    'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'
+  >,
 ): string | null {
   const known = (pid: string | null | undefined) => (pid && s.projects[pid] ? pid : null)
   return (
@@ -72,12 +78,20 @@ export function newSessionProjectOf(
  * trash (#204) needs no rule here — a trashed session is not in `sessions`.
  */
 export function projectScreenSessions(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions' | 'projectPanels'>,
+  s: Pick<
+    AppState,
+    'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions' | 'projectPanels'
+  >,
 ): string[] {
   const pid = projectScreenOf(s)
   if (!pid) return []
   const sessions = Object.values(s.sessions).filter((x) => x.projectId === pid)
-  const shown = new Set(arrangePanels(sessions.map((x) => sessionPanelId(x.id)), s.projectPanels[pid]))
+  const shown = new Set(
+    arrangePanels(
+      sessions.map((x) => sessionPanelId(x.id)),
+      s.projectPanels[pid],
+    ),
+  )
   return sessions.filter((x) => shown.has(sessionPanelId(x.id))).map((x) => x.id)
 }
 
@@ -86,12 +100,20 @@ export function projectScreenSessions(
  * over their panels, so it and ProjectView must not decide this separately.
  */
 export function projectScreenAppKeys(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
+  s: Pick<
+    AppState,
+    'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'
+  >,
 ): string[] {
   const pid = projectScreenOf(s)
   if (!pid) return []
   const apps = s.externalApps.filter((a) => a.projectId === pid)
-  const shown = new Set(arrangePanels(apps.map((a) => appPanelId(a.appId)), s.projectPanels[pid]))
+  const shown = new Set(
+    arrangePanels(
+      apps.map((a) => appPanelId(a.appId)),
+      s.projectPanels[pid],
+    ),
+  )
   return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => externalAppKey(pid, a.appId))
 }
 
@@ -104,7 +126,9 @@ export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'ext
   if (s.view !== 'grid') return []
   const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
   return s.gridPanels.flatMap((p) =>
-    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId, p.machine)) ? [gridAppViewKey(p.projectId, p.appId, p.machine)] : [],
+    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId, p.machine))
+      ? [gridAppViewKey(p.projectId, p.appId, p.machine)]
+      : [],
   )
 }
 
@@ -113,10 +137,24 @@ export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'ext
  * the one on screen, and the focus lane it goes back to is its project's screen with the app not hidden there.
  */
 export function returnsToPanel(
-  s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
+  s: Pick<
+    AppState,
+    | 'view'
+    | 'focusedApp'
+    | 'focusedSessionId'
+    | 'focusedProjectId'
+    | 'projects'
+    | 'externalApps'
+    | 'projectPanels'
+  >,
   key: string,
 ): boolean {
-  if (s.view !== 'app' || !s.focusedApp || externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key) return false
+  if (
+    s.view !== 'app' ||
+    !s.focusedApp ||
+    externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key
+  )
+    return false
   return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)
 }
 
@@ -125,10 +163,35 @@ export function returnsToPanel(
  * picked yet, the intro). Settings is a layer over the screen under it, and counts as a screen of its own.
  */
 export function screenOf(
-  s: Pick<AppState, 'settingsOpen' | 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
+  s: Pick<
+    AppState,
+    | 'settingsOpen'
+    | 'view'
+    | 'focusedApp'
+    | 'focusedSessionId'
+    | 'focusedProjectId'
+    | 'projects'
+    | 'overlay'
+    | 'viewerPath'
+    | 'viewerProjectId'
+  >,
 ): Screen | null {
   if (s.settingsOpen) return { kind: 'settings' }
-  return screenUnder(s)
+  const under = screenUnder(s)
+  const o = s.overlay
+  if (o?.kind === 'viewer' && s.viewerPath)
+    return { kind: 'file', path: s.viewerPath, projectId: s.viewerProjectId ?? null, under }
+  if (o?.kind === 'git') {
+    return {
+      kind: 'git',
+      sub: o.sub ?? 'changes',
+      path: o.path ?? null,
+      sha: o.sha ?? null,
+      staged: o.staged ?? null,
+      under,
+    }
+  }
+  return under
 }
 
 /** The screen under any layer */
@@ -141,7 +204,14 @@ function screenUnder(
     case 'orchestrator':
       return { kind: 'orchestrator' }
     case 'app':
-      return s.focusedApp ? { kind: 'app', projectId: s.focusedApp.projectId, appId: s.focusedApp.appId, ...(s.focusedApp.machine ? { machine: s.focusedApp.machine } : {}) } : null
+      return s.focusedApp
+        ? {
+            kind: 'app',
+            projectId: s.focusedApp.projectId,
+            appId: s.focusedApp.appId,
+            ...(s.focusedApp.machine ? { machine: s.focusedApp.machine } : {}),
+          }
+        : null
     case 'focus': {
       if (s.focusedSessionId) return { kind: 'session', id: s.focusedSessionId }
       const pid = projectScreenOf(s)

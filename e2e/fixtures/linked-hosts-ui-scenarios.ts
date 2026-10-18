@@ -380,13 +380,12 @@ export function linkedHostsUiTests(): void {
       })
 
       let id = ''
-      await test.step('create a session there: the dialog asks that machine which agents it has', async () => {
+      await test.step('create a session there: New session asks that machine which agents it can run', async () => {
+        // The menu's New session starts it at once (owner, 2026-10-18), with a tool that can run on the project's machine
         await page.getByTestId('project-menu-remote-project').click()
         await page.getByTestId('new-session-remote-project').click()
-        await expect(page.getByTestId('new-session-machine')).toHaveText('Remote box')
         await expect.poll(() => calls.some((c) => c.method === 'agents.detect' && c.params.machine === 'remote-box')).toBe(true)
-        await page.getByTestId('create-session-confirm').click()
-        await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+        await expect(page.getByTestId('new-session-dialog')).toHaveCount(0)
         await expect
           .poll(async () => ((await hubCall(pair.hub.port, 'sessions.list', {})) as { id: string; machine?: string }[]).filter((s) => s.machine === 'remote-box'))
           .toHaveLength(1)

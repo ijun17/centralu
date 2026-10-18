@@ -166,7 +166,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               </button>
               <button
                 type="button"
-                className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+                className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
                 onClick={() => void commit(false)}
                 disabled={!!busy}
                 data-testid="import-commit"
@@ -175,7 +175,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               </button>
               <button
                 type="button"
-                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
                 onClick={() => void commit(true)}
                 disabled={!!busy}
                 data-testid="import-enable"
@@ -190,7 +190,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
               </button>
               <button
                 type="button"
-                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+                className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
                 onClick={() => void review()}
                 disabled={!source.trim() || !!busy}
                 data-testid="import-review"

@@ -73,3 +73,41 @@ describe('navigation history (#374)', () => {
     expect(h.entries).toEqual([session('a'), settings, session('b')])
   })
 })
+
+describe('a file and the git screen as pages', () => {
+  const file = (path: string, under: Screen | null = session('a')): Screen => ({ kind: 'file', path, projectId: 'p', under })
+  const git = (sub: 'changes' | 'history' | 'branches', sha: string | null = null, under: Screen | null = session('a')): Screen => ({
+    kind: 'git',
+    sub,
+    path: null,
+    sha,
+    staged: null,
+    under,
+  })
+
+  it('tells files apart by path and project, not by the screen under them', () => {
+    expect(sameScreen(file('a.ts'), file('a.ts', grid))).toBe(true)
+    expect(sameScreen(file('a.ts'), file('b.ts'))).toBe(false)
+    expect(sameScreen(file('a.ts'), { kind: 'file', path: 'a.ts', projectId: null, under: null })).toBe(false)
+  })
+
+  it('tells git screens apart by what they show', () => {
+    expect(sameScreen(git('changes'), git('changes', null, grid))).toBe(true)
+    expect(sameScreen(git('history', 'abc'), git('history', 'def'))).toBe(false)
+    expect(sameScreen(git('changes'), git('branches'))).toBe(false)
+  })
+
+  it('closing a file or the git screen steps back to the screen under it, so forward reopens it', () => {
+    for (const layer of [file('a.ts'), git('history', 'abc')]) {
+      const h = of(session('a'), layer)
+      const closed = closeLayer(h, session('a'))
+      expect(closed).toEqual({ entries: [session('a'), layer], index: 0 })
+      expect(step(closed, 1, all).screen).toEqual(layer)
+    }
+  })
+
+  it('closing one onto another screen than the one before it is an ordinary visit', () => {
+    const h = of(session('a'), file('a.ts'))
+    expect(closeLayer(h, grid)).toEqual({ entries: [session('a'), file('a.ts'), grid], index: 2 })
+  })
+})

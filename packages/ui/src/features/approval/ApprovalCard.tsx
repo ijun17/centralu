@@ -1,6 +1,19 @@
 import { useEffect, useState } from 'react'
-import { alwaysAllowKey, isCentraluApply, isUnknownCard, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
-import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import {
+  alwaysAllowKey,
+  isCentraluApply,
+  isUnknownCard,
+  SESSION_HANDOFF,
+  sessionOnlyAlways,
+  type ApprovalDetail,
+} from '@cc/protocol'
+import {
+  agentStartQuestion,
+  approvalNotes,
+  centraluUpdateQuestion,
+  projectAccessQuestion,
+  projectCreateQuestion,
+} from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { useShortcut } from '../../app/shortcut.js'
@@ -33,7 +46,11 @@ export function ApprovalCard({
   // An edit whose file is unknown has nothing to remember (#428): no button, and `a` does nothing
   const canAlways = offersAlways(detail)
   const keys: AnswerKeys = inComposer
-    ? { allow: sc(...APPROVAL_COMBOS.allow), deny: sc(...APPROVAL_COMBOS.deny), always: sc(...APPROVAL_COMBOS.always) }
+    ? {
+        allow: sc(...APPROVAL_COMBOS.allow),
+        deny: sc(...APPROVAL_COMBOS.deny),
+        always: sc(...APPROVAL_COMBOS.always),
+      }
     : BARE_KEYS
 
   useEffect(() => {
@@ -50,7 +67,8 @@ export function ApprovalCard({
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
       // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
-      if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always') return
+      if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always')
+        return
       // Nor does an edit whose file is unknown (#428): there is no path to remember
       if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
@@ -124,13 +142,18 @@ export function ApprovalCard({
   }
 
   return (
+    /*
+      Every card that waits on the person (approvals here, questions in QuestionCard) is drawn alike (owner,
+      2026-10-18): the conversation's 14px corner, a white border all round as the inbox capsule's for an approval
+      (white is what waits on the person), the kind as a capsule, and the answers on a plain footer below a hairline.
+    */
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-keys={inComposer ? 'composer' : 'bare'}
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
           Awaiting approval
         </span>
         <span className="text-xs text-ink-faint">Agent is blocked, waiting</span>
@@ -143,25 +166,46 @@ export function ApprovalCard({
         {detailText(detail)}
       </pre>
 
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k={keys.allow} label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k={keys.deny} label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
-        {canAlways && <ActionKey
-          k={keys.always}
-          label="Always allow"
-          testId="approve-always"
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey
+          k={keys.allow}
+          label="Allow"
+          onClick={() => void respond(sessionId, requestId, 'allow')}
+          testId="approve-allow"
           disabled={busy}
-          title={
-            isCentraluApply(detail)
-              ? 'Allow this session to apply Centralu updates while it is running'
-              : detail.kind === 'other' && detail.about === SESSION_HANDOFF
-                ? 'Allow this session to hand off sessions while it is running'
-                : detail.kind === 'centralu_update'
-                ? 'Allow Centralu updates from this session while it is running'
-                : `Hold ${sc('alt')} and click to apply to the whole project`
-          }
-          onClick={(alt) => void respond(sessionId, requestId, 'always', updateCard ? 'session' : alt ? 'project' : 'session')}
-        />}
+        />
+        <ActionKey
+          k={keys.deny}
+          label="Deny"
+          onClick={() => void respond(sessionId, requestId, 'deny')}
+          testId="approve-deny"
+          disabled={busy}
+        />
+        {canAlways && (
+          <ActionKey
+            k={keys.always}
+            label="Always allow"
+            testId="approve-always"
+            disabled={busy}
+            title={
+              isCentraluApply(detail)
+                ? 'Allow this session to apply Centralu updates while it is running'
+                : detail.kind === 'other' && detail.about === SESSION_HANDOFF
+                  ? 'Allow this session to hand off sessions while it is running'
+                  : detail.kind === 'centralu_update'
+                    ? 'Allow Centralu updates from this session while it is running'
+                    : `Hold ${sc('alt')} and click to apply to the whole project`
+            }
+            onClick={(alt) =>
+              void respond(
+                sessionId,
+                requestId,
+                'always',
+                updateCard ? 'session' : alt ? 'project' : 'session',
+              )
+            }
+          />
+        )}
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
         {!inComposer && !updateCard && canAlways && (
           <span className="ml-auto text-2xs text-ink-faint">
@@ -197,23 +241,25 @@ export function PermissionCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid={testId}
       data-kind="capability"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">Awaiting approval</span>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+          Awaiting approval
+        </span>
         <span className="text-xs text-ink-faint">An app asks for a permission, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {appName} wants to {text}.
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it uses. You can
-        change it later under Runs → Permissions.
+        Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it
+        uses. You can change it later under Runs → Permissions.
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" />
       </div>
@@ -240,13 +286,15 @@ function ProjectAccessCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_access"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">Awaiting approval</span>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+          Awaiting approval
+        </span>
         <span className="text-xs text-ink-faint">This session wants to reach another project, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
@@ -262,16 +310,35 @@ function ProjectAccessCard({
       </p>
       {detail.to.trusted === false && (
         <p className="mt-1 px-3 text-xs leading-body text-ink-signal" data-testid="approval-untrusted">
-          You have not trusted {detail.to.name}. The session there reads none of its settings or instruction files and
-          runs none of its apps, but it works on that project&apos;s files under your own permission settings.
+          You have not trusted {detail.to.name}. The session there reads none of its settings or instruction
+          files and runs none of its apps, but it works on that project&apos;s files under your own permission
+          settings.
         </p>
       )}
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey
+          k={keys.allow}
+          label="Allow once"
+          onClick={() => onAnswer('allow')}
+          testId="approve-allow"
+          disabled={busy}
+        />
         {!detail.to.machine && (
-          <ActionKey k={keys.always} label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
+          <ActionKey
+            k={keys.always}
+            label="Always for this pair"
+            onClick={() => onAnswer('always')}
+            testId="approve-always"
+            disabled={busy}
+          />
         )}
-        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+        <ActionKey
+          k={keys.deny}
+          label="Deny"
+          onClick={() => onAnswer('deny')}
+          testId="approve-deny"
+          disabled={busy}
+        />
       </div>
     </div>
   )
@@ -306,13 +373,15 @@ function AgentStartCard({
   const remote = !!detail.machine
   return (
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-kind="agent_start"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">Awaiting approval</span>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+          Awaiting approval
+        </span>
         <span className="text-xs text-ink-faint">This session wants to start another agent, and waits</span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
@@ -322,11 +391,17 @@ function AgentStartCard({
         {remote
           ? `It opens on ${detail.machine}, in that machine's checkout of this repository, with that machine's own logins and its own approvals and Stop there; its answer comes back here. Nothing is remembered for another machine: it asks each time.`
           : inProject
-          ? 'It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer comes back here. Always for the project is remembered; revoke it in Settings.'
-          : 'It opens as its own session under this one, in a folder of its own outside any project, with its own approvals and Stop; its answer comes back here. Always for this session lasts until Centralu restarts.'}
+            ? 'It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer comes back here. Always for the project is remembered; revoke it in Settings.'
+            : 'It opens as its own session under this one, in a folder of its own outside any project, with its own approvals and Stop; its answer comes back here. Always for this session lasts until Centralu restarts.'}
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey
+          k={keys.allow}
+          label="Allow once"
+          onClick={() => onAnswer('allow')}
+          testId="approve-allow"
+          disabled={busy}
+        />
         {!remote && (
           <ActionKey
             k={keys.always}
@@ -347,7 +422,13 @@ function AgentStartCard({
             Always for this project
           </button>
         )}
-        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+        <ActionKey
+          k={keys.deny}
+          label="Deny"
+          onClick={() => onAnswer('deny')}
+          testId="approve-deny"
+          disabled={busy}
+        />
         {showProjectKey && inProject && !remote && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
@@ -375,32 +456,46 @@ function ProjectCreateCard({
 }) {
   return (
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="approval-card"
       data-kind="project_create"
       data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">Awaiting approval</span>
-        <span className="text-xs text-ink-faint">The orchestrator wants to make a new project, and waits</span>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+          Awaiting approval
+        </span>
+        <span className="text-xs text-ink-faint">
+          The orchestrator wants to make a new project, and waits
+        </span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
-        {detail.source ? 'Clone a repository as the new project' : 'Make a new project'} <span className="readout">{detail.name}</span>
+        {detail.source ? 'Clone a repository as the new project' : 'Make a new project'}{' '}
+        <span className="readout">{detail.name}</span>
         {detail.machine ? (
           <>
             {' '}
-            on <span className="readout" data-testid="approval-machine">{detail.machine}</span>
+            on{' '}
+            <span className="readout" data-testid="approval-machine">
+              {detail.machine}
+            </span>
           </>
         ) : null}
         ?
       </p>
       {detail.source && (
-        <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink" data-testid="approval-source">
+        <p
+          className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink"
+          data-testid="approval-source"
+        >
           {detail.source.git}
           {detail.source.branch ? ` (branch ${detail.source.branch})` : ''}
         </p>
       )}
-      <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted" data-testid="approval-path">
+      <p
+        className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted"
+        data-testid="approval-path"
+      >
         {detail.source ? 'into ' : ''}
         {detail.path}
       </p>
@@ -409,9 +504,21 @@ function ProjectCreateCard({
           ? `It is cloned with ${detail.machine ? `${detail.machine}'s` : "this machine's"} own git and saved sign-ins, without its submodules, and added to the sidebar. Nothing is made unless you choose Create.`
           : 'An empty folder is made there and added to the sidebar. Nothing is made unless you choose Create.'}
       </p>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
-        <ActionKey k={keys.allow} label="Create" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey
+          k={keys.allow}
+          label="Create"
+          onClick={() => onAnswer('allow')}
+          testId="approve-allow"
+          disabled={busy}
+        />
+        <ActionKey
+          k={keys.deny}
+          label="Deny"
+          onClick={() => onAnswer('deny')}
+          testId="approve-deny"
+          disabled={busy}
+        />
       </div>
     </div>
   )
@@ -541,7 +648,9 @@ export const APPROVAL_COMBOS = {
  * Y mirrors the bare y; D is Deny; L is the "always" one, kept off the keys a hand reaches for by habit. "Always" here
  * is session scope: project scope stays on ⌥a and ⌥-click, outside the composer.
  */
-function approvalComboOf(e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>): ApprovalKeyAction | null {
+function approvalComboOf(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+): ApprovalKeyAction | null {
   if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return null
   const k = letterOf(e)
   if (k === 'y') return { decision: 'allow' }
@@ -558,7 +667,9 @@ export function composerOf(target: EventTarget | null): string | null {
 
 /** Follows the keyboard into and out of a session's composer, for the hints on its card */
 function useComposerFocused(sessionId: string): boolean {
-  const [focused, setFocused] = useState(() => composerOf(typeof document === 'undefined' ? null : document.activeElement) === sessionId)
+  const [focused, setFocused] = useState(
+    () => composerOf(typeof document === 'undefined' ? null : document.activeElement) === sessionId,
+  )
   useEffect(() => {
     /*
      * Read after the event, not in it: focus moved by a component's layout effect fires focusin inside React's commit,

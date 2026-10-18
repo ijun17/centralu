@@ -211,6 +211,11 @@ export class ChildOwnership {
    */
   private readonly linked = new Map<string, LinkedReport>()
   readonly linkedReports: ReadonlyMap<string, LinkedReport> = this.linked
+  /**
+   * Told of each change to a linked report (#1038): a child start_agent started on a linked machine keeps what it is
+   * owed in its stored record (`RemoteAgents`), so a restarted hub still reports its end
+   */
+  private linkedChanged: ((sessionId: string) => void) | undefined
 
   constructor(private readonly store: OwnershipStore) {}
 
@@ -431,11 +436,16 @@ export class ChildOwnership {
     for (const [id, h] of [...this.given]) if (id === sessionId || h.from === sessionId || h.to === sessionId) this.given.delete(id)
   }
 
+  /** Set again with the same report after changing it in place, so its listener reads the change */
   setLinkedReport(sessionId: string, wait: LinkedReport): void {
     this.linked.set(sessionId, wait)
+    this.linkedChanged?.(sessionId)
   }
   dropLinkedReport(sessionId: string): void {
-    this.linked.delete(sessionId)
+    if (this.linked.delete(sessionId)) this.linkedChanged?.(sessionId)
+  }
+  onLinkedReportChange(listener: (sessionId: string) => void): void {
+    this.linkedChanged = listener
   }
 
   /**
@@ -467,7 +477,11 @@ export class ChildOwnership {
       this.notes.set(`${to}>${key.slice(from.length + 1)}`, n)
     }
     if (move.queued) for (const list of this.queues.values()) for (const r of list) if (r.callerSessionId === from) r.callerSessionId = to
-    for (const [id, wait] of this.linked) if (wait.orchestratorId === from && moving.has(id)) wait.orchestratorId = to
+    for (const [id, wait] of this.linked) {
+      if (wait.orchestratorId !== from || !moving.has(id)) continue
+      wait.orchestratorId = to
+      this.linkedChanged?.(id)
+    }
     // A start that already made its child: its handle follows the child
     for (const r of this.starts.values()) if (r.req.callerId === from && r.ended && 'childId' in r.ended && moving.has(r.ended.childId)) r.req.callerId = to
     moveCards()

@@ -242,11 +242,12 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
   // The same chip and look as the session row marker (#736): an approval wears the waiting look, a pure-white
-  // (ink-signal) ring, with a count where the label would be
+  // (ink-signal) 2px border on the chip itself (owner, 2026-10-18), with a count where the label would be
   const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
   await expect(mark).toHaveText('1')
   await expect(mark).toHaveAttribute('data-look', 'waiting')
-  await expect(mark).toHaveCSS('background-color', await tokenColor(page, '--color-ink-signal'))
+  await expect(mark.locator('> span')).toHaveCSS('border-top-color', await tokenColor(page, '--color-ink-signal'))
+  await expect(mark.locator('> span')).toHaveCSS('border-top-width', '2px')
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An expanded project has no summary — each row's own marker already says it

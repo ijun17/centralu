@@ -14,7 +14,7 @@ import { newSession as controlNewSession, setup as controlSetup } from './contro
 /** The control scenarios' first run with these projects (fixtures/control.ts), without trusting them */
 export const setup = (page: Page, projects: string[]) => controlSetup(page, { projects })
 
-/** A new session in `projectName` with no first instruction (fixtures/control.ts) */
+/** A new session in `projectName`, started at once from its menu, with no first instruction (fixtures/control.ts) */
 export const newSession = (page: Page, projectName: string): Promise<string> => controlNewSession(page, projectName)
 
 /** The panels on the project screen, in the order they stand */

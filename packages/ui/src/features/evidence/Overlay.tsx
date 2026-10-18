@@ -75,10 +75,9 @@ export function Overlay() {
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-surface-floor" data-testid="overlay">
-      <header className="flex items-center gap-2 border-b border-line bg-surface-side px-3 py-1.5">
-        <span className="text-xs uppercase text-ink-faint">
-          {overlay.kind === 'git' ? 'Git' : 'Files'}
-        </span>
+      {/* The panel's header height (h-10), so the two header lines meet in one line across the window (owner, 2026-10-18) */}
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-surface-side px-3">
+        <span className="text-xs uppercase text-ink-faint">{overlay.kind === 'git' ? 'Git' : 'Files'}</span>
         <button
           className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
           onClick={close}
@@ -109,12 +108,8 @@ export function Overlay() {
  * from the evidence panel next to the overlay belongs to that panel instead (Esc inside the
  * terminal).
  */
-export function overlayTakesEscape(
-  st: CoveringLayers,
-  target: EventTarget | null,
-): boolean {
+export function overlayTakesEscape(st: CoveringLayers, target: EventTarget | null): boolean {
   if (isCovered(st, 'overlay')) return false
   const el = target as Element | null
   return !(el && typeof el.closest === 'function' && el.closest('[data-testid="evidence-panel"]'))
 }
-

@@ -188,7 +188,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
             data-testid={`suggest-${q.key}`}
             disabled={waking || offline}
             onClick={() => ask(q.text)}
-            className="block w-full rounded-lg border border-line bg-surface-raised px-4 py-3 text-left text-md text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="block w-full rounded-lg border border-line bg-surface-raised px-4 py-3 text-left text-md text-ink transition-colors hover:border-line-strong disabled:opacity-50"
           >
             {q.text}
           </button>
@@ -212,7 +212,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
         through to the new-session window.
       */}
       <button
-        className="mt-3 text-sm text-ink-faint underline-offset-2 hover:text-ink hover:underline disabled:opacity-40"
+        className="mt-3 text-sm text-ink-faint underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
         data-testid="orchestrator-pick-folder"
         disabled={picking || offline}
         onClick={async () => {
@@ -281,7 +281,7 @@ function OrchestratorEmpty() {
             }
           }}
           placeholder="Ask the orchestrator anything…"
-          className="w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
+          className="w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
           data-testid="orchestrator-input"
         />
       </div>

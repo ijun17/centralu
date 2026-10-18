@@ -12,24 +12,30 @@ const asleep = (page: Page, sessionId: string) =>
   page.evaluate((id) => (window as any).__mock.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' }), sessionId)
 const resumeCalls = (page: Page) => page.evaluate(() => [...(window as any).__mock.resumeCalls] as string[])
 
-test('a sleeping session says so quietly, is not woken by selecting it, and wakes when its composer takes the keyboard', async ({ page }) => {
+/*
+ * Sleep is not shown (owner, 2026-10-18): it needs nothing from the person and typing wakes it, so neither the mark, its
+ * tooltip nor a line under the conversation says it. What is said is that a session is waking, and why it could not.
+ */
+test('a sleeping session says nothing, is not woken by selecting it, and wakes when its composer takes the keyboard', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
   const first = await newSession(page, 'alpha')
   const second = await newSession(page, 'alpha')
   await asleep(page, first)
 
-  // The sidebar's mark keeps its look and its tooltip names it; the second session is untouched
+  // The sidebar's mark keeps its look and its tooltip does not name sleep (the hook stays for tests); the second is untouched
   const mark = page.getByTestId(`session-row-${first}`).locator('[data-asleep]')
   await mark.hover()
-  await expect(page.getByTestId('tool-mark-tip-claude')).toContainText('asleep')
+  await expect(page.getByTestId('tool-mark-tip-claude')).toBeVisible()
+  await expect(page.getByTestId('tool-mark-tip-claude')).not.toContainText('asleep')
   await expect(page.getByTestId(`session-row-${second}`).locator('[data-asleep]')).toHaveCount(0)
 
-  // Selecting it shows it, asleep, and starts nothing
+  // Selecting it shows it, with no line about sleep, and starts nothing
   await page.getByTestId(`session-row-${first}`).click()
-  await expect(page.getByTestId('dormant-note')).toHaveText('Asleep — it wakes when you type to it')
+  await expect(page.getByTestId('chat-stream')).toBeVisible()
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await page.getByTestId(`session-row-${second}`).click()
   await page.getByTestId(`session-row-${first}`).click()
-  await expect(page.getByTestId('dormant-note')).toBeVisible()
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   expect(await resumeCalls(page)).toEqual([])
 
   // The composer taking the keyboard wakes it; the line says so while it starts
@@ -69,7 +75,7 @@ const setState = (page: Page, sessionId: string, state: string) =>
     [sessionId, state],
   )
 
-test('an asleep mark looks exactly like the same session awake; only the tooltip says asleep, and an error still stands out (#670)', async ({ page }) => {
+test('an asleep mark looks exactly like the same session awake, its tooltip too, and an error still stands out (#670)', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
   const awake = await newSession(page, 'alpha')
   const sleeper = await newSession(page, 'alpha')
@@ -93,9 +99,13 @@ test('an asleep mark looks exactly like the same session awake; only the tooltip
   expect((await look(page, failed)).look).toBe('stopped')
   expect(await look(page, failed)).not.toEqual(await look(page, sleeper))
 
-  // The information is kept for anyone who looks
+  // Not even the tooltip says it (owner, 2026-10-18): it reads as the same session awake
+  await markOf(awake).hover()
+  const awakeTip = (await page.getByTestId('tool-mark-tip-claude').textContent())!
+  await page.mouse.move(0, 0)
   await markOf(sleeper).hover()
-  await expect(page.getByTestId('tool-mark-tip-claude')).toHaveText(/asleep/)
+  await expect(page.getByTestId('tool-mark-tip-claude')).toHaveText(awakeTip)
+  expect(awakeTip).not.toContain('asleep')
 })
 
 test('a message to a sleeping session reads as waking, then goes through', async ({ page }) => {
@@ -103,7 +113,8 @@ test('a message to a sleeping session reads as waking, then goes through', async
   const id = await newSession(page, 'alpha')
   // The composer has the keyboard (#528); the host puts the session to sleep while it does
   await asleep(page, id)
-  await expect(page.getByTestId('dormant-note')).toHaveText('Asleep — it wakes when you type to it')
+  await expect(page.getByTestId(`session-row-${id}`).locator('[data-asleep]')).toHaveCount(1)
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await page.evaluate(() => ((window as any).__mock.wakeDelayMs = 1500))
   // The first key wakes it: the composer kept the keyboard while it fell asleep
   await page.keyboard.type('are you there?')

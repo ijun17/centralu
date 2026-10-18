@@ -1,15 +1,17 @@
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { centraluCallOf, launchesSubagent } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
 import { FileLink, Markdown } from '../Markdown.jsx'
 import { titlePieces } from '../filePath.js'
+import { formatSaidAt } from '../../../app/format.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
 import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
+import { CentraluCallBody } from './CentraluCallBody.jsx'
 
 /*
  * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
@@ -106,13 +108,14 @@ export const ChatRow = memo(function ChatRow({
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
-            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-lg rounded-br-md border bg-surface-hover px-3 py-2 text-ink ${
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border bg-surface-hover px-3 py-2 text-ink ${
               item.from || item.fromApp ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
             }`}
           >
             {item.text}
           </div>
         )}
+        {item.at !== undefined && <SaidAt at={item.at} className="pr-2" />}
       </div>
     )
   }
@@ -201,7 +204,9 @@ export const ChatRow = memo(function ChatRow({
       <ToolCard item={item} sessionId={sessionId} projectRoot={projectRoot} projectId={projectId} />
       {/* The app view this call opened (M4 B-1) — its own view is looked up by the card's id.
       Nothing is rendered if there is none */}
-      {item.callId && !nested && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
+      {item.callId && !nested && (
+        <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />
+      )}
     </>
   )
 })
@@ -287,34 +292,17 @@ export function ToolCard({
    * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
    * window knows, since a repository's own server may carry that name (#730 review)
    */
-  const knownApp = useStore((s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app))
+  const knownApp = useStore(
+    (s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app),
+  )
   const call = knownApp ? read : null
   // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
-  const pieces = useMemo(() => titlePieces(item.title, item.paths, projectRoot), [item.title, item.paths, projectRoot])
+  const pieces = useMemo(
+    () => titlePieces(item.title, item.paths, projectRoot),
+    [item.title, item.paths, projectRoot],
+  )
   const linked = pieces.some((p) => p.ref)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
-  const hidden = Math.max(0, lines.length - PREVIEW_LINES)
-  /*
-   * Whether the height cap **actually kicked in** cannot be known by counting — where wrapping
-   * happens is decided by the card's width. This has to be measured instead. Without it, one
-   * blob with no newlines (hidden === 0) gets clipped silently: the worst state is one where
-   * nothing tells anyone there is more to expand.
-   */
-  const outRef = useRef<HTMLPreElement>(null)
-  const [clamped, setClamped] = useState(false)
-  useLayoutEffect(() => {
-    const el = outRef.current
-    if (!el || open) {
-      setClamped(false)
-      return
-    }
-    const measure = () => setClamped(el.scrollHeight - el.clientHeight > 1)
-    measure()
-    // A change in card width changes how many lines wrap into it (a pane's width keeps moving in the grid)
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [open, item.result])
   /*
    * The tail of output while the tool is still running (#58, Codex's outputDelta). Only shown
    * until `result` arrives — unlike the preview, this shows **the end**: for a command still
@@ -322,23 +310,40 @@ export function ToolCard({
    * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
    * practice. The full output is what `result` delivers.)
    */
+  /** The whole input shows once the card is open, when it says more than the title row can (below) */
+  const showInput =
+    !call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60)
+  /** Still running: no answer yet and no failure */
+  const running = item.result === undefined && item.ok === undefined
   const liveTail =
-    item.result === undefined && item.live
+    open && item.result === undefined && item.live
       ? item.live.replace(/\s+$/, '').split('\n').slice(-PREVIEW_LINES)
       : []
 
   return (
     /*
-      A Centralu call's card (#730) keeps the card's shape and adds a left edge in the strong hairline: emphasis by
-      shape and weight, never the signal's white, which is kept for what waits on the person.
+      A Centralu call's card (#730; owner, 2026-10-18: it should stand out from the other tool calls and read as what
+      happened): a rounder card on its own tint with a stronger hairline, a sentence instead of a tool name, and the
+      session it reached as a chip. Emphasis by shape and weight, never the signal's white, which is kept for what waits
+      on the person. A failed call is dashed, as an error is on the inbox's capsule.
     */
     <div
-      className={`rounded-md border border-line bg-surface-raised/60 ${call ? 'border-l-2 border-l-line-strong' : ''}`}
+      className={
+        call
+          ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong/70'}`
+          : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line'}`
+      }
       data-testid="tool-card"
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
     >
       {call ? (
-        <CentraluCallHeader item={item} call={call} sessionId={sessionId} open={open} onToggle={() => setOpen((o) => !o)} />
+        <CentraluCallHeader
+          item={item}
+          call={call}
+          sessionId={sessionId}
+          open={open}
+          onToggle={() => setOpen((o) => !o)}
+        />
       ) : linked ? (
         /*
          * A title with a file the viewer can open (the audit of 2026-10, item 6). A link cannot sit inside the
@@ -347,17 +352,20 @@ export function ToolCard({
          */
         <div className="flex w-full items-center">
           <button
-            className="flex shrink-0 items-center gap-2 py-1.5 pl-2.5 pr-2 text-left"
+            className="flex shrink-0 items-center py-2 pl-3 pr-2.5 text-left"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             data-testid="tool-card-toggle"
           >
-            <span className="shrink-0 text-ink-faint">
-              <ChevronIcon open={open} />
+            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+              {item.tool}
             </span>
-            <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
           </button>
-          <span className="readout min-w-0 truncate py-1.5 text-xs text-ink-faint" data-testid="tool-card-title">
+          <span
+            className="readout min-w-0 truncate py-2 text-xs text-ink-muted"
+            data-testid="tool-card-title"
+            title={item.title}
+          >
             {pieces.map((p, i) =>
               p.ref ? (
                 <FileLink key={i} refInfo={p.ref} projectId={projectId}>
@@ -370,28 +378,53 @@ export function ToolCard({
           </span>
           {/* Not focusable: the toggle button above is the keyboard's way to the same action */}
           <div
-            className="flex min-h-[2rem] flex-1 shrink-0 items-center justify-end gap-2 self-stretch px-2.5"
+            className="flex min-h-[2rem] flex-1 shrink-0 items-center justify-end gap-2.5 self-stretch px-3"
             onClick={() => setOpen((o) => !o)}
             aria-hidden
           >
-            {item.ok === false && <span className="text-xs text-ink">Failed</span>}
+            {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" />}
+            {item.ok === false && <span className="text-2xs text-ink-muted">failed</span>}
+            <span className="shrink-0 text-ink-faint">
+              <ChevronIcon open={open} />
+            </span>
           </div>
         </div>
       ) : (
         <button
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           data-testid="tool-card-toggle"
+          title={item.title}
         >
+          {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
+          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+            {item.tool}
+          </span>
+          <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">
+            {item.title === item.tool ? '' : item.title}
+          </span>
+          {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" aria-label="running" />}
+          {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted">failed</span>}
           {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
           <span className="shrink-0 text-ink-faint">
             <ChevronIcon open={open} />
           </span>
-          <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
-          <span className="readout truncate text-xs text-ink-faint">{item.title}</span>
-          {item.ok === false && <span className="ml-auto shrink-0 text-xs text-ink">Failed</span>}
         </button>
+      )}
+
+      {/*
+        What the tool was given, whole, once the card is open (owner, 2026-10-18: a long command was cut to one line in
+        the title and could not be read anywhere). Only when it says more than the title row could.
+      */}
+      {showInput && (
+        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-input">
+          <span className="readout mb-1 block text-2xs uppercase tracking-wide text-ink-faint">Input</span>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-hover/25 px-2.5 py-1.5 font-mono text-xs leading-body text-ink-muted">
+            {item.tool === 'Bash' && <span className="select-none text-ink-faint">$ </span>}
+            {item.title}
+          </pre>
+        </div>
       )}
 
       {liveTail.length > 0 && (
@@ -405,33 +438,41 @@ export function ToolCard({
         </div>
       )}
 
-      {lines.length > 0 && (
+      {/* A Centralu call folds to its sentence: the answer shows only when the card is opened (owner, 2026-10-18) */}
+      {call && open && item.result && item.result.trim() && (
+        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-output">
+          <CentraluCallBody result={item.result} open={open} onOpen={() => setOpen(true)} />
+        </div>
+      )}
+
+      {/*
+        The output only once the card is open (owner, 2026-10-18: the preview lines were rarely read and made every
+        call a block). Closed, a card is its one title row; the tail of a running command shows when it is opened.
+      */}
+      {!call && open && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
+          {/* Named only beside a shown input, where the two would otherwise read as one block */}
+          {showInput && (
+            <span className="readout mb-1 block px-0.5 text-2xs uppercase tracking-wide text-ink-faint">
+              Output
+            </span>
+          )}
           <pre
-            ref={outRef}
-            className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted ${
-              open ? '' : PREVIEW_CLAMP
-            }`}
+            className="whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted"
             data-testid="tool-card-output"
           >
-            {open ? lines.join('\n') : lines.slice(0, PREVIEW_LINES).join('\n')}
+            {lines.join('\n')}
           </pre>
-          {!open && (hidden > 0 || clamped) && (
-            <button
-              className="readout mt-1 text-2xs text-ink-faint transition-colors hover:text-ink"
-              onClick={() => setOpen(true)}
-              data-testid="tool-card-more"
-            >
-              {/* Only counted when lines can actually be counted — "N more lines" would be a
-              lie for a blob with no newlines */}
-              {hidden > 0 ? `${hidden} more lines` : 'Show all'}
-            </button>
-          )}
         </div>
       )}
 
       {launchesSubagent(item.tool) && item.callId && (
-        <SubagentSteps sessionId={sessionId} callId={item.callId} projectRoot={projectRoot} projectId={projectId} />
+        <SubagentSteps
+          sessionId={sessionId}
+          callId={item.callId}
+          projectRoot={projectRoot}
+          projectId={projectId}
+        />
       )}
     </div>
   )
@@ -481,22 +522,36 @@ export function SubagentSteps({
         <span className="readout text-xs text-ink-faint">Subagent&apos;s steps</span>
       </button>
       {open && (
-        <div className="flex flex-col gap-2 border-t border-line px-2.5 py-2" data-testid="subagent-steps-list">
+        <div
+          className="flex flex-col gap-2 border-t border-line px-2.5 py-2"
+          data-testid="subagent-steps-list"
+        >
           {items.map((it) => (
-            <ChatRow key={it.seq} item={it} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} nested />
+            <ChatRow
+              key={it.seq}
+              item={it}
+              projectRoot={projectRoot}
+              projectId={projectId}
+              sessionId={sessionId}
+              nested
+            />
           ))}
           {steps?.loading && <p className="readout text-xs text-ink-faint">Loading the steps…</p>}
           {steps?.error && (
             <p className="text-xs text-ink" data-testid="subagent-steps-error">
               Could not load the steps — {steps.error}{' '}
-              <button className="readout text-ink-faint underline hover:text-ink" onClick={() => void loadMore(sessionId, callId)}>
+              <button
+                className="readout text-ink-faint underline hover:text-ink"
+                onClick={() => void loadMore(sessionId, callId)}
+              >
                 Try again
               </button>
             </p>
           )}
           {steps && !steps.loading && !steps.error && items.length === 0 && (
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-empty">
-              No steps were recorded for this agent. One that ran before Centralu kept them left only its report.
+              No steps were recorded for this agent. One that ran before Centralu kept them left only its
+              report.
             </p>
           )}
           {steps?.more && !steps.loading && (
@@ -510,6 +565,15 @@ export function SubagentSteps({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink */
+export function SaidAt({ at, className = '' }: { at: number; className?: string }) {
+  return (
+    <div className={`text-2xs text-ink-faint ${className}`} data-testid="said-at">
+      {formatSaidAt(at)}
     </div>
   )
 }

@@ -1,12 +1,19 @@
 import { isInTurn, STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent, type SessionState } from '@cc/protocol'
-import { applyEvent, bumpSeq, gridSessionIds, markRead as markReadPure, nextStateFor, type SessionSummary } from '@cc/core'
+import {
+  applyEvent,
+  bumpSeq,
+  gridSessionIds,
+  markRead as markReadPure,
+  nextStateFor,
+  type SessionSummary,
+} from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { StoreGet, StoreSet } from '../state.js'
 import { OFFSCREEN_TRIM_AT, putSubagentSteps, trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { projectScreenSessions } from '../screens.js'
 import { liveEventWatchers, penEvent, trackWorkingSince } from '../sessionList.js'
 import { omitKey } from '../patch.js'
-import { appendChat, subagentRow } from '../transcript.js'
+import { appendChat, stampSaid, subagentRow, type ChatItem } from '../transcript.js'
 import { notifyStateChange } from './notices.js'
 
 /**
@@ -34,14 +41,22 @@ export function subagentStepEvent(e: NormalizedEvent, set: StoreSet, get: StoreG
     const cur = get().subagentSteps[e.sessionId]?.[e.parentCallId]
     if (!cur || cur.more || cur.rows.some((r) => r.seq === e.stepSeq)) return true
     const row = subagentRow(e.sessionId, e.stepSeq, e.step)
-    set((s) => putSubagentSteps(s.subagentSteps, e.sessionId, e.parentCallId, { ...cur, rows: [...cur.rows, row] }))
+    set((s) =>
+      putSubagentSteps(s.subagentSteps, e.sessionId, e.parentCallId, { ...cur, rows: [...cur.rows, row] }),
+    )
     return true
   }
   return false
 }
 
 /** Any other event of a registered session: through the reducer, into the conversation, then the notices */
-export function conversationEvent(e: NormalizedEvent, sessionId: string, announced: boolean, set: StoreSet, get: StoreGet): void {
+export function conversationEvent(
+  e: NormalizedEvent,
+  sessionId: string,
+  announced: boolean,
+  set: StoreSet,
+  get: StoreGet,
+): void {
   const cur = get().sessions[sessionId]
   if (!cur) {
     // An event that arrived before the session was registered (the initial prompt streaming right
@@ -72,7 +87,7 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
    * no conversation to append and no slot yet.
    */
   const had = get().chat[sessionId]
-  const appended = appendChat(had ?? [], e)
+  const appended = stampNew(had ?? [], appendChat(had ?? [], e), Date.now())
   const chat = had === undefined && appended.length === 0 ? undefined : appended
   /*
    * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
@@ -158,12 +173,17 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
      * the person has not seen, and other sessions' cards are not about this one.
      */
     const turnBegan = withSeq.state === 'working' && cur.state !== 'working'
-    const notices = turnBegan ? st.notices.filter((n) => !(n.sessionId === sessionId && n.kind === 'done')) : st.notices
+    const notices = turnBegan
+      ? st.notices.filter((n) => !(n.sessionId === sessionId && n.kind === 'done'))
+      : st.notices
     return {
       sessions,
       ...(notices.length !== st.notices.length ? { notices } : {}),
       ...(lockedLate !== null
-        ? { wakeError: { ...st.wakeError, [sessionId]: lockedLate }, wakeLocked: { ...st.wakeLocked, [sessionId]: true } }
+        ? {
+            wakeError: { ...st.wakeError, [sessionId]: lockedLate },
+            wakeLocked: { ...st.wakeLocked, [sessionId]: true },
+          }
         : {}),
       ...(trimmed
         ? {
@@ -178,13 +198,17 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
       // A turn begins because an event arrived — this is where its start instant is
       // recorded, so the elapsed line survives remounting (issue #23)
       workingSince,
-      ...(stop !== st.stopping[sessionId] ? { stopping: stop ? { ...st.stopping, [sessionId]: stop } : omitKey(st.stopping, sessionId) } : {}),
+      ...(stop !== st.stopping[sessionId]
+        ? { stopping: stop ? { ...st.stopping, [sessionId]: stop } : omitKey(st.stopping, sessionId) }
+        : {}),
     }
   })
 
   // The tool says the Stop has not taken effect: the button stops saying "Stopping…" and says why (`stopping`)
   if (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL && get().stopping[sessionId]) {
-    set((st) => ({ stopping: { ...st.stopping, [sessionId]: { ...st.stopping[sessionId]!, failed: e.text } } }))
+    set((st) => ({
+      stopping: { ...st.stopping, [sessionId]: { ...st.stopping[sessionId]!, failed: e.text } },
+    }))
   }
 
   notifyStateChange(e, sessionId, cur, withSeq, announced, set, get)
@@ -197,9 +221,24 @@ type Stop = { turn: number | undefined; failed?: string }
  * the turn is the same one, but `workingSince` starts again when the session goes back to working, so the Stop moves to
  * that instant: otherwise the button would read Stop again while the stop is still on its way.
  */
-function stopAfter(stop: Stop | undefined, from: SessionState, to: SessionState, since: number | undefined): Stop | undefined {
+function stopAfter(
+  stop: Stop | undefined,
+  from: SessionState,
+  to: SessionState,
+  since: number | undefined,
+): Stop | undefined {
   if (!stop) return stop
   if (!isInTurn(to)) return undefined
   if (from === 'waiting_approval' && to === 'working') return { ...stop, turn: since }
   return stop
+}
+
+/** The rows this event added or changed at the end, marked with when they arrived (`ChatItem.at`) */
+function stampNew(had: ChatItem[], next: ChatItem[], at: number): ChatItem[] {
+  if (next === had) return next
+  const from = had.length > 0 && next[had.length - 1] !== had[had.length - 1] ? had.length - 1 : had.length
+  if (from >= next.length) return next
+  const out = next.slice()
+  for (let k = from; k < out.length; k++) out[k] = stampSaid(out[k]!, at)
+  return out
 }

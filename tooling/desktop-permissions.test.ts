@@ -212,6 +212,11 @@ describe('plugin permissions (#186)', () => {
         'core:window:allow-set-focus',
         'core:window:allow-show',
         'core:window:allow-unminimize',
+        // Windows: the OS title bar is off and the top bar draws minimize, maximize and close
+        // (WindowControls.tsx, os_integration.rs own_title_bar)
+        'core:window:allow-minimize',
+        'core:window:allow-toggle-maximize',
+        'core:window:allow-close',
         // The theme (#312): System mode hands the window's appearance back to the OS, and the
         // window's own background follows the floor colour
         'core:window:allow-set-theme',

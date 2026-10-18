@@ -47,24 +47,17 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
   let announced = false
 
   /*
-   * A session asks to start another agent (#673): a card in the top right whenever that session is off screen, the
-   * app in front or not. Other approvals leave one only while the app is behind (the notification policy), but this
-   * one used to stand unseen in a session the person was not looking at until it was withdrawn, and the session
-   * then worked alone. It now stands until answered, and comes back after the session's turn ends: each time it is
-   * raised off screen, the card is there; clicking it opens the session with the card.
+   * A session asks to start another agent (#673): a notice every time, on screen or not, until it is answered. It
+   * used to stand unseen in a session the person was not looking at until it was withdrawn, and the session then
+   * worked alone.
    */
   if (e.type === 'approval_request' && e.detail.kind === 'agent_start') {
-    const s = get()
-    const seen =
-      s.appFocused &&
-      isOnScreen(s.view, sessionId, {
-        focusedSessionId: s.focusedSessionId,
-        orchestratorId: s.orchestratorId,
-        gridSessions: gridSessionIds(s.gridPanels),
-        builderPaneSessionId: s.builderPaneSessionId,
-        projectScreen: projectScreenSessions(s),
-      })
-    if (!seen) pushNotice(set, { sessionId, kind: 'agent_start', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+    // Made on screen too (owner, 2026-10-18): a question the person must answer is always told
+    pushNotice(set, { sessionId, kind: 'agent_start', name: get().sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+  }
+  // The agent asks the person a question (a question card): told every time, and it stands until answered
+  if (e.type === 'question_request') {
+    pushNotice(set, { sessionId, kind: 'question', name: get().sessions[sessionId]?.name ?? sessionId, at: Date.now() })
   }
   // Answered (in another window, or withdrawn): the card in the top right has nothing left to open
   if (e.type === 'approval_resolved' && get().notices.some((n) => n.sessionId === sessionId && n.kind === 'agent_start')) {
@@ -109,15 +102,13 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
         builderPaneSessionId: s.builderPaneSessionId,
         projectScreen: projectScreenSessions(s),
       })
-    if (seen) {
-      set({ completion: { sessionId, at: Date.now() } })
-    } else {
-      pushNotice(set, {
-        sessionId,
-        kind: 'done',
-        name: s.sessions[sessionId]?.name ?? sessionId,
-        at: Date.now(),
-      })
+    if (seen) set({ completion: { sessionId, at: Date.now() } })
+    /*
+     * A notice either way (owner, 2026-10-18): the capsule writes it out for a few seconds, and whether the person saw
+     * it is decided when that line folds (Notices.tsx), not at this instant.
+     */
+    pushNotice(set, { sessionId, kind: 'done', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+    if (!seen) {
       /*
        * The card and the sound go together. A card that piles up silently reads as "the card is
        * there, why did it not alert me," and to someone who stepped away, a card is only seen once
@@ -145,6 +136,17 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
     if (projectId) get().refreshProjectGit(projectId)
   }
   return announced
+}
+
+/**
+ * What a session that now waits or failed is told as: a request to start an agent (#673) and a question the agent asked
+ * keep their own words, pushed by `noticeEvent` for the same event, rather than read as a plain approval.
+ */
+function waitKind(e: NormalizedEvent, s: SessionSummary): Notice['kind'] {
+  if (s.state === 'error') return 'error'
+  if (e.type === 'approval_request' && e.detail.kind === 'agent_start') return 'agent_start'
+  if (e.type === 'question_request') return 'question'
+  return 'approval'
 }
 
 /** The notices for a session whose state the event changed (`cur` before it, `withSeq` after) */
@@ -185,14 +187,13 @@ export function notifyStateChange(
     }
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     // "All done" is not about a single session, so it never creates a card (a per-session card already exists for that).
-    if (one) {
-      pushNotice(set, {
-        sessionId,
-        // A request to start an agent keeps its own words (#673), pushed above for the same event
-        kind: one.kind === 'error' ? 'error' : e.type === 'approval_request' && e.detail.kind === 'agent_start' ? 'agent_start' : 'approval',
-        name: withSeq.name,
-        at: Date.now(),
-      })
+    if (one || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
+      /*
+       * The notification policy decides the sound and the banner, not whether the top bar says it (owner, 2026-10-18).
+       * With the cards gone, a notice is one line the inbox's capsule writes out for a few seconds and nothing that
+       * covers the page, so an approval or an error is told there always, the session on screen included.
+       */
+      pushNotice(set, { sessionId, kind: waitKind(e, withSeq), name: withSeq.name, at: Date.now() })
     }
     syncBadge(get)
   }

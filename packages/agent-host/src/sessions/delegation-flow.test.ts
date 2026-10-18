@@ -90,7 +90,8 @@ describe('what a handoff gave away', () => {
 
 describe('the place a start holds', () => {
   it("a project's running children and its reserved starts count against the ceiling together", () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 2 }) as never, toolProfileOf: () => 'scoped' }))
+    // The store too: children on linked machines count under the ceiling (#1038), and none are recorded here
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 2 }) as never, toolProfileOf: () => 'scoped' }))
     const ceiling = flow.starts.agentCeilingError.bind(flow.starts)
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     expect(ceiling('caller', 'p1')).toBeNull()
@@ -111,7 +112,7 @@ describe('the place a start holds', () => {
     meta.set('orch', session('orch', { kind: 'orchestrator', projectId: null }))
     meta.set('kid', session('kid', { projectId: null }))
     children.setDelegation('orch>kid', { callerId: 'orch', sessionId: 'kid', agent: true, settled: false } as unknown as Delegation)
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 1 }) as never, toolProfileOf: () => 'orchestrator' }))
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 1 }) as never, toolProfileOf: () => 'orchestrator' }))
     expect(flow.starts.agentCeilingError('orch', ORCHESTRATOR_PLACE)).toBe(
       '1 agents you started are already working, the most at once. ' +
         'Wait for one (centralu_run(command="agent_session", args={sessionId: …, action: "wait"})) or stop one, then try again.',
@@ -119,7 +120,7 @@ describe('the place a start holds', () => {
   })
 
   it('releasing a place twice gives back one place, not two', () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 3 }) as never, toolProfileOf: () => 'scoped' }))
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 3 }) as never, toolProfileOf: () => 'scoped' }))
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     children.setDelegation('caller>child', { callerId: 'caller', sessionId: 'child', agent: true, settled: false } as unknown as Delegation)
     const a = reserve('caller', 'p1')

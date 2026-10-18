@@ -1,7 +1,8 @@
+import { usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
 import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol'
-import { MACHINE_STATUS_LABEL, cacheTooltipLine } from '@cc/core'
+import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
@@ -26,6 +27,8 @@ type Open = { machine: string | null; tool: ToolName }
 
 /** How often the limits are asked again while the window is in view */
 const POLL_MS = 5 * 60_000
+/** How soon a machine whose detect failed (its host restarting, the link catching up) is asked again */
+const RETRY_MS = 15_000
 
 const EMPTY: Group = { live: null, snap: {} }
 
@@ -81,9 +84,17 @@ export function UsageDonuts() {
   const connectedKey = useStore((s) => connectedIds(s.machines).join(','))
   const [groups, setGroups] = useState<Record<string, Group>>({})
   const [open, setOpen] = useState<Open | null>(null)
+  /*
+   * What the dropdown shows while it leaves: the last one opened, kept through its exit (usePresence), since `open`
+   * is already null by then and the content would vanish before the panel does.
+   */
+  const lastOpen = useRef<Open | null>(open)
+  if (open) lastOpen.current = open
+  const { shown: dropShown, leaving } = usePresence(open !== null)
+  const drop = dropShown ? (open ?? lastOpen.current) : null
   // A hook cannot be called conditionally — the value is unused anyway while closed
-  const openMeta = useToolMeta(open?.tool ?? '')
-  const openMachineName = useMachineName(open?.machine)
+  const openMeta = useToolMeta(drop?.tool ?? '')
+  const openMachineName = useMachineName(drop?.machine)
   /**
    * The tools a donut gets put up for (user request, 2026-09-09: "only connected agents should
    * get a donut").
@@ -99,6 +110,8 @@ export function UsageDonuts() {
    */
   const live = groups[HERE]?.live ?? null
 
+  /** Retries of a detect that failed, cleared when the bar goes */
+  const retries = useRef<ReturnType<typeof setTimeout>[]>([])
   /** Asks one machine (null: this computer) which tools are usable and what each one's limits are */
   const loadOne = useCallback(
     (machine: string | null) => {
@@ -124,18 +137,50 @@ export function UsageDonuts() {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
             void platform.agents
               .usage(tool, on)
-              .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
-              .catch((e: Error) => put({ usage: null, reason: e.message }))
+              .then((r) =>
+                put({
+                  usage: r.usage,
+                  reason: r.supported ? undefined : r.reason,
+                  cache: r.cache,
+                  sameAccount: r.sameAccountAsHub,
+                }),
+              )
+              .catch((e: Error) => {
+                put({ usage: null, reason: e.message })
+                // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
+                retries.current.push(
+                  setTimeout(() => {
+                    void platform.agents
+                      .usage(tool, on)
+                      .then((r) =>
+                        put({
+                          usage: r.usage,
+                          reason: r.supported ? undefined : r.reason,
+                          cache: r.cache,
+                          sameAccount: r.sameAccountAsHub,
+                        }),
+                      )
+                      .catch(() => {})
+                  }, RETRY_MS),
+                )
+              })
           }
         })
         /*
-         * A detection that failed is no answer (#850 item 8): it used to read as an empty list, and the strip said "No
-         * agent, install or sign in" of a machine that had not answered. What it said last stays; before any answer, nothing
+         * A question that failed is not an answer (#850 item 8; owner, 2026-10-18: a linked machine read "No agent" for minutes
+         * after its host restarted for an update, though Claude Code was there). The last answer stays, or nothing is
+         * drawn yet, and the machine is asked again soon rather than at the next 5-minute tick.
          */
-        .catch(() => {})
+        .catch(() => {
+          const t = setTimeout(() => loadOneRef.current?.(machine), RETRY_MS)
+          retries.current.push(t)
+        })
     },
     [platform],
   )
+  const loadOneRef = useRef(loadOne)
+  loadOneRef.current = loadOne
+  useEffect(() => () => retries.current.forEach(clearTimeout), [])
 
   /** The connected machines last asked, so a machine whose link comes back is asked once, and the others are not */
   const asked = useRef<Set<string>>(new Set())
@@ -199,7 +244,8 @@ export function UsageDonuts() {
       const s = useStore.getState()
       const tool = usageTools(s)[0]
       const machine = s.focusedSessionId ? (s.sessions[s.focusedSessionId]?.machine ?? null) : null
-      if (tool) return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
+      if (tool)
+        return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
       const first = (live ?? [])[0]
       return first ? { machine: null, tool: first } : null
     })
@@ -245,8 +291,8 @@ export function UsageDonuts() {
           </span>
         }
       >
-        <span className="text-xs text-ink-muted" data-testid="usage-no-agent">
-          No agent
+        <span className="flex" data-testid="usage-no-agent" aria-label="No agent connected">
+          <NoAgentMark />
         </span>
       </Tooltip>
     ) : null
@@ -271,7 +317,7 @@ export function UsageDonuts() {
         <MachineGroup key={id} machineId={id} group={groups[id] ?? EMPTY} isOpen={isOpen} show={show} />
       ))}
 
-      {open && (
+      {drop && (
         <>
           {/*
             Pressing outside closes it — covers the screen without dimming it (same rule as the inbox).
@@ -279,12 +325,19 @@ export function UsageDonuts() {
             window drag region, and on Windows a window drag swallows the mouseup, so a click never
             came and the dropdown stayed open (#365, DragRegion.tsx).
           */}
-          <div className="fixed inset-0 z-30" onMouseDown={() => show(null)} data-no-drag data-testid="usage-backdrop" />
+          {!leaving && (
+            <div
+              className="fixed inset-0 z-30"
+              onMouseDown={() => show(null)}
+              data-no-drag
+              data-testid="usage-backdrop"
+            />
+          )}
           <div
             data-no-drag
-            className="cc-drop absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
+            className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute right-0 top-full z-40 mt-1 w-[420px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)`}
             data-testid="usage-drop"
-            data-machine={open.machine ?? undefined}
+            data-machine={drop.machine ?? undefined}
           >
             <header className="flex items-center gap-2 border-b border-line px-4 py-2">
               <h2 className="text-md font-medium text-ink">Usage</h2>
@@ -296,7 +349,7 @@ export function UsageDonuts() {
               )}
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
-              <UsagePanel tool={open.tool} machine={open.machine} />
+              <UsagePanel tool={drop.tool} machine={drop.machine} />
             </div>
           </div>
         </>
@@ -324,11 +377,17 @@ function MachineGroup({
   show: (next: Open | null) => void
 }) {
   const info = useStore((s) => s.machines[machineId])
-  if (!info) return null
-  const connected = info.status === 'connected'
+  /*
+   * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected, or has no
+   * tool installed and logged in, is left out rather than drawn as "Offline" or "No agent". Tools will grow (OpenCode
+   * and others) and so will machines; the bar keeps only what the person can use. Settings → Machines still lists
+   * every machine with its state.
+   */
+  if (!info || info.status !== 'connected' || !group.live?.length) return null
+  const live = group.live
   return (
     <span
-      className="ml-1.5 flex items-center gap-0.5 rounded-full bg-surface-hover/30 pl-2 pr-0.5"
+      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -338,9 +397,7 @@ function MachineGroup({
         content={
           <span className="block">
             <span className="block text-ink">{info.name}</span>
-            <span className="mt-1 block text-ink-faint">
-              {connected ? 'Usage on this machine' : `${MACHINE_STATUS_LABEL[info.status]}: not asked until it is back`}
-            </span>
+            <span className="mt-1 block text-ink-faint">Usage on this machine</span>
           </span>
         }
       >
@@ -348,26 +405,16 @@ function MachineGroup({
           {info.name}
         </span>
       </Tooltip>
-      {!connected ? (
-        <span className="ml-0.5 text-2xs text-ink-faint" data-testid={`usage-machine-state-${machineId}`}>
-          {MACHINE_STATUS_LABEL[info.status]}
-        </span>
-      ) : group.live !== null && group.live.length === 0 ? (
-        <span className="ml-0.5 text-2xs text-ink-faint" data-testid={`usage-machine-no-agent-${machineId}`}>
-          No agent
-        </span>
-      ) : (
-        (group.live ?? []).map((tool) => (
-          <Donut
-            key={tool}
-            tool={tool}
-            machine={machineId}
-            snap={group.snap[tool]}
-            active={isOpen(machineId, tool)}
-            onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
-          />
-        ))
-      )}
+      {live.map((tool) => (
+        <Donut
+          key={tool}
+          tool={tool}
+          machine={machineId}
+          snap={group.snap[tool]}
+          active={isOpen(machineId, tool)}
+          onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
+        />
+      ))}
     </span>
   )
 }
@@ -414,7 +461,9 @@ function Donut({
         <span className="block">
           <span className="block text-ink">{label}</span>
           <span className="readout mt-1 block">
-            {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
+            {known
+              ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
+              : 'Weekly usage unknown'}
           </span>
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
           {known && snap?.sameAccount && (
@@ -455,8 +504,14 @@ function Donut({
          * where a ring is drawn, whether the hand touched the donut or the panel behind it would
          * look mismatched — the shape that lights up has to be the shape of the button.
          */
-        className={`relative z-40 flex items-center rounded-full p-0.5 transition-colors hover:bg-surface-hover/50 ${
-          active ? 'bg-surface-hover/50' : ''
+        /*
+         * A linked machine's donuts sit in a capsule drawn by its outline only (owner, 2026-10-18): a filled capsule
+         * left the hover's fill nothing to stand out from. The hover is a full step, so it shows on either ground.
+         * Inside that capsule the donut has no padding of its own and the capsule keeps 2px on every side, so its
+         * hover circle stands the same distance from the outline above, below and beside it (owner).
+         */
+        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'p-0.5'} transition-colors hover:bg-surface-hover ${
+          active ? 'bg-surface-hover' : ''
         }`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
@@ -488,14 +543,15 @@ function Donut({
           {/*
             The center letter is the **same mark** as the sidebar session chip. This single
             letter is why, with two donuts standing side by side, which is which reads without
-            a legend.
+            a legend. Set in the same face as that chip (Pretendard, owner 2026-10-18).
           */}
+          {/* y 11, not 12: Pretendard's capitals sit low around a central baseline (measured at 4x: 0.9px under the middle) */}
           <text
             x="12"
-            y="12"
+            y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-mono ${known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold ${known ? 'text-ink' : 'text-ink-faint'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}
@@ -503,5 +559,26 @@ function Donut({
         </svg>
       </button>
     </Tooltip>
+  )
+}
+
+/**
+ * Where a donut would stand when a machine has no usable agent (owner, 2026-10-18): an empty dashed ring of the donut's
+ * size, not the words "No agent", which took the capsule's width and were cut at its edge. The tooltip around it says
+ * what it means.
+ */
+function NoAgentMark() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden className="shrink-0 text-ink-faint">
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="2.2 2.6"
+      />
+    </svg>
   )
 }

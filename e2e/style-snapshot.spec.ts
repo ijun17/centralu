@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * A record of every colour and type metric the main screens paint, for changes that must not move
@@ -332,8 +333,7 @@ test('usage popover', async ({ page }) => {
 
 test('new session dialog', async ({ page }) => {
   await openDemo(page)
-  await page.getByTestId('project-menu-centralu').click()
-  await page.getByTestId('new-session-centralu').click()
+  await openSessionDialog(page, 'centralu')
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await snapshot(page, 'new-session')
 })
