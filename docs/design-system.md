@@ -163,16 +163,14 @@ small caps label or capsule by hand fails, naming the component to use. Its list
 **can only shrink**, as the corner guard's does. Once it lands, use these for any new button, toggle,
 label, capsule or field.
 
-## Known departures
+## Settled departures
 
-Places where the screen today does not follow a rule above, kept here until they are settled:
+Places where the screen did not follow a rule above, settled by the owner on 2026-10-18:
 
-- The background work capsule's running dot is `bg-white`, not a token (`BackgroundTasks.tsx`): no
-  theme reaches it, and on a light theme it is a white dot on a light capsule. It is also the one white
-  that does not wait on the person, by the owner's choice (a lit dot for running work).
-- The white edges use three inks: `ink` on the inbox capsule, `ink-signal` at 80% on waiting cards, and
-  `ink-signal` on session marks and panels.
-- The disabled fade is 40% at 31 sites, 50% at 12 and 60% at 3; #1122's `Button` settles it at 40%.
+- The background work capsule's running dot was `bg-white`; it is `ink-signal` now, so a theme reaches it.
+- The white edges used three inks; every edge that waits on the person is `ink-signal` at full strength now
+  (inbox capsule, waiting cards, session marks).
+- The disabled fade was 40%, 50% or 60%; it is 50% everywhere. #1122's `Button` follows it.
 
 ## Changing this
 

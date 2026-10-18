@@ -52,7 +52,7 @@ is not the obvious one.
   running)" (`grid/GridView.tsx`), "Close terminal (the shell exits)" (`evidence/Terminal.tsx`).
 - Breaks it: nouns as buttons, "Builder", "Runs", "Versions" (`pinned-app/PinnedApps.tsx`) and "Output"
   (`session/chat-rows/ChatRow.tsx`). These are toggles that open a panel, so they may be a case of their
-  own (open question 3.9).
+  own (settled in section 3).
 
 ### 1.4 "…" when another step follows
 
@@ -85,7 +85,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   reason" (`settings/apply-update.ts`), "Could not alert: …" (`store/events/notices.ts`, unclear what
   failed). Also "This session can't use <app>'s tools" (`session/appReachNotice.ts`), the one contraction
   among "Could not" and "cannot".
-- Open: how much of the reason to pass through as the system wrote it (open question 3.3).
+- How much of the reason to pass through: settled in section 3.
 
 ### 1.6 An empty state says there is nothing, and how to get something
 
@@ -96,7 +96,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
 - Short where the next step is plain: "No commits yet", "No changes", "No results", "The trash is empty".
 - Breaks it: "Empty" (`files/FileTree.tsx`) and "None." (`app-share/AppReviewDetails.tsx`) say less than
   their neighbours. Periods are mixed: "No projects yet." and "No runs yet." have one, most do not
-  (open question 3.4).
+  (settled in section 3).
 
 ### 1.7 Counts and times
 
@@ -123,7 +123,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   (`settings/Settings.tsx`).
 - Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`,
   `project/CreateProjectDialog.tsx`) and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
-  `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (open question 3.7).
+  `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
 
 ### 1.9 No internal words on screen unless the person needs them
 
@@ -143,7 +143,7 @@ These are:
 - "<session id>" in a hint (`project/NewSessionDialog.tsx`). "host" also means an ssh host
   (`settings/AddMachineForm.tsx`), which is the person's own word there.
 
-Where one of these stays, it should be because the next step needs it (open question 3.6).
+Where one of these stays, it should be because the next step needs it (open question 4.1).
 
 ### 1.10 Tooltips are short
 
@@ -173,7 +173,7 @@ hold.
   (`sidebar/dialogs/ConfirmDelete.tsx`).
 - Breaks it: "Remove?" with "Keep" (`settings/MachinesSection.tsx`) where every other one says "Cancel";
   "the Trash" (the OS's) and "trash" (Centralu's) are both written for different things, and not always
-  the right one (open question 3.8).
+  the right one (settled in section 3).
 
 ### 1.12 One state, one wording
 
@@ -191,61 +191,33 @@ A state the person has to recognise should read the same everywhere. Today: "Awa
   answers spend more of your usage." (`session/SessionSettings.tsx`).
 - No "please", no exclamation marks, no "we".
 - Spelling is British ("Customise…", "Accent colour", `settings/ThemeSection.tsx`), while dates and times
-  are American ("3:42 PM", "October 18") (open question 3.5).
+  are American ("3:42 PM", "October 18") (settled in section 3).
 
 ## 2. When a string is added
 
 Until the open questions are settled, a new string follows section 1 and copies the nearest existing
 string for the same thing, so it stays consistent. It does not start a new wording.
 
-## 3. Open questions
+## 3. Decided (owner, 2026-10-18)
 
-Each one needs the owner's choice. An option marked "(today)" is what the app mostly does now; that is not a
-recommendation. Where nothing is marked, the app does not settle on one yet.
+These settle the choices the draft asked about. Strings that do not follow them yet are fixed in a copy pass.
 
-### 3.1 Tone
+| Question | Decision | Example |
+|---|---|---|
+| Tone | Plain and brief: say what is and what to do, no warmth, no jokes | "Nothing waiting" |
+| Addressing the person | "you" where the person is the subject, impersonal elsewhere | "Needs your answer"; "Nothing restarts until you apply it." |
+| How much an error explains | What failed, a plain reason and the next step; the raw reason behind "Details". "Something went wrong" goes | "Could not read this app's runs: its record file is missing. Runs start being recorded on the next call. Details" |
+| Periods | None on a label, a tooltip or a single-line hint; one when there are two sentences or more | "Switch branch"; "Restart every idle session on the installed version. Busy sessions keep running." |
+| Spelling and formats | American throughout | "Customize…", "Accent color", "3:42 PM" |
+| This computer | "This computer" everywhere | "Usage on this computer" |
+| Trash | "the Trash" for the OS's, "Centralu's trash" for Centralu's | "Move the folder to the Trash too"; "Chat history stays in Centralu's trash" |
+| Labels that open a place | A toggle that opens a panel may be its noun; an action is a verb | "Runs" (toggle); "Open in VS Code" (action) |
+| One word per state | The state label on marks and cards; a sentence with the session's name in the capsule's peek | "Awaiting approval"; "api asks for approval" |
+| Korean | English only for now; Korean appears only in what the person and the agents write | |
 
-| Option | Example |
-|---|---|
-| A. Plain and neutral: say what is, no warmth, no jokes (today) | "Nothing waiting" |
-| B. Plain, with a little warmth where nothing is wrong | "Nothing waiting. Finished agents will show up here" |
-| C. Terse, closer to a terminal | "0 waiting" |
+## 4. Open questions
 
-### 3.2 Addressing the person
-
-| Option | Example |
-|---|---|
-| A. "you" where the person is the subject, impersonal elsewhere (today) | "Needs your answer"; "Nothing restarts until you apply it." |
-| B. Always impersonal | "Answer needed"; "Nothing restarts until the update is applied." |
-| C. Always "you", and the app speaks as "Centralu" | "Centralu needs your answer" |
-
-### 3.3 How much an error explains
-
-| Option | Example |
-|---|---|
-| A. What failed, then the system's reason as written (today) | "Could not read runs: ENOENT: no such file or directory, open '…/runs.jsonl'" |
-| B. What failed, a plain reason, and the next step; the raw reason behind "Details" | "Could not read this app's runs: its record file is missing. Runs start being recorded on the next call. Details" |
-| C. A short line, and the full reason only in a tooltip or a log | "Could not read runs" (tooltip: the raw error) |
-
-Whichever is picked: is a bare "Commit failed" ever enough, and should "Something went wrong" be removed?
-
-### 3.4 Periods
-
-| Option | Example |
-|---|---|
-| A. No period on a label, a tooltip or a single-line hint; a period when there are two sentences or more | "Switch branch"; "Restart every idle session on the installed version. Busy sessions keep running." |
-| B. Never a period on screen except in a dialog's body text | "No projects yet" |
-| C. A period on every full sentence, whatever its length | "See sessions and apps side by side." |
-
-### 3.5 Spelling and formats
-
-| Option | Example |
-|---|---|
-| A. British spelling, American dates and times (today) | "Customise…", "3:42 PM" |
-| B. American throughout | "Customize…", "Accent color", "3:42 PM" |
-| C. British throughout | "Customise…", "15:42", "18 October 2026" |
-
-### 3.6 Internal words
+### 4.1 Internal words
 
 | Option | Example |
 |---|---|
@@ -254,46 +226,3 @@ Whichever is picked: is a bare "Commit failed" ever enough, and should "Somethin
 | C. Allowed wherever they are accurate (today, mostly) | "…a desktop app whose agent host is not held by the background keeper" |
 
 The same choice covers "manifest", "bridge", "MCP" and tool names such as `update_centralu`.
-
-### 3.7 This computer
-
-| Option | Example |
-|---|---|
-| A. "This computer" everywhere | "Usage on this computer" |
-| B. "This machine" everywhere, the word used for linked machines | "This machine", "Add a machine" |
-| C. The computer's own name, with "this computer" only where there is no name | "Usage on Jun's MacBook" |
-
-### 3.8 Trash
-
-| Option | Example |
-|---|---|
-| A. "the Trash" for the OS's, "Centralu's trash" for Centralu's, written out each time | "Move the folder to the Trash too"; "Chat history stays in Centralu's trash" |
-| B. Centralu's trash gets its own name | "Move to Recently deleted" |
-| C. One lower-case "trash" for both, the place named only where it matters | "Moves it to the trash (Finder)" |
-
-### 3.9 Labels that open a place
-
-| Option | Example |
-|---|---|
-| A. A toggle that opens a panel may be its noun; an action is a verb (today) | "Runs", "Versions" (toggles); "Open in VS Code" (action) |
-| B. Always a verb | "Show runs", "Show versions" |
-| C. A noun with the place capitalised as a name | "Open Runs", "Open Git" |
-
-### 3.10 One word per state
-
-| Option | Example |
-|---|---|
-| A. The state label everywhere (`stateLabel`) | "Awaiting approval" in the inbox, the mark's tooltip and the card |
-| B. The state label on marks and cards, a sentence with the session's name in the capsule's peek | "Awaiting approval"; "api asks for approval" (today, partly) |
-| C. A shorter word everywhere | "Approval" / "Question" / "Error" |
-
-### 3.11 Korean, later
-
-| Option | Example |
-|---|---|
-| A. English only; Korean appears only in what the person and the agents write | (today) |
-| B. A Korean translation behind a setting; every string gets a key; English stays the source | "New session" / "새 세션"; "3:42 PM" / "오후 3:42" |
-| C. The system's language, Korean included, with dates and times in that language too | "토요일, 2026년 10월 18일" in the day divider |
-
-If B or C: are product words (session, approval, project, app) translated or kept in English, and do
-times follow the language or stay English as `formatSaidAt` decides today?
