@@ -356,7 +356,7 @@ describe('auto Centralu boundaries (#603)', () => {
   /*
    * One worktree per test (#368). Creating a worktree session and deleting it with its work kept is about fifty git
    * processes, and on windows-2022 each takes 100 ms or more: with both states in one test, the safe preset's ran past
-   * the 15 s Windows limit (run 38775014188). Auto-maintenance is off, as in manager.test.ts (#503): each commit would
+   * the 15 s Windows limit (run 38775014188). Auto-maintenance is off, as in manager-worktree.test.ts (#503): each commit would
    * start one more git, which goes on working in the repository after the commit returns.
    */
   const git = (cwd: string, ...args: string[]) =>
