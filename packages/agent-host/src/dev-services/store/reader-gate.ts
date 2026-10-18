@@ -18,8 +18,9 @@ export class StoreTooNewError extends Error {
     readonly minReaderVersion: number,
     readonly knownVersion: number,
     readonly dbPath: string,
+    message = storeTooNewMessage(minReaderVersion, knownVersion, dbPath),
   ) {
-    super(storeTooNewMessage(minReaderVersion, knownVersion, dbPath))
+    super(message)
     this.name = 'StoreTooNewError'
   }
 }
@@ -33,6 +34,22 @@ export function storeTooNewMessage(minReaderVersion: number, knownVersion: numbe
     `[agent-host] This data was written by a newer Centralu.\n` +
     `  It can be read from store version ${minReaderVersion} on; this Centralu knows store versions up to ${knownVersion}.\n` +
     `  Update Centralu to open it. Nothing in the data was changed.\n` +
+    `  Store: ${dbPath}`
+  )
+}
+
+/**
+ * Said when the record is not a version and the store is newer than this host (#384): nothing says which builds can
+ * read it, so this one does not try. It keeps the phrase the supervisor matches, for the same reason.
+ */
+function unreadableFloorMessage(stored: string, userVersion: number, knownVersion: number, dbPath: string): string {
+  return (
+    `[agent-host] This data was written by a newer Centralu, and which versions can read it cannot be told.
+` +
+    `  app_settings.${MIN_READER_KEY} holds ${JSON.stringify(stored.slice(0, 40))}, not a store version; the store is at version ${userVersion}, and this Centralu knows store versions up to ${knownVersion}.
+` +
+    `  Update Centralu to open it. Nothing in the data was changed.
+` +
     `  Store: ${dbPath}`
   )
 }
@@ -63,23 +80,48 @@ export abstract class ReaderGate {
   }
 
   protected refuseIfTooNew(): void {
-    const floor = this.storedMinReader()
-    const known = this.latestKnownVersion
-    if (floor === null || floor <= known) return
+    const refusal = this.tooNew(this.dbPath)
+    if (!refusal) return
     this.db.close()
-    throw new StoreTooNewError(floor, known, this.dbPath)
+    throw refusal
   }
 
-  /** null when nothing is recorded yet: a new store, or one last opened by a host from before #292 */
+  /**
+   * Why this host cannot open the store, or null. A record above this host refuses (#292). A record that is not a
+   * version (#384), which only a hand edit or a write cut short leaves, is worked out again from the steps the store
+   * has run when this host knows every one of them (`migrate`), and refuses when the store is newer than this host:
+   * a floor worked out from fewer steps could open what this host cannot read, and would lower the record for good.
+   */
+  protected tooNew(dbPath: string): StoreTooNewError | null {
+    const known = this.latestKnownVersion
+    const floor = this.storedMinReader()
+    if (floor !== null) return floor > known ? new StoreTooNewError(floor, known, dbPath) : null
+    const stored = this.unreadableMinReader()
+    const userVersion = this.db.pragma('user_version', { simple: true }) as number
+    if (stored === null || userVersion <= known) return null
+    return new StoreTooNewError(userVersion, known, dbPath, unreadableFloorMessage(stored, userVersion, known, dbPath))
+  }
+
+  /** null when nothing is recorded yet (a new store, or one last opened by a host from before #292), or the record is not a version */
   protected storedMinReader(): number | null {
     const raw = readStoreKey(this.db, MIN_READER_KEY)
-    const n = raw !== null ? Number(raw) : NaN
-    // Only a hand-edited store holds something else here; computing it again is better than trusting it
-    return Number.isInteger(n) && n >= 0 ? n : null
+    return raw !== null ? floorOf(raw) : null
+  }
+
+  /** The record as stored, when it is there and is not a version (#384); null otherwise */
+  protected unreadableMinReader(): string | null {
+    const raw = readStoreKey(this.db, MIN_READER_KEY)
+    return raw !== null && floorOf(raw) === null ? raw : null
   }
 
   protected writeMinReader(version: number): void {
     // v13 raises it before v16 has made the table (`writeStoreKey` makes it)
     writeStoreKey(this.db, MIN_READER_KEY, String(version))
   }
+}
+
+/** A stored record read as a version, or null for anything else */
+function floorOf(raw: string): number | null {
+  const n = Number(raw)
+  return raw.trim() !== '' && Number.isInteger(n) && n >= 0 ? n : null
 }

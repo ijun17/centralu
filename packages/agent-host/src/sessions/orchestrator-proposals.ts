@@ -1,7 +1,7 @@
 import { RESERVED_APP_IDS } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
-import type { SettingsRecords } from '../dev-services/store/settings.js'
+import { listSetting, type SettingsRecords } from '../dev-services/store/settings.js'
 import { proposedMcpServerNameError } from './orchestrator-tools.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 
@@ -37,6 +37,11 @@ const isTextList = (v: unknown): v is string[] => Array.isArray(v) && v.every(is
 /** A list kept in one app_settings row, read the way another build may have left it (#384, `readJsonObjects`) */
 const storedList = readJsonObjects
 
+type McpProposal = { name: string; command: string; args: string[]; why?: string }
+type Skill = { name: string; content: string; why?: string }
+const isMcp = (x: Record<string, unknown>) => isText(x.name) && isText(x.command) && isTextList(x.args)
+const isSkill = (x: Record<string, unknown>) => isText(x.name) && isText(x.content)
+
 export interface ProposalResult {
   ok: boolean
   error?: string
@@ -66,9 +71,17 @@ export class OrchestratorProposals {
     private readonly changed: () => void = () => {},
   ) {}
 
+  /**
+   * One of the lists, as a row another build reads and rewrites too (#384, `listSetting`): an element this build
+   * cannot read is kept when the list is written back, and a row that is not a list is set aside before it is replaced
+   */
+  private list<T extends object>(key: string, has: (x: Record<string, unknown>) => boolean) {
+    return listSetting<T>(this.store, key, has)
+  }
+
   /** MCP server proposals waiting on the person's approval */
   mcpProposals(): { name: string; command: string; args: string[]; why?: string }[] {
-    return storedList(this.store.appSetting(MCP_PROPOSALS_KEY), (x) => isText(x.name) && isText(x.command) && isTextList(x.args))
+    return this.list<McpProposal>(MCP_PROPOSALS_KEY, isMcp).read()
   }
 
   /** Saves an MCP server proposal (propose_mcp_server) — validation and persistence only */
@@ -99,7 +112,7 @@ export class OrchestratorProposals {
     if (this.mcpProposals().some((p) => p.name === spec.name)) return { ok: false, error: PENDING(spec.name) }
     const proposals = this.mcpProposals()
     proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
-    this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
+    this.list<McpProposal>(MCP_PROPOSALS_KEY, isMcp).write(proposals)
     this.changed()
     return { ok: true }
   }
@@ -123,7 +136,7 @@ export class OrchestratorProposals {
     if (this.skillProposals().some((p) => p.name === spec.name)) return { ok: false, error: PENDING(spec.name) }
     const proposals = this.skillProposals()
     proposals.push({ name: spec.name, content: spec.content, why: spec.why })
-    this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals))
+    this.list<Skill>(SKILL_PROPOSALS_KEY, isSkill).write(proposals)
     this.changed()
     return { ok: true }
   }
@@ -140,7 +153,7 @@ export class OrchestratorProposals {
    * what it would even launch.
    */
   private legacyMcpServers(): { name: string; command: string; args: string[] }[] {
-    return storedList(this.store.appSetting(LEGACY_MCP_SERVERS_KEY), (x) => isText(x.name) && isText(x.command) && isTextList(x.args))
+    return storedList(this.store.appSetting(LEGACY_MCP_SERVERS_KEY), isMcp)
   }
 
   /**
@@ -187,12 +200,12 @@ export class OrchestratorProposals {
 
   /** Skill proposals waiting on the person's approval (#71) */
   skillProposals(): { name: string; content: string; why?: string }[] {
-    return storedList(this.store.appSetting(SKILL_PROPOSALS_KEY), (x) => isText(x.name) && isText(x.content))
+    return this.list<Skill>(SKILL_PROPOSALS_KEY, isSkill).read()
   }
 
   /** Skills that have been approved and loaded into the orchestrator's role prompt (#71) */
   orchestratorSkills(): { name: string; content: string }[] {
-    return storedList(this.store.appSetting(SKILLS_KEY), (x) => isText(x.name) && isText(x.content))
+    return this.list<Skill>(SKILLS_KEY, isSkill).read()
   }
 
   /**
@@ -215,7 +228,7 @@ export class OrchestratorProposals {
     const proposals = this.skillProposals()
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending skill proposal named "${name}"`, restart: false }
-    this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    this.list<Skill>(SKILL_PROPOSALS_KEY, isSkill).write(proposals.filter((p) => p.name !== name))
     if (!approve) {
       this.changed()
       return { ok: true, restart: false }
@@ -223,7 +236,7 @@ export class OrchestratorProposals {
 
     const skills = this.orchestratorSkills().filter((s) => s.name !== name)
     skills.push({ name: hit.name, content: hit.content })
-    this.store.setAppSetting(SKILLS_KEY, JSON.stringify(skills))
+    this.list<Skill>(SKILLS_KEY, isSkill).write(skills)
     // After both writes, so a screen that reads on the announcement sees the proposal gone and the skill saved
     this.changed()
     return { ok: true, restart: true }
@@ -234,7 +247,7 @@ export class OrchestratorProposals {
   deleteOrchestratorSkill(name: string): ProposalOutcome {
     const skills = this.orchestratorSkills()
     if (!skills.some((s) => s.name === name)) return { ok: false, error: `No skill named "${name}"`, restart: false }
-    this.store.setAppSetting(SKILLS_KEY, JSON.stringify(skills.filter((s) => s.name !== name)))
+    this.list<Skill>(SKILLS_KEY, isSkill).write(skills.filter((s) => s.name !== name))
     // If a deleted skill stayed in the prompt, the deletion would be a lie — it is swapped in immediately
     return { ok: true, restart: true }
   }
@@ -261,7 +274,7 @@ export class OrchestratorProposals {
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending proposal named "${name}"`, restart: false }
     const dropProposal = () => {
-      this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+      this.list<McpProposal>(MCP_PROPOSALS_KEY, isMcp).write(proposals.filter((p) => p.name !== name))
       this.changed()
     }
     if (!approve) {

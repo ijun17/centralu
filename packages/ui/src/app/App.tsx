@@ -18,6 +18,7 @@ import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
+import { KeptDraftCard } from '../features/session/KeptDraft.jsx'
 import { GridView } from '../features/grid/GridView.jsx'
 import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
 import { PinnedApps } from '../features/pinned-app/PinnedApps.jsx'
@@ -288,6 +289,7 @@ export function App({
           </OnceOpened>
           <ImportAppDialog />
           <Gust />
+          <KeptDraftCard />
           <Toast />
           <GlobalKeys />
         </div>

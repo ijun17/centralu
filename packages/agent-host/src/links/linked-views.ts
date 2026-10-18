@@ -1,4 +1,4 @@
-import { RpcMethods } from '@cc/protocol'
+import { RpcMethods, parseTolerant } from '@cc/protocol'
 import type { RemoteViews } from '../views/view-host.js'
 import type { RpcHandler } from './router.js'
 import { rpcError } from '../rpc-error.js'
@@ -24,8 +24,17 @@ export function linkedViews(call: RpcHandler): RemoteViews {
         }
         throw err
       }
-      const d = RpcMethods['apps.viewDocument'].result.parse(answer)
-      return { app: { appId: d.appId, projectId: d.projectId }, uri: d.uri, origin: d.origin, resource: d.resource }
+      /*
+       * Read as the window reads a newer host's answers (#384): a field or a word this hub does not know costs that
+       * value only. An origin mode it cannot read is `opaque`, the one that shares nothing: a view on the wrong side
+       * of that line could reach another app's storage. Without the app, the address or the document there is no view.
+       */
+      const d = parseTolerant(RpcMethods['apps.viewDocument'].result, answer)
+      const projectId: unknown = d?.projectId
+      if (typeof d?.appId !== 'string' || typeof d.uri !== 'string' || !(typeof projectId === 'string' || projectId === null) || !Array.isArray(d.resource?.contents)) {
+        throw rpcError("The machine's answer for this app view could not be read. Update Centralu on both computers to the same version.")
+      }
+      return { app: { appId: d.appId, projectId: d.projectId }, uri: d.uri, origin: d.origin === 'app' ? 'app' : 'opaque', resource: d.resource }
     },
   }
 }

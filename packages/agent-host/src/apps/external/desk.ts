@@ -165,6 +165,13 @@ export type BrokerHost = {
    * the answer is the desk's job.
    */
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null>
+  /**
+   * A run_agent request is over and its row is closed (#378), with the outcome the app was given: the schema check
+   * comes after the agent answers, so the turn's own end is not yet the run's. The host decides what becomes of the
+   * session it stood up, and the app has its answer once that is done: a screen that reads the sessions after its call
+   * sees them as they will stay. It never fails the app's call.
+   */
+  agentRunEnded?(run: { runId: string; sessionId: string; status: 'ok' | 'error' | 'cancelled' | 'rejected' }): Promise<void>
 }
 
 /**
@@ -384,10 +391,23 @@ export class BrokerDesk {
       const a =
         tool === 'run_agent' ? await this.runAgent(app, args, call, row) : tool === 'call_app' ? await this.callApp(app, args, call) : await this.hostData(app, args, call)
       if (a.status !== 'delegated') row.close(a.status, a.status === 'ok' ? null : firstText(a.result), a.status === 'error' ? a.result : null)
+      if (a.status !== 'delegated') await this.agentRunEnded(row, a.status)
       return a.result
     } catch (e) {
-      row.close(call.signal.aborted ? 'cancelled' : 'error', (e as Error).message)
+      const status = call.signal.aborted ? 'cancelled' : 'error'
+      row.close(status, (e as Error).message)
+      await this.agentRunEnded(row, status)
       throw e
+    }
+  }
+
+  /** Tells the host a run_agent row with a session is closed (#378); a throw there is the host's, never the app's */
+  private async agentRunEnded(row: RunRow, status: 'ok' | 'error' | 'cancelled' | 'rejected'): Promise<void> {
+    if (!row.sessionId) return
+    try {
+      await this.host?.agentRunEnded?.({ runId: row.id, sessionId: row.sessionId, status })
+    } catch (e) {
+      console.error(`[apps] what follows the end of an agent run failed: ${(e as Error).message}`)
     }
   }
 
@@ -490,11 +510,24 @@ export class BrokerDesk {
     try {
       r = await host.runAgent(
         { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
-        { signal: call.signal, progress: call.progress, onSession: (id) => row.link(id), onUsage: (t) => (row.used = t) },
+        {
+          signal: call.signal,
+          progress: call.progress,
+          /*
+           * The run keeps what it was asked once a session stands up for it (#378), and below what it answered: the session
+           * may be deleted when the run ends. A kept request is also how the run still counts as an agent started (`appAgentUse`)
+           */
+          onSession: (id) => {
+            row.agent = { request: prompt }
+            row.link(id)
+          },
+          onUsage: (t) => (row.used = t),
+        },
       )
     } finally {
       this.agentsRunning.delete(key)
     }
+    row.agent = { request: prompt, answer: r.text, ...(r.output !== undefined ? { output: r.output } : {}) }
     if (!check) return say(r.text)
 
     const structured = r.output !== undefined ? r.output : parseJsonAnswer(r.text)

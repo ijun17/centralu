@@ -36,6 +36,8 @@ export type PortBook = {
   assigned: Record<string, number>
   /** Ports that left because they were held by someone else. Never given to anyone again */
   retired: number[]
+  /** Fields a newer build added (#384), kept as they are when the book is written back */
+  [field: string]: unknown
 }
 
 export interface PortBookStore {
@@ -60,16 +62,63 @@ export type OriginPortsOptions = {
 
 export const ORIGIN_PORT_RANGE = [20000, 32767] as const
 
-/** The stored value is a file — malformed parts are dropped on read (a failure to start is a bigger risk than a dropped port being reassigned) */
+const validPort = (p: unknown): p is number => Number.isInteger(p) && (p as number) > 0 && (p as number) < 65536
+
+/** Every port a value names, at any depth: what a value this build cannot read may hold */
+function portsIn(v: unknown, out: number[] = []): number[] {
+  if (validPort(v)) out.push(v)
+  else if (Array.isArray(v)) for (const x of v) portsIn(x, out)
+  else if (v && typeof v === 'object') for (const x of Object.values(v)) portsIn(x, out)
+  return out
+}
+
+/**
+ * The stored value is a file another build writes too (#384). A part this build cannot read is not used, but its
+ * ports are retired, so an assignment a newer build wrote in another shape never has its port given to another app:
+ * a failure to start is a bigger risk than a dropped entry, and a port handed out twice leaks one app's storage to
+ * another. Fields this build does not know are kept, so writing the book back does not drop them.
+ */
 function readBook(raw: PortBook | null): PortBook {
-  const book: PortBook = { assigned: {}, retired: [] }
-  if (!raw || typeof raw !== 'object') return book
-  const validPort = (p: unknown): p is number => Number.isInteger(p) && (p as number) > 0 && (p as number) < 65536
-  if (raw.assigned && typeof raw.assigned === 'object') {
-    for (const [k, v] of Object.entries(raw.assigned)) if (validPort(v)) book.assigned[k] = v
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { assigned: {}, retired: [] }
+  const { assigned, retired, ...rest } = raw
+  const book: PortBook = { ...rest, assigned: {}, retired: [] }
+  const unread: number[] = []
+  if (assigned && typeof assigned === 'object') {
+    for (const [k, v] of Object.entries(assigned)) {
+      if (validPort(v)) book.assigned[k] = v
+      else portsIn(v, unread)
+    }
   }
-  if (Array.isArray(raw.retired)) book.retired = raw.retired.filter(validPort)
+  if (Array.isArray(retired)) for (const p of retired) (validPort(p) ? book.retired : unread).push(...portsIn(p))
+  const used = new Set([...Object.values(book.assigned), ...book.retired])
+  for (const p of unread) {
+    if (used.has(p)) continue
+    used.add(p)
+    book.retired.push(p)
+  }
   return book
+}
+
+/**
+ * The stored row read as a book (`apps.viewPorts`, main.ts), or null for none. Text that is not a JSON object (a write
+ * cut short, a hand edit) cannot say which app had which port, so every number in it that could be a port is retired,
+ * and its apps get new ports: they lose what they kept under the old origin, and no app gets another's. `say` is told
+ * once per reading of such a row; the next port written replaces it.
+ */
+export function parsePortBook(raw: string | null, say: (line: string) => void): PortBook | null {
+  if (raw === null) return null
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    v = undefined
+  }
+  if (v && typeof v === 'object' && !Array.isArray(v)) return v as PortBook
+  const retired = [...new Set((raw.match(/\d+/g) ?? []).map(Number).filter(validPort))]
+  say(
+    `is not a JSON object (${JSON.stringify(raw.slice(0, 80))}): its ${retired.length} port number(s) are retired so none goes to another app, and its apps get new ports`,
+  )
+  return { assigned: {}, retired }
 }
 
 function listenOn(port: number, handler: RequestListener): Promise<Server> {
@@ -201,3 +250,4 @@ export class OriginPorts {
     throw new Error(`No free view origin port for ${key} in ${lo}-${hi}`)
   }
 }
+

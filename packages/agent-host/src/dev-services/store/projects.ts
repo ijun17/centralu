@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { ProjectInfo, SavedCommand, ToolDefaults } from '@cc/protocol'
-import { asObj } from '../../json-value.js'
+import { asObj, isObj } from '../../json-value.js'
 import { parseJson, readJsonList } from './json.js'
 import { z } from 'zod'
 
@@ -166,10 +166,23 @@ export class ProjectRecords {
     return out
   }
 
-  /** Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107) */
+  /**
+   * Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107). It is
+   * written over the stored value, not over this build's reading of it (#384): what a newer build keeps next to a
+   * tool's model and effort, and a tool this build does not know, stay as they were. A value that is not a JSON object
+   * is replaced, and named on stderr with what it held.
+   */
   setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
-    const all = { ...this.projectToolDefaults(projectId), [tool]: d }
-    this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
+    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
+      { default_models: string | null } | undefined
+    const raw = row?.default_models ?? null
+    const stored = parseJson(raw)
+    if (raw !== null && !isObj(stored)) {
+      console.error(`[store] projects.default_models of ${projectId} held ${JSON.stringify(raw.slice(0, 200))}, not a JSON object; replaced by this pick`)
+    }
+    const all = asObj(stored)
+    const next = { ...all, [tool]: { ...asObj(all[tool]), ...d } }
+    this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(next), projectId)
   }
 
   /**

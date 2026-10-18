@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
+import { asideKeyOf } from './store/settings.js'
 
 const session = (s: Store, id: string) =>
   s.sessions.upsertSession({
@@ -27,6 +28,8 @@ const KEEP_ALL = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', r
 const PER_SESSION = [
   'agent_depth', 'hub_ask_depth', 'report_paused', 'fresh_start', 'code_intelligence',
   'background_tasks', 'tool_prefix', 'launch_settings', 'external_synced', 'session_apps',
+  // Where a list setting sets aside a value it could not read (#384, `asideKeyOf`)
+  asideKeyOf('session_apps:x').slice(0, -2),
 ]
 
 describe('purging a session deletes the settings it keeps', () => {

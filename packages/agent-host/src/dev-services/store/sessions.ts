@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { SessionInfo } from '@cc/protocol'
-import { Interruption as InterruptionSchema, sessionLiveDefaults } from '@cc/protocol'
+import { Interruption as InterruptionSchema, PermissionPreset, sessionLiveDefaults } from '@cc/protocol'
 import { z } from 'zod'
 import { readJson, readJsonList } from './json.js'
 
@@ -155,6 +155,11 @@ export class SessionRecords {
         ...r
       }) => ({
         ...r,
+        /*
+         * A preset a newer build added reads as `safe` (#384): a permission that cannot be read is a refusal, and
+         * `safe` asks about everything. Passed on as it was, every adapter and gate here took it for `normal`.
+         */
+        permissionPreset: PermissionPreset.safeParse(r.permissionPreset).data ?? 'safe',
         autoNamed: !!r.autoNamed,
         /*
          * Whether a session coordinates is also relational (#80, #81): having a visibility list
