@@ -1178,6 +1178,13 @@
      1px on top brings every look within a quarter pixel of the middle */
   padding-top: 1px;
 }
+/* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
+   the 1px goes under it (measured at 4x) */
+.cc-mark > .cc-chip.cc-chip-letter {
+  font-family: var(--font-sans);
+  padding-top: 0;
+  padding-bottom: 1px;
+}
 .cc-mark[data-look='answering'] > .cc-chip {
   border: 2px solid var(--color-ink-muted);
 }

@@ -41,8 +41,8 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
       >
         <span
           /*
-            A bright letter on a dark chip, set in the terminal font (monospace): a single-character glyph needs a
-            fixed width, or the row would jitter. The chip is 14px inside the ring's 1.5px, so the mark is 17px in
+            A bright letter on a dark chip, in the UI's own face (Pretendard, owner 2026-10-18: rounder and clearer at
+            this size than the code face; the chip's width is fixed, so a fixed-width face bought nothing here). The chip is 14px inside the ring's 1.5px, so the mark is 17px in
             every look.
 
             The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
@@ -52,7 +52,7 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
             brightness is the resource this app uses to state urgency, so spending it on decoration
             would cut into that signal by the same amount. Its fill follows the look (`.cc-mark`).
           */
-          className="readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
+          className="cc-chip cc-chip-letter flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
         >
           {meta.mark}
         </span>
