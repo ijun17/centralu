@@ -215,7 +215,7 @@ export class QueuedRequests {
       return null
     }
     if (r.via === 'send_to_session') return null
-    // Queued by a newer build through a tool this one does not know (#384): no gate here stands for it, so it is refused
+    // A tool this build does not know (#384): `restoreQueued` leaves such a row in the store, so this is the guard behind it
     return `The request was queued through ${JSON.stringify(r.via)}, which this version of Centralu cannot deliver.`
   }
 

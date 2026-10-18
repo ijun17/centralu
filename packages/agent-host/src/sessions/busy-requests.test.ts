@@ -684,18 +684,21 @@ describe('a queued request across a host swap (#677)', () => {
    * A newer build may queue through a tool this one does not know (#384): another word in `queued_requests.via`, left
    * for whichever host serves the store next. It used to pass the delivery gate, which checks only the tools it names,
    * and go in framed as an ask_project without that tool's gates. A request this build cannot read is not delivered,
-   * and the requester is told.
+   * and not dropped either: the row stays for a build that knows the tool, and the requests behind it still go.
    */
-  it('is not delivered by a next host that does not know the tool it was queued through, and the requester is told', async () => {
+  it('is not delivered by a next host that does not know the tool it was queued through, and stays for one that does', async () => {
     const { a, b } = await queuedFor()
+    expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'second in line', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     await w.mgr.detachAll()
-    // A conversation the next host can resume, to tell the requester in
-    w.store.sessions.upsertSession({ ...w.store.sessions.listSessions().find((x) => x.id === b)!, externalId: 'ext-b' })
-    ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare(`UPDATE queued_requests SET via = 'hand_off'`).run()
+    ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare(`UPDATE queued_requests SET via = 'hand_off' WHERE text = 'queued work'`).run()
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { claude } = next([])
-    await w.until(() => w.store.children.listQueuedRequests().length === 0)
-    expect(claude.handles.get(a)?.sent ?? []).toEqual([])
-    await w.until(() => w.store.messages.loadMessages(b, 50).some((m) => JSON.stringify(m.payload).includes('which this version of Centralu cannot deliver')))
+    await w.until(() => (claude.handles.get(a)?.sent.length ?? 0) === 1)
+    expect(claude.handles.get(a)!.sent[0]).toContain('second in line')
+    expect(claude.handles.get(a)!.sent.join(' | ')).not.toContain('queued work')
+    expect(w.store.children.listQueuedRequests()).toMatchObject([{ via: 'hand_off', text: 'queued work' }])
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('"hand_off"')
+    said.mockRestore()
   })
 
   it('is delivered at once by a next host that finds the session at rest', async () => {
