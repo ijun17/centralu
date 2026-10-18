@@ -114,6 +114,10 @@ export class RemoteAgents {
    * to read the cards of, answer and add a note to (`ownTurn`). Gone with the turn's end, a link drop and the host
    */
   private readonly instructed = new Set<string>()
+  /** Children in a turn there, as their machine's events last said (`trackBusy`) */
+  private readonly busy = new Set<string>()
+  /** The last message number seen of each child there, so a link's replay of a message is not taken twice */
+  private readonly lastSeq = new Map<string, number>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -397,21 +401,31 @@ export class RemoteAgents {
           this.sentNow(rec.sessionId, framed)
           const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
           if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
-          return this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId))
+          // The machine recorded it before it answered: in a turn that is no longer the caller's, it was only a message there
+          return this.instructed.has(rec.sessionId) ? this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId)) : this.wentElsewhere(rec)
         }
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }
         // New work counts under the caller's project as a local child's does (#1038); nothing is awaited up to the arming
         const full = this.places.agentCeilingError(callerId, this.host.meta.get(callerId)?.projectId ?? '')
         if (full) return { ok: false, error: full }
-        // A new turn: its cards are new cards (#676)
+        // A new turn: its cards are new cards (#676). Read at rest just now, so no turn is running there as far as the hub knows
         const framed = agentNoteFrame(label, text)
         this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
+        this.busy.delete(rec.sessionId)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
         const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
         if (!sent.ok) {
           if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
           return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+        }
+        /*
+         * The machine recorded it before it answered. Taken into a turn already running there (the person began one
+         * after it was read at rest), it is a message in another's turn: nothing of that turn is the caller's (#1038 review)
+         */
+        if (!this.instructed.has(rec.sessionId)) {
+          if (this.reportArmed(rec)) this.host.children.dropLinkedReport(rec.sessionId)
+          return this.wentElsewhere(rec)
         }
         return this.working(rec, true)
       }
@@ -471,7 +485,8 @@ export class RemoteAgents {
     const sessionId = e.sessionId
     const rec = this.of(sessionId)
     if (!rec) return
-    if (e.type === 'user_message' && this.fromHubHere(rec, e.from) && e.text === rec.sent) this.tookInstruction(rec)
+    if (e.type === 'user_message') this.messageTaken(rec, e)
+    else this.trackBusy(sessionId, e)
     const wait = this.waits.get(sessionId)
     if ((e.type === 'approval_request' || e.type === 'question_request') && typeof e.requestId === 'string') {
       this.cardRaised(rec, e.type === 'approval_request' ? 'approval' : 'question', e.requestId, !!wait)
@@ -618,6 +633,53 @@ export class RemoteAgents {
   }
 
   /**
+   * A message the child took there (#1038 review). The instruction this hub last sent it, from this link, is evidence
+   * the turn that takes it is the caller's (`tookInstruction`), unless another turn was already running there when it
+   * went in: then it is only a message in that turn (a send that raced the person's own message, a note that arrived
+   * after the caller's turn had ended and the person's had begun), and the turn stays another's. Any other message (the
+   * person's) means what runs there is not the caller's alone: the turn is not read as the caller's again until the
+   * child takes an instruction from this hub. A report held over the caller's background work is then no longer the
+   * caller's to finish: the turn that ends it would be the person's. A message seen already (a link's replay) is skipped
+   */
+  private messageTaken(rec: RemoteAgent, e: LinkedEvent): void {
+    const sessionId = rec.sessionId
+    if (typeof e.seq === 'number') {
+      if (e.seq <= (this.lastSeq.get(sessionId) ?? -1)) return
+      this.lastSeq.set(sessionId, e.seq)
+    }
+    if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
+      if (!this.busy.has(sessionId) || this.instructed.has(sessionId)) this.tookInstruction(rec)
+      return
+    }
+    this.instructed.delete(sessionId)
+    const report = this.host.children.linkedReports.get(sessionId)
+    if (report?.orchestratorId !== rec.callerId || !report.paused) return
+    this.host.children.dropLinkedReport(sessionId)
+    void this.host.tellSession(
+      rec.callerId,
+      `[Centralu] "${rec.name}" [${sessionId}] on ${rec.machine} took a message there that you did not send while the background work of your turn still ran ` +
+        '(the person on that machine, most likely). What it does now is not yours, and nothing more of your work is reported. agent_session status reads where it stands.',
+      { sessionId, name: rec.name },
+      true,
+    )
+  }
+
+  /** Whether the child is in a turn there, as the machine's events last said (#1038 review): an instruction taken in one is a message in it */
+  private trackBusy(sessionId: string, e: LinkedEvent): void {
+    const step = linkedTurnEnd(true, e)
+    if (step?.step === 'busy') this.busy.add(sessionId)
+    else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') this.busy.delete(sessionId)
+  }
+
+  /** A send the machine took into a turn that is not the caller's: delivered, and followed no further */
+  private wentElsewhere(rec: RemoteAgent): ChildRunResult {
+    return {
+      ...this.working(rec, false),
+      notice: `It went in while a turn you did not give it was running on ${rec.machine} (the person's, most likely), as a message in that turn. Nothing of that turn is reported to you; send again once it is at rest.`,
+    }
+  }
+
+  /**
    * Whether the child is no longer anywhere (#1038 review): its machine removed from Centralu, or the machine's sessions
    * (read now, or as last known when it cannot be asked) do not have it
    */
@@ -637,7 +699,10 @@ export class RemoteAgents {
 
   /** Whether the turn running there is the one its caller gave: a call waits on it, or its end is owed to the caller */
   private ownTurn(rec: RemoteAgent): boolean {
-    return this.instructed.has(rec.sessionId) && (this.waits.has(rec.sessionId) || this.reportArmed(rec))
+    // A report held over the background work of a turn that ended is no turn of the caller's running (#1038 review)
+    const report = this.host.children.linkedReports.get(rec.sessionId)
+    const running = this.waits.has(rec.sessionId) || (report?.orchestratorId === rec.callerId && !report.paused)
+    return running && this.instructed.has(rec.sessionId)
   }
 
   /**
@@ -851,6 +916,8 @@ export class RemoteAgents {
     if (this.records().some((r) => r.sessionId === sessionId)) this.save(this.records().filter((r) => r.sessionId !== sessionId))
     this.toldDown.delete(sessionId)
     this.instructed.delete(sessionId)
+    this.busy.delete(sessionId)
+    this.lastSeq.delete(sessionId)
     for (const key of [...this.toldCards]) if (key.startsWith(`${sessionId}\0`)) this.toldCards.delete(key)
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
   }

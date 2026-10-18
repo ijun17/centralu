@@ -373,9 +373,10 @@ linked both ways cannot start each other's sessions past the setting. The checko
 repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
 never the address as written, which can carry a token. Its caller may answer a question card of the turn it gave it
 (`agent_session answer`), never an approval card there, `auto` or not: what that computer runs is allowed there. A
-turn is the one it gave only on evidence, the machine's record of the hub's own instruction seen since the hub last
-lost sight of the child (a link drop, a restart), so the person's own turn there is never read, answered or reported
-as the caller's.
+turn is the one it gave only on evidence: the machine's record of this hub's own instruction, taken while no other
+turn ran there, with no other message since and not since the hub last lost sight of the child (a link drop, a
+restart), so the person's own turn there is never read, answered or reported as the caller's, a report held over the
+caller's background work included.
 
 **Proposals** (`propose_mcp_server`, `propose_skill`, #838) are approved by name, and approval installs or saves what
 is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a

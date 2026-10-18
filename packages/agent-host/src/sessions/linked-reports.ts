@@ -49,6 +49,8 @@ export type LinkedEvent = {
   error?: { message?: string }
   /** A card's request id (`approval_request`, `question_request`) */
   requestId?: unknown
+  /** A message's number in its conversation (`user_message`) */
+  seq?: unknown
   machine?: unknown
   machineId?: unknown
   text?: unknown

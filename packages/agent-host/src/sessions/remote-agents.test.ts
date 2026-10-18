@@ -117,6 +117,144 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
 })
 
 // #1038 review (RV12): on the link's return, a turn the person ran there meanwhile was reported as the caller's answer
+/**
+ * Whose turn runs on the child's machine (#1038 review, RV12): only one that took the instruction this hub sent, and
+ * never one the person started there, is read, answered, added to or reported as the caller's.
+ */
+describe("the turn on the child's machine, read as the caller's only on evidence", () => {
+  let answered: string[]
+  let sentTexts: string[]
+  let holdSend: Promise<void> | null
+  const q = { requestId: 'r1', questions: [{ question: 'Delete prod?', header: 'Delete', multiSelect: false, options: [{ label: 'yes', description: '' }, { label: 'no', description: '' }] }] }
+
+  function following(): RemoteAgents {
+    answered = []
+    sentTexts = []
+    holdSend = null
+    store.projects.addProject({ id: 'p1', path: '/p', name: 'p' })
+    store.projects.setProjectTrusted('p1', true)
+    const reader = {
+      read: async () => ({ ok: true, state, lines: [] }),
+      list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
+      machineLinked: () => true,
+      lastWords: async () => "the person's private answer",
+      lastUserMessage: async () => ({ ok: true, message: lastUser }),
+      cards: async () => ({ ok: true, approval: null, questions: [q] }),
+      answerQuestion: async (_s: string, id: string) => {
+        answered.push(id)
+        return { ok: true }
+      },
+      send: async (_s: string, text: string) => {
+        sentTexts.push(text)
+        if (holdSend) await holdSend
+        return { ok: true }
+      },
+    } as unknown as LinkedSessions
+    const host = {
+      children,
+      store,
+      linkedReader: reader,
+      meta: new Map([[caller.id, caller]]),
+      settleLinkedTurn: (id: string) => settled.push(id),
+      linkedTasksRunning: () => [],
+      tellSession: async (_to: string, text: string) => void told.push(text),
+      autoBoundaryOpen: () => false,
+      emit: () => {},
+      uiPreferences: () => ({}),
+    } as unknown as RemoteAgentsHost
+    const ra = new RemoteAgents(host, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
+    ra.restore()
+    return ra
+  }
+  const act = (ra: RemoteAgents, action: string, more: Record<string, unknown> = {}) =>
+    ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action, ...more } as never)
+  const reportOwed = () => children.linkedReports.has(child.sessionId)
+
+  it("leaves a turn the person starts there while the caller's report waits on its background work to the person", async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    // The caller's turn completed with its own background work running there: its report is held over that work
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    // The person types there; their turn runs and asks a question
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
+    expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
+    expect(await act(ra, 'answer', { card: 'r1.any', text: 'yes' })).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
+    expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(answered).toEqual([])
+    expect(sentTexts).toEqual([])
+    // Nothing of the person's turn is owed to the caller, who is told its work is no longer followed
+    expect(reportOwed()).toBe(false)
+    expect(told.some((t) => t.includes('took a message there that you did not send'))).toBe(true)
+  })
+
+  it("takes neither a paused report's caller nor anyone else for the turn's owner before a message settles it", async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    // Held over its work, the turn is over: no card of what runs there is the caller's
+    ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
+    expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
+  })
+
+  it('does not follow a turn the person began after a send read the child at rest, which took the send as a message', async () => {
+    const ra = following()
+    state = 'idle'
+    let release!: () => void
+    holdSend = new Promise<void>((resolve) => (release = resolve))
+    const sending = act(ra, 'send', { text: 'do X' })
+    await eventually(() => sentTexts.length === 1)
+    // There: the person's message began a turn first; the hub's text went into it as a message
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: sentTexts[0], from: HUB })
+    release()
+    expect(await sending).toMatchObject({ ok: true, state: 'working', reported: false, notice: expect.stringContaining('a turn you did not give it') })
+    expect(reportOwed()).toBe(false)
+    state = 'working'
+    ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
+    expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
+    expect(told.some((t) => t.includes('asking a question'))).toBe(false)
+  })
+
+  it("does not take the person's turn for the caller's when a note arrives after the caller's turn ended", async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    let release!: () => void
+    holdSend = new Promise<void>((resolve) => (release = resolve))
+    const note = act(ra, 'send', { text: 'use the staging data' })
+    await eventually(() => sentTexts.length === 1)
+    // The caller's turn ends (its report goes, as the linked reports send it), and the person types at once
+    ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+    children.dropLinkedReport(child.sessionId)
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 3, text: sentTexts[0], from: HUB })
+    release()
+    expect(await note).toMatchObject({ ok: true, reported: false, notice: expect.stringContaining('a turn you did not give it') })
+    expect(reportOwed()).toBe(false)
+  })
+
+  it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 7, text: 'TASK', from: HUB })
+    ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+    children.dropLinkedReport(child.sessionId)
+    // The link comes back and replays what it relayed before
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 7, text: 'TASK', from: HUB })
+    expect(reportOwed()).toBe(false)
+    // The same text from a hub whose sender this machine's link does not qualify
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 8, text: 'TASK', from: { sessionId: 'hub.x._hub-orchestrator' } })
+    expect(reportOwed()).toBe(false)
+  })
+})
+
 describe('a child read at rest when the link is back after a missed end', () => {
   const returned = async (last: { text: string; from: unknown } | null, sent = 'TASK') => {
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...child, sent }]))

@@ -579,10 +579,16 @@ a caller's `auto`, which alone lets it answer a local child's approval, is never
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
 refused, as neither a queue nor a fork reaches another machine. "The turn the caller gave it" rests on evidence: the
-hub has seen the machine record the instruction it last sent (its `user_message` from `HUB_SENDER`, with the text it
-keeps as `sent`) since anything of that turn could have been missed (`instructed`); a link drop and a restart clear it
-until the machine's last message is read again (below). A note that goes in after the turn it was meant for ended
-starts a turn of its own, and that turn's end is owed as a send's is (`tookInstruction`). When the link drops, a waiting call returns with that
+hub has seen the machine record the instruction it last sent (its `user_message` from this machine's `HUB_SENDER`, with
+the text it keeps as `sent`, not a replay of one seen before) while no other turn ran there, and no other message
+since (`instructed`, `messageTaken`). A link drop and a restart clear it until the machine's last message is read again
+(below); so does any message the child takes that is not that instruction (the person's). A report held over the
+background work of a turn that ended is no turn running: no card of what runs there is the caller's, and a message the
+person sends then ends what the caller is owed, with the caller told. An instruction the machine takes into a turn
+already running there (a send that read the child at rest just before the person's message, a note that arrived after
+the caller's turn ended and the person's began) is only a message in that turn: the send says so and nothing of that
+turn is reported. A note that goes in after the caller's turn ended with nothing else running starts a turn of its
+own, and that turn's end is owed as a send's is (`tookInstruction`). When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
 is back, the child is read (`onReturn`): what ran there meanwhile is the caller's only if the last message the child
 took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link
