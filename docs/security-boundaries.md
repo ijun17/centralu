@@ -1351,10 +1351,13 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   stops there), matching checksums, no names that collide on a case-insensitive disk, no
   encrypted, split or ZIP64 archives. There are caps on files (2,000), bytes (64 MiB, 16 MiB per
   file), depth (16) and the archive (32 MiB). Every file is written under a path built from checked
-  segments and checked again to be inside the staging folder (`imports.ts`, `zip.ts`;
+  segments and checked again to be inside the staging folder. A file is written 0644, or 0755 when its source (a
+  folder's file, or a zip entry made on Unix) has any executable bit; no other mode bit (setuid) is carried over
+  (`execBits`) (`imports.ts`, `zip.ts`;
   `imports.test.ts` "a zip cannot write outside (zip slip)", "a link inside the folder that points
   outside is refused (stating what it points at), and a link pointing inside is never moved",
-  "caps: file count, one file, the total, depth, archive size").
+  "caps: file count, one file, the total, depth, archive size", "a file stays executable whether the app came as a
+  folder or as a zip").
 - **Dot-names are not copied.** A user-folder app's builder works in the app folder and reads the
   settings there (decision 3 trusts that folder), so `.claude/` or `.codex/` inside an archive
   would be hooks and settings nobody confirmed. `.git`, `.env` and the rest are left out too.
