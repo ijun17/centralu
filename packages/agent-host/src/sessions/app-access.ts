@@ -1,7 +1,7 @@
 import { appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, freeServerName, untrustedReaches, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS, freeServerName, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
 import { listSetting } from '../dev-services/store/settings.js'
 
@@ -263,7 +263,8 @@ export class AppAccess implements OnDemandApps {
     const have = this.deps.hub.refsFor(session)
     return this.deps.hub.rt
       .list()
-      .filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && untrustedReaches(session, a, !!this.deps.boundaryOpen?.(session.id))))
+      // An untrusted project's apps attach nowhere, auto included (owner, #1141)
+      .filter((a) => !UNUSABLE.has(a.status))
       .filter((a) => a.projectId === null || (a.projectId !== session.projectId && (a.shared === true || a.root === true)))
       .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))

@@ -417,9 +417,16 @@ defers them behind Claude's tool search, which changes nothing here. The measure
 [tool-cost.md](tool-cost.md) §9.
 
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
-user-folder apps, a project's sessions that project's apps, and a builder its own app
-(`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An agent an
-app started gets none (`appsFor`).
+user-folder apps and the root apps of trusted projects (#1141: a project whose folder holds the manifest
+is an app, and its trust is the project's), a project's sessions that project's apps, and a builder its
+own app (`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An
+agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,
+#1141): its root app and the apps inside it, to no session, its own project's included, under every
+preset, `auto` too; #603's opening no longer applies to apps, and the runtime refuses them for every
+caller (`blocker` in `apps/external/runtime.ts`). The project's sessions still run and read its code.
+A name a session has seen an app under (`app-<id>`) stays bound to that app for the session's life
+(`session_app_names:<session>`), so a later app of the same id, a repository's included, cannot take
+calls meant for another (`SessionAppsHub.named`).
 
 ### When the person is asked
 
@@ -469,11 +476,12 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `handoff_session` (the orchestrator hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words, each quoted; "always" for this orchestrator while the host serves it, recorded only for a call that passed every check; an unknown or unusable tool is refused before the card) | asks | asks | open | asks | asks | asks | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the central orchestrator only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an orchestrator or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its live children move to the successor (`moveChildren`, scope `live`), and the successor keeps the original's preset |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
-| `attach_app`, an untrusted target project's shared app | refused | refused | refused | open | refused | refused | refused | open | `AppAccess`, `SessionAppsHub` and runtime startup/call gates use the caller's preset; auto does not mark the project trusted |
+| `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
 | `update_centralu` action `apply` (any profile that has the tool) | refused | asks | asks | open | refused | asks | asks | open | `applyUpdateAsked` → `askHost` (an `other` card, `about: 'centralu_apply'`) after a window answered ready (`UpdateApplyBroker`); app agents refused; the window re-checks with its button's rules (`agentApplyVerdict`: the bundle's own version must be the installed one and newer than the window) |
 | Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
+| `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
 | Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
@@ -1250,8 +1258,11 @@ then who may call it:
   pair of projects (a consent card in the calling session; "always" kept per pair and revocable in
   Settings, "once" for that attachment, a denial not kept), and both projects are trusted. A session
   in an untrusted project attaches nothing, so a planted AGENTS.md cannot pull another project's
-  tools into it. User-folder apps attach without a card, as they are the person's own; that does not
-  widen what the session could already run, since the calls follow the session's preset. The app
+  tools into it. User-folder apps attach without a card, as they are the person's own, and so does
+  another trusted project's root app (#1141), which its project's trust covers (the trust card lists
+  each app with what it declares it may ask for, and the inbox says once when a trusted project gains
+  one); that does not widen what the session could already run, since the calls follow the session's
+  preset. An untrusted project's apps attach to no session, under any preset. The app
   still runs in its own folder with its own data, and its calls are recorded with the calling
   session (`app-access.test.ts`, `app-access-manager.test.ts`).
 - The broker pipe (fd 3) is handed only to that process, so there is no token to steal. A broker

@@ -55,14 +55,12 @@ afterEach(async () => {
 })
 
 describe('an app auto started in a project never trusted (#839)', () => {
-  it('a rescan leaves it running: the next call is served by the same process', async () => {
-    await rt.tools(ref, 'model', 'auto-1')
-    await until(() => starts('notes').length, (n) => n === 1)
-    const pid = starts('notes')[0]!.pid
+  // An untrusted project's apps run for nobody, auto included (owner, #1141): the case #839 fixed cannot arise any more
+  it('an auto session cannot start it: its tools and its calls are refused, and no process starts', async () => {
+    await expect(rt.tools(ref, 'model', 'auto-1')).rejects.toThrow("This app's project is not trusted")
+    expect((await rt.call(ref, 'echo', { text: 'x' }, { kind: 'session', sessionId: 'auto-1' })).status).toBe('rejected')
     rt.refresh()
-    await rt.tools(ref, 'model', 'auto-1')
-    expect(starts('notes')).toHaveLength(1)
-    expect(alive(pid)).toBe(true)
+    expect(starts('notes')).toHaveLength(0)
   })
 
   it('trust given and then taken away still stops it', async () => {

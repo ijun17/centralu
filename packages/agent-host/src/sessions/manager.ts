@@ -521,6 +521,8 @@ export class SessionManager {
       this.apps.appsHub?.sessionMoved(id, projectId)
       this.emit({ type: 'session_created', sessionId: id, session: moved })
     }
+    // The names sessions saw the app under moved to its new key in the store (#1141): the hub reads them again
+    this.apps.appsHub?.reloadNames()
   }
 
   /**

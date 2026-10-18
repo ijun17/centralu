@@ -108,6 +108,8 @@ beforeEach(async () => {
   store.settings.setAppSetting('session_apps:worker-1', JSON.stringify([{ projectId: null, appId: 'notes', server: 'app-notes', consent: 'none', at: 1 }]))
   store.grid.setGridView([{ kind: 'app', projectId: null, appId: 'notes', span: { cols: 2, rows: 1 } }])
   store.settings.setAppSetting('apps.viewPorts', JSON.stringify({ assigned: { [OLD]: 21234 }, retired: [] }))
+  // The name the orchestrator has called it by (#1141): the same app keeps it under its new key
+  store.settings.setAppSetting('session_app_names:orch', JSON.stringify({ [OLD]: 'app-notes', '_user/gone': 'app-gone' }))
   store.settings.saveWorkspace({ appSpans: { [OLD]: { cols: 3, rows: 2 } }, focusedApp: { projectId: null, appId: 'notes' } })
   // A half copy a host stopped mid-carry left beside its place
   mkdirSync(join(dataRoot, 'app-data', '_user', 'helper.carry-0b7c2e4a-1f3d-4c5b-9a8e-123456789abc'), { recursive: true })
@@ -190,6 +192,10 @@ describe('a user-folder app becomes a project in place', () => {
 
   it('moves its grid panel, span and all, to the new key', () => {
     expect(store.grid.listGridView()).toEqual([{ kind: 'app', projectId: project()!.id, appId: 'notes', span: { cols: 2, rows: 1 } }])
+  })
+
+  it('carries the names sessions have called it by, so the same app keeps its name and no other takes it', () => {
+    expect(JSON.parse(store.settings.appSetting('session_app_names:orch')!)).toEqual({ [newKey()]: 'app-notes', '_user/gone': 'app-gone' })
   })
 
   it('keeps its view origin port, so its browser storage stays its own', () => {

@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName } from '../apps/contract.js'
@@ -155,14 +156,27 @@ function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | '
 }
 
 /**
- * Whether an app of an untrusted project may still be given to this session because the session's boundary is open
- * (`auto`, #603). A root app reaches the orchestrator and other projects because its project is trusted (#1141,
- * owner: trust follows the project), so an untrusted project's root app reaches none of them, under `auto` or not: only
- * its own project's sessions. An app inside a project keeps #603's rule (an auto session may attach a shared one).
+ * Where the names a session has seen are kept (#1141): app key → server name, per session. A name a session's agent has
+ * called (and a Codex thread keeps for its life) must never come to mean another app, so once given it stays with its
+ * app for the session's life, across a host restart and a swap; the key goes with the session (`<name>:<session id>`
+ * is purged with it). Absent (tests), names are remembered for this hub's life only.
  */
-export function untrustedReaches(session: Pick<AppSessionKey, 'projectId'>, app: Pick<ExternalAppInfo, 'projectId' | 'root'>, open: boolean): boolean {
-  return open && !(app.root === true && app.projectId !== session.projectId)
+export type AppNameBook = {
+  load(sessionId: string): Record<string, string>
+  save(sessionId: string, names: Record<string, string>): void
 }
+
+/** `session_app_names:<session id>` in the store's settings: one JSON object per session */
+export const APP_NAMES_PREFIX = 'session_app_names:'
+
+/** A project's name as one segment of a server name: lowercase letters, digits and single hyphens */
+const nameSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
+    .replace(/-+$/, '')
 
 /** The first of `app-<id>`, `app-<id>-2`, … that `taken` does not hold */
 export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[]): string {
@@ -173,9 +187,8 @@ export function freeServerName(appId: string, taken: ReadonlySet<string> | reado
 }
 
 /**
- * The order decision 4's apps are named in: by id, the user folder's first, then by project. Two of a session's apps can
- * share an id only for the orchestrator (root apps of two projects, #1141); the first keeps `app-<id>` and the next is
- * `app-<id>-2`, the way an attached app steps aside (#371), so a user-folder app keeps the name it always had.
+ * The order apps new to a session are named in, when several arrive in one count: by id, the user folder's first, then
+ * by project. Only the first naming follows it; after that a name stays with its app (`AppNameBook`).
  */
 const byNameOrder = (x: Pick<ExternalAppInfo, 'appId' | 'projectId'>, y: Pick<ExternalAppInfo, 'appId' | 'projectId'>): number =>
   x.appId.localeCompare(y.appId) || (x.projectId === y.projectId ? 0 : x.projectId === null ? -1 : y.projectId === null ? 1 : x.projectId.localeCompare(y.projectId))
@@ -196,7 +209,16 @@ export class SessionAppsHub {
 
   constructor(
     readonly rt: ExternalApps,
-    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number; onDemand?: OnDemandApps; boundaryOpen?: (sessionId: string) => boolean } = {},
+    readonly opts: {
+      toolListWaitMs?: number
+      callJoinWaitMs?: number
+      onDemand?: OnDemandApps
+      boundaryOpen?: (sessionId: string) => boolean
+      /** Where the names a session has seen are kept (#1141) */
+      names?: AppNameBook
+      /** A project's name, for the name of a later app with an id another app of the session already has */
+      projectName?: (projectId: string) => string | undefined
+    } = {},
   ) {
     this.stopListening = rt.onAppsChanged(() => {
       for (const a of [...this.live.values()]) a.recheck()
@@ -328,17 +350,13 @@ export class SessionAppsHub {
    * keep answering "yes" even after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
-    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && untrustedReaches(session, a, !!this.opts.boundaryOpen?.(session.id))))
-    const named = new Set<string>()
-    const hits = usable
-      .filter((a) => givesApp(session, a))
-      .sort(byNameOrder)
-      .map((a) => {
-        const server = freeServerName(a.appId, named)
-        named.add(server)
-        return { ref: { projectId: a.projectId, appId: a.appId }, server }
-      })
-      .sort((x, y) => x.server.localeCompare(y.server))
+    /*
+     * An untrusted project's apps attach nowhere (owner, #1141): its root app and the apps inside it, to no session, its
+     * own project's included, and under `auto` too. #603's opening of an untrusted project's apps to an auto session
+     * no longer applies to apps; the project's sessions still run and may read its code
+     */
+    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status))
+    const hits = this.named(session, usable.filter((a) => givesApp(session, a))).sort((x, y) => x.server.localeCompare(y.server))
     /*
      * Then what the session attached itself (#371 part A), after decision 4's apps and in the order it
      * attached them. One the rule already gives is not added twice, and one whose server name is taken
@@ -353,6 +371,48 @@ export class SessionAppsHub {
       hits.push({ ref: x.ref, server: x.server })
       taken.add(x.server)
     }
+    return hits
+  }
+
+  /** Names this hub has given, per session: the book's, read once, and what it gave since */
+  private names = new Map<string, Record<string, string>>()
+
+  /** The books changed behind this hub (#1141: an app moved into a project carries its names to its new key): read again */
+  reloadNames(): void {
+    this.names.clear()
+    for (const a of [...this.live.values()]) a.recheck()
+  }
+
+  /**
+   * The server names of the apps decision 4 gives a session (#1141): a name the session has seen stays with its app for
+   * the session's life, even while the app is gone, so it never comes to mean another app; an app new to the session
+   * gets `app-<id>` when no app of the session holds it, else a name qualified by its project
+   * (`app-<id>-<project>`, then `-2`, … if that is taken too). What it attached itself keeps the names it was given
+   * then (`OnDemandApps`), and those are taken as well.
+   */
+  private named(session: AppSessionKey, apps: readonly ExternalAppInfo[]): Hit[] {
+    let book = this.names.get(session.id)
+    if (!book) {
+      book = { ...(this.opts.names?.load(session.id) ?? {}) }
+      this.names.set(session.id, book)
+    }
+    const taken = new Set([...Object.values(book), ...(this.opts.onDemand?.attached(session.id) ?? []).map((x) => x.server)])
+    let added = false
+    const hits: Hit[] = []
+    for (const a of [...apps].sort(byNameOrder)) {
+      const key = appKeyOf(a.projectId, a.appId)
+      let server = book[key]
+      if (!server) {
+        const base = appMcpServerName(a.appId)
+        const slug = a.projectId ? nameSlug(this.opts.projectName?.(a.projectId) ?? '') || a.projectId.slice(0, 8).toLowerCase() : 'user'
+        server = !taken.has(base) ? base : freeServerName(`${a.appId}-${slug}`, taken)
+        book[key] = server
+        taken.add(server)
+        added = true
+      }
+      hits.push({ ref: { projectId: a.projectId, appId: a.appId }, server })
+    }
+    if (added) this.opts.names?.save(session.id, book)
     return hits
   }
 
@@ -372,9 +432,9 @@ export class SessionAppsHub {
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
-    const opened = untrustedReaches(session, app, !!this.opts.boundaryOpen?.(session.id))
-    if (app.status === 'untrusted' && !opened) return { reachable: false, reason: 'untrusted' }
-    if (UNUSABLE.has(app.status) && !(app.status === 'untrusted' && opened)) return { reachable: false, reason: 'app-unusable', status: app.status }
+    // An untrusted project's apps attach nowhere, auto included (owner, #1141)
+    if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
+    if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
     const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameRef(h.ref, ref))?.server ?? appMcpServerName(app.appId)) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }

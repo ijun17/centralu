@@ -118,6 +118,15 @@ export class UserAppAdoptionRecords {
         }
         if (changed) this.settings.setAppSetting(row.key, JSON.stringify(list))
       }
+      // The names sessions have seen it under (#1141): the same app, so the same name, under its new key
+      const names = this.db.prepare(`SELECT key, value FROM app_settings WHERE key LIKE ? ESCAPE '\\'`).all('session\\_app\\_names:%') as { key: string; value: string }[]
+      for (const row of names) {
+        const book = parseJson(row.value)
+        if (!isObj(book) || typeof book[from] !== 'string' || book[to] !== undefined) continue
+        book[to] = book[from]
+        delete book[from]
+        this.settings.setAppSetting(row.key, JSON.stringify(book))
+      }
       // The window's own memory of the app (its span on the grid, the app it had open), kept in the workspace snapshot
       const layout = this.settings.loadWorkspace<Record<string, unknown>>()
       if (isObj(layout)) {

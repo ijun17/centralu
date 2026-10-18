@@ -745,7 +745,7 @@ and "Send to builder".
 
 | Session | Apps |
 |---|---|
-| Orchestrator | User-folder apps and the root apps of trusted projects (#1141: a project that is an app takes the user-folder app's place, and trust follows the project; an untrusted project's root app reaches it under no preset). Two of one id are named apart: the user folder's first keeps `app-<id>`, then by project, `app-<id>-2`, … |
+| Orchestrator | User-folder apps and the root apps of trusted projects (#1141: a project that is an app takes the user-folder app's place, and trust follows the project; an untrusted project's root app reaches it under no preset). Two of one id are named apart, and a name once seen stays with its app (below) |
 | A project's sessions, worktree sessions included | That project's apps, if the project is trusted |
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
@@ -756,7 +756,12 @@ app another project shares, or a user-folder app (§9.4). Apps that are `invalid
 Codex cannot change a running thread's servers, so the per-call check is what actually stops an app
 that was detached.
 
-Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`.
+Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`. A name a session has seen stays bound to its app for the session's life (#1141,
+`session_app_names:<session>`, purged with the session): a later app with the same id (the root app of
+another project, say) gets a name qualified by its project, `app-<id>-<project>`, never a name another
+app held. **An untrusted project's apps attach nowhere**, its own project's sessions included and
+under `auto` too (owner, #1141): #603's opening of an untrusted project's apps to an `auto` session no
+longer applies, and the runtime refuses them for every caller.
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
 and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
@@ -843,7 +848,7 @@ session's apps (and so at every call):
 |---|---|---|
 | Another project's app | The person shares it (off by default), its project is trusted, and it is not `invalid`, `untrusted` or `failed` | Once per pair of projects, in the calling session: the consent card (Allow once, Always for this pair, Deny). "Always" is kept per (from project, to project, `apps`) in `project_consents` (store v44, shared with part B's `ask_project`) and listed in Settings, where revoking it detaches what it allowed. "Once" lasts for that attachment; a denial is not remembered |
 | User-folder app | Not `invalid`, `unconfirmed` or `failed` | Never: the person put it in their own folder to use across projects |
-| Another project's root app (#1141) | Its project is trusted (an untrusted project's root app is never attached, even by a session under `auto`, whose boundary opens only its own project's apps), and it is not `invalid` or `failed`. Found as `<project>/<id>`, and attached by its bare id too when one project's root app has it | Never, as a user-folder app: it took that app's place. It has no share switch: its project's trust decides (owner), and the trust card lists the project's apps (§3) |
+| Another project's root app (#1141) | Its project is trusted (an untrusted project's apps are never attached, under any preset, `auto` included), and it is not `invalid` or `failed`. Found as `<project>/<id>`, and attached by its bare id too when one project's root app has it | Never, as a user-folder app: it took that app's place. It has no share switch: its project's trust decides (owner), and the trust card lists the project's apps (§3) |
 | This project's own app | Already attached by decision 4 | — |
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one

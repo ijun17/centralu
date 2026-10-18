@@ -830,7 +830,8 @@ export class ExternalApps {
    * status all read, so none of them can let through what another refuses. In order:
    *
    *   invalid      the manifest did not pass validation
-   *   untrusted    its project is not trusted — unless the calling session's boundary is open (`boundaryOpen`)
+   *   untrusted    its project is not trusted: an untrusted project's apps run for nobody, a session under `auto`
+   *                included (owner, #1141; #603's opening no longer applies to apps, `boundaryOpen` is not read here)
    *   unconfirmed  an imported app the person has not reviewed and enabled (E-3) — checked on every call: if server
    *                or uses changes after being enabled, it is blocked starting from the next startup
    *   removing     its folder is moving to the trash (`removeUserApp`) — nothing starts it meanwhile
@@ -839,7 +840,7 @@ export class ExternalApps {
    */
   private blocker(e: AppEntry, opts: { boundaryOpen?: boolean; fresh?: boolean } = {}): Blocker | null {
     if (!e.manifest) return { kind: 'invalid', reason: invalidReason(e) }
-    if (!e.scope.trusted && !opts.boundaryOpen) {
+    if (!e.scope.trusted) {
       return { kind: 'untrusted', reason: "This app's project is not trusted, so the app does not start — trust the project and it will" }
     }
     const held = this.held(e)

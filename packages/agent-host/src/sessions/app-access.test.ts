@@ -313,7 +313,7 @@ describe('a project that is an app (#1141)', () => {
     expect(asks).toEqual([])
   })
 
-  it("an untrusted project's root app reaches no other session, not even one under auto, nor the orchestrator; its own project's session under auto still gets it (an inner shared app keeps #603's rule)", async () => {
+  it("an untrusted project's apps, root and inner alike, attach nowhere, not even under auto: no other session, not the orchestrator, not its own project's session", async () => {
     w.trust.p2 = false
     w.plantRoot('p2', 'kanban')
     w.rt.refresh()
@@ -328,12 +328,13 @@ describe('a project that is an app (#1141)', () => {
     })
     access = newAccess(() => true)
     session('w1', 'p1')
-    expect(refs('w1')).toEqual(['Beta/board', 'helper'])
+    expect(refs('w1')).toEqual(['helper'])
     expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
     const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
     expect(hub.refsFor(orchestrator).map((h) => h.server)).toEqual(['app-helper'])
     expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
-    expect(hub.refsFor(session('w2', 'p2')).map((h) => h.server)).toContain('app-kanban')
+    expect(hub.refsFor(session('w2', 'p2')).map((h) => h.server)).toEqual([])
+    expect(hub.reach(session('w2', 'p2'), { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
   })
 
   it("the orchestrator gets every root app and no project's inner app; its own project's sessions get it; two of one id are named apart", () => {
@@ -345,13 +346,50 @@ describe('a project that is an app (#1141)', () => {
     expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
       ['app-helper', null],
       ['app-kit', null],
-      ['app-kit-2', 'p1'],
-      ['app-kit-3', 'p2'],
+      ['app-kit-p1', 'p1'],
+      ['app-kit-p2', 'p2'],
     ])
     // A session of p1 gets its project's apps, its root app among them, under their own names
     expect(hub.refsFor(session('w1', 'p1')).map((h) => h.server)).toEqual(['app-kit', 'app-notes'])
     // The name a session's app answers to is the one it is listed under
     expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
+  })
+})
+
+/**
+ * A name a session's agent has called never comes to mean another app (#1141, second review): two projects with root apps
+ * of one id, the second sorting first, used to take `app-kit` from the first.
+ */
+describe('stable app names (#1141)', () => {
+  it('a name a session has seen stays with its app: a later app of the same id, sorting first, gets a name of its own', () => {
+    // Remembered across the hub's own life too, as the store keeps them
+    const kept = new Map<string, Record<string, string>>()
+    const names = { load: (id: string) => ({ ...(kept.get(id) ?? {}) }), save: (id: string, book: Record<string, string>) => void kept.set(id, { ...book }) }
+    access.dispose()
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      callJoinWaitMs: 300,
+      names,
+      projectName: (id) => projects.find((p) => p.id === id)?.name,
+      onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) },
+    })
+    access = newAccess()
+    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    w.plantRoot('p2', 'kit')
+    w.rt.refresh()
+    const before = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
+    expect(before['app-kit']).toBe('p2')
+    // p1 sorts before p2, and gets its own kit now
+    w.plantRoot('p1', 'kit')
+    w.rt.refresh()
+    const after = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
+    expect({ before: before['app-kit'], after: after['app-kit'] }).toEqual({ before: 'p2', after: 'p2' })
+    expect(after['app-kit-alpha']).toBe('p1')
+    // A new hub (a host restart, a swap) reads the same names back
+    const next = new SessionAppsHub(w.rt, { names, projectName: (id) => projects.find((p) => p.id === id)?.name })
+    expect(Object.fromEntries(next.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toMatchObject({ 'app-kit': 'p2', 'app-kit-alpha': 'p1' })
+    next.dispose()
   })
 })
 
