@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { isPlainEscape } from '../../app/keys.js'
 import { CreateProjectForm } from '../project/CreateProjectDialog.jsx'
 
@@ -75,7 +77,7 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
         <p className="mt-1.5 text-xs leading-body text-ink-muted">
           The folder&apos;s path on {name}, as that machine writes it. Its agents, files and terminals run there.
         </p>
-        <input
+        <TextInput
           autoFocus
           value={path}
           onChange={(e) => setPath(e.target.value)}
@@ -87,7 +89,8 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
           spellCheck={false}
           autoComplete="off"
           data-testid="add-remote-project-path"
-          className="mt-3 w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          font="mono"
+          className="mt-3 w-full"
         />
         {error && (
           <p className="mt-2 text-xs leading-body text-danger" data-testid="add-remote-project-error">
@@ -98,14 +101,9 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
           <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onClose}>
             Cancel
           </button>
-          <button
-            type="submit"
-            disabled={busy || !path.trim()}
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-            data-testid="add-remote-project-confirm"
-          >
+          <Button type="submit" variant="primary" disabled={busy || !path.trim()} data-testid="add-remote-project-confirm">
             {busy ? 'Adding…' : 'Add project'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

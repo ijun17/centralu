@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup as firstRun } from './fixtures/control.js'
 import { setup, newSession } from './fixtures/panel.js'
 
 /**
@@ -93,9 +94,7 @@ test('a tool that is not logged in gets no donut', async ({ page }) => {
 })
 
 test('a tool check that fails is not "no agent": the strip keeps what it said last (#850)', async ({ page }) => {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
+  await firstRun(page)
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
 
   await page.evaluate(() => {

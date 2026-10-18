@@ -11,7 +11,7 @@ import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { decideBefore, decideCi, emptyQueue, enqueue, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
-import { conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
+import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -536,14 +536,14 @@ describe('which conflicts the merge queue regenerates itself (#1182)', () => {
     const plan = conflictPlan(MECHANICAL_FILES, LISTS)
     expect(plan.handoff).toBe(false)
     expect(plan.commands.map((c: string[]) => c.join(' '))).toEqual([
-      'pnpm install --lockfile-only',
-      'pnpm install --frozen-lockfile',
+      'pnpm install --lockfile-only --ignore-scripts',
+      'pnpm install --frozen-lockfile --ignore-scripts',
       'pnpm docs:schema',
       'pnpm exec vitest run --update packages/agent-host/src/dev-services/store-migrations.test.ts',
       'pnpm bundle:host',
       'cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml',
     ])
-    expect(conflictPlan(['pnpm-lock.yaml'], LISTS).commands).toEqual([['pnpm', 'install', '--lockfile-only']])
+    expect(conflictPlan(['pnpm-lock.yaml'], LISTS).commands).toEqual([['pnpm', 'install', '--lockfile-only', '--ignore-scripts']])
     // A clean merge GitHub called DIRTY: nothing to regenerate
     expect(conflictPlan([], LISTS)).toMatchObject({ handoff: false, commands: [] })
   })
@@ -568,11 +568,18 @@ describe('which conflicts the merge queue regenerates itself (#1182)', () => {
       for (const argv of e.run) {
         expect(['pnpm', 'cargo']).toContain(argv[0])
         if (argv[0] === 'pnpm' && !['install', 'exec'].includes(argv[1]!)) expect(scripts[argv[1]!], argv.join(' ')).toBeTruthy()
+        // An install runs no package scripts of the pull request's (#1182 review)
+        if (argv[0] === 'pnpm' && argv[1] === 'install') expect(argv, argv.join(' ')).toContain('--ignore-scripts')
         for (const a of argv.filter((x) => /\.(ts|toml)$/.test(x))) expect(tracked, a).toContain(a)
       }
     }
     // Every never pattern names a tracked file
     for (const pattern of LISTS.never) expect(conflictPlan(tracked, { mechanical: [], never: [pattern] }).never.length, pattern).toBeGreaterThan(0)
+  })
+
+  it('runs the commands with only what they need from the environment, no token or key of the queue', () => {
+    const env = commandEnv({ PATH: '/bin', Path: 'C:\\bin', HOME: '/h', TEMP: '/t', GH_TOKEN: 'x', GITHUB_TOKEN: 'x', ANTHROPIC_API_KEY: 'x', NPM_CONFIG__AUTHTOKEN: 'x', AWS_SECRET_ACCESS_KEY: 'x', FAKE_GH_STATE: 'x', SOMETHING_NEW: 'x' })
+    expect(env).toEqual({ PATH: '/bin', Path: 'C:\\bin', HOME: '/h', TEMP: '/t', CI: '1' })
   })
 
   it('hands a conflict to the author session with the exact instruction, or says no author session is recorded', () => {
@@ -1261,24 +1268,58 @@ function conflictRepo(branches: Record<number, string[]>): ConflictRepo {
   return { work, origin, main, heads }
 }
 
-/** The board's own lists, each mechanical entry regenerating with a script of the test's: `regenerated <file>` */
-function testLists() {
-  const regen = join(root, 'regen.mjs')
-  writeFileSync(regen, ["import { writeFileSync } from 'node:fs'", 'for (const f of process.argv.slice(2)) writeFileSync(f, `regenerated ${f}\\n`)', ''].join('\n'))
+/**
+ * The stand-ins for the board's regeneration commands, each run as `node <script> …args <files>`:
+ * - `regen` writes `regenerated <file>` into each file, and the names of its environment's variables to command-env.json;
+ * - `fail` writes a line to stderr and exits 1;
+ * - `push` first pushes `args` (`<checkout> <commit> <branch>`) to GitHub's stand-in, as an author pushing while the
+ *   queue regenerates, then does what `regen` does.
+ */
+const SCRIPTS = {
+  regen: [
+    "import { writeFileSync } from 'node:fs'",
+    'writeFileSync(__ENV_OUT__, JSON.stringify(Object.keys(process.env)))',
+    'for (const f of process.argv.slice(2)) writeFileSync(f, `regenerated ${f}\\n`)',
+  ],
+  fail: ["process.stderr.write('warming up\\nregeneration broke\\n')", 'process.exit(1)'],
+  push: [
+    "import { execFileSync } from 'node:child_process'",
+    "import { writeFileSync } from 'node:fs'",
+    'const [work, sha, branch, ...files] = process.argv.slice(2)',
+    "execFileSync('git', ['-C', work, 'push', '-q', 'origin', `${sha}:refs/heads/${branch}`])",
+    'for (const f of files) writeFileSync(f, `regenerated ${f}\\n`)',
+  ],
+}
+
+/** The board's own lists (#1182), each mechanical entry regenerating with the test's `script` instead of its command. */
+function testLists(script: keyof typeof SCRIPTS = 'regen', args: string[] = []) {
+  const file = join(root, `${script}.mjs`)
+  const body = SCRIPTS[script].map((l) => l.replace('__ENV_OUT__', JSON.stringify(join(root, 'command-env.json'))))
+  writeFileSync(file, `${body.join('\n')}\n`)
   return JSON.stringify({
-    mechanical: LISTS.mechanical.map((e) => ({ files: e.files, run: [[process.execPath, regen, ...MECHANICAL_FILES.filter((f) => e.files.some((p) => pathMatches(p, f)))]] })),
+    mechanical: LISTS.mechanical.map((e) => ({ files: e.files, run: [[process.execPath, file, ...args, ...MECHANICAL_FILES.filter((f) => e.files.some((p) => pathMatches(p, f)))]] })),
     never: LISTS.never,
   })
 }
 
-function conflictRuntime(repo: ConflictRepo, prs: number[]) {
+/** The temporary folder the app sees: the test's own, so the queue's sweep of left-over worktrees looks only there */
+const appTmp = () => join(root, 'tmp')
+
+function conflictRuntime(repo: ConflictRepo, prs: number[], { lists = testLists(), env = {} }: { lists?: string; env?: Record<string, string> } = {}) {
   const state = ghState({
     prs: Object.fromEntries(prs.map((n) => [String(n), ghPr(n, { headRefOid: repo.heads[n], mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' })])),
     checks: {},
     runs: {},
   })
-  return runtime(state, { PROJECT_BOARD_QUEUE_CHECKOUT: repo.work, PROJECT_BOARD_QUEUE_CONFLICTS: testLists(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig') }, gitWrapper(fake.bin))
+  mkdirSync(appTmp(), { recursive: true })
+  const tmp = { TMPDIR: appTmp(), TEMP: appTmp(), TMP: appTmp() }
+  return runtime(state, { PROJECT_BOARD_QUEUE_CHECKOUT: repo.work, PROJECT_BOARD_QUEUE_CONFLICTS: lists, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig'), ...tmp, ...env }, gitWrapper(fake.bin))
 }
+
+/** A commit an author made on top of the branch's head (the same tree, a new commit), not pushed yet: the checkout is not touched */
+const authorCommit = (repo: ConflictRepo, n: number) => g(repo.work, 'commit-tree', `${repo.heads[n]}^{tree}`, '-p', repo.heads[n]!, '-m', `author's fix ${n}`)
+/** The queue's own temporary folders left in the app's temporary folder */
+const queueTmps = () => readdirSync(appTmp()).filter((f) => f.startsWith('centralu-queue-merge-'))
 
 const tipOf = (repo: ConflictRepo, n: number) => g(repo.origin, 'rev-parse', `refs/heads/feat/b${n}`)
 const conflictSteps = (pr = 77) => (queueOnDisk().events as any[]).filter((e) => e.kind === 'conflict' && e.pr === pr)
@@ -1295,10 +1336,16 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
   it('regenerates a conflict only in mechanical files, pushes the merge, and lands its new head once CI passed on it, with no attention', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml', 'docs/generated/schema.md'] })
     const before = untouched(repo.work)
-    conflictRuntime(repo, [77])
+    // The queue's own secrets, which code of the pull request must not see
+    conflictRuntime(repo, [77], { env: { GH_TOKEN: 'gh-secret', GITHUB_TOKEN: 'gh-secret', ANTHROPIC_API_KEY: 'key', SOME_PASSWORD: 'pw' } })
     await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
     await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
     const tip = tipOf(repo, 77)
+    const seen: string[] = JSON.parse(readFileSync(join(root, 'command-env.json'), 'utf8'))
+    expect(seen.filter((k) => /TOKEN|KEY|PASSWORD|FAKE_GH|PROJECT_BOARD/i.test(k))).toEqual([])
+    expect(seen.some((k) => k.toUpperCase() === 'PATH')).toBe(true)
+    // What regenerating made of each file, against main's version, for a person to see
+    expect(g(repo.origin, 'log', '-1', '--format=%b', tip)).toContain(`Regenerated, against main at ${repo.main.slice(0, 7)}:\n  docs/generated/schema.md +1 -1\n  pnpm-lock.yaml +1 -1`)
     // A merge of main into the branch, on top of the head the queue read: a fast-forward, never forced
     expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tip).split(' ').slice(1)).toEqual([repo.heads[77], repo.main])
     expect(g(repo.origin, 'show', `${tip}:pnpm-lock.yaml`)).toBe('regenerated pnpm-lock.yaml')
@@ -1321,17 +1368,29 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(steps.map((e) => e.step)).toEqual(['merge', 'regenerate', 'push', 'fixed'])
     for (const e of steps) expect(typeof e.ms === 'number' && e.ms >= 0, JSON.stringify(e)).toBe(true)
     expect(steps[0]).toMatchObject({ files: ['docs/generated/schema.md', 'pnpm-lock.yaml'], notify: false })
+    expect(steps[1]).toMatchObject({
+      stat: [
+        { file: 'docs/generated/schema.md', added: 1, removed: 1 },
+        { file: 'pnpm-lock.yaml', added: 1, removed: 1 },
+      ],
+    })
+    expect(steps[1].text).toContain('against main: docs/generated/schema.md +1 -1, pnpm-lock.yaml +1 -1.')
     expect(steps.find((e) => e.step === 'fixed')).toMatchObject({ by: 'queue' })
+    expect(queueTmps()).toEqual([])
   })
 
   it('hands a conflict in code to the author session, once, with the exact instruction, and pushes nothing', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml', 'src/app.ts'] })
+    const before = untouched(repo.work)
     conflictRuntime(repo, [77])
     await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
     const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
     expect(q.queue[0].reason).toMatchObject({ kind: 'conflict', files: ['pnpm-lock.yaml', 'src/app.ts'], relay: { to: 'writer', branch: 'feat/b77' } })
     await morePolls()
     expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    // Its worktree, its registration and the refs it fetched are gone on this path too
+    expect(untouched(repo.work)).toEqual(before)
+    expect(queueTmps()).toEqual([])
     const told = notices().filter((e) => e.kind === 'attention')
     expect(told).toHaveLength(1)
     expect(told[0]!.text).toContain("src/app.ts is not on project.json's list of mechanical files (queue.conflicts.mechanical)")
@@ -1374,6 +1433,78 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(q.queue.map((i: any) => i.pr)).toEqual([77, 78])
     expect(q.queue[0].front).toEqual(expect.any(String))
     expect(q.queue[1].front).toBeNull()
+  })
+
+  // #1182 review: the queue only ever adds to the head it read, so it never replaces a commit somebody else pushed
+  it('merges nothing into a branch that is not at the head GitHub reported, and pushes nothing over it', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    // The author pushed again; GitHub has not caught up and still reports the old head as DIRTY
+    const theirs = authorCommit(repo, 77)
+    g(repo.work, 'push', '-q', 'origin', `${theirs}:refs/heads/feat/b77`)
+    conflictRuntime(repo, [77])
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await morePolls(3)
+    expect(tipOf(repo, 77)).toBe(theirs)
+    expect(conflictSteps()).toEqual([])
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+    expect(stateOf((await call('merge_queue')).data)).toBe('waiting')
+  })
+
+  it('never forces its push: when the author pushes while it regenerates, git refuses the queue, which says nothing and takes their head', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    const theirs = authorCommit(repo, 77)
+    conflictRuntime(repo, [77], { lists: testLists('push', [repo.work, theirs, 'feat/b77']) })
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until(() => conflictSteps().some((e) => e.step === 'superseded'), 'the refused push')
+    // A forced push would have put the queue's merge over the author's commit
+    expect(tipOf(repo, 77)).toBe(theirs)
+    expect(conflictSteps().map((e) => e.step)).toEqual(['merge', 'regenerate', 'superseded'])
+    expect(conflictSteps()[2]).toMatchObject({ tip: theirs })
+    // GitHub still reports the old head for a while: no hand-off, no second try on it
+    await morePolls(3)
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+    expect(conflictSteps()).toHaveLength(3)
+    // GitHub shows the author's head: the queue goes on with it
+    patchGh((s) => {
+      Object.assign(s.prs['77'], { headRefOid: theirs, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[theirs] = green('2026-10-17T09:00:00Z')
+      s.runs[theirs] = [ghRun('success', 1, theirs)]
+    })
+    await until((x) => stateOf(x) === 'merged', 'the author head to land')
+    expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', theirs]))
+    expect(conflictSteps().at(-1)).toMatchObject({ step: 'fixed', by: 'session' })
+  })
+
+  it('hands off a pull request GitHub calls DIRTY when main is merged into it already, instead of waiting for ever', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    // A branch that has main in it already
+    const ahead = g(repo.work, 'commit-tree', `${repo.main}^{tree}`, '-p', repo.main, '-m', 'on top of main')
+    g(repo.work, 'push', '-q', 'origin', `+${ahead}:refs/heads/feat/b77`)
+    repo.heads[77] = ahead
+    conflictRuntime(repo, [77])
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+    expect(q.queue[0].reason.kind).toBe('conflict')
+    expect(q.queue[0].reason.text).toContain(`GitHub says it conflicts, but main at ${repo.main.slice(0, 7)} is already merged into feat/b77, so the queue has nothing to push.`)
+    expect(tipOf(repo, 77)).toBe(ahead)
+  })
+
+  it('hands off a regeneration that fails, and leaves no worktree, registration or ref, sweeping those a killed run left', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    const before = untouched(repo.work)
+    // What a run killed half way left: a folder of an ended process, and one still registered as a worktree
+    mkdirSync(join(appTmp(), 'centralu-queue-merge-999999999-left'), { recursive: true })
+    writeFileSync(join(appTmp(), 'centralu-queue-merge-999999999-left', 'x'), 'x')
+    g(repo.work, 'worktree', 'add', '-q', '--detach', join(appTmp(), 'centralu-queue-merge-999999998-left'), repo.main)
+    g(repo.work, 'update-ref', 'refs/centralu-queue/0', repo.main)
+    conflictRuntime(repo, [77], { lists: testLists('fail') })
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+    expect(q.queue[0].reason.text).toContain('could not regenerate pnpm-lock.yaml:')
+    expect(q.queue[0].reason.text).toContain('failed (exit 1): regeneration broke. It pushed nothing.')
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    expect(untouched(repo.work)).toEqual(before)
+    expect(queueTmps()).toEqual([])
   })
 
   it('hands off a conflict in the UX baseline or a store migration step even beside mechanical files, and says when no author session is recorded', async () => {

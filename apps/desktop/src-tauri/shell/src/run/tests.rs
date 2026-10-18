@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use content_verify::{remove_content, verify_in_place, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
+use content_verify::{hex, remove_content, verify_in_place, TrustedKey, MANIFEST_NAME, SIGNATURE_NAME};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -25,10 +25,7 @@ const PLATFORM: &str = "test-platform";
 const READY_KEEPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$0\" \"$@\" > \"$2/fake-keeper.out\"\necho \"keeper output\"\n: > \"$2/fake-ready\"\nexec sleep 2\n";
 
 fn key() -> SigningKey {
-    let mut seed = [0u8; 32];
-    use std::io::Read;
-    fs::File::open("/dev/urandom").unwrap().read_exact(&mut seed).unwrap();
-    SigningKey::from_bytes(&seed)
+    SigningKey::from_bytes(&centralu_keeper_core::os::random_bytes::<32>().unwrap())
 }
 
 fn trusted(k: &SigningKey) -> TrustedKey {
@@ -52,10 +49,6 @@ impl Drop for Temp {
     fn drop(&mut self) {
         let _ = remove_content(&self.0);
     }
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// Content in `dir`: `files` (path, bytes, executable), with a manifest for `version` signed by `k`.

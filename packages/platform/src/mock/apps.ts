@@ -5,6 +5,7 @@ import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** App screens (M4 B): pinned and in-conversation views, tool calls from a screen, runs, restart and removal */
 export class AppsMock {
@@ -124,7 +125,7 @@ export class AppsMock {
       const owner = inline ?? this.registry.pinnedInstances.get(instanceId)
       if (!owner) throw new Error('This app view is not open')
       const s = this.store.sessions.get(sessionId)
-      if (!s) throw Object.assign(new Error('Session not found'), { code: 'session_not_found' })
+      if (!s) throw mockError('Session not found', 'session_not_found')
       const name = this.registry.externalAppList.find((a) => a.appId === owner.appId && a.projectId === owner.projectId)?.name ?? owner.appId
       const fromApp = { appId: owner.appId, projectId: owner.projectId, name }
       this.viewMessages.push({ sessionId, instanceId, text })

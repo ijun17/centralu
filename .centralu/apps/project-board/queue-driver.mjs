@@ -55,7 +55,7 @@ import {
   rerunRefused,
   resetFor,
 } from './queue.mjs'
-import { mergeMain } from './queue-conflict.mjs'
+import { mergeMain, statLine } from './queue-conflict.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { listSome, short, span } from './util.mjs'
@@ -344,8 +344,8 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
   const done = item.conflict?.head === head ? item.conflict : null
-  // Pushed: GitHub still shows the head it merged into, for a moment
-  if (done?.outcome === 'pushed') return { decision: { state: 'waiting' }, events: [] }
+  // Pushed, or the author pushed first: GitHub still shows the head before it, for a moment
+  if (done?.outcome === 'pushed' || done?.outcome === 'superseded') return { decision: { state: 'waiting' }, events: [] }
   // Handed off on this head already: the same reason, so no second message
   if (done?.outcome === 'handoff' && done.reason) return { decision: { state: 'attention', reason: done.reason }, events: [] }
   const since = item.conflict?.at ?? at
@@ -384,10 +384,22 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
     st.step === 'merge'
       ? conflictEvent(`${n}: merged ${defaultBranch} into ${pr.headRefName} in a temporary worktree in ${span(st.ms)}; ${st.files.length ? `conflicts in ${listSome(st.files, 8)}` : 'no conflicts'}.`, { step: 'merge', ms: st.ms, files: st.files })
       : st.step === 'regenerate'
-        ? conflictEvent(`${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}.`, { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands })
-        : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue' }),
+        ? conflictEvent(
+            `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
+            { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat },
+          )
+        : st.step === 'superseded'
+          ? conflictEvent(`${n}: ${pr.headRefName} moved to ${short(st.tip)} while the queue merged ${defaultBranch} in (its author pushed first), so git refused the queue's ${short(st.sha)}; the queue takes the new head.`, {
+              step: 'superseded',
+              ms: st.ms,
+              sha: st.sha,
+              tip: st.tip,
+            })
+          : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue' }),
   )
   if (r.outcome === 'pushed') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'pushed', sha: r.sha, files: r.files } }, events: steps }
+  // Quietly: the author's own push is the fix, or the next conflict, which the next poll reads
+  if (r.outcome === 'superseded') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'superseded', tip: r.tip, files: r.files } }, events: steps }
   return hand(r.why, r.files, steps)
 }
 
