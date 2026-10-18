@@ -526,14 +526,15 @@ function Donut({
           {/*
             The center letter is the **same mark** as the sidebar session chip. This single
             letter is why, with two donuts standing side by side, which is which reads without
-            a legend.
+            a legend. Set in the same face as that chip (Pretendard, owner 2026-10-18).
           */}
+          {/* y 11, not 12: Pretendard's capitals sit low around a central baseline (measured at 4x: 0.9px under the middle) */}
           <text
             x="12"
-            y="12"
+            y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-mono ${known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold ${known ? 'text-ink' : 'text-ink-faint'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}
