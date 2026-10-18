@@ -20,6 +20,7 @@ export function ProjectMenu({
   anchorEl,
   onClose,
   onNewSession,
+  onNewSessionWith,
   onNewApp,
   onToggleTrust,
   onOpenInVsCode,
@@ -28,7 +29,10 @@ export function ProjectMenu({
   project: ProjectInfo
   anchorEl: HTMLElement | null
   onClose: () => void
+  /** Starts a session at once, with what the project remembers (its last tool, model and effort; #543) */
   onNewSession: () => void
+  /** Opens the window that chooses the tool, a past conversation or a worktree */
+  onNewSessionWith: () => void
   onNewApp?: () => void
   onToggleTrust: () => void
   /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
@@ -41,7 +45,17 @@ export function ProjectMenu({
   }
   return (
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
+      {/*
+        The only way to start a session from the sidebar since its `+` went (owner, 2026-10-18). The first row starts
+        one at once (its empty screen still switches tool and offers past conversations); the second opens the window
+        for a worktree or a resumed conversation.
+      */}
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
+      <ActionRow
+        label="New session with options…"
+        onClick={pick(onNewSessionWith)}
+        testId={`new-session-with-${project.name}`}
+      />
       {/*
         New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
         so they belong in the same group. It shows up even for an untrusted project too: the dialog
@@ -54,7 +68,11 @@ export function ProjectMenu({
         there it took the width the strip counts tabs by, and pushed the terminal tab into "more" in a narrow panel.
       */}
       {onOpenInVsCode && (
-        <ActionRow label="Open in VS Code" onClick={pick(onOpenInVsCode)} testId={`open-vscode-${project.name}`} />
+        <ActionRow
+          label="Open in VS Code"
+          onClick={pick(onOpenInVsCode)}
+          testId={`open-vscode-${project.name}`}
+        />
       )}
       {/*
         Trust (M4, decision 3). Asked once at registration, and changed from here afterward. A
