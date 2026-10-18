@@ -120,9 +120,22 @@ export function App({
      * background is the floor as it actually computed, for the strip the window paints itself.
      */
     void platform.system
-      .setWindowAppearance(themeMode === 'system' ? null : theme.base, getComputedStyle(document.body).backgroundColor)
+      .setWindowAppearance(
+        themeMode === 'system' ? null : theme.base,
+        getComputedStyle(document.body).backgroundColor,
+      )
       .catch(() => {})
-  }, [prefsArrived, themeMode, themeDark, themeLight, themeFiles, lastGoodThemes, accent, systemDark, platform])
+  }, [
+    prefsArrived,
+    themeMode,
+    themeDark,
+    themeLight,
+    themeFiles,
+    lastGoodThemes,
+    accent,
+    systemDark,
+    platform,
+  ])
 
   /*
    * Fonts, line height and the overall text size (Settings → Appearance, #312 step 5), held back
@@ -310,6 +323,21 @@ function Body() {
   const view = useStore((s) => s.view)
   // The focus lane with a project picked and no session is that project's screen (#203)
   const projectScreen = useStore(projectScreenOf)
+  const ready = useStore((s) => s.workspaceReady)
+
+  /*
+   * Until the first lists arrive and the last screen is restored, no screen is chosen (owner, 2026-10-18): the
+   * intro, the orchestrator's empty screen or "Select a project or session" would each flash before the restored one
+   * replaced it. The sidebar shows its skeleton meanwhile, and the screen fades in once known.
+   */
+  if (!ready) {
+    return (
+      <div className="relative flex min-h-0 flex-1">
+        <Sidebar />
+        <div className="relative flex min-h-0 min-w-0 flex-1" data-testid="screen-waiting" />
+      </div>
+    )
+  }
 
   if (virgin && !introSeen) {
     return (
@@ -328,7 +356,7 @@ function Body() {
         */}
         <Sidebar />
         <Notices />
-        <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div className="cc-fade relative flex min-h-0 min-w-0 flex-1">
           <Intro />
         </div>
       </div>
@@ -379,7 +407,7 @@ function Body() {
         Then widening the panel pushes the layout past the window edge and the whole screen
         scrolls horizontally (the real cause of a bug found in dogfooding).
       */}
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+      <div className="cc-fade relative flex min-h-0 min-w-0 flex-1">
         {view === 'orchestrator' ? (
           <OrchestratorView />
         ) : view === 'grid' ? (
@@ -584,10 +612,20 @@ function NavButtons() {
   const nav = useNavShortcut()
   return (
     <span className="flex items-center gap-0.5">
-      <IconButton label={`Back (${nav(-1)})`} onClick={() => useStore.getState().goBack()} disabled={!canBack} testId="nav-back">
+      <IconButton
+        label={`Back (${nav(-1)})`}
+        onClick={() => useStore.getState().goBack()}
+        disabled={!canBack}
+        testId="nav-back"
+      >
         <StepIcon dir={-1} />
       </IconButton>
-      <IconButton label={`Forward (${nav(1)})`} onClick={() => useStore.getState().goForward()} disabled={!canForward} testId="nav-forward">
+      <IconButton
+        label={`Forward (${nav(1)})`}
+        onClick={() => useStore.getState().goForward()}
+        disabled={!canForward}
+        testId="nav-forward"
+      >
         <StepIcon dir={1} />
       </IconButton>
     </span>
@@ -736,7 +774,13 @@ function Toast() {
     >
       <span>{toast}</span>
       {/* Gone before it was read is the toast's whole risk; one that is in the way can be put away (#842 item 14) */}
-      <IconButton label="Dismiss" onClick={() => setToast(null)} testId="toast-dismiss" placement="top" align="right">
+      <IconButton
+        label="Dismiss"
+        onClick={() => setToast(null)}
+        testId="toast-dismiss"
+        placement="top"
+        align="right"
+      >
         <CloseIcon size={11} />
       </IconButton>
     </div>

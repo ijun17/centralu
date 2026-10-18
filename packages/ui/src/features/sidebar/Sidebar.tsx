@@ -21,10 +21,7 @@ export function Sidebar() {
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
   // Whether the host's first lists have arrived since this window opened; a later reconnect keeps what is shown
-  const connected = useStore((s) => s.connection === 'connected')
-  const everListed = useRef(false)
-  if (connected) everListed.current = true
-  const listed = everListed.current
+  const listed = useStore((s) => s.workspaceReady)
   const machineIds = useStore((s) => Object.keys(s.machines).join(','))
   const machines = machineIds ? machineIds.split(',') : []
   const [addingOn, setAddingOn] = useState<string | null>(null)

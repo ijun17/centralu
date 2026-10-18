@@ -12,14 +12,19 @@ import type {
   AgentVersions,
   MachineInfo,
 } from '@cc/protocol'
-import {
-  DEFAULT_NOTIFY_POLICY,
-  gridSessionIds,
-  type ProjectArrangement,
-} from '@cc/core'
+import { DEFAULT_NOTIFY_POLICY, gridSessionIds, type ProjectArrangement } from '@cc/core'
 import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
-export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
+export {
+  audienceText,
+  compactionText,
+  errorText,
+  handoffText,
+  markerText,
+  messagesToChat,
+  noticeLine,
+  resetText,
+} from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
 import { type AppState, type InlineView, type Notice, type PinnedView, type StoreSet } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
@@ -38,12 +43,7 @@ export {
   screenOf,
 } from './screens.js'
 export { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS } from './sessionList.js'
-import {
-  appActions,
-  inlineFrameKey,
-  inlineFrames,
-  type InlineFrame,
-} from './apps.js'
+import { appActions, inlineFrameKey, inlineFrames, type InlineFrame } from './apps.js'
 export {
   applyAppView,
   AUTO_RELOAD_WINDOW_MS,
@@ -55,7 +55,15 @@ export {
 export type { InlineFrame } from './apps.js'
 import { eventActions } from './events/index.js'
 import { layoutActions } from './layout.js'
-export { CENTER_MIN, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from './layout.js'
+export {
+  CENTER_MIN,
+  PANEL_DEFAULT,
+  PANEL_MAX,
+  PANEL_MIN,
+  SIDEBAR_DEFAULT,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+} from './layout.js'
 import { PANEL_DEFAULT, SIDEBAR_DEFAULT } from './layout.js'
 import { navigationActions, navigating } from './navigation.js'
 import { orchestratorActions } from './orchestrator.js'
@@ -181,176 +189,183 @@ export function stampToasts(set: StoreSet): StoreSet {
 export const useStore = create<AppState>((rawSet, get) => {
   const set = stampToasts(rawSet)
   return {
-  platform: null,
-  connection: 'connecting',
-  hostResyncs: 0,
-  projects: {},
-  gitEpoch: {},
-  sessions: {},
-  tools: [] as ToolStatus[],
-  chat: {},
-  drafts: {},
-  stickToBottom: {},
-  scrollAnchor: {},
-  searchTargets: {},
-  workingSince: {},
-  stopping: {},
-  expandedDirs: {},
-  showIgnored: true,
-  // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
-  foldComposer: true,
-  focusedSessionId: null,
-  focusedProjectId: null,
-  newSessionFor: null,
-  newSessionWorktree: false,
-  newSessionBranch: '',
-  worktreeProposals: [],
-  mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
-  externalAppChanges: {},
-  externalAppRunChanges: {},
-  externalAppChangedBy: {},
-  externalApps: [] as ExternalAppInfo[],
-  themeFiles: [] as ThemeFileEntry[],
-  lastGoodThemes: {} as Record<string, ThemeFileEntry>,
-  appQuestions: [] as AppQuestion[],
-  appQuestionsVersion: 0,
-  projectConsentsVersion: 0,
-  skillProposals: [] as { name: string; content: string; why?: string }[],
-  history: {},
-  subagentSteps: {},
-  resuming: {},
-  wakeError: {},
-  wakeLocked: {},
-  panelOpen: true,
-  panelLayout: defaultLayout(),
-  view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
-  focusedApp: null as { projectId: string | null; appId: string; machine?: string | null } | null,
-  nav: EMPTY_NAV,
-  pinnedViews: [] as PinnedView[],
-  inlineViews: {} as Record<string, Record<string, InlineView>>,
-  inlineFramesVersion: 0,
-  gridPanels: [] as GridPanel[],
-  builderPaneSessionId: null,
-  builderPaneFor: null as string | null,
-  orchestratorId: null as string | null,
-  orchestratorWaking: false,
-  introSeen: false,
-  trustAsk: null as string | null,
-  panelSplit: 0.5,
-  panelWidth: PANEL_DEFAULT,
-  sidebarWidth: SIDEBAR_DEFAULT,
-  foldedProjects: [],
-  projectPanels: {} as Record<string, ProjectArrangement>,
-  appSpans: {} as Record<string, GridSpan>,
-  commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
-  overlay: null,
-  inboxOpen: false,
-  toast: null,
-  toastAt: 0,
-  appFocused: true,
-  completion: null as { sessionId: string; at: number } | null,
-  notices: [] as Notice[],
-  viewerPath: null,
-  viewerProjectId: null,
-  paletteOpen: false,
-  openLayers: 0,
-  approvalsInFlight: {} as Record<string, true>,
-  uploading: {} as Record<string, number>,
-  settingsMenuRequest: null as { sessionId: string; at: number } | null,
-  composerFocusFor: null as string | null,
-  usageOpen: false,
-  settingsOpen: false,
-  notifyPolicy: DEFAULT_NOTIFY_POLICY,
-  importDialog: null as { source: string; fromLink: boolean; at: number } | null,
-  update: null,
-  agentVersions: null,
-  sleepPolicy: null,
-  machines: {} as Record<string, MachineInfo>,
-  machineAgentVersions: {} as Record<string, AgentVersions>,
-  settingsRequest: null as { category: string; at: number } | null,
-  prefs: DEFAULT_UI_PREFERENCES,
+    platform: null,
+    connection: 'connecting',
+    workspaceReady: false,
+    hostResyncs: 0,
+    projects: {},
+    gitEpoch: {},
+    sessions: {},
+    tools: [] as ToolStatus[],
+    chat: {},
+    drafts: {},
+    stickToBottom: {},
+    scrollAnchor: {},
+    searchTargets: {},
+    workingSince: {},
+    stopping: {},
+    expandedDirs: {},
+    showIgnored: true,
+    // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
+    foldComposer: true,
+    focusedSessionId: null,
+    focusedProjectId: null,
+    newSessionFor: null,
+    newSessionWorktree: false,
+    newSessionBranch: '',
+    worktreeProposals: [],
+    mcpProposals: [] as { name: string; command: string; args: string[]; why?: string }[],
+    externalAppChanges: {},
+    externalAppRunChanges: {},
+    externalAppChangedBy: {},
+    externalApps: [] as ExternalAppInfo[],
+    themeFiles: [] as ThemeFileEntry[],
+    lastGoodThemes: {} as Record<string, ThemeFileEntry>,
+    appQuestions: [] as AppQuestion[],
+    appQuestionsVersion: 0,
+    projectConsentsVersion: 0,
+    skillProposals: [] as { name: string; content: string; why?: string }[],
+    history: {},
+    subagentSteps: {},
+    resuming: {},
+    wakeError: {},
+    wakeLocked: {},
+    panelOpen: true,
+    panelLayout: defaultLayout(),
+    view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
+    focusedApp: null as { projectId: string | null; appId: string; machine?: string | null } | null,
+    nav: EMPTY_NAV,
+    pinnedViews: [] as PinnedView[],
+    inlineViews: {} as Record<string, Record<string, InlineView>>,
+    inlineFramesVersion: 0,
+    gridPanels: [] as GridPanel[],
+    builderPaneSessionId: null,
+    builderPaneFor: null as string | null,
+    orchestratorId: null as string | null,
+    orchestratorWaking: false,
+    introSeen: false,
+    trustAsk: null as string | null,
+    panelSplit: 0.5,
+    panelWidth: PANEL_DEFAULT,
+    sidebarWidth: SIDEBAR_DEFAULT,
+    foldedProjects: [],
+    projectPanels: {} as Record<string, ProjectArrangement>,
+    appSpans: {} as Record<string, GridSpan>,
+    commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
+    overlay: null,
+    inboxOpen: false,
+    toast: null,
+    toastAt: 0,
+    appFocused: true,
+    completion: null as { sessionId: string; at: number } | null,
+    notices: [] as Notice[],
+    viewerPath: null,
+    viewerProjectId: null,
+    paletteOpen: false,
+    openLayers: 0,
+    approvalsInFlight: {} as Record<string, true>,
+    uploading: {} as Record<string, number>,
+    settingsMenuRequest: null as { sessionId: string; at: number } | null,
+    composerFocusFor: null as string | null,
+    usageOpen: false,
+    settingsOpen: false,
+    notifyPolicy: DEFAULT_NOTIFY_POLICY,
+    importDialog: null as { source: string; fromLink: boolean; at: number } | null,
+    update: null,
+    agentVersions: null,
+    sleepPolicy: null,
+    machines: {} as Record<string, MachineInfo>,
+    machineAgentVersions: {} as Record<string, AgentVersions>,
+    settingsRequest: null as { category: string; at: number } | null,
+    prefs: DEFAULT_UI_PREFERENCES,
 
-  async loadSleepPolicy() {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      set({ sleepPolicy: await platform.agents.sleepPolicy() })
-    } catch {
-      // An older host does not put sessions to sleep: the setting stays hidden
-    }
-  },
+    async loadSleepPolicy() {
+      const platform = get().platform
+      if (!platform) return
+      try {
+        set({ sleepPolicy: await platform.agents.sleepPolicy() })
+      } catch {
+        // An older host does not put sessions to sleep: the setting stays hidden
+      }
+    },
 
-  async setSleepAfter(afterMinutes) {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      set({ sleepPolicy: await platform.agents.setSleepPolicy(afterMinutes) })
-    } catch (e) {
-      set({ toast: `Could not save that: ${(e as Error).message}` })
-    }
-  },
+    async setSleepAfter(afterMinutes) {
+      const platform = get().platform
+      if (!platform) return
+      try {
+        set({ sleepPolicy: await platform.agents.setSleepPolicy(afterMinutes) })
+      } catch (e) {
+        set({ toast: `Could not save that: ${(e as Error).message}` })
+      }
+    },
 
-  async refreshThemes() {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      const themeFiles = await platform.themes.list()
-      set((st) => ({ themeFiles, lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles) }))
-    } catch {
-      /* the folder could not be read this time — the screen keeps what it has */
-    }
-  },
+    async refreshThemes() {
+      const platform = get().platform
+      if (!platform) return
+      try {
+        const themeFiles = await platform.themes.list()
+        set((st) => ({ themeFiles, lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles) }))
+      } catch {
+        /* the folder could not be read this time — the screen keeps what it has */
+      }
+    },
 
-  async setPrefs(patch) {
-    const platform = get().platform
-    if (!platform) return
-    try {
-      const saved = parseUiPreferences(await platform.prefs.save(patch))
-      /*
-       * Only what this patch wrote is taken from the answer (#666). The answer is the host's whole record at that
-       * moment: a host from before a field answers without it (so reading it whole would reset the field to its default
-       * on every unrelated save), and a fold saved meanwhile may not be in it yet.
-       */
-      set((s) => ({
-        prefs: {
-          ...s.prefs,
-          ...Object.fromEntries(Object.keys(patch).filter((k) => k in saved).map((k) => [k, saved[k as keyof typeof saved]])),
-        },
-      }))
-    } catch (e) {
-      // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
-      set({ toast: `Could not save that: ${(e as Error).message}` })
-    }
-  },
+    async setPrefs(patch) {
+      const platform = get().platform
+      if (!platform) return
+      try {
+        const saved = parseUiPreferences(await platform.prefs.save(patch))
+        /*
+         * Only what this patch wrote is taken from the answer (#666). The answer is the host's whole record at that
+         * moment: a host from before a field answers without it (so reading it whole would reset the field to its default
+         * on every unrelated save), and a fold saved meanwhile may not be in it yet.
+         */
+        set((s) => ({
+          prefs: {
+            ...s.prefs,
+            ...Object.fromEntries(
+              Object.keys(patch)
+                .filter((k) => k in saved)
+                .map((k) => [k, saved[k as keyof typeof saved]]),
+            ),
+          },
+        }))
+      } catch (e) {
+        // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
+        set({ toast: `Could not save that: ${(e as Error).message}` })
+      }
+    },
 
-  setNotifyPolicy(notifyPolicy) {
-    set({ notifyPolicy })
-    // The policy is carried in the workspace snapshot too (E-5) — saving goes through the single writer
-    get().saveWorkspace()
-  },
+    setNotifyPolicy(notifyPolicy) {
+      set({ notifyPolicy })
+      // The policy is carried in the workspace snapshot too (E-5) — saving goes through the single writer
+      get().saveWorkspace()
+    },
 
-
-  ...connectionActions(set, get),
-  ...eventActions(set, get),
-  ...focusActions(set, get),
-  ...historyActions(set, get),
-  ...sendActions(set, get),
-  ...answerActions(set, get),
-  ...processActions(set, get),
-  ...lifecycleActions(set, get),
-  ...handoffActions(set, get),
-  ...projectActions(set, get),
-  ...appActions(set, get),
-  ...updateActions(set, get),
-  ...machineActions(set, get),
-  ...orchestratorActions(set, get),
-  ...navigationActions(set, get),
-  ...layoutActions(set, get),
-}
+    ...connectionActions(set, get),
+    ...eventActions(set, get),
+    ...focusActions(set, get),
+    ...historyActions(set, get),
+    ...sendActions(set, get),
+    ...answerActions(set, get),
+    ...processActions(set, get),
+    ...lifecycleActions(set, get),
+    ...handoffActions(set, get),
+    ...projectActions(set, get),
+    ...appActions(set, get),
+    ...updateActions(set, get),
+    ...machineActions(set, get),
+    ...orchestratorActions(set, get),
+    ...navigationActions(set, get),
+    ...layoutActions(set, get),
+  }
 })
 
 /** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
-export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
+export function usableThemeFiles(s: {
+  themeFiles: ThemeFileEntry[]
+  lastGoodThemes: Record<string, ThemeFileEntry>
+}): ThemeFileEntry[] {
   return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
 }
 
