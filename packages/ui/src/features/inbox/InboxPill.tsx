@@ -4,8 +4,9 @@ import { useStore } from '../../store/store.js'
 import type { Notice } from '../../store/state/notifications.js'
 import { MailIcon } from '../../components/icons.jsx'
 
-/** How long a new notice stays written out in the capsule before it folds back into the count */
-export const PEEK_MS = 3000
+/** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-18: 4 s;
+ * a finished turn on screen is judged seen at the same moment, Notices.tsx) */
+export const PEEK_MS = 4000
 
 /**
  * The inbox's door in the top bar: an envelope and the count of sessions waiting on the person, on one capsule
