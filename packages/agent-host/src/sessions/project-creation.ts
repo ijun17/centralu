@@ -116,14 +116,19 @@ export class ProjectCreation {
 
   /**
    * add_project on a linked machine (#1220): the same, with the facts that machine's host reads (`projects.inspect`
-   * there) and, on Allow, that machine's `projects.add`, the call the sidebar's Add project on its group makes. That
-   * host makes the same checks again when it registers the folder.
+   * there) and, on Allow, read again and that machine's `projects.add`, the call the sidebar's Add project on its group
+   * makes. That host makes the same checks again when it registers the folder.
    */
   async addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded> {
     const read = await reader.inspectFolder(machine.id, path)
     if (!read.ok) return read
     const refused = folderRefusal(read.facts, machine.name) ?? (await this.askFolderAdd(sessionId, read.facts, machine.name, signal))
     if (refused) return { ok: false, error: refused }
+    // Read again, as here: a folder gone or added while the card stood is not added
+    const again = await reader.inspectFolder(machine.id, read.facts.path)
+    if (!again.ok) return again
+    const changed = folderRefusal(again.facts, machine.name)
+    if (changed) return { ok: false, error: `${changed} It changed while the card stood, so nothing was added.` }
     const added = await reader.addProject(machine.id, read.facts.path)
     if (!added.ok) return added
     this.host.emit({ type: 'projects_changed', added: added.projectId })

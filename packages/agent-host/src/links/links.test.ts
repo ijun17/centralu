@@ -2231,6 +2231,21 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     expect(remote.store.projects.listProjects().length).toBe(1)
   })
 
+  it('reads the folder there again after Allow: one made a project while the card stood is not reported as added', async () => {
+    const { remote, hub, orc } = await linked()
+    const site = folder()
+    const call = addProject(hub, orc.id, { path: site, machine: 'Remote box' })
+    await eventually(() => !!addCard(hub, orc.id))
+    // Someone added it there meanwhile: that machine's projects.add would hand back the project it already has
+    const meanwhile = await remote.mgr.addProject(site)
+    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
+    const r = await call
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/already the project .* changed while the card stood/)
+    expect(r.text).toContain(`[m1.${meanwhile.id}]`)
+    expect(remote.store.projects.listProjects().length).toBe(1)
+  })
+
   it('names a machine on a Centralu from before it as too old, before any card', async () => {
     const { remote, hub, orc } = await linked({ without: ['projects.inspect'] })
     const r = await addProject(hub, orc.id, { path: folder(), machine: 'Remote box' })
