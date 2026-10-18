@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -125,13 +125,13 @@ describe('the rules for public text', () => {
     expect(commitProblems('fix(ui): keep moonbase focus', CONVENTIONS, ['Moonbase']).problems.join()).toMatch(/private list: "Moonbase"/)
   })
 
-  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
+  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', situationsChecked: 'n/a', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
 
   it("fills this repository's pull request template, without its guidance, in its order", () => {
-    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', Usability: 'n/a', closes: 'Closes #1' })
+    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Host swap: unchanged.', Usability: 'n/a', closes: 'Closes #1' })
     expect(r.problems).toEqual([])
     expect(r.warnings).toEqual([])
-    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
+    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nHost swap: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
   })
 
@@ -140,15 +140,19 @@ describe('the rules for public text', () => {
     expect(r.problems.join()).toMatch(/"Not exercised" is (empty|only)/)
   })
 
-  it('takes "Nothing" for Not exercised, keeps Usability as the template asks, drops other headings left out, and refuses a heading it does not have', () => {
-    expect(fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' }).problems).toEqual([])
-    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing' })
+  it('takes "Nothing" for Not exercised, keeps Situations checked and Usability as the template asks, drops other headings left out, and refuses a heading it does not have', () => {
+    const kept = { 'Not exercised': 'Nothing', 'Situations checked': 'n/a', Usability: 'n/a' }
+    expect(fillTemplate(TEMPLATE, kept).problems).toEqual([])
+    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Situations checked': 'n/a' })
     expect(noUsability.problems.join()).toMatch(/"Usability" is empty, and the template keeps it/)
-    const dropped = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a', Why: 'Because.' })
+    // The self-attack review (#1181): an author who skips it is sent to the situations, not let through
+    const noSituations = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' })
+    expect(noSituations.problems.join()).toMatch(/"Situations checked" is empty, and the template keeps it: .*Host swap/)
+    const dropped = fillTemplate(TEMPLATE, { ...kept, Why: 'Because.' })
     expect(dropped.warnings).toEqual(['"What changed" is left out.', '"Verified" is left out.', '"Closes" is left out.'])
-    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')
+    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Situations checked\n\nn/a\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')
     expect(fillTemplate(TEMPLATE, { ...SECTIONS, Screenshots: 'x' }).problems).toEqual([
-      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Usability, Not exercised, Closes.',
+      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Situations checked, Usability, Not exercised, Closes.',
     ])
   })
 })
@@ -377,9 +381,12 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     why: 'Procedure errors.',
     whatChanged: 'Tools.',
     verified: 'Tests.',
+    situationsChecked: 'Two at once: each call opens its own.',
     usability: 'n/a',
     notExercised: 'The packaged app.',
     closes: 'Refs #386',
+    // pnpm pre-pr has its own tests below, on a checkout made for them
+    skipPrePr: 'The template is what these tests are about.',
   }
 
   it("opens a pull request with the repository's template filled from its base branch", async () => {
@@ -394,7 +401,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
@@ -710,5 +717,222 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     g(s.work, 'remote', 'set-url', 'origin', 'https://github.com/someone/else.git')
     runtime()
     expect((await call('rebase_stack', { pr: 2, path: s.work })).text).toBe(`Not restacked: The checkout at ${s.work} has no remote for github.com/ijun17/centralu. Give path: a checkout of it.`)
+  })
+})
+
+// --- open_pr runs pnpm pre-pr first (#1181) --------------------------------------------------------
+
+/**
+ * A checkout whose remote is GitHub's address, rewritten to a bare repository made here (as for
+ * rebase_stack), with a scripts/pre-pr.mjs standing for the repository's: it records how it was
+ * called and which of the board's refs it saw, and answers what the test put in pre-pr-answer.json.
+ */
+function prePrCheckout() {
+  const origin = join(root, 'origin.git')
+  const work = join(root, 'work')
+  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+  g(root, 'init', '-q', '-b', 'main', work)
+  g(work, 'config', 'user.name', 'Tester')
+  g(work, 'config', 'user.email', 'tester@example.test')
+  g(work, 'config', 'commit.gpgsign', 'false')
+  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
+  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  commit(work, 'a.txt', 'a\n', 'base')
+  g(work, 'checkout', '-q', '-b', 'feat/low')
+  const low = commit(work, 'b.txt', 'b\n', 'low')
+  g(work, 'checkout', '-q', '-b', 'feat/tools')
+  const tools = commit(work, 'c.txt', 'c\n', 'tools')
+  g(work, 'push', '-q', 'origin', 'main', 'feat/low', 'feat/tools')
+  g(work, 'checkout', '-q', 'main')
+  mkdirSync(join(work, 'scripts'))
+  writeFileSync(
+    join(work, 'scripts/pre-pr.mjs'),
+    [
+      "import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'",
+      "import { execFileSync, spawn } from 'node:child_process'",
+      "const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/centralu-pre-pr'], { encoding: 'utf8' }).trim().split('\\n')",
+      "appendFileSync(new URL('../../pre-pr-calls.jsonl', import.meta.url), JSON.stringify({ args: process.argv.slice(2), refs }) + '\\n')",
+      "const answer = new URL('../../pre-pr-answer.json', import.meta.url)",
+      "const hang = existsSync(answer) ? JSON.parse(readFileSync(answer, 'utf8')).hangMs : 0",
+      "if (hang && !process.argv.includes('--cleanup')) {",
+      "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })",
+      "  writeFileSync(new URL('../../pre-pr-grandchild.pid', import.meta.url), String(child.pid))",
+      "  await new Promise((r) => setTimeout(r, hang))",
+      "  child.kill()",
+      "}",
+      "process.stdout.write('progress on stdout\\n' + (existsSync(answer) ? readFileSync(answer, 'utf8') : 'not json') + '\\n')",
+    ].join('\n'),
+  )
+  return { work, low, tools }
+}
+const prePrCalls = () => (existsSync(join(root, 'pre-pr-calls.jsonl')) ? readFileSync(join(root, 'pre-pr-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; refs: string[] }) : [])
+const prePrAnswers = (a: unknown) => writeFileSync(join(root, 'pre-pr-answer.json'), JSON.stringify(a))
+/** The refs a call fetched under: refs/centralu-pre-pr/<one of its own>, read from its --head */
+const spaceOf = (args: string[]) => /^(refs\/centralu-pre-pr\/[^/]+)\/feat\/tools$/.exec(args[args.indexOf('--head') + 1]!)![1]!
+const PR_PLAIN = {
+  title: 'feat(apps): add contribution tools to the board',
+  head: 'feat/tools',
+  why: 'Procedure errors.',
+  whatChanged: 'Tools.',
+  verified: 'Tests.',
+  situationsChecked: 'Two at once: each call opens its own.',
+  usability: 'n/a',
+  notExercised: 'The packaged app.',
+  closes: 'Refs #386',
+}
+
+describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 * SLOW }, () => {
+  it('refuses with what pre-pr found, sending nothing, on the pushed head fetched under refs of its own', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: false, findings: [{ check: 'revert', message: 'a.test.ts: "x" passes without the change' }, { check: 'tsc', message: 'tsc fails at feat/low' }], notes: ['1 test fails without the change'], heads: [], head: c.tools })
+    const tracking = g(c.work, 'for-each-ref', 'refs/remotes')
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe(
+      'Not opened: pnpm pre-pr found 2 problem(s) on feat/tools; nothing was sent to GitHub. Fix them and push, or give prePrExempt (one check) or skipPrePr (all) with the reason they stand.\n' +
+        '[revert] a.test.ts: "x" passes without the change\n[tsc] tsc fails at feat/low\nNotes:\n1 test fails without the change',
+    )
+    expect(writes()).toEqual([])
+    const [run] = prePrCalls()
+    const ns = spaceOf(run!.args)
+    expect(run!.args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/main`, '--main', `${ns}/main`])
+    expect(run!.refs).toContain(`${ns}/feat/tools ${c.tools}`)
+    // A second call fetches under another name: one call's clean-up never deletes what the other reads
+    await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(spaceOf(prePrCalls()[1]!.args)).not.toBe(ns)
+    // Nothing of the person's moved: the board's refs are gone, and the remote-tracking refs are as they were
+    expect(g(c.work, 'for-each-ref', 'refs/centralu-pre-pr')).toBe('')
+    expect(g(c.work, 'for-each-ref', 'refs/remotes')).toBe(tracking)
+  })
+
+  it('checks every pull request under a stacked one, and says in Verified that it passed', async () => {
+    const c = prePrCheckout()
+    patchState((s) => (s.prs['5'] = pr(5, { headRefName: 'feat/low', baseRefName: 'main' })))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.low }, { sha: c.tools }], head: c.tools })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, base: 'feat/low', path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    const args = prePrCalls()[0]!.args
+    const ns = spaceOf(args)
+    expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
+  })
+
+  it('opens without it only with a stated reason, which goes into Verified', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: false, findings: [{ check: 'tsc', message: 'x' }], notes: [], heads: [], head: c.tools })
+    runtime()
+    const blank = await call('open_pr', { ...PR_PLAIN, path: c.work, skipPrePr: '  ' })
+    expect(blank.text).toBe('Not opened: skipPrePr needs the reason the checks are skipped; it goes into the description.')
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, skipPrePr: 'The new test guards a Windows path that this branch only documents.' })
+    expect(r.isError, r.text).toBe(false)
+    expect(prePrCalls()).toEqual([])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain('Tests.\n\n`pnpm pre-pr` was not run: The new test guards a Windows path that this branch only documents.')
+  })
+
+  it('refuses a bad title before spending minutes on pre-pr, and says when pre-pr could not run', async () => {
+    const c = prePrCheckout()
+    runtime()
+    const title = await call('open_pr', { ...PR_PLAIN, title: 'Add tools', path: c.work })
+    expect(title.data.problems.join()).toMatch(/^Title: The subject "Add tools" is not <type>/)
+    expect(prePrCalls()).toEqual([])
+    // No answer file: the script prints no JSON
+    const broken = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(broken.isError).toBe(true)
+    expect(broken.text).toMatch(/^Not opened: pnpm pre-pr did not run: scripts\/pre-pr\.mjs could not check: .*Give path \(a checkout of ijun17\/centralu\), or skipPrePr with the reason it cannot run\.$/)
+    const fork = await call('open_pr', { ...PR_PLAIN, head: 'someone:feat/tools', path: c.work })
+    expect(fork.text).toMatch(/^Not opened: pnpm pre-pr cannot fetch a fork's branch \(someone:feat\/tools\) here/)
+    expect(writes()).toEqual([])
+  })
+})
+
+describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { timeout: 120_000 * SLOW }, () => {
+  const grandchild = () => (existsSync(join(root, 'pre-pr-grandchild.pid')) ? Number(readFileSync(join(root, 'pre-pr-grandchild.pid'), 'utf8')) : 0)
+  const isAlive = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const until = async (what: string, ok: () => boolean, ms = 30_000 * SLOW) => {
+    const end = Date.now() + ms
+    while (!ok()) {
+      if (Date.now() > end) throw new Error(`still waiting for ${what}`)
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  afterEach(() => {
+    // A grandchild a failed test left running is the test's own process: stop it by its id
+    const pid = grandchild()
+    if (pid && isAlive(pid)) process.kill(pid)
+  })
+
+  it('leaves out one check with its reason, and opens with a warning instead of refusing a branch behind main', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({
+      ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools,
+      warnings: [{ check: 'main', message: 'feat/tools does not contain main: 1 commit(s) behind.' }],
+      exempted: [{ check: 'revert', reason: 'The new test guards a Windows path this branch only documents.' }],
+    })
+    runtime()
+    const blank = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { revert: ' ' } })
+    expect(blank.text).toBe('Not opened: prePrExempt.revert needs the reason that check is left out; it goes into the description.')
+    const unknown = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { main: 'x' } })
+    expect(unknown.isError).toBe(true)
+    expect(prePrCalls()).toEqual([])
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { revert: 'The new test guards a Windows path this branch only documents.' } })
+    expect(r.isError, r.text).toBe(false)
+    expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'revert=The new test guards a Windows path this branch only documents.'])
+    expect(r.data.warnings).toEqual(['[main] feat/tools does not contain main: 1 commit(s) behind.'])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(
+      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 1 head(s), no orphans.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
+    )
+  })
+
+  it('opens nothing when the call is cancelled, and stops pre-pr\'s whole process tree and cleans up after it', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 60_000 })
+    runtime()
+    const abort = new AbortController()
+    const outcome = rt!.call(ref, 'open_pr', { ...PR_PLAIN, path: c.work }, agent, { signal: abort.signal })
+    await until('pre-pr to start its own child', () => grandchild() > 0)
+    abort.abort()
+    await outcome
+    await until('the clean-up run', () => prePrCalls().some((x) => x.args[0] === '--cleanup'))
+    const [run, cleanup] = prePrCalls()
+    expect(cleanup!.args).toEqual(['--cleanup', run!.args[run!.args.indexOf('--run-id') + 1]])
+    await until('the grandchild to be stopped', () => !isAlive(grandchild()))
+    // Long after pre-pr would have answered "passed", still nothing was opened
+    await new Promise((r) => setTimeout(r, 1_500))
+    expect(writes()).toEqual([])
+    await until('the refs to go', () => g(c.work, 'for-each-ref', 'refs/centralu-pre-pr') === '')
+  })
+
+  it('stops pre-pr when it runs out of time, and says a ref it could not remove instead of swallowing it', async () => {
+    // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+    const { runPrePr } = await import('../.centralu/apps/project-board/pre-pr.mjs')
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 60_000 })
+    const late = await runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main', limitMs: 3_000 })
+    expect(late.ran).toBe(false)
+    expect(late.why).toBe('it was stopped: it did not finish within 3 s.')
+    await until('the grandchild to be stopped', () => !isAlive(grandchild()))
+    expect(prePrCalls().at(-1)!.args[0]).toBe('--cleanup')
+
+    // A ref locked while pre-pr runs cannot be deleted after: the answer names it
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 2_000 })
+    const answered = runPrePr({ dir: c.work, repo: 'ijun17/centralu', head: 'feat/tools', base: 'main', main: 'main' })
+    await until('pre-pr to start', () => prePrCalls().length === 3)
+    const head = prePrCalls()[2]!.args[prePrCalls()[2]!.args.indexOf('--head') + 1]!
+    const lock = join(c.work, '.git', `${head}.lock`)
+    writeFileSync(lock, '')
+    const r = await answered
+    rmSync(lock)
+    expect(r.ran).toBe(true)
+    expect(r.refsLeft).toHaveLength(1)
+    expect(r.refsLeft[0]).toMatch(new RegExp(`^${head.replace(/[/-]/g, '\\$&')} \\(.*\\); remove it with git update-ref -d `))
   })
 })

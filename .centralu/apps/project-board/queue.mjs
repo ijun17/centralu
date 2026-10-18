@@ -71,25 +71,37 @@ export function normalize(q) {
   }
 }
 
+/**
+ * The queue's order (#1182): items fixed after a conflict first (`front`, when they were fixed, the
+ * earliest first), then the rest as they were queued. Without it a pull request fixed after a
+ * conflict waited again behind everything queued since.
+ */
+export const queueOrder = (a, b) => (a.front ? 0 : 1) - (b.front ? 0 : 1) || String(a.front ?? a.queuedAt).localeCompare(String(b.front ?? b.queuedAt))
+
 export const keyOf = (repo, pr) => `${String(repo).toLowerCase()}#${pr}`
 export const itemKey = (item) => keyOf(item.repo, item.pr)
 export const findItem = (q, repo, pr) => q.items.find((i) => itemKey(i) === keyOf(repo, pr) && ACTIVE.has(i.state)) ?? null
 const refIn = (defaultRepo) => (repo, n) => (String(repo).toLowerCase() === String(defaultRepo).toLowerCase() ? `#${n}` : `${repo}#${n}`)
 
-/** Adds an event; `notify` ones are what the queuing session hears about. Keeps the last MAX_EVENTS. */
-export function pushEvent(q, item, { kind, text, notify = false, at }) {
+/**
+ * Adds an event; `notify` ones are what the queuing session hears about. Keeps the last MAX_EVENTS.
+ * `data` adds fields of its own: a conflict's `step` and `ms` (how long it took), a hand-off's `relay`.
+ */
+export function pushEvent(q, item, { kind, text, notify = false, at, data = null }) {
   q.seq += 1
-  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text })
+  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text, ...(data ?? {}) })
   if (q.events.length > MAX_EVENTS) q.events.splice(0, q.events.length - MAX_EVENTS)
   return q.seq
 }
 
 /**
  * Queues a pull request (or a stack through its top). Queuing one already queued replaces its lowers,
- * owner and branch setting. A pull request may be in one active item only, as a top or a lower.
+ * owner, author and branch setting. A pull request may be in one active item only, as a top or a lower.
+ * `owner` is the session that queued it (it hears the queue's news); `author` the session that opened
+ * or owns the pull request, which a conflict is handed to (#1182), or null when none is known.
  * Answers `{ item, replaced }`, or `{ error }` and changes nothing.
  */
-export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
+export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
   const mine = findItem(q, repo, pr)
   for (const other of q.items.filter((i) => ACTIVE.has(i.state) && i !== mine && String(i.repo).toLowerCase() === String(repo).toLowerCase())) {
     if (other.lowers.includes(pr)) return { error: `${ref(repo, pr)} is already queued under ${ref(other.repo, other.pr)}.` }
@@ -99,10 +111,11 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
   if (mine) {
     // Queued again (what an attention message may ask for): it is looked at afresh, so its clocks
     // and failure count start again and a merge GitHub refused is tried again; reruns already spent
-    // on this head stay spent. Queued again without an owner, it stays the first session's
+    // on this head stay spent. Queued again without an owner or an author, it keeps the first ones
     Object.assign(mine, {
       lowers,
       owner: owner ?? mine.owner,
+      author: author ?? mine.author ?? null,
       deleteBranch,
       state: 'waiting',
       reason: null,
@@ -114,6 +127,12 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
       updatedAt: at,
       nextAt: at,
     })
+    // A conflict on this head is merged again (main may have moved); when it was found stays known.
+    // Queued again after a conflict, it goes to the front, not behind everything queued since
+    if (mine.conflict) {
+      mine.conflict = { ...mine.conflict, outcome: 'again', reason: null }
+      mine.front = mine.front ?? at
+    }
     // Out of any batch it was in (the batch sees it gone and carries on without it)
     delete mine.batch
     delete mine.batchless
@@ -126,6 +145,7 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
     pr,
     lowers,
     owner,
+    author,
     deleteBranch,
     title,
     state: 'waiting',
@@ -181,12 +201,51 @@ export function decideBefore({ item, permissions, pr, defaultBranch, ref }) {
   if (pr.state === 'MERGED') return { state: 'merged', landed: pr.baseRefName === defaultBranch }
   if (pr.state !== 'OPEN') return { state: 'closed' }
   if (pr.isDraft) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
+  // A conflict: the driver merges the default branch in itself, or hands it to the author (#1182)
   if (pr.mergeStateStatus === 'DIRTY' || pr.mergeable === 'CONFLICTING')
     return attention(
       'dirty',
       `${n} conflicts with ${pr.baseRefName} (GitHub: DIRTY) at ${short(pr.headRefOid)}. Rebase it onto ${pr.baseRefName} and push (rebase_stack if the PR under it merged); the queue takes the new head by itself.`,
     )
   return null
+}
+
+/**
+ * Why the queue does not merge the base into a conflicting pull request itself (#1182), or null when
+ * it may: only into a branch of this repository (a fork's is its author's to push), and only the
+ * default branch (a stack's top based on a lower's branch is restacked, rebase_stack).
+ */
+export function cannotMergeBase(pr, defaultBranch) {
+  if (pr.isCrossRepository) return `It is a fork's branch, which the queue does not push to.`
+  if (pr.baseRefName !== defaultBranch) return `It is based on ${pr.baseRefName}, not ${defaultBranch}, so the queue leaves it to its stack (rebase_stack, once the PR under it has merged).`
+  return null
+}
+
+/** The instruction for the session that fixes a conflict: what to merge, and the files. */
+export function conflictInstruction({ base, branch, files }) {
+  return `Merge ${base} into ${branch} and push again; conflicted files: ${files.length ? files.join(', ') : 'not known (GitHub says it conflicts)'}.`
+}
+
+/**
+ * A conflict the queue hands to the pull request's author session (#1182): kind `conflict`, the
+ * files, and `relay` (`to`: the author session, or null when none is recorded; `text`: the exact
+ * instruction). Until an app can message a session (#1173), the attention event names the author
+ * and carries the instruction, and the queuing session relays it; with no author recorded, it says
+ * so and that a session started on the branch needs that instruction.
+ */
+export function handoffReason({ item, pr, files = [], why, ref }) {
+  const n = ref(item.repo, item.pr)
+  const branch = pr.headRefName
+  const text = conflictInstruction({ base: pr.baseRefName, branch, files })
+  const author = item.author ?? null
+  const where = files.length ? ` in ${files.length > 8 ? `${files.slice(0, 8).join(', ')} and ${files.length - 8} more` : files.join(', ')}` : ''
+  const to = author
+    ? `Author session: ${author}. Relay this to it (the queue cannot message a session yet, #1173): "${text}"`
+    : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
+  return {
+    state: 'attention',
+    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: author, branch, text } },
+  }
 }
 
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */

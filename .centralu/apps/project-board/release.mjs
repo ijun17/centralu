@@ -502,6 +502,7 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
     why: [String(notes ?? '').trim() || `Ship what merged since ${s.notesFrom ?? 'the last release'}.`, ...(merged.length ? ['', ...merged] : [])].join('\n'),
     whatChanged: `The version ${s.version} → ${next} in ${vf.named.map((p) => `\`${p}\``).join(', ')}.`,
     verified: `The release tool's checks on ${s.main} at ${short(s.tip)}: CI green, every file in release.versionFiles carried ${s.version} and now carries ${next}, and no other tracked text file outside release.ignore carries ${s.version}, including embedded references. \`tooling/brand.test.ts\` runs on this pull request.`,
+    situationsChecked: 'n/a: a version bump changes no behaviour.',
     usability: 'n/a',
     notExercised: `The release workflow, until ${cfg.tagPrefix}${next} is tagged.`,
     closes: String(closes ?? '').trim() || 'No issue: a release.',

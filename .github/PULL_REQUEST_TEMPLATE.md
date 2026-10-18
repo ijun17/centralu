@@ -16,6 +16,17 @@
 <!-- What you actually ran, and what it said. Numbers if you measured something:
      "9.4ms -> 0.275ms, 7-sample median" beats "faster". -->
 
+## Situations checked
+
+<!--
+  If this changes behaviour: what it does in each situation, one line each
+  (CONTRIBUTING.md#situations-checked). Host swap (an older build serving the same store); link
+  loss and reconnect; an older build reading what this one writes; two of the same thing at once
+  (sends, deletes, sessions); the person using the same session; data loss (what is deleted,
+  what is kept, what a crash in the middle leaves). "Does not apply, because ..." is an answer.
+  Otherwise write n/a and keep the heading, so a reviewer sees it was considered.
+-->
+
 ## Usability
 
 <!--
