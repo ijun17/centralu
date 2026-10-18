@@ -2,6 +2,7 @@ import type { ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { AppManifest } from './manifest.js'
 import { toolNameError } from './manifest.js'
 import { resourceUriOf, visibilityOf } from './visibility.js'
+import { isViewMimeType, viewHtmlOf, VIEW_MIME_TYPE } from '../../views/view-document.js'
 
 /**
  * App check (M4 C-3) — the judgment behind `check`, which the building session uses to test its
@@ -16,8 +17,6 @@ import { resourceUriOf, visibilityOf } from './visibility.js'
  * runtime's door's job (`ExternalApps.check`).
  */
 
-/** The MIME type of a screen resource — set by the MCP Apps spec. If it differs, the host will not render it as a screen. */
-export const UI_MIME = 'text/html;profile=mcp-app'
 /** The bridge placeholder in a template screen — `centralu.uiResource` replaces it. If it is still there, the screen has no bridge. */
 const BRIDGE_TAG = 'centralu:mcp-app.js'
 
@@ -108,13 +107,15 @@ export function checkScreen(uri: string, read: ReadResourceResult | Error): { fi
   const content = read.contents.find((c) => c.uri === uri) ?? read.contents[0]
   if (!content) return { findings: [problem(where, 'it was read but came back empty (no contents)')], chars: 0 }
   const findings: CheckFinding[] = []
-  if (content.mimeType !== UI_MIME) {
-    findings.push(problem(where, `its mimeType is ${JSON.stringify(content.mimeType ?? null)} — a screen must be "${UI_MIME}" (centralu.uiResource sets it)`))
+  // The renderer's own test (views/view-document.ts), so the check never calls a screen broken that renders
+  if (!isViewMimeType(content.mimeType)) {
+    findings.push(problem(where, `its mimeType is ${JSON.stringify(content.mimeType ?? null)} — a screen must be "${VIEW_MIME_TYPE}" (centralu.uiResource sets it)`))
   }
-  const text = 'text' in content && typeof content.text === 'string' ? content.text : null
-  if (text === null) {
+  // Read as the screen reads it (`viewHtmlOf`): a blob is decoded, and its page is checked like any other
+  const text = viewHtmlOf(content)
+  if (text === null) return { findings: [...findings, problem(where, 'it has neither text nor a blob, so it cannot be shown')], chars: 0 }
+  if (!('text' in content) || typeof content.text !== 'string') {
     findings.push(warning(where, "the HTML came as a blob, not as text — Centralu's template sends text"))
-    return { findings, chars: 0 }
   }
   if (!text.trim()) findings.push(problem(where, 'the HTML is empty'))
   if (text.includes(BRIDGE_TAG)) {

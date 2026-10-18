@@ -1,13 +1,8 @@
 import type Database from 'better-sqlite3'
 import type { VacuumDone } from '../vacuum.js'
 
-/** The host's own settings (v16). Also created by the first write of `min_reader_version`, which can come before v16 */
-export const APP_SETTINGS_DDL = `
-  CREATE TABLE IF NOT EXISTS app_settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-`
+// The host's own settings table (v16), named here for the steps as it always was
+export { APP_SETTINGS_DDL } from '../store-keys.js'
 
 /** One step of the migration list. The rule the two flags serve is written above the list in `migrationSteps` */
 export interface MigrationStep {

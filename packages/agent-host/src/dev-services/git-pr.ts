@@ -6,6 +6,20 @@ import { raceTimeout } from '../timing.js'
 /** A branch's pull request status, asked of gh: what the merge checks know beside `gitBranchMerged` (#76). */
 
 const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
+/** How much of the end of gh's stderr is kept for the reason it failed */
+const GH_STDERR_KEEP = 4096
+/** The reasons already said, so a check that runs on every refresh says each once */
+const ghFailuresSaid = new Set<string>()
+
+/** gh's own reason a lookup failed, in the host's log once; "no pull request" is an answer, not a failure */
+function noteGhFailure(branch: string, e: { stderr?: unknown }): void {
+  const lines = String(e.stderr ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  if (!lines.length || lines.some((l) => /no pull requests? found/i.test(l))) return
+  const why = lines[0]!.slice(0, 300)
+  if (ghFailuresSaid.has(why)) return
+  ghFailuresSaid.add(why)
+  console.error(`[git] gh could not read the pull request of ${branch}: ${why}`)
+}
 
 export type BranchPr = {
   number: number
@@ -33,7 +47,9 @@ export type BranchPr = {
  *   - `null` — unknown for now (no PR, offline, not a GitHub repository, not authenticated).
  *     Asking again later may get an answer.
  * Neither branch throws — this signal is the basis for one badge, not a precondition for the
- * session list.
+ * session list. But a gh that fails for any reason other than "no pull request" (its sign-in
+ * expired, the network, GitHub refusing) is said once in the host's log with gh's own line
+ * (#841): read as "no PR" alone, a badge that never came had no trace of why.
  */
 export async function gitBranchPr(
   projectCwd: string,
@@ -57,10 +73,13 @@ export async function gitBranchPr(
     outBytes += chunk.length
     if (outBytes <= OK.maxBuffer) out.push(chunk)
   })
-  child.stderr!.resume()
+  let err = ''
+  child.stderr!.on('data', (chunk: Buffer) => {
+    err = (err + chunk.toString('utf8')).slice(-GH_STDERR_KEEP)
+  })
   const run = new Promise<string>((resolve, reject) => {
     child.once('error', reject)
-    child.once('close', (code) => (code === 0 ? resolve(Buffer.concat(out).toString('utf8')) : reject(Object.assign(new Error(`gh exited with ${code}`), { code }))))
+    child.once('close', (code) => (code === 0 ? resolve(Buffer.concat(out).toString('utf8')) : reject(Object.assign(new Error(`gh exited with ${code}`), { code, stderr: err }))))
   })
   const closed = new Promise<void>((done) => child.once('close', () => done()))
   const exited = new Promise<void>((done) => child.once('exit', () => done()))
@@ -104,7 +123,9 @@ export async function gitBranchPr(
     }
   } catch (e) {
     // Not started at all (ENOENT) has nothing to wait for
-    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'unavailable'
+    noteGhFailure(branch, e as { stderr?: unknown })
+    return null
   } finally {
     clearTimeout(timer)
     if (onAbort) signal?.removeEventListener('abort', onAbort)

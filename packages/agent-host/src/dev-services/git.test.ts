@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStatusFiles, gitSummary } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEntries, gitLog, gitStatusFiles, gitSummary, isRepo } from './git.js'
 import { gitCheckout, gitCommit, gitStage } from './git-write.js'
 import { gitWorktreeDirty } from './git-worktree.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
@@ -173,6 +173,27 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
       restore()
     }
   }, 30_000 * SLOW)
+
+  /*
+   * #841 item 1: any failure of `rev-parse --git-dir` read as "not a repository", so a repository git refuses to read
+   * (here one of a format this git does not know; a folder owned by another user is another) showed an empty panel.
+   */
+  it('a repository git refuses to read is an error, not "not a repository"', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    git('config', 'core.repositoryformatversion', '99')
+    await expect(isRepo(d)).rejects.toThrow(/repo version/)
+    await expect(gitStatusFiles(d)).rejects.toThrow(/repo version/)
+    await expect(gitLog(d)).rejects.toThrow(/repo version/)
+    // A plain folder is still no repository, read as empty
+    const plain = mkdtempSync(join(tmpdir(), 'cc-git-plain-'))
+    try {
+      expect(await isRepo(plain)).toBe(false)
+      expect(await gitStatusFiles(plain)).toEqual([])
+    } finally {
+      rmSync(plain, { recursive: true, force: true })
+    }
+  })
 
   it('stops at the cap with real git, and says there is more', async () => {
     const { d } = repo()

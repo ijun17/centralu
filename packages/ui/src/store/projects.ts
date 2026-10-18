@@ -136,8 +136,12 @@ type ProjectActions = Pick<
   | 'loadCommandRuns'
   | 'runCommand'
   | 'stopCommand'
+  | 'watchProjectDirs'
   | 'reorderProjects'
 >
+
+/** Projects whose last watch registration failed and was said: said again only after one succeeds (#841) */
+const watchFailureSaid = new Set<string>()
 
 export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => ({
   async setWorktreeTrunk(projectId, baseBranch) {
@@ -438,6 +442,24 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     } catch (e) {
       // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
       set({ toast: `Could not stop: ${(e as Error).message}` })
+    }
+  },
+
+  async watchProjectDirs(projectId, dirs) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.fs.watch(projectId, dirs)
+      watchFailureSaid.delete(projectId)
+    } catch (e) {
+      /*
+       * Watching is a side glance, so the tree goes on (#34), but a failure swallowed whole left a tree that stopped
+       * following what an agent or Finder changed with no word of it (#841). Said once: the tree asks again with every
+       * folder opened
+       */
+      if (watchFailureSaid.has(projectId)) return
+      watchFailureSaid.add(projectId)
+      set({ toast: `The file tree will not follow changes made outside it: ${(e as Error).message}` })
     }
   },
 

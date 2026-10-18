@@ -2661,7 +2661,9 @@ session keep their own machine's view.
 **And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
 delivered there as an instruction from `<orchestrator> on <this computer>`; with `reportBack`, `observeLinked` watches
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
-session's own background work running included (§1.2.1 step 7, #723).
+session's own background work running included (§1.2.1 step 7, #723). The watch starts at the instruction's own
+`user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
+is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
 refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s
@@ -2772,7 +2774,7 @@ step against:
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
-| **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
+| **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |
 
 A step that changes the schema regenerates [generated/schema.md](generated/schema.md) (`pnpm docs:schema`) in the
 same PR, and a new table gets a line in a "Where it is stored" list of [domain-model.md](domain-model.md) and its
@@ -2784,6 +2786,10 @@ The store's tables are one shape that two builds share; §5.1 covers them. Many 
 the same way: JSON rows in `app_settings`, files in the data folder, files a person or another build writes, and
 the lines and frames between processes. An older and a newer build read each of them during a host swap, after a
 person goes back a release, and between two machines on different releases.
+
+A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
+`tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
+`purgeSession`), so a new per-session key needs no line in the purge.
 
 The rules for every shape:
 
@@ -2859,9 +2865,9 @@ This section used to describe something else entirely: a chokidar watcher parsin
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —
 chokidar is not a dependency, `core/usage` holds only the cache arithmetic of §6.1, there is no `usage.weekly`
-method, and no build ever wrote a row to `usage_facts`. It stays in `schema.sql` for now: released builds up to
-v0.1.0-beta.10 still delete a project's rows from it, and this build is the first that leaves it alone, so dropping it
-is a contract step for a later release (§5.1 rule 2). It was
+method, and no build ever wrote a row to `usage_facts`. The table is gone from `schema.sql`, and store step 56
+drops it from an existing store (#423; a contract step, §5.1 rule 2, one release after the last that deleted a
+project's rows from it). It was
 also the *opposite* of the rule §8.1 states, and the two sections sat in this file
 contradicting each other. Reading a tool's private JSONL is exactly what §8.1 forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break

@@ -270,8 +270,14 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       // The theme files arrive with the preferences that choose among them, so the first screen
       // already has its theme — and a folder that cannot be read just means the presets
       platform.themes.list().catch(orEmpty('the theme files', [] as ThemeFileEntry[])),
-      // The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before them has none
-      platform.machines.list().catch(() => [] as MachineInfo[]),
+      /*
+       * The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before
+       * them has none, and says it does not know the method: that is no machine, quietly. Any other failure is a list
+       * that was not read, and is said (#841 item 10): the sidebar would show no machine where one is linked
+       */
+      platform.machines.list().catch((e: unknown) =>
+        e instanceof Error && e.message.startsWith('Unknown method: machines.list') ? ([] as MachineInfo[]) : orEmpty('the linked machines', [] as MachineInfo[])(),
+      ),
     ]).finally(watch.stop)
     set((st) => {
       // Recovery or re-attachment may have updated the window while startup reads were pending (#640).
