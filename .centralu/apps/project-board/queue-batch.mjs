@@ -12,6 +12,7 @@ import {
   decideLanding,
   endBatch,
   formBatch,
+  gathering,
   markBatchless,
   NOT_STARTED,
   releaseMembers,
@@ -60,7 +61,11 @@ export function batchWork(q, now) {
   const b = activeBatch(q)
   if (b) return Date.parse(b.nextAt ?? 0) <= now ? { batch: b } : null
   if (q.batchOff && Date.parse(q.batchOff.until) > now) return null
-  return batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS }).length >= QUEUE.batch.min ? { form: true } : null
+  const items = batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS })
+  if (items.length < QUEUE.batch.min) return null
+  // One queued a moment ago and not read yet joins this batch rather than wait for the next
+  if (gathering(q, { repo: items[0].repo, now, size: items.length, max: QUEUE.batch.max })) return null
+  return { form: true }
 }
 
 /** Forms the batch batchWork saw, on the queue as it is now (inside updateQueue). */
@@ -218,14 +223,16 @@ async function build(b, ctx) {
       then: (fq) => (fq.batchOff = { until: new Date(now + BATCH_OFF_MS).toISOString(), reason: e.message }),
     })
   }
-  // Their own runs that have not started are not needed now: the batch's run tests them. Each is
-  // written down before it is cancelled, so a driver stopped in between leaves no cancelled run
-  // the batch does not know (landing accepts UNSTABLE only from runs on that list). A batch made
-  // from another (split, tested again) starts with that one's list.
+  // Their own runs that have not started are not needed now: the batch's run tests them; with two
+  // tiers, their quick runs still going are not either (the full run tests what they test, and their
+  // runners are the batch's). Each is written down before it is cancelled, so a driver stopped in
+  // between leaves no cancelled run the batch does not know (landing accepts UNSTABLE only from runs
+  // on that list). A batch made from another (split, tested again) starts with that one's list.
   const cancelled = [...(b.cancelled ?? [])]
+  const needless = (x) => (TIERS ? x.status !== 'completed' : NOT_STARTED.has(x.status))
   for (const s of steps) {
     const own = await readWorkflowChecks(repo, s.head, { workflows: CI.workflows })
-    for (const run of own.runs.filter((x) => NOT_STARTED.has(x.status))) {
+    for (const run of own.runs.filter(needless)) {
       // Not the driver any more: the next one builds this batch again from the start
       if (!renew()) return { yielded: true }
       const entry = { pr: s.pr, run: run.id, suite: run.check_suite_id ?? null }

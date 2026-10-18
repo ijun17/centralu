@@ -35,7 +35,7 @@ export const CI = {
 }
 
 // The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items
-// ready make a batch, `max` at most (default 6). `min` is at least 2, or 1 with two tiers
+// ready make a batch, `max` at most (default 4, the owner's, 2026-10-19). `min` is at least 2, or 1 with two tiers
 // (`ci.fullTier`): there every pull request lands through a batch, a batch of one included.
 // PROJECT_BOARD_QUEUE_BATCH_MIN: for the tests only, which queue several pull requests one call at a time
 // The checkout rebase_stack and the merge queue's conflicts work from by default: the one this app is committed in
@@ -59,7 +59,7 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
   flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
-  batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
+  batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 4) || 4) } : null,
   conflicts: {
     mechanical: Array.isArray(conflicts.mechanical) ? conflicts.mechanical.filter((e) => Array.isArray(e?.files) && Array.isArray(e?.run) && e.run.every((a) => Array.isArray(a) && a.length > 0)) : [],
     never: Array.isArray(conflicts.never) ? conflicts.never : [],

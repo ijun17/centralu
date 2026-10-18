@@ -369,14 +369,23 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
 The free plan runs about one CI build at a time, so pull requests queued together each waited for
 their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
 and the tick drives the running batch before any item, under the same lease. On while `project.json`
-has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`, default 6).
+has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`,
+default 4: the owner's, 2026-10-19, this repository's too).
 
-- **Which**: active items in CI whose own CI was read on their head and has not started (every run
-  `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
-  from a batch on that head (`batchless`), not a fork's (its head would run CI in this repository's
-  branch) and not a release bump (its CI is the release's evidence), the oldest first, in one
-  repository. Sent back, an item is batchable again only after its own next poll. One batch runs at a
-  time; an item in a batch is not polled on its own (`dueItem`).
+- **Which**: active items in CI whose own CI was read on their head, not sent back from a batch on
+  that head (`batchless`), not a fork's (its head would run CI in this repository's branch) and not a
+  release bump (its CI is the release's evidence), in one repository, those fixed after a conflict
+  first (`front`), then in the order they were queued; a stack is one item, so one member. With two
+  tiers, **every ready item** (2026-10-19): its own quick run passed, still runs, waits for a runner
+  or has not reported yet, but not one whose own CI failed (its poll handles that). Without tiers,
+  only one whose own run has not started (every run `queued`, `waiting`, `requested` or `pending`):
+  that run could land it, and cancelling a started one throws work away. Day one, taking only those
+  not started or finished, made batches of 1.25 pull requests on average, about 20 minutes each, one
+  after another (5 queued: about 100 minutes). Sent back, an item is batchable again only after its
+  own next poll. One batch runs at a time; an item in a batch is not polled on its own (`dueItem`).
+- **Gathering**: a batch that is not full waits while another active item of its repository, queued
+  less than a minute ago, has not been read on its head yet (`gathering`), so pull requests queued
+  together in a row share one batch instead of the first going alone.
 - **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
   branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
   batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
@@ -384,8 +393,10 @@ has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of 
   into it for another reason (a 404 or 422, a head gone, already in main). With two or more merged, the CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
   permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
-  Then the members' own runs that have not started are cancelled, each written down before it is
-  cancelled (`cancelled`, which a batch split or re-formed from this one keeps for its members).
+  Then the members' own runs that have not started are cancelled (with two tiers, every one not
+  finished: the batch's full run tests what a quick run does, and the runners are the batch's), each
+  written down before it is cancelled (`cancelled`, which a batch split or re-formed from this one
+  keeps for its members).
 - **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
   required set from the default branch plus jobs the batch adds, and only an infrastructure failure
   rerun, once (Reruns, above). A member that changes meanwhile (pushed, closed, a draft, taken out,

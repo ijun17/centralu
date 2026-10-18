@@ -21,7 +21,7 @@ import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-b
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { batchCandidates, decideLanding, endBatch, formBatch, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
+import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -550,6 +550,43 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(batchCandidates(q, { max: 6, tiers: true }).map((i: any) => i.pr)).toEqual([2])
     q.items[0].alone = { head: B, text: 'x' }
     expect(batchCandidates(q, { max: 6, tiers: true }).map((i: any) => i.pr)).toEqual([3])
+  })
+
+  // The owner, 2026-10-19: day one's batches averaged 1.25 pull requests, about 20 minutes each, one after another
+  it('batches every ready item, whether its own quick run passed, still runs, waits or has not reported, four at most, those fixed after a conflict first', () => {
+    const quick = (pr: number, head: string, extra: Record<string, unknown> = {}) =>
+      waitingItem(pr, head, 'completed', { ci: { head, verdict: 'quick', runs: [{ id: 900 + pr, status: 'completed' }] }, ...extra })
+    const D = 'd'.repeat(40)
+    const q = queueOf(
+      quick(1, A),
+      waitingItem(2, B, 'in_progress'), // its quick run is going
+      waitingItem(3, C), // its quick run waits for a runner
+      waitingItem(4, D, 'queued', { ci: { head: D, verdict: 'none', runs: [] } }), // no run reported yet
+      waitingItem(5, '5'.repeat(40), 'completed', { ci: { head: '5'.repeat(40), verdict: 'failing', runs: [{ id: 905, status: 'completed' }] } }), // its own CI failed
+      quick(6, '6'.repeat(40), { front: '2026-10-17T10:30:00Z' }), // fixed after a conflict
+      quick(7, '7'.repeat(40), { lowers: [70, 71] }), // a stack: one member
+    )
+    expect(batchCandidates(q, { max: 4, tiers: true }).map((i: any) => i.pr)).toEqual([6, 1, 2, 3])
+    expect(batchCandidates(q, { max: 10, tiers: true }).map((i: any) => i.pr)).toEqual([6, 1, 2, 3, 4, 7])
+    // Without tiers only those not started: their own run could land them
+    expect(batchCandidates(q, { max: 10 }).map((i: any) => i.pr)).toEqual([3])
+    // The project's batches take four
+    expect(PROJECT.queue.batch.max).toBe(4)
+  })
+
+  it('waits a moment for one queued just now to be read, so pull requests queued together share a batch', () => {
+    const now = Date.parse('2026-10-17T10:00:00Z')
+    const q = queueOf(waitingItem(1, A), { repo: R, pr: 2, lowers: [], state: 'waiting', head: null, queuedAt: '2026-10-17T09:59:40Z' })
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(true)
+    // Not for ever: queued over a minute ago and still not read (GitHub slow to say), the batch goes without it
+    expect(gathering(q, { repo: R, now: now + 61_000, size: 1, max: 4 })).toBe(false)
+    // Nor when the batch is full, or the other one is read already, needs attention or is in another repository
+    expect(gathering(q, { repo: R, now, size: 4, max: 4 })).toBe(false)
+    q.items[1].state = 'attention'
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(false)
+    q.items[1].state = 'ci'
+    q.items[1].repo = 'someone/else'
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(false)
   })
 
   it('marks the one member of a batch of one that ended without landing it, with why, and no member of a larger batch', () => {
@@ -1976,6 +2013,43 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', `status ${SHA}`, 'merge 77', 'delete feat/b77', 'delete queue/batch-1'])
     expect(writes().find((w) => w[0] === 'status')).toEqual(['status', SHA, 'success', 'merge-queue', 'Passed CI in queue/batch-1'])
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else.'])
+  })
+
+  it('batches four ready pull requests in one run, its quick run still going or finished, cancels what still runs, and lands them in order', async () => {
+    const H = (n: number) => `${n}`.repeat(40).slice(0, 40)
+    const quickOf = (n: number, going: boolean) => [
+      suiteCheck('full tier', 'skipped', n * 10, 5000 + n),
+      suiteCheck('verify', 'success', n * 10 + 1, 5000 + n),
+      suiteCheck('windows tests', going ? null : 'success', n * 10 + 2, 5000 + n),
+    ]
+    const own = (n: number, going: boolean) => ownRun(n, H(n), 900 + n, 5000 + n, going ? null : 'success', 1)
+    const going = (n: number) => ({ ...own(n, true), status: 'in_progress' })
+    const prs = [77, 78, 79, 80, 81]
+    const full = (suite: number) => [suiteCheck('full tier', 'success', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
+    const batchRunOf = (k: number, head: string) => ghRun('success', 1, head, { id: 950 + k, head_branch: `queue/batch-${k}`, event: 'workflow_dispatch', check_suite_id: 6000 + k })
+    runtime(
+      ghState({
+        prs: Object.fromEntries(prs.map((n) => [String(n), ghPr(n, { headRefOid: H(n), mergeStateStatus: n === 78 ? 'UNSTABLE' : 'CLEAN' })])),
+        runs: Object.fromEntries(prs.map((n) => [H(n), [n === 78 ? going(n) : own(n, false)]])),
+        checks: Object.fromEntries(prs.map((n) => [H(n), quickOf(n, n === 78)])),
+        on: {
+          'cancel:978': { runs: { [H(78)]: [{ ...own(78, false), conclusion: 'cancelled' }] }, checks: { [H(78)]: quickOf(78, false).map((c) => (c.name === 'windows tests' ? { ...c, conclusion: 'cancelled' } : c)) } },
+          'dispatch:queue/batch-1': { runs: { [`batch-${H(80)}`]: [batchRunOf(1, `batch-${H(80)}`)] }, checks: { [`batch-${H(80)}`]: full(6001) } },
+        },
+      }),
+      { ...TIERS, PROJECT_BOARD_QUEUE_BATCH_MIN: '4' },
+    )
+    // Five queued in a row (a batch starts at four here, so none goes alone before the rest are queued)
+    for (const n of prs) await call('queue_merge', { pr: n, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to land', BATCH_WAIT_MS)
+    const order = writes().map(short2)
+    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${H(77)}`, `merge-into ${H(78)}`, `merge-into ${H(79)}`, `merge-into ${H(80)}`, 'dispatch queue/batch-1', 'cancel 978'])
+    // One run for the four; each lands as its own squash, in order; the fifth waits for the next batch
+    expect(order.filter((w) => w.startsWith('merge ')).map((w) => w.slice(6))).toEqual(['77', '78', '79', '80'])
+    expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([[[77, 78, 79, 80], 'done']])
+    expect(['waiting', 'ci']).toContain(queueOnDisk().items.find((i: any) => i.pr === 81).state)
+    expect(queueOnDisk().items.find((i: any) => i.pr === 81).batch).toBeUndefined()
+    expect(order.filter((w) => w.startsWith('rerun'))).toEqual([])
   })
 
   it('lands nothing when the batch of one fails, and tells the session why', async () => {
