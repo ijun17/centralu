@@ -1073,8 +1073,8 @@ one still serving during a swap or a remote rollback.
 Rule: every step declares `breaksOlderReaders` and `heavy`; drops and renames land one release after the code stopped
 using what they remove; a breaking step raises `min_reader_version` before it runs. One step back is the only safe
 rollback.
-Guard: `host/dev-services/store-min-reader.test.ts` "every step declares whether it breaks older readers; v13, v28 and
-v32 do, and v3, v11, v21 and v40 are heavy"; `host/dev-services/store-min-reader.test.ts` "applying a breaking step
+Guard: `host/dev-services/store-min-reader.test.ts` "every step declares whether it breaks older readers; v13, v28,
+v32 and v56 do, and v3, v11, v21 and v40 are heavy"; `host/dev-services/store-min-reader.test.ts` "applying a breaking step
 raises the record to that step".
 Platforms: all.
 

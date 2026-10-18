@@ -112,10 +112,13 @@ test('The global counter counts everything waiting as one, and brightness signal
   await injectApproval(page, 0, { kind: 'command', command: 'x', cwd: '/tmp' })
   await finishTurnUnread(page, 1)
 
-  const count = page.getByTestId('count-waiting')
-  await expect(count).toContainText('02')
-  // Pure white if even one approval is pending — pure white is reserved for what is blocking the person
-  await expect(count).toHaveClass(/(^|\s)signal(\s|$)/)
+  // The inbox's capsule (owner, 2026-10-18): an envelope and the count
+  await expect(page.getByTestId('count-waiting')).toHaveText('2')
+  // Pure white if even one approval is pending — pure white is reserved for what is blocking the person — and a white
+  // solid edge says an approval is what waits
+  const capsule = page.getByTestId('counter')
+  await expect(capsule).toHaveClass(/(^|\s)signal(\s|$)/)
+  await expect(capsule).toHaveAttribute('data-edge', 'approval')
 })
 
 test('Control loop: clearing five waiting items using only the keyboard (T5-5 core scenario)', async ({
@@ -137,7 +140,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
   await injectApproval(page, 3, { kind: 'command', command: 'pytest', cwd: '/tmp/beta' })
   for (const idx of [1, 2, 4]) await finishTurnUnread(page, idx)
 
-  await expect(page.getByTestId('count-waiting')).toContainText('05')
+  await expect(page.getByTestId('count-waiting')).toHaveText('5')
 
   // Open the inbox — it must be sorted by urgency
   await page.keyboard.press('Meta+i')
@@ -161,7 +164,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
    * immediately starts waiting for the next reply, it gets counted again, and that is not the
    * fact this test is checking (whether anything urgent remains).
    */
-  await expect(page.getByTestId('count-waiting')).not.toHaveClass(/(^|\s)signal(\s|$)/)
+  await expect(page.getByTestId('counter')).not.toHaveClass(/(^|\s)signal(\s|$)/)
 
   /*
     Clear the remaining 3 items waiting for a reply by **actually replying**.
@@ -277,28 +280,17 @@ test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ pag
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
 
   // Even with something waiting, the bar does not advertise a key — this used to be exactly when
-  // the chip was brightest
+  // the chip was brightest. The capsule has no words at all now (owner, 2026-10-18): an envelope and the count
   const bar = page.getByTestId('app-header')
-  await expect(bar).toContainText('Waiting for input')
+  await expect(bar).not.toContainText('Waiting for input')
   await expect(bar).not.toContainText('Next item')
   await expect(bar).not.toContainText('List')
+  const capsule = page.getByTestId('counter')
+  await expect(capsule).toHaveAttribute('aria-label', '1 waiting')
 
   // Lighting up remains the count's job (an approval waiting = pure white)
-  await expect(page.getByTestId('count-waiting')).toContainText('01')
-  await expect(page.getByTestId('count-waiting')).toHaveClass(/(^|\s)signal(\s|$)/)
-
-  /*
-   * The glow belongs to the number alone (pointed out by the person, 2026-09-12). Because
-   * `signal`'s text-shadow is inherited, the label — which only overrides color — was wearing a
-   * white halo on its dark text as well. Instead of looking luminous, it just looked out of
-   * focus.
-   */
-  const halo = await page.getByTestId('count-waiting').evaluate((el) => ({
-    label: getComputedStyle(el.firstElementChild!).textShadow,
-    value: getComputedStyle(el.lastElementChild!).textShadow,
-  }))
-  expect(halo.label).toBe('none')
-  expect(halo.value).not.toBe('none')
+  await expect(page.getByTestId('count-waiting')).toHaveText('1')
+  await expect(capsule).toHaveClass(/(^|\s)signal(\s|$)/)
 
   // The keys themselves still work (FR-17 was left untouched)
   await page.keyboard.press('Meta+i')

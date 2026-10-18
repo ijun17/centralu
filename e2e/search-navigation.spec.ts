@@ -76,7 +76,9 @@ test('a search hit opens an asleep session without waking it (#590)', async ({ p
 
   await openHit(page, needle)
   expect(await page.evaluate(() => [...(window as any).__mock.resumeCalls])).toEqual([])
-  await expect(page.getByTestId('dormant-note')).toContainText('Asleep')
+  // Still asleep, and nothing says so (owner, 2026-10-18): no line, no Waking
+  expect(await page.evaluate((sid) => (window as any).__store.getState().sessions[sid].live, target)).toBe(false)
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await expectLandedOnHit(page, needle)
 })
 

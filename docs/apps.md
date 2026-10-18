@@ -99,7 +99,8 @@ app wrote there while running would reach the whole team.
   a moved-aside copy is found in the data folder, so a restart says it again until the copy is
   removed or each app's values are back. An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
-  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
+  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, and in the text of a failed start
+  (the list, a check, a caller's refusal), also where JSON
   escapes them (a multi-line key in an argument, #838). The app's log is masked a line at a time, so each line of a
   multi-line value (a PEM) of 16 characters or more is masked on its own; shorter lines of it (`}`, an empty line)
   are not.
@@ -230,7 +231,7 @@ agent reads its whole context again on every call and that is the use the person
   (`app_run_failures`). The builder needs the input that failed.
 - Kept 30 days, pruned when the host starts. A row left `running` because the host died is closed
   at the next start.
-- **A `run_agent` row keeps its request and answer (#378, store v56)**: the app's prompt once a
+- **A `run_agent` row keeps its request and answer (#378, store v57)**: the app's prompt once a
   session stood up for it, the agent's answer and its structured output, redacted like the rest of
   the row. Deleting a session for good no longer deletes the runs it started or ran in: the link
   (`session_id`, `caller_session_id`) is cleared and the row stays in the app's log. Until then

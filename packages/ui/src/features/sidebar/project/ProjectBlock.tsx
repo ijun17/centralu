@@ -89,7 +89,6 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         project={project}
         projectId={projectId}
         folded={folded}
-        open={open}
         sessions={sessions}
         setNewAppOpen={setNewAppOpen}
         setDeleting={setDeleting}

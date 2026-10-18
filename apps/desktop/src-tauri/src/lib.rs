@@ -316,6 +316,7 @@ pub fn run() {
             file_manager_name,
             focus_window,
             window_controls_inset,
+            window_controls_drawn,
             shortcut_keys,
             quit_app,
             take_app_links,
@@ -352,6 +353,8 @@ pub fn run() {
                 sup.start(app.handle().clone());
                 #[cfg(target_os = "macos")]
                 traffic_lights::install(app.handle());
+                // Windows: no OS title bar above ours; the top bar draws the controls (os_integration.rs)
+                own_title_bar(app);
                 #[cfg(target_os = "macos")]
                 if let Err(e) = install_quit_menu(app.handle()) {
                     // The app still launches even if the menu could not be changed — ⌘Q just

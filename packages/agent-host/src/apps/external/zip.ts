@@ -26,6 +26,8 @@ export type ZipEntry = {
   /** The entry name verbatim (UTF-8). A directory ends with `/` */
   name: string
   kind: 'file' | 'dir' | 'link' | 'other'
+  /** The Unix mode an archive made on Unix records for the entry (file-type bits included); 0 for any other archive */
+  mode: number
   method: number
   compressedSize: number
   /** The unpacked size the central directory declares — checked against the actual size when unpacked */
@@ -82,21 +84,25 @@ export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
     if (name.includes('�')) throw new ZipError('An entry name is not UTF-8; re-create the archive with UTF-8 names')
     if (flags & 0x1) throw new ZipError(`Encrypted entries are not supported: ${name}`)
     if (compressedSize === 0xffffffff || size === 0xffffffff || offset === 0xffffffff) throw new ZipError('ZIP64 archives are not supported')
-    out.push({ name, kind: kindOf(name, madeBy, external), method, compressedSize, size, crc, offset })
+    const mode = unixMode(madeBy, external)
+    out.push({ name, kind: kindOf(name, mode, external), mode, method, compressedSize, size, crc, offset })
     p = nameEnd + extraLen + commentLen
   }
   return out
 }
 
+/** For a bundle made on Unix (made-by host 3, macOS 19), the upper 16 bits of the external attributes are the mode */
+function unixMode(madeBy: number, external: number): number {
+  const host = madeBy >> 8
+  return host === 3 || host === 19 ? external >>> 16 : 0
+}
+
 /**
- * An entry's kind. For a bundle made on Unix (made-by host 3, macOS 19), the upper 16 bits of the
- * external attributes are the mode — a symlink (`S_IFLNK`) can only be recognized there. Unpacking a
+ * An entry's kind. A symlink (`S_IFLNK`) can only be recognized by its Unix mode. Unpacking a
  * symlink as a regular file turns its content (the path it points at) into a file; unpacking it as
  * an actual symlink is the oldest form of a zip-slip attack.
  */
-function kindOf(name: string, madeBy: number, external: number): ZipEntry['kind'] {
-  const host = madeBy >> 8
-  const mode = host === 3 || host === 19 ? external >>> 16 : 0
+function kindOf(name: string, mode: number, external: number): ZipEntry['kind'] {
   const type = mode & 0o170000
   if (type === 0o120000) return 'link'
   if (name.endsWith('/') || type === 0o040000 || (external & 0x10) !== 0) return 'dir'

@@ -17,6 +17,20 @@ export type Screen =
   | { kind: 'grid' }
   | { kind: 'orchestrator' }
   | { kind: 'settings' }
+  /*
+   * A file and the git screen are pages of their own (owner, 2026-10-18): they open over the screen they were opened
+   * from (`under`, which back returns to with its reading place, #61) and are drawn over it in the centre lane, so
+   * coming back costs nothing. `under` is where they stand, not what they are, so it is not part of their sameness.
+   */
+  | { kind: 'file'; path: string; projectId: string | null; under: Screen | null }
+  | {
+      kind: 'git'
+      sub: 'changes' | 'history' | 'branches'
+      path: string | null
+      sha: string | null
+      staged: boolean | null
+      under: Screen | null
+    }
 
 /** The entries, oldest first, and which one is on screen. `index` is -1 only while there are none */
 export type NavHistory = { entries: Screen[]; index: number }
@@ -36,7 +50,17 @@ export function sameScreen(a: Screen | undefined, b: Screen | undefined): boolea
     case 'project':
       return a.id === (b as typeof a).id
     case 'app':
-      return a.projectId === (b as typeof a).projectId && a.appId === (b as typeof a).appId && (a.machine ?? null) === ((b as typeof a).machine ?? null)
+      return (
+        a.projectId === (b as typeof a).projectId &&
+        a.appId === (b as typeof a).appId &&
+        (a.machine ?? null) === ((b as typeof a).machine ?? null)
+      )
+    case 'file':
+      return a.path === (b as typeof a).path && a.projectId === (b as typeof a).projectId
+    case 'git': {
+      const c = b as typeof a
+      return a.sub === c.sub && a.path === c.path && a.sha === c.sha && a.staged === c.staged
+    }
     default:
       return true
   }
@@ -53,12 +77,16 @@ export function visit(h: NavHistory, screen: Screen): NavHistory {
 }
 
 /**
- * A layer laid over a screen (Settings) was closed, and the screen under it is on again. When the layer is the
+ * A layer laid over a screen (Settings, a file, the git screen) was closed, and the screen under it is on again. When the layer is the
  * current entry and that screen is the one before it, this steps back to it rather than adding it a second time:
  * closing Settings is going back, and forward reopens it. Anything else is an ordinary visit.
  */
 export function closeLayer(h: NavHistory, under: Screen): NavHistory {
-  if (h.entries[h.index]?.kind === 'settings' && sameScreen(h.entries[h.index - 1], under)) {
+  const kind = h.entries[h.index]?.kind
+  if (
+    (kind === 'settings' || kind === 'file' || kind === 'git') &&
+    sameScreen(h.entries[h.index - 1], under)
+  ) {
     return { entries: h.entries, index: h.index - 1 }
   }
   return visit(h, under)

@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 /**
  * Entry points a person can see (#529). The task-cost baseline (docs/ux-metrics.md) found three
@@ -12,14 +12,6 @@ async function demo(page: Page): Promise<void> {
   await expect(page.getByTestId('session-name')).toHaveText('Finish the collapsed composer')
 }
 
-/** How visible an element is: its own opacity times every ancestor's */
-const seen = (el: Locator) =>
-  el.evaluate((node) => {
-    let o = 1
-    for (let at: Element | null = node; at; at = at.parentElement) o *= Number(getComputedStyle(at).opacity)
-    return o
-  })
-
 test('the Search button opens the palette and says its key', async ({ page }) => {
   await demo(page)
   const search = page.getByTestId('search-button')
@@ -31,24 +23,30 @@ test('the Search button opens the palette and says its key', async ({ page }) =>
   await expect(page.getByTestId('palette-input')).toHaveAttribute('placeholder', /apps/)
 })
 
-test("the project the person is in shows its +, others only on hover, and the project menu's New session opens that project's dialog", async ({ page }) => {
+/*
+ * Sessions start from the project's menu only (owner, 2026-10-18): the + on the project row, shown on hover, moved the
+ * row's other marks as the pointer passed. The menu's one New session starts a session at once; the window that
+ * chooses a tool, a past conversation or a worktree opens from the palette (below) or a worktree proposal.
+ */
+test("a project row carries no +, and its menu holds the one New session", async ({ page }) => {
   await demo(page)
-  const here = page.getByTestId('project-new-session-centralu')
-  const there = page.getByTestId('project-new-session-landing-site')
-  // Opacity, not presence: the other project's + is still reachable by hover and Tab
+  // Nothing on the row moves when the pointer arrives: the menu's button stands where it stood
+  const actions = page.getByTestId('project-actions-centralu')
   await page.mouse.move(900, 500)
-  await expect.poll(() => seen(here)).toBe(1)
-  await expect.poll(() => seen(there)).toBe(0)
-  // The chevron beside the + is gone (2026-10-17): the dialog that chooses a tool or a worktree is in the project menu
+  const away = await actions.boundingBox()
+  await page.getByTestId('project-header-centralu').hover()
+  expect(await actions.boundingBox()).toEqual(away)
+  await expect(page.getByTestId('project-new-session-centralu')).toHaveCount(0)
+  await expect(page.getByTestId('project-new-session-landing-site')).toHaveCount(0)
   await expect(page.getByTestId('project-new-session-options-centralu')).toHaveCount(0)
 
   await page.getByTestId('project-menu-centralu').click()
-  await page.getByTestId('new-session-centralu').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeVisible()
-  await expect(page.getByTestId('new-session-dialog')).toContainText('centralu')
+  const menu = page.getByTestId('project-menu-open-centralu')
+  await expect(menu.getByText('New session', { exact: true })).toHaveCount(1)
+  await expect(page.getByTestId('new-session-with-centralu')).toHaveCount(0)
 })
 
-test("the + starts a session at once with the project's tool, model and effort, and the caret is in its message box (#543)", async ({ page }) => {
+test("the menu's New session starts a session at once with the project's tool, model and effort, and the caret is in its message box (#543)", async ({ page }) => {
   await demo(page)
   // What the project remembers: Codex, its model and effort (the demo's default is Claude Code)
   await page.evaluate(() => {
@@ -59,7 +57,7 @@ test("the + starts a session at once with the project's tool, model and effort, 
   })
   const before = await page.evaluate(() => Object.keys((window as any).__store.getState().sessions).length)
 
-  await page.getByTestId('project-new-session-centralu').click()
+  await newSessionFromMenu(page)
 
   // No dialog in between: the session exists, is the open one, and carries the remembered settings
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__store.getState().sessions).length)).toBe(before + 1)
@@ -72,7 +70,7 @@ test("the + starts a session at once with the project's tool, model and effort, 
   await expect(page.getByTestId('prompt-input')).toBeFocused()
   await page.keyboard.type('Fix the login bug')
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('msg-user').last()).toHaveText('Fix the login bug')
+  await expect(page.getByTestId('msg-user').last()).toContainText('Fix the login bug')
 })
 
 /** Makes the named tools unusable (logged out) on the mock, and the project's remembered tool the first of them */
@@ -90,14 +88,20 @@ async function logOut(page: Page, tools: string[], remembered: string): Promise<
   )
 }
 
+/** The project menu's New session, as a person reaches it */
+async function newSessionFromMenu(page: Page): Promise<void> {
+  await page.getByTestId('project-menu-centralu').click()
+  await page.getByTestId('new-session-centralu').click()
+}
+
 const sessionCount = (page: Page) => page.evaluate(() => Object.keys((window as any).__store.getState().sessions).length)
 
-test("the + falls back to the other tool when the project's is logged out, as the dialog does (#543)", async ({ page }) => {
+test("New session falls back to the other tool when the project's is logged out, as the dialog does (#543)", async ({ page }) => {
   await demo(page)
   await logOut(page, ['claude'], 'claude')
   const before = await sessionCount(page)
 
-  await page.getByTestId('project-new-session-centralu').click()
+  await newSessionFromMenu(page)
 
   await expect.poll(() => sessionCount(page)).toBe(before + 1)
   await expect(page.getByTestId('new-session-dialog')).toHaveCount(0)
@@ -109,12 +113,12 @@ test("the + falls back to the other tool when the project's is logged out, as th
   await expect(page.getByTestId('prompt-input')).toBeFocused()
 })
 
-test("the + opens the dialog instead when no tool can run, and the dialog says why (#543)", async ({ page }) => {
+test("New session opens the dialog instead when no tool can run, and the dialog says why (#543)", async ({ page }) => {
   await demo(page)
   await logOut(page, ['claude', 'codex'], 'claude')
   const before = await sessionCount(page)
 
-  await page.getByTestId('project-new-session-centralu').click()
+  await newSessionFromMenu(page)
 
   await expect(page.getByTestId('new-session-dialog')).toBeVisible()
   await expect(page.getByTestId('tool-blocked')).toContainText('needs a login')

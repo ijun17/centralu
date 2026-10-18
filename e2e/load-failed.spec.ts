@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './fixtures/project-screen.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * A list read when its screen shows says so when the read fails (#850 item 8, `useLoad`). It used to draw the failure
@@ -109,8 +110,8 @@ test('the intro says a failed tool check failed, not that no tool is ready', asy
 test('the new session dialog says a failed tool check failed, and does not call the tool missing', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
   const heal = await failing(page, 'agents', 'detect', 'detect did not answer')
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  // The menu's New session starts at once (owner, 2026-10-18); the dialog is the palette's, opened here directly
+  await openSessionDialog(page, 'alpha')
 
   await expect(page.getByTestId('tool-detect-failed')).toContainText('detect did not answer')
   await expect(page.getByTestId('tool-blocked')).toHaveCount(0)

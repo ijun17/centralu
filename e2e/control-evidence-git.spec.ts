@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { copied, pressCopy, watchCopies } from './fixtures/clipboard.js'
 import { setup, newSession } from './fixtures/control.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on the evidence panel: git changes, staging, commits and history.
@@ -147,9 +148,7 @@ test('The Git tab is disabled when the project is not a git repository (B-1 abno
     })
     await store.getState().addProject('/tmp/nogit')
   })
-  await page.getByTestId('project-menu-nogit').click()
-  await page.getByTestId('new-session-nogit').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'nogit')
   await expect(page.getByTestId('evidence-tab-git')).toBeDisabled()
   await expect(page.getByTestId('evidence-not-repo')).toBeVisible()
 })

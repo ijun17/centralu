@@ -82,4 +82,19 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
     expect(again.migrationsRun).toBe(0)
     again.close()
   })
+
+  it('has no usage_facts table afterwards: the fixture has it, v56 drops it (#423)', () => {
+    const file = olderStore(version)
+    const tables = (path: string) => {
+      const db = new Database(path)
+      try {
+        return (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[]).map((t) => t.name)
+      } finally {
+        db.close()
+      }
+    }
+    expect(tables(file)).toContain('usage_facts')
+    new Store(file).close()
+    expect(tables(file)).not.toContain('usage_facts')
+  })
 })

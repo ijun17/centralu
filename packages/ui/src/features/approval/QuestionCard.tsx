@@ -129,11 +129,13 @@ export function QuestionCard({
 
   return (
     <div
-      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="question-card"
     >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
-        <span className="signal text-2xs font-medium">Agent is asking</span>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <span className="rounded-full border border-ink-signal/60 px-2 py-px text-2xs font-medium text-ink-signal">
+          Agent is asking
+        </span>
         <span className="text-xs text-ink-faint">
           {tabbed ? `${questions.length} questions` : 'Pick an option'}
         </span>
@@ -145,7 +147,10 @@ export function QuestionCard({
           The dot on a tab is its answered state: what still waits is legible without
           visiting every tab, which is the whole point of not stacking.
         */
-        <nav className="mt-2 flex items-center gap-0.5 border-b border-line px-2 pb-1" data-testid="question-tabs">
+        <nav
+          className="mt-2 flex items-center gap-0.5 border-b border-line px-2 pb-1"
+          data-testid="question-tabs"
+        >
           {questions.map((q, qi) => (
             <button
               key={qi}
@@ -178,7 +183,9 @@ export function QuestionCard({
             <div key={qi} className="flex flex-col gap-1.5">
               <div className="flex items-baseline gap-2">
                 {!tabbed && q.header && (
-                  <span className="shrink-0 rounded-md bg-surface-selected px-1.5 py-px text-2xs text-ink-faint">{q.header}</span>
+                  <span className="shrink-0 rounded-md bg-surface-selected px-1.5 py-px text-2xs text-ink-faint">
+                    {q.header}
+                  </span>
                 )}
                 <span className="text-md leading-tight text-ink">{q.question}</span>
                 {/* That several answers are allowed must be known before pressing, not after */}
@@ -193,8 +200,10 @@ export function QuestionCard({
                       type="button"
                       data-testid="question-option"
                       onClick={() => pick(qi, o.label, q.multiSelect)}
-                      className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
-                        on ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
+                      className={`rounded-field border px-3 py-2 text-left transition-colors ${
+                        on
+                          ? 'border-ink-signal bg-surface-selected'
+                          : 'border-line hover:bg-surface-selected/50'
                       }`}
                     >
                       <div className="text-sm text-ink">{o.label}</div>
@@ -211,8 +220,10 @@ export function QuestionCard({
                   type="button"
                   data-testid="question-other"
                   onClick={() => toggleOther(qi, q.multiSelect)}
-                  className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
-                    otherOn[qi] ? 'border-ink-signal bg-surface-selected' : 'border-line hover:bg-surface-selected/50'
+                  className={`rounded-field border px-3 py-2 text-left transition-colors ${
+                    otherOn[qi]
+                      ? 'border-ink-signal bg-surface-selected'
+                      : 'border-line hover:bg-surface-selected/50'
                   }`}
                 >
                   <div className="text-sm text-ink-faint">Other — write your own</div>
@@ -226,7 +237,7 @@ export function QuestionCard({
                     value={otherText[qi] ?? ''}
                     onChange={(e) => setOtherText((t) => ({ ...t, [qi]: e.target.value }))}
                     placeholder="Type your answer"
-                    className="w-full resize-y rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink outline-none focus:border-ink-signal"
+                    className="w-full resize-y rounded-field border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink outline-none focus:border-ink-signal"
                   />
                 )}
               </div>
@@ -241,7 +252,7 @@ export function QuestionCard({
           data-testid="question-submit"
           disabled={!ready || sending}
           onClick={() => void submit()}
-          className="rounded-md border border-line px-2.5 py-1 text-xs text-ink enabled:hover:bg-surface-selected disabled:opacity-40"
+          className="rounded-full border border-line-strong px-3 py-1 text-xs text-ink enabled:hover:bg-surface-selected disabled:opacity-50"
         >
           {sending ? 'Sending…' : 'Answer'}
         </button>

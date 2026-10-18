@@ -437,10 +437,17 @@ export const sessionMethods = {
    * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own. `runs` are
    * the records of deleted app-agent sessions (#378), which `bytes` counts too, each on the machine its app ran on
    * (`machine`, as a session's); a host older than #378 sends none.
+   * `unreached`: the linked machines whose trash could not be read this time (#841 item 4), so the list says it is
+   * not the whole trash. Absent when every machine answered, and from a host before it.
    */
   'trash.list': {
     params: z.object({}),
-    result: z.object({ sessions: z.array(TrashedSession), runs: z.array(TrashedRun).default([]), bytes: z.number() }),
+    result: z.object({
+      sessions: z.array(TrashedSession),
+      runs: z.array(TrashedRun).default([]),
+      bytes: z.number(),
+      unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+    }),
   },
   /**
    * An app-agent run's record (#378), read-only: the request and the answer as the app's run saw them, the structured

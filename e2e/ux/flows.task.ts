@@ -278,11 +278,14 @@ uxTask({
   task: 'Start a session in its own git worktree',
   path: 'mouse',
   access: 'discoverable',
-  notes: ["The project menu's New session, then the dialog's worktree box; the branch left blank takes the default name"],
+  notes: [
+    "The Search button, the palette's New session, then the dialog's worktree box; the branch left blank takes the default name. The project menu's New session starts a session at once (owner, 2026-10-18), so the dialog that offers a worktree is the palette's",
+  ],
   start: demo,
   run: async (u, page) => {
-    await u.click(page.getByTestId('project-menu-centralu'))
-    await u.click(page.getByTestId('new-session-centralu'))
+    await u.click(page.getByTestId('search-button'))
+    await u.until('the palette', () => expect(page.getByTestId('palette-input')).toBeFocused())
+    await u.click(page.getByTestId('palette-item-action').filter({ hasText: 'New session' }))
     await u.until('the new-session dialog', () => expect(page.getByTestId('new-session-dialog')).toBeVisible())
     await u.click(page.getByTestId('worktree-toggle'))
     await u.until('the worktree options', () => expect(page.getByTestId('worktree-options')).toBeVisible())
@@ -293,8 +296,9 @@ uxTask({
     await expect(page.getByTestId('worktree-badge').first()).toBeVisible()
   },
   /*
-   * One click more than the chevron beside the + took (2026-10-17): the owner removed the chevron, and the dialog that
-   * offers a worktree is the project menu's New session. A worktree session is the rarer start; the + stays one click.
+   * The chevron beside the + went first (2026-10-17), then the + and the menu's dialog (2026-10-18): the project menu's
+   * New session starts at once, and the dialog that offers a worktree opens from the palette. A worktree session is
+   * the rarer start; the common one is the menu's single New session.
    */
   budget: { operators: 17, M: 4, seconds: 11.3 },
 })
@@ -493,7 +497,7 @@ uxTask({
   task: 'Update the app when a new version is out',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['The "Update to …" line in the top bar installs; "Apply now" relaunches into it (#352)'],
+  notes: ['The "Update" capsule in the top bar installs, its version in the tooltip (owner, 2026-10-18); pressed again it relaunches into it (#352)'],
   start: async (page) => {
     await demo(page)
     await page.evaluate(() => {
@@ -501,7 +505,7 @@ uxTask({
       m.relaunchCheck = { ready: true }
       m.offerUpdate('9.9.9')
     })
-    await expect(page.getByTestId('update-line')).toContainText('9.9.9')
+    await expect(page.getByTestId('update-line')).toHaveText('Update')
   },
   run: async (u, page) => {
     await u.click(page.getByTestId('update-line'))

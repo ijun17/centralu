@@ -18,11 +18,8 @@ export { STOP_REPORTED_MS, taskList } from './background-stops.js'
 // Moved with the waits on a delegated turn (#428); still importable from here
 export type { TurnWait } from './delegation-waits.js'
 
-/**
- * The sender a hub's orchestrator's instruction is recorded under (`sendFromHub`). Not a session of this host: no id
- * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
- */
-export const HUB_SENDER = '_hub-orchestrator'
+// Moved to a module of its own, which the linked reports read without this one's imports (#1082); still importable from here
+export { HUB_SENDER } from './hub-sender.js'
 
 /**
  * The work one session gives another (#428): ask_project's delegations (#371 part B; linked machines, #700), start_agent

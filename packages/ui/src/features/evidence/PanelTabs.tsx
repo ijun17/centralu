@@ -402,7 +402,7 @@ function TabButton({
         e.stopPropagation()
         onLayout(moveTab(groups, dragged, id, dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)))
       }}
-      className={`rounded-md px-2 py-0.5 text-sm transition-colors disabled:opacity-40 ${
+      className={`rounded-md px-2 py-0.5 text-sm transition-colors disabled:opacity-50 ${
         active ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
       } ${dropLine(edge)}`}
     >

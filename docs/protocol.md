@@ -419,7 +419,9 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   `agents.sleepPolicy`, `agents.setSleepPolicy` (#568),
   `projects.add`, `projects.create`, `projects.createPreview` (#515), `processes.strays`, `processes.stop`. Lists the UI rebuilds from
   (`sessions.list`, `projects.list`, `trash.list`, `messages.search`, `apps.list`,
-  `approvals.rules`, `projectConsents.list`) are merged across machines. The table, one entry per
+  `approvals.rules`, `projectConsents.list`) are merged across machines. A machine that cannot be
+  reached is left out of the merge; `trash.list` names those (`unreached`, #841) and `trash.empty`
+  lists each as failed, so neither reads as the whole trash. The table, one entry per
   method, is `packages/agent-host/src/links/routes.ts`; a method added to the protocol does not
   compile until it is classified there.
 - **Numbers.** An approval rule id from another machine is folded into a negative number (one

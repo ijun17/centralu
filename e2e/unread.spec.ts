@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * Unread reflects only what the person actually saw (#161) — real UI on a mock platform.
@@ -21,9 +22,7 @@ test('an answer that finishes while the app is behind another window does not be
   await page.goto('/?mock=1')
   await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
   await page.getByTestId('add-project').click()
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'alpha')
   await expect(page.getByTestId('session-view')).toBeVisible()
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
 

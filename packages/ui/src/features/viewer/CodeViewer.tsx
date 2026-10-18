@@ -227,7 +227,8 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="code-viewer">
-      <header className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+      {/* The panel's tab row height (31px, PanelTabs), so this bar's line meets the tabs' line beside it */}
+      <header className="flex h-[31px] shrink-0 items-center gap-2 border-b border-line px-3">
         <span className="readout truncate text-xs text-ink-muted" data-testid="viewer-path">
           {path}
         </span>
@@ -253,7 +254,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           </>
         )}
         {isSvg && (
-          <span className="ml-2 flex overflow-hidden rounded-md border border-line text-2xs" data-testid="viewer-svg-mode">
+          <span
+            className="ml-2 flex overflow-hidden rounded-md border border-line text-2xs"
+            data-testid="viewer-svg-mode"
+          >
             <button
               type="button"
               className={`px-2 py-0.5 transition-colors ${
@@ -396,7 +400,9 @@ export function CodeViewer({ projectId }: { projectId: string }) {
                 <span className="sticky left-0 w-12 shrink-0 select-none bg-surface-floor pr-2 text-right text-ink-faint">
                   {v.index + 1}
                 </span>
-                <span data-code className="whitespace-pre text-ink-muted">{lines[v.index]}</span>
+                <span data-code className="whitespace-pre text-ink-muted">
+                  {lines[v.index]}
+                </span>
               </div>
             ))}
           </div>
@@ -409,5 +415,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
 
 /** The host is the primary gate; this keeps a malformed adapter response from becoming a data URL. */
 function isViewerImage(image: NonNullable<FsFile['image']>): boolean {
-  return ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml'].includes(image.mime)
+  return ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml'].includes(
+    image.mime,
+  )
 }

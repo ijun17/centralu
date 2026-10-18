@@ -398,7 +398,7 @@ describe('messagesToChat — image rows (#40, second pass)', () => {
         payload: { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/a.png' },
       },
     ])
-    expect(items).toEqual([{ kind: 'image', seq: 1, storedSeq: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
+    expect(items).toEqual([{ kind: 'image', seq: 1, storedSeq: 1, at: 1, mime: 'image/png', data: 'aWJs', path: '/tmp/a.png', note: undefined }])
   })
 
   it('a cleaned-up image is restored with its reason — not a silent gap', () => {
@@ -421,9 +421,9 @@ describe('messagesToChat — reasoning rows', () => {
     })
     const items = messagesToChat([row(1, 'reasoning', '**Path review**'), row(2, 'reasoning', '**Test check**'), row(3, 'text', 'reply')])
     expect(items).toEqual([
-      { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**Path review**' },
-      { kind: 'reasoning', seq: 2, storedSeq: 2, text: '**Test check**' },
-      { kind: 'assistant', seq: 3, storedSeq: 3, text: 'reply' },
+      { kind: 'reasoning', seq: 1, storedSeq: 1, at: 1, text: '**Path review**' },
+      { kind: 'reasoning', seq: 2, storedSeq: 2, at: 1, text: '**Test check**' },
+      { kind: 'assistant', seq: 3, storedSeq: 3, at: 1, text: 'reply' },
     ])
   })
 })

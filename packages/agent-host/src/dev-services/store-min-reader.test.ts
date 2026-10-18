@@ -28,8 +28,8 @@ afterEach(() => {
 
 /** The newest step this host knows */
 const KNOWN = new Store().latestKnownVersion
-/** The last breaking step today (v32): every store this host has migrated is readable from here on */
-const FLOOR = 32
+/** The last breaking step today (v56, #423): every store this host has migrated is readable from here on */
+const FLOOR = 56
 
 /** A store at the current version, with one project in it */
 function currentStore(): string {
@@ -79,7 +79,7 @@ describe('which builds can still read the store (#292)', () => {
       db.pragma(`user_version = ${KNOWN + 3}`)
       setFloor(db, KNOWN + 2)
       // What a newer contract step might have dropped. schema.sql would recreate it empty if it ran
-      db.exec(`DROP TABLE usage_facts`)
+      db.exec(`DROP TABLE workspace`)
     })
 
     let err: unknown
@@ -98,12 +98,12 @@ describe('which builds can still read the store (#292)', () => {
     raw(file, (db) => {
       expect(db.pragma('user_version', { simple: true })).toBe(KNOWN + 3)
       expect(floorOf(db)).toBe(String(KNOWN + 2))
-      expect(hasTable(db, 'usage_facts')).toBe(false)
+      expect(hasTable(db, 'workspace')).toBe(false)
     })
   })
 
   it.each([
-    ['well below this host', FLOOR],
+    ['well below this host', 32],
     ['exactly this host', KNOWN],
   ])('a store newer than this host but readable from %s opens, and is not migrated', (_label, floor) => {
     const file = currentStore()
@@ -124,7 +124,7 @@ describe('which builds can still read the store (#292)', () => {
 
   it('applying a breaking step raises the record to that step', () => {
     const file = currentStore()
-    // Back to v31, readable from v28 on: the two columns v32 drops are still there
+    // Back to v31, readable from v28 on: the two columns v32 drops are still there. The last breaking step, v56, runs too
     raw(file, (db) => {
       db.exec(`ALTER TABLE projects ADD COLUMN default_model TEXT; ALTER TABLE projects ADD COLUMN default_effort TEXT`)
       db.pragma('user_version = 31')
@@ -133,9 +133,9 @@ describe('which builds can still read the store (#292)', () => {
 
     const s = new Store(file)
     expect(s.migrationsRun).toBe(KNOWN - 31)
-    expect(s.minReaderVersion).toBe(32)
+    expect(s.minReaderVersion).toBe(FLOOR)
     s.close()
-    raw(file, (db) => expect(floorOf(db)).toBe('32'))
+    raw(file, (db) => expect(floorOf(db)).toBe(String(FLOOR)))
   })
 
   it('a breaking step that fails changes nothing, its record included, so older hosts can still open the store (#396)', () => {
@@ -174,12 +174,12 @@ describe('which builds can still read the store (#292)', () => {
    * The classification is part of the record: changing a step's flag after it shipped changes what older hosts are
    * told. A new breaking or heavy step adds itself here, where a reviewer sees it.
    */
-  it('every step declares whether it breaks older readers; v13, v28 and v32 do, and v3, v11, v21 and v40 are heavy', () => {
+  it('every step declares whether it breaks older readers; v13, v28, v32 and v56 do, and v3, v11, v21 and v40 are heavy', () => {
     type Step = { to: number; breaksOlderReaders: boolean; heavy?: true }
     const steps = (new Store() as unknown as { migrationSteps(): Step[] }).migrationSteps()
     expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 1 }, (_, i) => i + 2))
     expect(steps.every((s) => typeof s.breaksOlderReaders === 'boolean')).toBe(true)
-    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32])
+    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56])
     expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([3, 11, 21, 40])
   })
 

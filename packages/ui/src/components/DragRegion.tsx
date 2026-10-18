@@ -65,7 +65,22 @@ export function DragRegion({
          * Cancelling the press's default keeps focus (and starts no text selection); the drag
          * itself is the platform's and does not need it.
          */
+        // A second press of a double click is the shell's: it maximizes (or zooms) on the marked region itself
+        if (e.detail >= 2) return
         e.preventDefault()
+        /*
+         * One drag per press (owner, 2026-10-18: on Windows the drag sometimes did not start, most often right beside
+         * the bar's controls). A press on an element that itself carries data-tauri-drag-region (the bar, the right-hand
+         * group) also reaches the shell's own drag script on `document`, so the window was told to start dragging twice
+         * for one press, and on Windows the second call can land after the first drag has begun or ended. This one
+         * starts it; the shell's script is told to skip this press by the attribute it reads (`false` means "not a drag
+         * region"), put back on the next task.
+         */
+        if (el.hasAttribute('data-tauri-drag-region') && el.getAttribute('data-tauri-drag-region') !== 'false') {
+          const was = el.getAttribute('data-tauri-drag-region') ?? ''
+          el.setAttribute('data-tauri-drag-region', 'false')
+          setTimeout(() => el.setAttribute('data-tauri-drag-region', was), 0)
+        }
         void platform.system.startWindowDrag().catch((err: Error) => {
           // Does not swallow the error. This exact thing caused the window to stop moving and
           // went unnoticed three times before — if the Tauri permission

@@ -1,6 +1,7 @@
 import type { ProjectInfo } from '@cc/protocol'
 import { Tooltip } from '../../../components/primitives.jsx'
 import { formatChangedCount } from '../../../app/format.js'
+import { ChangesIcon } from '../../../components/icons.jsx'
 
 /**
  * Marks placed on the name line — they claim no new vertical space.
@@ -32,7 +33,14 @@ export function ProjectMarks({ project }: { project: ProjectInfo }) {
           content={`${count} uncommitted file${changed > 1 ? 's' : ''}`}
           testId={`mark-changed-tip-${project.name}`}
         >
-          <span data-testid={`mark-changed-${project.name}`}>{count}</span>
+          {/* A capsule with the changes icon and the count (owner, 2026-10-18), the top bar's grammar */}
+          <span
+            className="flex h-[18px] items-center gap-1 rounded-full border border-line px-1.5 text-ink-faint"
+            data-testid={`mark-changed-${project.name}`}
+          >
+            <ChangesIcon size={11} />
+            <span className="translate-y-px leading-none">{count}</span>
+          </span>
         </Tooltip>
       )}
       {denied && (

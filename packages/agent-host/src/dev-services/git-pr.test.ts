@@ -241,3 +241,47 @@ describe('a gh that is a batch file', () => {
     expect({ answer, plantedRan: existsSync(join(project, 'planted-ran')) }).toEqual({ answer: 'unavailable', plantedRan: false })
   })
 })
+
+/*
+ * #841: every gh failure read as "no pull request", and gh's stderr was thrown away, so a sign-in that had expired left
+ * the merge badge missing with no trace of why. A failure is said once in the host's log with gh's own line.
+ */
+describe('a gh lookup that fails (#841)', () => {
+  let root: string
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    __forgetPrograms()
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  })
+
+  function ghSaying(stderr: string): string {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-fail-')))
+    const bin = join(root, 'bin')
+    const project = join(root, 'project')
+    mkdirSync(bin)
+    mkdirSync(project)
+    fakeGh(bin)
+    writeFileSync(join(project, 'package.json'), '{"type":"commonjs"}')
+    writeFileSync(join(project, 'pr'), `process.stderr.write(${JSON.stringify(stderr)}); process.exitCode = 1\n`)
+    vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH ?? ''}`)
+    __forgetPrograms()
+    return project
+  }
+
+  it('says why in the host log, once, and still reads as unknown', { timeout: 30_000 * SLOW }, async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const project = ghSaying('HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n')
+    expect(await gitBranchPr(project, 'feat/x')).toBeNull()
+    expect(await gitBranchPr(project, 'feat/x')).toBeNull()
+    const said = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('Bad credentials'))
+    expect(said).toEqual(['[git] gh could not read the pull request of feat/x: HTTP 401: Bad credentials (https://api.github.com/graphql)'])
+  })
+
+  it('says nothing when the branch has no pull request, which is an answer', { timeout: 30_000 * SLOW }, async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const project = ghSaying('no pull requests found for branch "feat/y"\n')
+    expect(await gitBranchPr(project, 'feat/y')).toBeNull()
+    expect(log.mock.calls.filter((c) => String(c[0]).includes('gh could not'))).toEqual([])
+  })
+})

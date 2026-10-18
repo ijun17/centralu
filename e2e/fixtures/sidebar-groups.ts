@@ -284,13 +284,9 @@ export function sidebarGroupTests(): void {
           }
         }
 
-        // Project rows: the arrow, the name, `+`, its options and `⋯` (and, folded, the summary of what is hidden)
-        await expectCentred('project-header-alpha', [
-          'project-fold-alpha',
-          'project-new-session-alpha',
-          'project-menu-alpha',
-        ])
-        await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-new-session-beta', 'project-menu-beta'])
+        // Project rows: the arrow, the name and `⋯` (and, folded, the summary of what is hidden); the `+` is gone
+        await expectCentred('project-header-alpha', ['project-fold-alpha', 'project-menu-alpha'])
+        await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-menu-beta'])
         // Session rows at the three depths, the badges they carry, and the menu at their end
         await expectCentred(`session-row-${plain}`, ['mark', 'title', `background-mark-${plain}`, `session-menu-${plain}`])
         await expectCentred(`session-row-${PARENT}`, ['mark', 'title', `pr-badge-${PARENT}`, `children-fold-${PARENT}`, `session-menu-${PARENT}`])

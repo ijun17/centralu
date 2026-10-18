@@ -2,9 +2,25 @@ import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession, injectApproval, emitEvent, watchAppearance } from './fixtures/control.js'
 
 /**
- * The control loop's scenarios on unread marks and the finished cards: when they appear, call out, and clear. Moved out of control-loop.spec.ts by subject (#845); the
+ * The control loop's scenarios on unread marks and the finished notices: when they appear, call out, and clear. Moved out of control-loop.spec.ts by subject (#845); the
  * shared helpers (setup, newSession, emitEvent and the rest) are in fixtures/control.ts.
+ *
+ * The cards that stood in the top right are gone (owner, 2026-10-18): a notice is kept in the store (`notices`), written
+ * out in the inbox's capsule for 4 s (InboxPill, inbox-peek.spec.ts) and listed in the inbox. So these read the notices
+ * the store keeps, and check that no card covers the page.
  */
+
+async function sessionIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => [...(window as any).__mock.sessions.values()].map((s: { id: string }) => s.id))
+}
+
+/** The sessions with a "finished" notice, in the order they were made */
+const doneNotices = (page: Page) =>
+  page.evaluate(() =>
+    ((window as any).__store.getState().notices as { sessionId: string; kind: string }[])
+      .filter((n) => n.kind === 'done')
+      .map((n) => n.sessionId),
+  )
 
 test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
@@ -97,61 +113,60 @@ test('A gust blows once and disappears when the session being watched finishes',
   await expect(page.getByTestId('gust')).toHaveCount(0, { timeout: 3000 })
 })
 
-test("A gust does not blow when an off-screen session finishes — that is the card's job", async ({
+test("A gust does not blow when an off-screen session finishes — that is the notice's job", async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second') // Watching this one
+  const [first] = (await sessionIds(page)) as [string]
 
   // Session 0 (not being watched) finishes
   const blew = await watchGust(page)
   await emitEvent(page, 0, { type: 'turn_complete' })
   // A lingering signal arrives instead of a passing one — since it was not being watched, a
-  // passing signal would be missed
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  // passing signal would be missed. It is written out in the capsule and covers nothing
+  await expect.poll(() => doneNotices(page)).toEqual([first])
+  await expect(page.getByTestId('inbox-peek')).toHaveText(/ finished$/)
+  await expect(page.getByTestId('notice')).toHaveCount(0)
   expect(await blew()).toBe(false)
 })
 
 /*
- * A "Finished" card stops being true when its session is given more work or goes away (#674).
- * The session being watched is always one that did not finish, since a card only exists off screen.
+ * A "Finished" notice stops being true when its session is given more work or goes away (#674).
  */
-async function sessionIds(page: Page): Promise<string[]> {
-  return page.evaluate(() => [...(window as any).__mock.sessions.values()].map((s: { id: string }) => s.id))
-}
 
-test('A finished card goes away when that session starts another turn', async ({ page }) => {
+test('A finished notice goes away when that session starts another turn', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second') // Watching this one
   const [first] = (await sessionIds(page)) as [string]
 
   await emitEvent(page, 0, { type: 'turn_complete' })
-  await expect(page.getByTestId('notice').and(page.locator(`[data-session="${first}"]`))).toHaveCount(1)
+  await expect.poll(() => doneNotices(page)).toEqual([first])
 
   await emitEvent(page, 0, { type: 'state_change', state: 'working' })
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await expect.poll(() => doneNotices(page)).toEqual([])
 })
 
-test('A finished card goes away when that session is deleted', async ({ page }) => {
+test('A finished notice goes away when that session is deleted', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
   const [first] = (await sessionIds(page)) as [string]
 
   await emitEvent(page, 0, { type: 'turn_complete' })
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(() => doneNotices(page)).toEqual([first])
 
   await page.getByTestId(`session-menu-${first}`).click()
   await page.getByTestId(`delete-session-${first}`).click()
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${first}`)).toBeHidden()
 
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await expect.poll(() => doneNotices(page)).toEqual([])
 })
 
-test("Another session's finished card stays when this session starts working or is deleted", async ({ page }) => {
+test("Another session's finished notice stays when this session starts working or is deleted", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
@@ -160,18 +175,16 @@ test("Another session's finished card stays when this session starts working or 
 
   await emitEvent(page, 0, { type: 'turn_complete' })
   await emitEvent(page, 1, { type: 'turn_complete' })
-  await expect(page.getByTestId('notice')).toHaveCount(2)
+  await expect.poll(() => doneNotices(page)).toEqual([first, second])
 
   await emitEvent(page, 0, { type: 'state_change', state: 'working' })
-  await expect(page.getByTestId('notice')).toHaveCount(1)
-  await expect(page.getByTestId('notice')).toHaveAttribute('data-session', second)
+  await expect.poll(() => doneNotices(page)).toEqual([second])
 
   await page.getByTestId(`session-menu-${first}`).click()
   await page.getByTestId(`delete-session-${first}`).click()
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${first}`)).toBeHidden()
-  await expect(page.getByTestId('notice')).toHaveCount(1)
-  await expect(page.getByTestId('notice')).toHaveAttribute('data-session', second)
+  await expect.poll(() => doneNotices(page)).toEqual([second])
 })
 
 /*
@@ -191,7 +204,7 @@ test("Another session's finished card stays when this session starts working or 
  * an empty room and no card was ever created — in exactly the case a notification is needed
  * most, exactly nothing happened.
  */
-test('When the app is in the background, the card persists even if the session being watched finishes', async ({
+test('When the app is in the background, the notice persists even if the session being watched finishes', async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -204,12 +217,14 @@ test('When the app is in the background, the card persists even if the session b
   await emitEvent(page, 0, { type: 'turn_complete' })
 
   // Not the window being watched, so nobody sees the gust -> it must be a lingering signal
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  const [work] = (await sessionIds(page)) as [string]
+  await expect.poll(() => doneNotices(page)).toEqual([work])
   expect(await blew()).toBe(false)
 
-  // Returning means it is being seen then, so it clears
+  // Returning means it is being seen then: its line is written out, and once it folds (4 s) it is done with
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await expect(page.getByTestId('inbox-peek')).toHaveText(/ finished$/)
+  await expect.poll(() => doneNotices(page), { timeout: 15_000 }).toEqual([])
 })
 
 test('Finishing while away also calls out with a sound — it does not wait for everything to finish', async ({
@@ -229,104 +244,75 @@ test('Finishing while away also calls out with a sound — it does not wait for 
     .toEqual([{ kind: 'done', sound: true }])
 })
 
-test('When it is right in front of the person, only the card stays and no sound plays', async ({ page }) => {
+test('When it is right in front of the person, only the notice stays and no sound plays', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second') // Watching this one -> first is off-screen
 
   await emitEvent(page, 0, { type: 'turn_complete' })
 
-  // Unseen, so the card stays. But calling with a sound at someone right in front of it is just noise.
-  // The card and any sound are decided in the same handling of the event (store/events/notices.ts),
-  // and the mock records an alert as it is asked for, so once the card is drawn the count is final.
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  // Unseen, so the notice stays. But calling with a sound at someone right in front of it is just noise.
+  // The notice and any sound are decided in the same handling of the event (store/events/notices.ts),
+  // and the mock records an alert as it is asked for, so once the notice is kept the count is final.
+  await expect.poll(async () => (await doneNotices(page)).length).toBe(1)
   expect(
     await page.evaluate(() => (window as never as { __mock: { alerts: unknown[] } }).__mock.alerts.length),
   ).toBe(0)
 })
 
-test('The card does not disappear on its own over time', async ({ page }) => {
+test('The notice of a session off screen does not disappear on its own over time', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
+  const [first] = (await sessionIds(page)) as [string]
 
   await emitEvent(page, 0, { type: 'turn_complete' })
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(() => doneNotices(page)).toEqual([first])
 
   /*
-   * A toast clears at 2.5 seconds, and this must outlast it. A fixed 4 s wait measured the test's clock, not the page's:
-   * on a loaded machine the page may have run far less of it, and the check passed without the time having passed
-   * there (#845). Two toasts in a row, each cleared by the page's own 2.5 s timer, are 5 s the page did run.
+   * It must outlast the capsule's 4 s line. A fixed wait measured the test's clock, not the page's: on a loaded machine
+   * the page may have run far less of it, and the check passed without the time having passed there (#845). Two toasts
+   * in a row, each cleared by the page's own 2.5 s timer, are 5 s the page did run.
    */
   for (let i = 0; i < 2; i++) {
     await page.evaluate((n) => (window as any).__store.getState().setToast(`time passing ${n}`), i)
     await expect(page.getByTestId('toast')).toBeVisible()
     await expect(page.getByTestId('toast')).toBeHidden({ timeout: 30_000 })
-    await expect(page.getByTestId('notice')).toHaveCount(1)
+    expect(await doneNotices(page)).toEqual([first])
   }
 })
 
-test('The card clears once that session is being viewed', async ({ page }) => {
+test('The notice is done with once that session is being viewed and its line has folded', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
+  const [first] = (await sessionIds(page)) as [string]
 
   await emitEvent(page, 0, { type: 'turn_complete' })
-  const card = page.getByTestId('notice')
-  await expect(card).toHaveCount(1)
-  const target = await card.getAttribute('data-session')
+  await expect.poll(() => doneNotices(page)).toEqual([first])
 
-  await page.evaluate((id) => {
-    const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
-    ;(st as unknown as { focusSession(id: string): void }).focusSession(id!)
-  }, target)
-
-  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await page.evaluate((id) => (window as any).__store.getState().focusSession(id), first)
+  await expect.poll(() => doneNotices(page), { timeout: 15_000 }).toEqual([])
 })
 
-test('Clicking the card navigates to that session', async ({ page }) => {
+test('The inbox opens a finished session, and no card stands over the page', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
+  const [first] = (await sessionIds(page)) as [string]
 
+  // An answer to read: the inbox lists a finished turn only while it is unread (#669)
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'all done here' })
   await emitEvent(page, 0, { type: 'turn_complete' })
-  const target = await page.getByTestId('notice').getAttribute('data-session')
+  await expect.poll(() => doneNotices(page)).toEqual([first])
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+  await expect(page.getByTestId('notices')).toHaveCount(0)
 
-  await page.getByTestId('notice-open').click()
-
-  const focused = await page.evaluate(
-    () =>
-      (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState()
-        .focusedSessionId,
-  )
-  expect(focused).toBe(target)
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`inbox-item-${first}`).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(first)
   // Having navigated there, there is no reason to keep calling out
-  await expect(page.getByTestId('notice')).toHaveCount(0)
-})
-
-test('Clicking × clears only the card without navigating to that session', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'first')
-  await newSession(page, 'alpha', 'second')
-
-  const before = await page.evaluate(
-    () =>
-      (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState()
-        .focusedSessionId,
-  )
-  await emitEvent(page, 0, { type: 'turn_complete' })
-  await expect(page.getByTestId('notice')).toHaveCount(1)
-
-  await page.getByTestId('notice-close').click()
-
-  await expect(page.getByTestId('notice')).toHaveCount(0)
-  const after = await page.evaluate(
-    () =>
-      (window as never as { __store: { getState(): { focusedSessionId: string } } }).__store.getState()
-        .focusedSessionId,
-  )
-  // It only dismissed the card — it does not mean navigating there
-  expect(after).toBe(before)
+  await expect.poll(() => doneNotices(page), { timeout: 15_000 }).toEqual([])
 })
 
 /*
@@ -364,16 +350,17 @@ test('A pending approval also calls out with sound and the dock badge', async ({
     .toEqual([{ kind: 'approval', sound: true }])
 })
 
-test('The same session finishing multiple times still produces only one card', async ({ page }) => {
+test('The same session finishing multiple times still produces only one notice', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   await newSession(page, 'alpha', 'second')
+  const [first] = (await sessionIds(page)) as [string]
 
   await emitEvent(page, 0, { type: 'turn_complete' })
   await emitEvent(page, 0, { type: 'turn_complete' })
   await emitEvent(page, 0, { type: 'turn_complete' })
 
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(() => doneNotices(page)).toEqual([first])
 })
 
 /*
@@ -390,7 +377,7 @@ test('Moving to an already-finished session does not trigger a gust', async ({ p
 
   const blewAtFinish = await watchGust(page)
   await emitEvent(page, 0, { type: 'turn_complete' }) // The unseen one finishes
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect.poll(async () => (await doneNotices(page)).length).toBe(1)
   expect(await blewAtFinish()).toBe(false)
 
   // Move to that finished session — nothing new has finished

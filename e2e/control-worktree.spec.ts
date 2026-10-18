@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setup, newSession } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on worktree sessions: the toggle, branches, setup, proposals and merged or PR badges. Moved out of control-loop.spec.ts by subject (#845); the
@@ -16,9 +17,7 @@ import { setup, newSession } from './fixtures/control.js'
 test('The worktree defaults to off, and turning it on shows the branch on the session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   const toggle = page.getByTestId('worktree-toggle').locator('input')
   await expect(toggle).not.toBeChecked()
 
@@ -50,9 +49,7 @@ test('A session with the worktree off has no badge', async ({ page }) => {
 test('Deleting a worktree session asks first, and deletion requires opting in', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -102,8 +99,7 @@ test('Deleting a non-worktree session never mentions worktrees', async ({ page }
 test('A worktree session the person makes stands on its own; one a session started sits under that session', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -161,7 +157,8 @@ test('A new worktree session forks from the project trunk, and the project menu 
   await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
   await expect(page.locator('[data-testid^="worktree-trunk-"]')).toHaveCount(0)
   await expect(page.getByTestId('project-menu-open-alpha')).not.toContainText(/trunk/i)
-  await page.getByTestId('new-session-alpha').click()
+  await page.keyboard.press('Escape')
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await expect(page.getByTestId('worktree-base-input')).toHaveValue('develop')
 })
@@ -169,9 +166,7 @@ test('A new worktree session forks from the project trunk, and the project menu 
 test('Naming the worktree branch becomes the session name', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // The branch field does not exist before the worktree is turned on — details of an off option
   // are never expanded ahead of time
   await expect(page.getByTestId('worktree-branch-input')).toHaveCount(0)
@@ -203,8 +198,7 @@ test('Turning on the worktree shows where it branches from, and it can be change
     ]
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // Details of an off option are never expanded ahead of time — the same rule as the branch field
   await expect(page.getByTestId('worktree-base-input')).toHaveCount(0)
   await page.getByTestId('worktree-toggle').locator('input').check()
@@ -236,8 +230,7 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   // A session whose conversation holds a proposal (the worktree manager made them before #561 part 3)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -265,8 +258,7 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
   await expect(page.locator('[data-worktree-proposal]')).toHaveCount(1)
 
   // Opening that door: worktree turned on + branch name filled in
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('worktree-toggle').locator('input')).toBeChecked()
   await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/proposed-work')
 
@@ -274,8 +266,7 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
   // empty dialog
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-worktree-proposal]')).toHaveCount(0)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('worktree-toggle').locator('input')).not.toBeChecked()
 })
 
@@ -287,9 +278,7 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
 test('Worktree setup: input fields at first, collapsing into a summary once saved', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   // With no saved setup, the input fields stay expanded
   await expect(page.getByTestId('worktree-setup-edit')).toBeVisible()
@@ -306,8 +295,7 @@ test('Worktree setup: input fields at first, collapsing into a summary once save
   expect(saved).toEqual({ command: 'pnpm install', copyFiles: ['.env.local', '.env'] })
 
   // Opening it next time shows one collapsed summary line — clicking it allows editing again
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await expect(page.getByTestId('worktree-setup-summary')).toContainText('setup: pnpm install')
   await expect(page.getByTestId('worktree-setup-summary')).toContainText('copies: .env.local, .env')
@@ -334,9 +322,7 @@ test('Worktree setup: gitignored candidates are pointed out, and clicking adds o
     ]
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
 
   // The size shows alongside — the judgment a person makes from this list is "this is too big"
@@ -363,9 +349,7 @@ test('Worktree setup: gitignored candidates are pointed out, and clicking adds o
 test('Merging a branch shows a merged badge on the sidebar row', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('worktree-branch-input').fill('feat/badge')
   await page.getByTestId('create-session-confirm').click()
@@ -387,8 +371,7 @@ test('Merging a branch shows a merged badge on the sidebar row', async ({ page }
 test('Opening a PR shows a PR chip, and merging replaces it with the merged badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('worktree-branch-input').fill('feat/pr-chip')
   await page.getByTestId('create-session-confirm').click()
@@ -422,8 +405,7 @@ test('Opening a PR shows a PR chip, and merging replaces it with the merged badg
 /** #69 dogfooding finding 3: proposals are a queue — receiving two, opening + twice consumes both */
 test('Two worktree proposals fill in order across two dialog openings', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
@@ -445,13 +427,10 @@ test('Two worktree proposals fill in order across two dialog openings', async ({
     }
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/first')
   await page.keyboard.press('Escape')
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('worktree-branch-input')).toHaveValue('feat/second')
   await page.keyboard.press('Escape')
   // The queue is empty — the glow turns off, and the next dialog is an ordinary one

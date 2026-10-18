@@ -138,31 +138,32 @@ describe('ChatRow: approvals and marks', () => {
 })
 
 describe('ChatRow: tool cards', () => {
-  it('shows the tool and its title in the header, collapsed, with three lines of output and the rest counted', () => {
+  /*
+   * The output shows only once a card is opened (owner, 2026-10-18): closed, a card is its title row, with no preview
+   * lines and no "N more lines". What an open card draws is checked in e2e, since a static render cannot press the toggle.
+   */
+  it('shows the tool and its title in the header, collapsed, with none of its output', () => {
     const { html, text } = row(tool({ result: 'one\ntwo\nthree\nfour\nfive\n\n' }))
-    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'tool-card-output', 'tool-card-more'])
+    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle'])
     expect(html).toContain('aria-expanded="false"')
-    expect(text).toBe('Bash ls -la one two three 2 more lines')
-    expect(html).toContain('max-h-[3lh] overflow-hidden')
+    expect(text).toBe('Bash ls -la')
+    expect(html).not.toContain('max-h-[3lh] overflow-hidden')
   })
 
-  it('shows a short result whole, with nothing to expand', () => {
-    const { html, text } = row(tool({ result: 'ok' }))
-    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'tool-card-output'])
-    expect(text).toBe('Bash ls -la ok')
+  it('keeps a failure visible in the header while collapsed, and dashes the card', () => {
+    const { html, text } = row(tool({ result: 'No such file', ok: false }))
+    expect(text).toBe('Bash ls -la failed')
+    expect(html).toContain('border-dashed')
   })
 
-  it('keeps a failure visible in the header while collapsed', () => {
-    const { text } = row(tool({ result: 'No such file', ok: false }))
-    expect(text).toBe('Bash ls -la Failed No such file')
-  })
-
-  it('shows the tail of live output while the tool still runs, and drops it once the result is in', () => {
+  it('shows no live output on a closed card, only a running dot until the result is in', () => {
     const running = row(tool({ live: 'a\nb\nc\nd\n' }))
-    expect(testIds(running.html)).toEqual(['tool-card', 'tool-card-toggle', 'tool-card-live'])
-    expect(running.text).toBe('Bash ls -la b c d')
+    expect(testIds(running.html)).toEqual(['tool-card', 'tool-card-toggle'])
+    expect(running.text).toBe('Bash ls -la')
+    expect(running.html).toContain('aria-label="running"')
     const finished = row(tool({ live: 'a\nb\nc\nd\n', result: 'done' }))
-    expect(testIds(finished.html)).toEqual(['tool-card', 'tool-card-toggle', 'tool-card-output'])
+    expect(testIds(finished.html)).toEqual(['tool-card', 'tool-card-toggle'])
+    expect(finished.html).not.toContain('aria-label="running"')
   })
 
   it('draws a running card with no output as the header alone', () => {
@@ -215,9 +216,9 @@ describe('ChatRow: tool cards', () => {
     const { html, text } = row(tool({ tool: 'Task', title: 'Explore', callId: 'c1' }))
     expect(testIds(html)).toEqual([
       'tool-card', 'tool-card-toggle', 'subagent-steps', 'subagent-steps-toggle', 'subagent-steps-list',
-      'msg-assistant', 'markdown', 'tool-card', 'tool-card-toggle', 'tool-card-output', 'subagent-steps-more',
+      'msg-assistant', 'markdown', 'tool-card', 'tool-card-toggle', 'subagent-steps-more',
     ])
-    expect(text).toBe("Task Explore Subagent's steps Looking Read README.md # Title Show more steps")
+    expect(text).toBe("Task Explore Subagent's steps Looking Read README.md Show more steps")
   })
 
   it('says when a subagent left no steps, and when they could not be read', () => {
@@ -238,12 +239,12 @@ describe('ChatRow: rows that point elsewhere', () => {
   it('draws a worktree proposal as a line naming the branch', () => {
     const { html, text } = row(tool({ tool: 'mcp__centralu__propose_worktree_session', title: 'feat/rows' }))
     expect(testIds(html)).toEqual(['worktree-proposal'])
-    expect(text).toBe('↖ Branch feat/rows proposed — the + button on this project opens the prefilled dialog')
+    expect(text).toBe("↖ Branch feat/rows proposed — New session in this project's ⋯ menu opens the prefilled dialog")
   })
 
   it('says a worktree session was proposed when the title is only the tool name', () => {
     const { text } = row(tool({ tool: 'propose_worktree_session', title: 'propose_worktree_session' }))
-    expect(text).toBe('↖ A worktree session was proposed — the + button on this project opens the prefilled dialog')
+    expect(text).toBe("↖ A worktree session was proposed — New session in this project's ⋯ menu opens the prefilled dialog")
   })
 
   it('draws an ask_project call still running with no way in yet', () => {
@@ -330,20 +331,24 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
     )
     expect(html).toContain('data-centralu-call="centralu"')
     expect(html).toContain('data-mark="centralu"')
-    expect(html).toContain('border-l-line-strong')
-    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'centralu-call-mark', 'centralu-call-label', 'tool-card-title', 'centralu-call-open', 'tool-card-output'])
-    expect(text).toMatch(/^Started an agent write the parser \(codex, heavy\) Open session →/)
+    // A rounder card on its own tint with a stronger hairline (owner, 2026-10-18); the answer only once opened
+    expect(html).toContain('bg-surface-hover/15')
+    expect(html).toContain('border-line-strong/70')
+    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'centralu-call-mark', 'centralu-call-label', 'tool-card-title', 'centralu-call-open'])
+    // The session it reached is a chip with its name (owner, 2026-10-18)
+    expect(text).toBe('Started an agent write the parser (codex, heavy) Parser →')
     expect(text).not.toContain('mcp__centralu__start_agent')
-    expect(html).toContain('title="Parser"')
+    expect(html).toContain('title="Open Parser"')
   })
 
   it('reads a Claude name an older host stored without the mark, and gives no link to the session it is in', () => {
     const { html, text } = row(tool({ tool: 'mcp__centralu__read_session', title: 'mcp__centralu__read_session', centralu: undefined }))
     expect(html).toContain('data-centralu-call="centralu"')
-    expect(text).toBe('Read session')
+    // No answer yet: the call says it is still running beside its sentence
+    expect(text).toBe('Read session running…')
     state = { sessions: { s1: session('s1') } }
     const self = row(tool({ tool: 'mcp__centralu__agent_session', title: 'Checked on an agent', centralu: { tool: 'agent_session', label: 'Checked on an agent', sessionId: 's1' } }))
-    expect(self.text).toBe('Checked on an agent')
+    expect(self.text).toBe('Checked on an agent running…')
     expect(testIds(self.html)).not.toContain('centralu-call-open')
   })
 
@@ -352,7 +357,7 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
     const { html, text } = row(tool({ tool: 'list_items', title: 'app-board: list_items {"status":"Ready"}', centralu: { tool: 'list_items', app: 'board' } }))
     expect(html).toContain('data-centralu-call="app"')
     expect(html).toContain('data-mark="app"')
-    expect(text).toBe('Project board: list items {"status":"Ready"}')
+    expect(text).toBe('Project board: list items running… {"status":"Ready"}')
   })
 
   it("links a session from the answer only for a call that made or reached one; a list's first id is no one's", () => {
@@ -375,7 +380,7 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
     state = { externalApps: [{ appId: 'notes', name: 'Notes' }] as AppState['externalApps'] }
     const known = row(tool({ tool: 'mcp__app-notes__add', title: 'mcp__app-notes__add' }))
     expect(known.html).toContain('data-centralu-call="app"')
-    expect(known.text).toBe('Notes: add')
+    expect(known.text).toBe('Notes: add running…')
   })
 
   it('leaves an ordinary MCP call and a built-in tool as they were', () => {
@@ -383,7 +388,7 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
       const { html } = row(item)
       expect(html).not.toContain('data-centralu-call')
       expect(testIds(html)).not.toContain('centralu-call-mark')
-      expect(html).not.toContain('border-l-line-strong')
+      expect(html).not.toContain('bg-surface-hover/15')
     }
   })
 })

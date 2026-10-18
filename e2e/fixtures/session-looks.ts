@@ -27,14 +27,18 @@ const CASES: { name: string; look: Look; patch: Record<string, unknown> }[] = [
 ]
 
 /**
- * What a look draws, as tokens. The mark's ring is the 1.5px background behind the chip (`fill`), or for the
- * stopped look a dashed border of the same width (`dashed`); a panel only colours and dashes its own 1px border.
+ * What a look draws, as tokens. The mark is one chip whose own border is the look (owner, 2026-10-18: one edge, not a
+ * ring behind a chip): thin grey when idle, 2px when it says something, dashed when stopped. A panel only colours and
+ * dashes its own 1px border.
  */
-const LOOKS: Record<Look, { ring: 'none' | 'fill' | 'dashed'; panelStyle: string; line: 'signal' | 'muted' | 'faint-line'; chip: 'floor' | 'selected' }> = {
-  idle: { ring: 'none', panelStyle: 'solid', line: 'faint-line', chip: 'floor' },
-  answering: { ring: 'fill', panelStyle: 'solid', line: 'muted', chip: 'floor' },
-  stopped: { ring: 'dashed', panelStyle: 'dashed', line: 'signal', chip: 'selected' },
-  waiting: { ring: 'fill', panelStyle: 'solid', line: 'signal', chip: 'selected' },
+const LOOKS: Record<
+  Look,
+  { width: string; style: string; panelStyle: string; line: 'signal' | 'muted' | 'faint-line'; chip: 'floor' | 'selected' }
+> = {
+  idle: { width: '1px', style: 'solid', panelStyle: 'solid', line: 'faint-line', chip: 'floor' },
+  answering: { width: '2px', style: 'solid', panelStyle: 'solid', line: 'muted', chip: 'floor' },
+  stopped: { width: '2px', style: 'dashed', panelStyle: 'dashed', line: 'signal', chip: 'selected' },
+  waiting: { width: '2px', style: 'solid', panelStyle: 'solid', line: 'signal', chip: 'selected' },
 }
 
 /** A token's colour as the browser computes it (`rgb(…)`), so the expectation follows the preset */
@@ -107,15 +111,13 @@ export function sessionLookTests() {
           await patchSession(page, id, patch)
           const want = LOOKS[look]
           await expect(mark, name).toHaveAttribute('data-look', look)
-          // The ring: the background behind the chip, or a dashed border of the same width for the stopped look
-          await expect(mark, name).toHaveCSS('background-color', want.ring === 'fill' ? c[want.line as 'signal' | 'muted'] : c.clear)
-          if (want.ring !== 'dashed') await expect(mark, name).toHaveCSS('border-top-width', '0px')
-          else await expect(mark, name).toHaveCSS('border-top-style', 'dashed')
-          if (want.ring === 'dashed') await expect(mark, name).toHaveCSS('border-top-color', c.signal)
-          // The chip keeps its thin grey line in every look, and its fill carries the look inside
-          await expect(chip, name).toHaveCSS('border-top-width', '1px')
-          await expect(chip, name).toHaveCSS('border-top-style', 'solid')
-          await expect(chip, name).toHaveCSS('border-top-color', c.lineStrong)
+          // No ring around the chip: the mark itself draws nothing
+          await expect(mark, name).toHaveCSS('background-color', c.clear)
+          await expect(mark, name).toHaveCSS('border-top-width', '0px')
+          // The chip's own border is the look, and its fill carries it inside
+          await expect(chip, name).toHaveCSS('border-top-width', want.width)
+          await expect(chip, name).toHaveCSS('border-top-style', want.style)
+          await expect(chip, name).toHaveCSS('border-top-color', c[want.line])
           await expect(chip, name).toHaveCSS('background-color', c[want.chip])
           await expectStill(mark)
         }

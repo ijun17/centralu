@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession, emitEvent } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * The control loop's scenarios on reading older conversation back: pages, past conversations, compaction and external continuation. Moved out of control-loop.spec.ts by subject (#845); the
@@ -63,15 +64,12 @@ test('Picking and loading a past conversation from the create-session modal', as
   )
 
   // Set ext-2 up as already loaded (the mock decides by looking at actual sessions)
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('past-ext-2').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   // The default is 'new conversation' — loading must never be the default
   await expect(page.getByTestId('past-new')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('past-ext-1')).toContainText("yesterday's refactor")
@@ -110,9 +108,7 @@ test('An older tool version that cannot list past sessions does not block creati
     sessions: [],
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-unsupported')).toContainText('update codex')
   // The reason is shown, but the path must stay open
   await expect(page.getByTestId('create-session-confirm')).toHaveText('Start')
@@ -127,8 +123,7 @@ test('An older tool version that cannot list past sessions does not block creati
 test('When there are no past conversations, it says so', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedPastSessions(page, { supported: true, sessions: [] })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-empty')).toBeVisible()
 })
 
@@ -443,16 +438,13 @@ test('Picking an already-open conversation again navigates to that session inste
     m.externalHistory.set('ext-1', [{ role: 'user', text: "yesterday's work" }])
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('past-ext-1').click()
   await page.getByTestId('create-session-confirm').click()
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
   // Opening it again shows "Already open", and clicking it navigates instead of creating
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
   await page.getByTestId('past-ext-1').click()
 
@@ -486,16 +478,13 @@ test('Two sessions cannot open the same conversation (blocked here before the to
     m.externalHistory.set('ext-1', [{ role: 'user', text: 'the only conversation' }])
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('past-ext-1').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
 
   // Opening it again shows "Already open" and navigates to that session instead of creating a new one
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-ext-1')).toContainText('Already open')
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(1)
 })
@@ -534,9 +523,7 @@ test('A loaded conversation shows the most recent messages first', async ({ page
     )
   })
 
-  await page.getByTestId('project-menu-alpha').click()
-
-  await page.getByTestId('new-session-alpha').click()
+  await openSessionDialog(page, 'alpha')
   await page.getByTestId('past-ext-long').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()

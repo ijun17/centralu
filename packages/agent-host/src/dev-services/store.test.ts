@@ -648,10 +648,8 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
         )
         .all() as { session_id: string }[]
       expect(read.map((r) => r.session_id)).toEqual(['s2', 's1'])
-      const minReader = older.prepare(`SELECT value FROM app_settings WHERE key = 'min_reader_version'`).get() as
-        | { value: string }
-        | undefined
-      expect(Number(minReader?.value ?? 0)).toBeLessThan(42)
+      // That v42 does not raise min_reader_version is the step's flag, checked in store-min-reader.test.ts: the
+      // record of this newest store is v56's (#423), which says nothing about v42
       older.close()
 
       const again = new Store(file)
@@ -2118,20 +2116,5 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
-})
-
-/**
- * `usage_facts` is on its way out (#372 follow-up): no build ever wrote a row, and this build is the first that does
- * not touch it, which is what lets a later contract step drop it (docs/agent-host.md §5.1 rule 2). Deleting a project
- * was the last statement that named it; on a store where the table is already gone it works all the same.
- */
-describe('usage_facts is no longer touched', () => {
-  it('deleting a project works on a store without the table', () => {
-    const s = seeded()
-    ;(s as unknown as { db: Database.Database }).db.exec(`DROP TABLE usage_facts`)
-    s.trash.deleteProject('p1')
-    expect(s.projects.listProjects()).toEqual([])
-    s.close()
   })
 })

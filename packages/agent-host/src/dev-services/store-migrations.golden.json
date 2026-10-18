@@ -223,13 +223,17 @@
   },
   {
    "to": 56,
+   "breaksOlderReaders": true
+  },
+  {
+   "to": 57,
    "breaksOlderReaders": false
   }
  ],
- "version": 56,
- "ran": 55,
+ "version": 57,
+ "ran": 56,
  "store": {
-  "userVersion": 56,
+  "userVersion": 57,
   "master": [
    {
     "type": "index",
@@ -397,12 +401,6 @@
     "type": "index",
     "name": "sqlite_autoindex_subagent_messages_1",
     "tbl_name": "subagent_messages",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_usage_facts_1",
-    "tbl_name": "usage_facts",
     "sql": null
    },
    {
@@ -584,12 +582,6 @@
     "name": "subagent_messages",
     "tbl_name": "subagent_messages",
     "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
-   },
-   {
-    "type": "table",
-    "name": "usage_facts",
-    "tbl_name": "usage_facts",
-    "sql": "CREATE TABLE usage_facts (\n      date       TEXT NOT NULL,\n      tool       TEXT NOT NULL,\n      model      TEXT NOT NULL,\n      project_id TEXT,\n      input_tokens  INTEGER NOT NULL DEFAULT 0,\n      output_tokens INTEGER NOT NULL DEFAULT 0,\n      cache_tokens  INTEGER NOT NULL DEFAULT 0,\n      cost_est   REAL NOT NULL DEFAULT 0,\n      PRIMARY KEY (date, tool, model, project_id)\n    )"
    },
    {
     "type": "table",
@@ -777,7 +769,6 @@
      "match": "NONE"
     }
    ],
-   "usage_facts": [],
    "workspace": []
   },
   "tables": {
@@ -891,7 +882,7 @@
     "rows": [
      {
       "key": "min_reader_version",
-      "value": "32"
+      "value": "56"
      }
     ]
    },
@@ -1336,30 +1327,6 @@
      "ts INTEGER notnull=1 default=null pk=0"
     ],
     "rows": []
-   },
-   "usage_facts": {
-    "columns": [
-     "date TEXT notnull=1 default=null pk=1",
-     "tool TEXT notnull=1 default=null pk=2",
-     "model TEXT notnull=1 default=null pk=3",
-     "project_id TEXT notnull=0 default=null pk=4",
-     "input_tokens INTEGER notnull=1 default=0 pk=0",
-     "output_tokens INTEGER notnull=1 default=0 pk=0",
-     "cache_tokens INTEGER notnull=1 default=0 pk=0",
-     "cost_est REAL notnull=1 default=0 pk=0"
-    ],
-    "rows": [
-     {
-      "date": "2026-01-01",
-      "tool": "claude",
-      "model": "opus",
-      "project_id": "p1",
-      "input_tokens": 5,
-      "output_tokens": 6,
-      "cache_tokens": 0,
-      "cost_est": 0
-     }
-    ]
    },
    "workspace": {
     "columns": [

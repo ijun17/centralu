@@ -337,6 +337,9 @@ class WebSystemPort implements SystemPort {
   async setBadge(_count: number) {
     /* A browser has no dock badge */
   }
+  async windowAction(): Promise<void> {
+    throw new Error('A browser tab has no app window to minimize, maximize or close')
+  }
   async startWindowDrag(): Promise<void> {
     // A browser has no window to move
   }

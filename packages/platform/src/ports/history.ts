@@ -32,8 +32,11 @@ export interface ApprovalRulesPort {
  * (Settings → Trash). Nothing here is emptied on its own, so `list` carries the total size.
  */
 export interface TrashPort {
-  /** `runs`: the records of deleted app-agent sessions (#378), each with its machine; `bytes` counts them too */
-  list(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number }>
+  /**
+   * `runs`: the records of deleted app-agent sessions (#378), each with its machine; `bytes` counts them too.
+   * `unreached`: linked machines whose trash could not be read, so the list is not the whole trash (#841)
+   */
+  list(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number; unreached?: { machineId: string; name: string }[] }>
   /** A trashed conversation, read-only — pages like `AgentPort.loadMessages` */
   read(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /** Back as it was. `project` is set when its project had been deleted and restoring registered the folder again */

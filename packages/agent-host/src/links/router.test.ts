@@ -578,6 +578,26 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(await router.handle('projects.list', {})).toEqual([expect.objectContaining({ id: 'm1.p1', unreachable: true })])
     })
 
+    // #841 item 4: the trash read without a machine was shown as the whole trash
+    it('names each machine whose trash it could not read, and only when one was missed', async () => {
+      const { router, localAnswers, m1, m2 } = rig()
+      localAnswers['trash.list'] = { sessions: [], bytes: 0 }
+      m1.reachable = false
+      m2.answers['trash.list'] = new Error('dropped')
+      expect(await router.handle('trash.list', {})).toEqual({
+        sessions: [],
+        bytes: 0,
+        unreached: [
+          { machineId: 'm1', name: 'Machine m1' },
+          { machineId: 'm2', name: 'Machine m2' },
+        ],
+      })
+      m1.reachable = true
+      m1.answers['trash.list'] = { sessions: [], bytes: 5 }
+      m2.answers['trash.list'] = { sessions: [], bytes: 7 }
+      expect(await router.handle('trash.list', {})).toEqual({ sessions: [], bytes: 12 })
+    })
+
     // #841 item 4: a machine left out made "the trash is empty" true of the hub alone
     it('names each machine it could not empty the trash of among what failed', async () => {
       const { router, localAnswers, m1, m2 } = rig()
@@ -755,7 +775,7 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       ])
     })
 
-    it('adds up the trash, and leaves out a machine that fails', async () => {
+    it('adds up the trash, and leaves out a machine that fails, naming it', async () => {
       const { router, localAnswers, m1, m2 } = rig()
       localAnswers['trash.list'] = { sessions: [{ id: 'h1', project: null }], bytes: 10 }
       m1.answers['trash.list'] = { sessions: [{ id: 'a', project: { id: 'p1', name: 'p', path: '/p', exists: true } }], bytes: 5 }
@@ -763,6 +783,7 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(await router.handle('trash.list', {})).toEqual({
         sessions: [{ id: 'h1', project: null }, { id: 'm1.a', project: { id: 'm1.p1', name: 'p', path: '/p', exists: true }, machine: 'm1' }],
         bytes: 15,
+        unreached: [{ machineId: 'm2', name: 'Machine m2' }],
       })
     })
 

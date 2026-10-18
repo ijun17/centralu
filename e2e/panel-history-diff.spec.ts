@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { setup, newSession } from './fixtures/panel.js'
+import { startSession } from './fixtures/new-session.js'
 
 /**
  * The right-hand panel and the grid around it: the history tab and the change list's diff. Moved
@@ -303,9 +304,7 @@ test('when there is no git repository, the history tab is disabled just like the
     })
     await store.getState().addProject('/tmp/nogit')
   })
-  await page.getByTestId('project-menu-nogit').click()
-  await page.getByTestId('new-session-nogit').click()
-  await page.getByTestId('create-session-confirm').click()
+  await startSession(page, 'nogit')
 
   await expect(page.getByTestId('evidence-tab-git')).toBeDisabled()
   await expect(page.getByTestId('evidence-tab-history')).toBeDisabled()

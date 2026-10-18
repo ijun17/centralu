@@ -381,7 +381,6 @@ Where it is stored:
   ([agent-host.md](agent-host.md) §5.1).
 - `workspace`: the UI's snapshot, one row.
 - `commit_sessions`: commit attribution.
-- `usage_facts`: unused (above); dropped in a later contract step ([agent-host.md](agent-host.md) §5.1).
 
 ## 3. Session state
 

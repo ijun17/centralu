@@ -8,9 +8,9 @@ import { useStore, type ChatItem } from '../../../store/store.js'
  */
 
 /**
- * A worktree proposal (#69) — one door, and this is only a finger pointing at it, with one value riding along: the branch name. The sidebar's + button
- * lights up, and opening that door brings up a dialog with the worktree toggle already on and
- * the name pre-filled. Creating it is, to the very end, the person's own act.
+ * A worktree proposal (#69) — one door, and this is only a finger pointing at it, with one value riding along: the branch name. The project's ⋯
+ * menu button lights up, and its New session (the door) brings up a dialog with the worktree toggle already on and
+ * the name pre-filled; the sidebar's + it used to name is gone (owner, 2026-10-18: sessions start from the menu). Creating it is, to the very end, the person's own act.
  */
 export function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
@@ -27,9 +27,9 @@ export function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 
         ) : (
           'A worktree session was proposed'
         )}
-        {' — the '}
-        <span className="text-ink">+</span>
-        {' button on this project opens the prefilled dialog'}
+        {' — '}
+        <span className="text-ink">New session</span>
+        {" in this project's ⋯ menu opens the prefilled dialog"}
       </span>
     </p>
   )

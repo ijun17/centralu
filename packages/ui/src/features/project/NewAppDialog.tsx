@@ -203,7 +203,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
             Cancel
           </button>
           <button
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
             disabled={!canCreate}
             data-testid="new-app-create"
           >

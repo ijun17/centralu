@@ -183,6 +183,32 @@ pub(crate) fn window_controls_inset() -> u32 {
     }
 }
 
+/// Turns the OS title bar off where the top bar draws the window's controls itself (Windows, owner
+/// 2026-10-18), so the top bar is the only strip as on macOS. The shadow keeps the window's edge and
+/// the resize border an undecorated window would otherwise lose. Elsewhere it does nothing.
+pub(crate) fn own_title_bar(app: &tauri::App) {
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::Manager;
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.set_decorations(false);
+            let _ = w.set_shadow(true);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
+}
+
+/// Whether the top bar draws the window's own minimize, maximize and close (owner, 2026-10-18).
+///
+/// On Windows the OS title bar is turned off at startup (`lib.rs`, setup) so the top bar is the only
+/// strip, as on macOS where the traffic lights sit inside it; the controls it took away are drawn in
+/// the bar instead. Answered as a yes/no so the UI never learns which OS it is on.
+#[tauri::command]
+pub(crate) fn window_controls_drawn() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// What this machine's keyboard prints on the two modifier keys the UI shows.
 ///
 /// `join` is what goes between keys when a combination is written as one string. macOS

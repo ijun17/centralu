@@ -30,7 +30,7 @@ export const orchestratorActions = (set: StoreSet, get: StoreGet): OrchestratorA
      * the instant it is sent.
      */
     // Landing here also counts as having passed the intro (the same reason as `setView`, #63)
-    set({ view: 'orchestrator', introSeen: true })
+    set({ view: 'orchestrator', introSeen: true, overlay: null })
     get().saveWorkspace()
     try {
       /*

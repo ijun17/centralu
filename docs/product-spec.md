@@ -802,7 +802,6 @@ interface AgentAdapter {
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it goes to the trash; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
 - `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it, except to take a trashed session off it. Dropping it is a later, breaking step
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
-- `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation; never built, and the table is dropped in a later release ([agent-host.md](agent-host.md) §6)
 - `workspace(id, layout, updated_at)` — snapshot
 
 The list above is the core of it; every table and column of the current schema, generated from the migrations, is in [generated/schema.md](generated/schema.md).

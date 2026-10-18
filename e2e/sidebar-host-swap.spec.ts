@@ -48,7 +48,7 @@ test('a background Codex session keeps its answering look when re-attachment ove
   await expect(mark).not.toHaveAttribute('data-asleep')
 })
 
-test('the tool mark explains working and asleep states with a rendered tooltip', async ({ page }) => {
+test('the tool mark explains its state with a rendered tooltip, and leaves sleep out', async ({ page }) => {
   const id = await workingCodex(page)
   const mark = page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-codex')
   await mark.hover()
@@ -62,7 +62,9 @@ test('the tool mark explains working and asleep states with a rendered tooltip',
     mock.emit({ type: 'state_change', sessionId, state: 'idle' })
     mock.emit({ type: 'session_live', sessionId, live: false, reason: 'asleep' })
   }, id)
-  await expect(tip).toHaveText('Codex · Idle · asleep')
+  // Sleep is not shown, not even here (owner, 2026-10-18)
+  await expect(mark).toHaveAttribute('data-asleep', 'true')
+  await expect(tip).toHaveText('Codex · Idle')
   await page.getByTestId('project-header-beta').hover()
   await expect(tip).toBeHidden()
 })

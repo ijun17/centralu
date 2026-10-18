@@ -19,13 +19,13 @@ import { lookOf } from '../../session/look.js'
  */
 /*
  * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
- * restart. Said only in the tooltip: the mark is drawn exactly as the same session awake in the same state, because
- * sleep is nothing the person has to act on (using the session wakes it) and a fade would be mistaken for a stalled
- * session (#670). So a finished turn still looks finished and idle still looks idle.
+ * restart. Not shown at all, not even in the tooltip (owner, 2026-10-18): sleep is the app working as it should,
+ * nothing the person has to act on (using the session wakes it), and a fade would be mistaken for a stalled session
+ * (#670). So a finished turn still looks finished and idle still looks idle. `data-asleep` stays for tests.
  */
 export function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0 }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number }) {
   const meta = useToolMeta(tool)
-  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}${asleep ? ' · asleep' : ''}`
+  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
   const look = lookOf({ state, interruption, openQuestions })
 
   return (
@@ -37,12 +37,12 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
         data-testid={`tool-mark-${tool}`}
         data-state={state}
         data-interruption={interruption?.reason}
-        data-asleep={asleep || undefined} // a hook for tests and the tooltip's wording; it changes no style
+        data-asleep={asleep || undefined} // a hook for tests; it changes nothing shown
       >
         <span
           /*
-            A bright letter on a dark chip, set in the terminal font (monospace): a single-character glyph needs a
-            fixed width, or the row would jitter. The chip is 14px inside the ring's 1.5px, so the mark is 17px in
+            A bright letter on a dark chip, in the UI's own face (Pretendard, owner 2026-10-18: rounder and clearer at
+            this size than the code face; the chip's width is fixed, so a fixed-width face bought nothing here). The chip is 14px inside the ring's 1.5px, so the mark is 17px in
             every look.
 
             The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
@@ -52,7 +52,7 @@ export function ToolMark({ tool, state, asleep = false, interruption = null, ope
             brightness is the resource this app uses to state urgency, so spending it on decoration
             would cut into that signal by the same amount. Its fill follows the look (`.cc-mark`).
           */
-          className="readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
+          className="cc-chip cc-chip-letter flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
         >
           {meta.mark}
         </span>

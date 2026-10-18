@@ -146,9 +146,9 @@ describe('messagesToChat — restoration', () => {
       row(3, 'text', { type: 'message_delta', text: 'reply' }, 'assistant'),
     ])
     expect(items).toEqual([
-      { kind: 'reasoning', seq: 1, storedSeq: 1, text: '**Path review**' },
-      { kind: 'reasoning', seq: 2, storedSeq: 2, text: '**Test check**' },
-      { kind: 'assistant', seq: 3, storedSeq: 3, text: 'reply' },
+      { kind: 'reasoning', seq: 1, storedSeq: 1, at: 1, text: '**Path review**' },
+      { kind: 'reasoning', seq: 2, storedSeq: 2, at: 2, text: '**Test check**' },
+      { kind: 'assistant', seq: 3, storedSeq: 3, at: 3, text: 'reply' },
     ])
   })
 })

@@ -1,6 +1,7 @@
 import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import { str, type Json } from './json.js'
 import { ClaudeSchedules } from './schedules.js'
+import { BackgroundEvents, endedSummary } from '../background-events.js'
 
 type TaskInfo = { kind: BackgroundTask['kind']; description: string; parentCallId?: string; ambient?: boolean; nested?: boolean }
 
@@ -37,12 +38,15 @@ export class ClaudeBackgroundTracker {
   private readonly info = new Map<string, TaskInfo>()
   /** Timers the CLI holds in this process for the session (`ClaudeSchedules`), listed with the tasks */
   private readonly schedules: ClaudeSchedules
+  /** The events, by the rule both adapters share (`BackgroundEvents`): a repeat of the last list is not sent */
+  private readonly events: BackgroundEvents
 
   constructor(
-    private readonly sessionId: string,
+    sessionId: string,
     now: () => number = Date.now,
   ) {
     this.schedules = new ClaudeSchedules(now)
+    this.events = new BackgroundEvents(sessionId)
   }
 
   /** When the earliest scheduled wake-up is due (epoch ms), for a look then (`tick`); null with none */
@@ -55,7 +59,7 @@ export class ClaudeBackgroundTracker {
    * (`ClaudeSchedules.recover`); the new level when that found any
    */
   recover(messages: readonly Json[]): NormalizedEvent[] {
-    return this.schedules.recover(messages) ? [this.event()] : []
+    return this.schedules.recover(messages) ? this.event() : []
   }
 
   /**
@@ -84,13 +88,13 @@ export class ClaudeBackgroundTracker {
 
   /** Drops the wake-ups whose time has passed; the new level when that changed anything */
   tick(): NormalizedEvent[] {
-    return this.schedules.prune() ? [this.event()] : []
+    return this.schedules.prune() ? this.event() : []
   }
 
   push(m: Json): NormalizedEvent[] {
     if (str(m.type) === 'assistant' || str(m.type) === 'user') {
       const changed = this.schedules.push(m)
-      return changed ? [this.event()] : []
+      return changed ? this.event() : []
     }
     if (str(m.type) !== 'system') return []
     const subtype = str(m.subtype)
@@ -111,7 +115,7 @@ export class ClaudeBackgroundTracker {
         this.seen.add(id)
       }
       // The CLI's whole list: what an adopted process holds is known from here on (#648)
-      return [this.event(undefined, true)]
+      return this.event(undefined, true)
     }
     if (subtype === 'task_started' || subtype === 'task_updated') {
       const id = str(m.task_id)
@@ -133,7 +137,7 @@ export class ClaudeBackgroundTracker {
         if (!prev || !description) return []
         this.info.set(id, { ...prev, description })
       }
-      return this.live.includes(id) ? [this.event()] : []
+      return this.live.includes(id) ? this.event() : []
     }
     if (subtype === 'task_notification') {
       const id = str(m.task_id)
@@ -146,8 +150,7 @@ export class ClaudeBackgroundTracker {
       this.live = this.live.filter((x) => x !== id)
       const raw = str(m.status)
       const status = raw === 'failed' || raw === 'stopped' ? raw : 'completed'
-      const summary = str(m.summary).slice(0, 300)
-      return [this.event([{ ...this.entry(id, known), status, ...(summary ? { summary } : {}) }])]
+      return this.event([{ ...this.entry(id, known), status, ...endedSummary(str(m.summary)) }])
     }
     return []
   }
@@ -164,7 +167,7 @@ export class ClaudeBackgroundTracker {
     this.live = []
     this.info.clear()
     this.seen.clear()
-    return [this.event(ended)]
+    return this.event(ended)
   }
 
   private entry(id: string, i: TaskInfo | undefined): BackgroundTask {
@@ -182,13 +185,7 @@ export class ClaudeBackgroundTracker {
     }
   }
 
-  private event(ended?: BackgroundTask[], snapshot?: true): NormalizedEvent {
-    return {
-      type: 'background_tasks',
-      ...(snapshot ? { snapshot } : {}),
-      sessionId: this.sessionId,
-      live: [...this.live.map((id) => this.entry(id, this.info.get(id))), ...this.schedules.live()],
-      ...(ended ? { ended } : {}),
-    }
+  private event(ended?: BackgroundTask[], snapshot?: true): NormalizedEvent[] {
+    return this.events.event([...this.live.map((id) => this.entry(id, this.info.get(id))), ...this.schedules.live()], ended, snapshot)
   }
 }

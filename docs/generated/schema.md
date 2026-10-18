@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 56, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 57, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -269,16 +269,6 @@ erDiagram
     TEXT payload
     INTEGER ts
   }
-  usage_facts {
-    TEXT date PK
-    TEXT tool PK
-    TEXT model PK
-    TEXT project_id PK
-    INTEGER input_tokens
-    INTEGER output_tokens
-    INTEGER cache_tokens
-    REAL cost_est
-  }
   workspace {
     INTEGER id PK
     TEXT layout
@@ -328,40 +318,40 @@ Added in v34.
 
 ### `app_run_messages`
 
-Added in v56.
+Added in v57.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `run_id` | TEXT | no |  | PK 1 | v56 |
-| `seq` | INTEGER | no |  | PK 2 | v56 |
-| `role` | TEXT | no |  |  | v56 |
-| `kind` | TEXT | no |  |  | v56 |
-| `payload` | TEXT | no |  |  | v56 |
-| `ts` | INTEGER | no |  |  | v56 |
+| `run_id` | TEXT | no |  | PK 1 | v57 |
+| `seq` | INTEGER | no |  | PK 2 | v57 |
+| `role` | TEXT | no |  |  | v57 |
+| `kind` | TEXT | no |  |  | v57 |
+| `payload` | TEXT | no |  |  | v57 |
+| `ts` | INTEGER | no |  |  | v57 |
 
 ### `app_run_records`
 
-Added in v56.
+Added in v57.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `run_id` | TEXT | yes |  | PK | v56 |
-| `project_id` | TEXT | yes |  |  | v56 |
-| `project_name` | TEXT | yes |  |  | v56 |
-| `app_id` | TEXT | no |  |  | v56 |
-| `app_name` | TEXT | no |  |  | v56 |
-| `session_id` | TEXT | no |  |  | v56 |
-| `session_name` | TEXT | no |  |  | v56 |
-| `tool` | TEXT | no |  |  | v56 |
-| `status` | TEXT | no |  |  | v56 |
-| `duration_ms` | INTEGER | yes |  |  | v56 |
-| `tokens_in` | INTEGER | yes |  |  | v56 |
-| `tokens_out` | INTEGER | yes |  |  | v56 |
-| `request` | TEXT | no |  |  | v56 |
-| `answer` | TEXT | no |  |  | v56 |
-| `output` | TEXT | yes |  |  | v56 |
-| `started_at` | INTEGER | no |  |  | v56 |
-| `kept_at` | INTEGER | no |  |  | v56 |
+| `run_id` | TEXT | yes |  | PK | v57 |
+| `project_id` | TEXT | yes |  |  | v57 |
+| `project_name` | TEXT | yes |  |  | v57 |
+| `app_id` | TEXT | no |  |  | v57 |
+| `app_name` | TEXT | no |  |  | v57 |
+| `session_id` | TEXT | no |  |  | v57 |
+| `session_name` | TEXT | no |  |  | v57 |
+| `tool` | TEXT | no |  |  | v57 |
+| `status` | TEXT | no |  |  | v57 |
+| `duration_ms` | INTEGER | yes |  |  | v57 |
+| `tokens_in` | INTEGER | yes |  |  | v57 |
+| `tokens_out` | INTEGER | yes |  |  | v57 |
+| `request` | TEXT | no |  |  | v57 |
+| `answer` | TEXT | no |  |  | v57 |
+| `output` | TEXT | yes |  |  | v57 |
+| `started_at` | INTEGER | no |  |  | v57 |
+| `kept_at` | INTEGER | no |  |  | v57 |
 
 Indexes:
 
@@ -369,17 +359,17 @@ Indexes:
 
 ### `app_run_subagent_messages`
 
-Added in v56.
+Added in v57.
 
 | Column | Type | Null | Default | Key | Added in |
 |---|---|---|---|---|---|
-| `run_id` | TEXT | no |  | PK 1 | v56 |
-| `parent_call_id` | TEXT | no |  | PK 2 | v56 |
-| `seq` | INTEGER | no |  | PK 3 | v56 |
-| `role` | TEXT | no |  |  | v56 |
-| `kind` | TEXT | no |  |  | v56 |
-| `payload` | TEXT | no |  |  | v56 |
-| `ts` | INTEGER | no |  |  | v56 |
+| `run_id` | TEXT | no |  | PK 1 | v57 |
+| `parent_call_id` | TEXT | no |  | PK 2 | v57 |
+| `seq` | INTEGER | no |  | PK 3 | v57 |
+| `role` | TEXT | no |  |  | v57 |
+| `kind` | TEXT | no |  |  | v57 |
+| `payload` | TEXT | no |  |  | v57 |
+| `ts` | INTEGER | no |  |  | v57 |
 
 ### `app_runs`
 
@@ -404,9 +394,9 @@ Added in v34.
 | `session_id` | TEXT | yes |  |  | v37 |
 | `tokens_in` | INTEGER | yes |  |  | v38 |
 | `tokens_out` | INTEGER | yes |  |  | v38 |
-| `request` | TEXT | yes |  |  | v56 |
-| `answer` | TEXT | yes |  |  | v56 |
-| `output` | TEXT | yes |  |  | v56 |
+| `request` | TEXT | yes |  |  | v57 |
+| `answer` | TEXT | yes |  |  | v57 |
+| `output` | TEXT | yes |  |  | v57 |
 
 Indexes:
 
@@ -661,21 +651,6 @@ Added in v41.
 | `kind` | TEXT | no |  |  | v41 |
 | `payload` | TEXT | no |  |  | v41 |
 | `ts` | INTEGER | no |  |  | v41 |
-
-### `usage_facts`
-
-Added in schema.sql.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `date` | TEXT | no |  | PK 1 | schema.sql |
-| `tool` | TEXT | no |  | PK 2 | schema.sql |
-| `model` | TEXT | no |  | PK 3 | schema.sql |
-| `project_id` | TEXT | yes |  | PK 4 | schema.sql |
-| `input_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `output_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `cache_tokens` | INTEGER | no | `0` |  | schema.sql |
-| `cost_est` | REAL | no | `0` |  | schema.sql |
 
 ### `workspace`
 

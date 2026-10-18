@@ -28,6 +28,7 @@ export function ProjectMenu({
   project: ProjectInfo
   anchorEl: HTMLElement | null
   onClose: () => void
+  /** Starts a session: at once with what the project remembers (#543), or in the window a worktree proposal waits in */
   onNewSession: () => void
   onNewApp?: () => void
   onToggleTrust: () => void
@@ -41,6 +42,10 @@ export function ProjectMenu({
   }
   return (
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
+      {/*
+        The only way to start a session from the sidebar since its `+` went (owner, 2026-10-18). It starts one at once:
+        the empty screen switches the tool and offers past conversations, so no window of options is needed here.
+      */}
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
       {/*
         New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
@@ -54,7 +59,11 @@ export function ProjectMenu({
         there it took the width the strip counts tabs by, and pushed the terminal tab into "more" in a narrow panel.
       */}
       {onOpenInVsCode && (
-        <ActionRow label="Open in VS Code" onClick={pick(onOpenInVsCode)} testId={`open-vscode-${project.name}`} />
+        <ActionRow
+          label="Open in VS Code"
+          onClick={pick(onOpenInVsCode)}
+          testId={`open-vscode-${project.name}`}
+        />
       )}
       {/*
         Trust (M4, decision 3). Asked once at registration, and changed from here afterward. A

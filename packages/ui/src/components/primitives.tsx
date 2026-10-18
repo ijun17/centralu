@@ -136,6 +136,8 @@ export function Tooltip({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLSpanElement>(null)
   const tipRef = useRef<HTMLSpanElement>(null)
+  /** Pressed since the pointer came in: the tip stays away until it leaves */
+  const pressed = useRef(false)
   /*
    * fixed, not absolute (dogfooding: the usage donut's tooltip was clipped at the bottom by the
    * modal's scroll box). An absolute inside the trigger is guaranteed to be clipped by an
@@ -174,8 +176,22 @@ export function Tooltip({
       ref={anchorRef}
       className={`relative inline-flex min-w-0 ${className}`}
       onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocusCapture={() => setOpen(true)}
+      onMouseLeave={() => {
+        pressed.current = false
+        setOpen(false)
+      }}
+      /*
+       * A press puts the tip away until the pointer leaves (owner, 2026-10-18): a button that opens a list left its tip
+       * standing over the list it opened. The focus the press gives the button does not bring it back; keyboard focus
+       * still does.
+       */
+      onMouseDownCapture={() => {
+        pressed.current = true
+        setOpen(false)
+      }}
+      onFocusCapture={() => {
+        if (!pressed.current) setOpen(true)
+      }}
       onBlurCapture={() => setOpen(false)}
     >
       {children}

@@ -56,6 +56,22 @@ export class StepsV55 extends MigrationRange {
       },
       {
         to: 56,
+        // Drops `usage_facts`: an older schema.sql recreates it empty, and builds up to beta.10 still ran DELETE FROM it
+        breaksOlderReaders: true,
+        /**
+         * The unused usage aggregate goes (#423). It was planned for the first milestone and never built: no build ever
+         * wrote a row. Deleting a project was the last statement that named it, and #420 removed that; the table has
+         * been left alone by every release since, which is the "one release later" that §5.1 rule 2 asks for.
+         *
+         * `schema.sql` no longer creates it either, so a new store and a migrated one end with the same tables. Nothing
+         * is lost: there is no row to keep. `IF EXISTS` because a fresh store never had the table.
+         */
+        run: () => {
+          this.db.exec(`DROP TABLE IF EXISTS usage_facts`)
+        },
+      },
+      {
+        to: 57,
         breaksOlderReaders: false,
         /**
          * An app-agent run keeps its own record (#378). `app_runs` gains the app's request, the agent's answer and its

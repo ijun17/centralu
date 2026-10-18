@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort } from '../ports/index.js'
+import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort, WindowAction } from '../ports/index.js'
 import type { HostBuild } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
@@ -337,6 +337,14 @@ export class TauriSystemPort implements SystemPort {
     await invoke('set_badge', { count: badgeCount(count) }).catch(rethrowAsError)
   }
 
+  async windowAction(action: WindowAction): Promise<void> {
+    const w = getCurrentWindow()
+    // close() asks first: the shell turns the close into the quit question (lib.rs, CloseRequested)
+    if (action === 'minimize') await w.minimize().catch(rethrowAsError)
+    else if (action === 'toggleMaximize') await w.toggleMaximize().catch(rethrowAsError)
+    else await w.close().catch(rethrowAsError)
+  }
+
   async openInIde(path: string, line?: number): Promise<void> {
     // If Rust's Err(String) arrived as-is, the screen would show "Could not open in IDE: undefined" (#159)
     await invoke('open_in_ide', { path, line }).catch(rethrowAsError)
@@ -533,6 +541,9 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
   const fileManagerName = await invoke<string>('file_manager_name').catch(() => ANY_FILE_MANAGER)
 
+  // Whether the top bar draws the window's controls itself (Windows, where the shell turned the OS title bar off)
+  const windowControls = await invoke<boolean>('window_controls_drawn').catch(() => false)
+
   // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
   // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
   const mode = await hostBuild()
@@ -546,7 +557,7 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
     // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
-    capabilities: { windowControlsInset, shortcutKeys, fileManagerName },
+    capabilities: { windowControlsInset, shortcutKeys, fileManagerName, windowControls },
     /*
       The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
       A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
