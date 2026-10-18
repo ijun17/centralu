@@ -261,7 +261,7 @@ export function ChatStream({
          */
         className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
           bottomPeek ? 'pb-14' : 'pb-4'
-        } ${settling ? 'invisible' : ''}`}
+        } ${settling ? 'invisible opacity-0' : 'opacity-100 transition-opacity duration-200 ease-out motion-reduce:transition-none'}`}
         /* The empty space the card will settle onto. Follows size, not state, so there is no
       transition or animation */
         style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
@@ -366,14 +366,15 @@ export function ChatStream({
       {/*
         The skeleton stands over the list, not in it, from the moment history is asked for until the list has settled
         where it opens (owner, 2026-10-18). In the list it vanished as the rows arrived, and the list then stayed hidden
-        while it settled (#61), so the pane went blank for a moment between the two; one overlay covers both.
+        while it settled (#61), so the pane went blank for a moment between the two; one overlay covers both. It shows
+        only after 600ms (cc-skeleton-late); a quicker open is the rows fading in as the list stops hiding.
       */}
       {((reading && !gaveUp) || settling) && (
         <div
           className="pointer-events-none absolute inset-0 overflow-hidden px-4 pt-4"
           data-testid="chat-skeleton-cover"
         >
-          <ChatSkeleton />
+          <ChatSkeleton late />
         </div>
       )}
       {/* Pressing the thumb is a person taking over, as a press on the native bar was */}

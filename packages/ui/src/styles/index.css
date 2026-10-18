@@ -819,6 +819,14 @@
 .cc-skeleton {
   animation: cc-skeleton-in 200ms ease-out 150ms both;
 }
+/*
+ * The conversation's cover (ChatStream) waits longer (owner, 2026-10-18): a conversation usually arrives in
+ * 150-300ms, and a skeleton that half rose and was then swapped for the rows read as a flicker. Below 600ms the rows
+ * simply fade in; only a slow read (a linked machine, a very long history) shows the skeleton.
+ */
+.cc-skeleton.cc-skeleton-late {
+  animation-delay: 600ms;
+}
 @media (prefers-reduced-motion: reduce) {
   .cc-skeleton {
     animation-duration: 0s;

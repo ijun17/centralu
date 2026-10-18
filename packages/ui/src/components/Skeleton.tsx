@@ -43,10 +43,16 @@ const WIDTHS = [72, 88, 56, 80, 64]
  * A conversation being read: the person's message on the right, the agent's answer on the left, twice.
  * Drawn in the chat's own column and spacing, so the first rows land where the skeleton stood.
  */
-export function ChatSkeleton({ testId = 'chat-skeleton' }: { testId?: string }) {
+export function ChatSkeleton({
+  testId = 'chat-skeleton',
+  late = false,
+}: {
+  testId?: string
+  late?: boolean
+}) {
   return (
     <div
-      className="cc-skeleton flex flex-col"
+      className={`cc-skeleton ${late ? 'cc-skeleton-late' : ''} flex flex-col`}
       role="status"
       aria-label="Loading the conversation"
       data-testid={testId}
