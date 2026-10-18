@@ -103,8 +103,9 @@ A capsule is `rounded-full`, 1px border, on a translucent `surface-hover` fill; 
 
 Every card that waits on the person is drawn alike (*owner, 2026-10-18*, `ApprovalCard.tsx`, `QuestionCard.tsx`):
 
-- `rounded-bubble`, on `surface-raised`, with a **white edge** all round (`ink-signal` at 80%).
-- **The kind as a capsule** at the top left, in the signal ink: "Awaiting approval", "Agent is asking";
+- `rounded-bubble`, on `surface-raised`, with a **white edge** all round (`ink-signal` at full strength: an
+  edge that waits on the person is never a fraction of the signal, *owner, 2026-10-18*).
+- **The kind as a capsule** at the top left (`Pill size="label" edge="solid"`), in the signal ink: "Awaiting approval", "Agent is asking";
   a quiet line beside it says what is blocked.
 - The body: the command or question. A question's options are `rounded-field` and lit by a white edge
   when picked.
@@ -126,7 +127,7 @@ Every card that waits on the person is drawn alike (*owner, 2026-10-18*, `Approv
 | Hover | a translucent `surface-hover` (`/60` on capsules and icon buttons), the ink one step up (`ink-faint` to `ink`); a full step where the ground is already a fill (usage donuts) | Shows what the pointer will press without spending white |
 | Pressed, open | `surface-hover`, held while the thing it opened is open (`aria-expanded`) | So the button and its dropdown read as one |
 | Selected | `surface-selected` and the `ink`; a picked option in a waiting card adds the white edge, since there it is the answer being given | Selection is position, not urgency |
-| Disabled | `opacity-40`, no hover | One fade everywhere (#1122's `Button` holds it; 50% and 60% are older copies) |
+| Disabled | `opacity-50`, no hover | One fade everywhere (*owner, 2026-10-18*); the shared components hold it (`Button`, `Segmented`, `IconButton`, `InlineConfirm`) |
 | Focus | `:focus-visible`: a 1px outline in `--color-focus`, 1px off; the accent colours it when set | Keyboard focus must always show, and must never look like the signal |
 | Asleep | **not shown at all**: no dimmed row, nothing in the mark or its tooltip, no line under the conversation. Only waking is said ("Waking session…"), and a wake that failed (its reason and Retry) | Sleep needs nothing from the person: typing to the session wakes it. A state that asks nothing is not announced (*owner, 2026-10-18*, `SessionNotes.tsx` `DormantNote`, `sidebar/marks/ToolMark.tsx`; [ux-writing.md](ux-writing.md) 1.1) |
 
