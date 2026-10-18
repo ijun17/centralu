@@ -1,11 +1,9 @@
 # UX writing: the words on screen
 
-**Status: draft, to be settled with the owner.** The rules below are the ones the app already follows
-most of the time. They are written down here so they can be argued about. Each one has real strings from
-the code and the counterexamples found next to them. Paths are relative to `packages/ui/src/features/`,
-except those that start with `app/`, `components/` or `store/`, which are relative to `packages/ui/src/`. The last
-section lists the choices only the owner can make. Until those are settled, no string changes because of
-this document, and it stays in English only.
+**Status: settled 2026-10-18, revised as the screen changes.** Section 1 holds the rules the app follows, each
+with real strings from the code and the counterexamples found next to them; section 3 holds the choices the owner
+made. Paths are relative to `packages/ui/src/features/`, except those that start with `app/`, `components/` or
+`store/`, which are relative to `packages/ui/src/`. Strings that do not follow it yet are fixed in a copy pass.
 
 How the screen looks is [design-system.md](design-system.md). This document is about what it says.
 
@@ -143,7 +141,7 @@ These are:
 - "<session id>" in a hint (`project/NewSessionDialog.tsx`). "host" also means an ssh host
   (`settings/AddMachineForm.tsx`), which is the person's own word there.
 
-Where one of these stays, it should be because the next step needs it (open question 4.1).
+Where one of these stays, it should be because the next step needs it (settled in section 3).
 
 ### 1.10 Tooltips are short
 
@@ -195,8 +193,7 @@ A state the person has to recognise should read the same everywhere. Today: "Awa
 
 ## 2. When a string is added
 
-Until the open questions are settled, a new string follows section 1 and copies the nearest existing
-string for the same thing, so it stays consistent. It does not start a new wording.
+A new string follows sections 1 and 3, and copies the nearest existing string that does.
 
 ## 3. Decided (owner, 2026-10-18)
 
@@ -214,15 +211,4 @@ These settle the choices the draft asked about. Strings that do not follow them 
 | Labels that open a place | A toggle that opens a panel may be its noun; an action is a verb | "Runs" (toggle); "Open in VS Code" (action) |
 | One word per state | The state label on marks and cards; a sentence with the session's name in the capsule's peek | "Awaiting approval"; "api asks for approval" |
 | Korean | English only for now; Korean appears only in what the person and the agents write | |
-
-## 4. Open questions
-
-### 4.1 Internal words
-
-| Option | Example |
-|---|---|
-| A. Never on screen; say what the person sees | "Not connected to the agent host" → "Centralu is reconnecting — nothing can start until it is back" |
-| B. Allowed in Settings and in errors where the next step needs them, defined once in Settings | "The agent host restarted (Settings → About explains what it is)" |
-| C. Allowed wherever they are accurate (today, mostly) | "…a desktop app whose agent host is not held by the background keeper" |
-
-The same choice covers "manifest", "bridge", "MCP" and tool names such as `update_centralu`.
+| Internal words | Never on screen; say what the person sees. Covers "agent host", "keeper", "manifest", "bridge", "MCP" and tool names such as `update_centralu` | "Not connected to the agent host" → "Centralu is reconnecting — nothing can start until it is back" |
