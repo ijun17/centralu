@@ -546,12 +546,14 @@ describe("an agent's work on a machine that connects when needed connects it (#1
 
   // #1134 review M2: a child whose turn ended with its background work still running there owes its report
   it('stays connected past the hold while a child there owes its report over its background work', async () => {
-    const { hub } = await rig({ deps: { needHoldMs: 100, idleCheckMs: 50 } })
+    // A hold longer than connecting takes under load; shortened once the work is owed
+    const { hub } = await rig({ deps: { needHoldMs: 60_000, idleCheckMs: 50 } })
     const children = (hub.mgr as unknown as { children: { setLinkedReport(id: string, r: unknown): void; dropLinkedReport(id: string): void } }).children
     await hub.call('machines.need', { machineId: 'm1' })
     await eventually(() => hub.row().status === 'connected')
     // Its turn ended there with its work still running, as the machine's events would leave it
     children.setLinkedReport('m1.w1', { orchestratorId: 'h1', busy: false, paused: [{ id: 'bg1', kind: 'shell', description: 'npm test', status: 'running' }] })
+    hub.deps.needHoldMs = 100
     await new Promise((r) => setTimeout(r, 600))
     expect(hub.row().status).toBe('connected')
     children.dropLinkedReport('m1.w1')
