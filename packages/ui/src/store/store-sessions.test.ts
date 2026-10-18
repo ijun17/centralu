@@ -397,6 +397,28 @@ describe('a late lock error offers the fork (#168)', () => {
 })
 
 /*
+ * A newer host's session (#384). `sessions.list` reads it tolerantly (`parseTolerant`): a value this build does not
+ * know costs that value only. `session_created`, the only word about a session the host made on its own, parsed it
+ * strictly, so one new word left the session out of the sidebar until a reconnect listed it.
+ */
+describe('a session a newer host created', () => {
+  it('is added from session_created even with a value this build does not know, as the session list would', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const newer = { ...sessionInfo('newer-made'), permissionPreset: 'plan-only', laterField: { a: 1 } }
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: newer.id, session: newer } as unknown as NormalizedEvent)
+    expect(useStore.getState().sessions['newer-made']).toMatchObject({ id: 'newer-made', name: newer.name })
+  })
+
+  it('is not added from a session_created that carries no session', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: 'no-record', session: 'not a session' } as unknown as NormalizedEvent)
+    expect(useStore.getState().sessions['no-record']).toBeUndefined()
+  })
+})
+
+/*
  * A handoff moves the original's live children to the session that took over (#693); the host says so with
  * `session_owner`, and the sidebar hangs the child under its new owner without waiting for a reconnect.
  */

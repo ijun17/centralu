@@ -115,9 +115,9 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 | Shape | Where | Owner | Parser | Added | Removed | Broken | Tests |
 |---|---|---|---|---|---|---|---|
 | RPC results | every `res` frame | protocol | `parseRpcResult` `protocol/src/commands.ts:52` → `parseTolerant` `protocol/src/tolerant.ts:24`; called in `platform/src/web/rpc-client.ts:401` | undeclared fields dropped; an unreadable value is kept as sent, alone | defaults applied (a field the protocol adds has a default, protocol.md §4) | a frame that is not JSON is dropped; an answer that does not read rejects the call, naming the method | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
-| Events | every `event` frame | protocol | `parseServerFrame` `protocol/src/envelope.ts:130`, a strict parse | an unknown event type is dropped (protocol.md); an unknown word in a field without a `.catch` (`state_change.state`, `session_live.reason`, …) drops the whole event, with no word ✗3 | defaults applied | dropped | `protocol.test.ts` "forward compatibility" |
-| A new session's record | `session_created.session` | ui store | `SessionInfo.safeParse` `ui/src/store/events/sessions.ts:88` | a strict parse: a newer host's session with one unknown word is not added to the list, where `sessions.list` would have kept it ✗3 | defaults applied | not added | none |
-| A linked machine's app view | `apps.viewDocument` answered by a remote | agent-host links | `linked-views.ts:27`, a strict `parse` | a value a newer remote invented throws, and the view does not open ✗3 | defaults applied | throws | none |
+| Events | every `event` frame | protocol | `parseServerFrame` `protocol/src/envelope.ts:130`, a strict parse | an unknown event type is dropped (protocol.md); an unknown word in a field without a `.catch` (`state_change.state`, `session_live.reason`, …) drops the whole event, with no word ✗3 ([Left](#left)) | defaults applied | dropped | `protocol.test.ts` "forward compatibility" |
+| A new session's record | `session_created.session` | ui store | `parseTolerant(SessionInfo, …)` `ui/src/store/events/sessions.ts:89` | read as `sessions.list` reads it: undeclared fields dropped, an unreadable value kept as sent, alone; the session is added | defaults applied | a payload that is not a session record is not added | `store-sessions.test.ts` |
+| A linked machine's app view | `apps.viewDocument` answered by a remote | agent-host links | `linkedViews` `agent-host/src/links/linked-views.ts:32`, `parseTolerant` | read tolerantly; an origin mode the hub does not know is `opaque`, the one that shares nothing | defaults applied | an answer without the app, address or document is an error that says to update both computers | `linked-views.test.ts` |
 | The handshake | `hello_ok` | protocol | `parseServerFrame` | strict: an unreadable `hello_ok` is dropped and the handshake times out | defaults applied | dropped | `e2e/older-host.spec.ts` (older only) |
 
 ## Left
@@ -134,6 +134,12 @@ What this inventory found and the pull requests of #384 do not change, with the 
   permission.
 - **`agents.versionsSeen` that does not read** is read as nothing seen, with no word: one upgrade's capability check
   (`AgentVersionService`) is skipped, and the next read writes the versions again. Nothing else depends on it.
+- **An event with a word this build does not know is dropped whole.** Events are parsed strictly
+  (`parseServerFrame`); a field that may grow a word carries a `.catch` (the notice level, the interruption reason,
+  a background task's status), and the rest do not. Read piecewise, the event would hand the screen's reducers a
+  state or a reason they have no branch for, which is a worse failure than a missed update: the next read of the
+  session list (tolerant) carries the value. A field that a newer build may widen gets its `.catch` when it is
+  added, under protocol.md §4.
 - **Steps an unreadable `deferred_migrations` named do not run.** `user_version` is past them, and a step a swap left
   for later owes an index, a vacuum or a contraction, never data, so the open says what the row held instead of
   guessing which steps to run again.
