@@ -371,7 +371,13 @@ is remembered for another machine's project. The machine keeps the child one lev
 depth (`agentDepth`); a machine whose build would drop it (it has no `projects.origin`) is refused, so two machines
 linked both ways cannot start each other's sessions past the setting. The checkout is matched by its origin's
 repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
-never the address as written, which can carry a token.
+never the address as written, which can carry a token. Its caller may answer a question card of the turn it gave it
+(`agent_session answer`), never an approval card there, `auto` or not: what that computer runs is allowed there. A
+turn is the one it gave only on evidence: the machine's record of this hub's own instruction, taken while no other
+turn ran there, with no other message since and not since the hub last lost sight of the child (a link drop, a
+restart). One gate (`RemoteAgents.gate`) stands between the child and every path to its caller (status, wait, answer,
+send, a card's notice, the linked report's text and preview), so the person's own turn there is never read, answered
+or reported as the caller's: the caller gets only the fact and the state word.
 
 **Proposals** (`propose_mcp_server`, `propose_skill`, #838) are approved by name, and approval installs or saves what
 is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a
@@ -1214,7 +1220,8 @@ then who may call it:
   data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures), error bundles and the text of a failed start, which the list, a check
-  and a caller's refusal carry (`secrets.ts` `redactor`, `app-process.ts` `AppLog` and `AppProcess.start`; tests "stderr
+  and a caller's refusal carry, and the app's own error text a check report or a failed resource read quotes (`#1142`:
+  `app-check.ts`, `app-resources.ts` `maskedError`; tests "a check report quotes …", "a resource read that fails …") (`secrets.ts` `redactor`, `app-process.ts` `AppLog` and `AppProcess.start`; tests "stderr
   goes to the app's own log, with secret values masked by name", "an app that fails to start with the value in its
   error leaves only the name in the list, the bundles, the check and the refusal"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
   arguments as JSON, where a multi-line key or one with quotes is spelled differently, and each line of a

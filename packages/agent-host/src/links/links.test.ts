@@ -49,7 +49,15 @@ afterEach(async () => {
 async function remoteHost(
   port = 0,
   store = new Store(),
-  o: { version?: string; activity?: () => HostActivity; immediate?: boolean; without?: readonly string[]; elevated?: () => boolean | null } = {},
+  o: {
+    version?: string
+    activity?: () => HostActivity
+    immediate?: boolean
+    without?: readonly string[]
+    elevated?: () => boolean | null
+    /** What happens on the host before it listens: no hub can see it yet */
+    beforeListen?: (mgr: SessionManager) => Promise<void>
+  } = {},
 ) {
     const adapters = scriptedAdapters({ immediate: o.immediate })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
@@ -60,6 +68,7 @@ async function remoteHost(
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
     ...(o.elevated ? { elevated: o.elevated } : {}),
   })
+  await o.beforeListen?.(mgr)
   const p = await server.listen()
   let closed = false
   const close = async () => {
@@ -99,6 +108,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     tunnelFor: () => new DirectTunnel(line),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
+    ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
     ...extra,
   })
   mgr.useLinkedSessions((id) => links.knowsSession(id))
@@ -1607,8 +1617,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     }
     const start = (opts: Partial<Parameters<SessionManager['startAgent']>[1]> = {}) =>
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
-    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete', text?: string) =>
-      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}) })
+    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string) =>
+      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
@@ -1809,6 +1819,272 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await hub.links.remove('m1')
     expect(await agent(b.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('was removed from Centralu') })
     expect(records()).toEqual([])
+  })
+
+  // #1038: agent_session answer did not reach a child on another machine
+  it('answers a question card of the turn it gave the child there, read through the wait or status, and only that card', async () => {
+    const { answer, start, agent, reports } = await rig()
+    const call = start({ task: 'a question for you' })
+    await answer('allow')
+    // The wait reads the card, as a local child's does
+    const asked = await call
+    expect(asked).toMatchObject({ ok: true, state: 'asking', cards: [expect.objectContaining({ kind: 'question', questions: [expect.objectContaining({ question: 'Proceed?' })] })] })
+    if (!asked.ok || asked.state !== 'asking') return
+    const card = asked.cards[0]!.card
+    expect(await agent(asked.sessionId, 'status')).toMatchObject({ state: 'asking', cards: [expect.objectContaining({ card })] })
+    expect(await agent(asked.sessionId, 'answer', 'yes')).toMatchObject({ ok: false, error: expect.stringContaining(`Name the card you read: ${card}`) })
+    expect(await agent(asked.sessionId, 'answer', 'yes', `${card.split('.')[0]}.deadbeef`)).toMatchObject({ ok: false, error: expect.stringContaining('no longer stands') })
+    expect(await agent(asked.sessionId, 'answer', 'yes', card)).toMatchObject({ ok: true, state: 'answered', card })
+    // Its answer is the wait's, and owed to nobody else
+    expect(await agent(asked.sessionId, 'wait')).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('answered: Yes') })
+    expect(reports()).toBe(0)
+  })
+
+  it("tells the caller of an approval there once, and leaves it to the person, as the caller's preset does not cross machines", async () => {
+    const { hub, answer, start, agent, told } = await rig()
+    await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const notices = () => told().filter((t) => t.includes('is waiting on an approval in that turn'))
+    await eventually(() => notices().length === 1)
+    expect(notices()[0]).toContain(`sourceSessionId: ${r.sessionId}`)
+    const status = await agent(r.sessionId, 'status')
+    expect(status).toMatchObject({ state: 'asking', cards: [expect.objectContaining({ kind: 'approval', answerable: false, detail: expect.objectContaining({ command: 'echo linked' }) })] })
+    if (!status.ok || status.state !== 'asking') return
+    expect(await agent(r.sessionId, 'answer', 'allow', status.cards[0]!.card)).toMatchObject({ ok: false, error: expect.stringContaining('Only the person can answer this approval') })
+    expect(notices()).toHaveLength(1)
+  })
+
+  // #1038: a send was refused while the child's turn ran
+  it('sends a note into the turn it gave the child there, and refuses one into a turn the person started there', async () => {
+    const { remote, answer, start, agent, told } = await rig()
+    const call = start({ task: 'a question for you', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+    // Into the running turn: no new turn is armed, and the turn's end is still the report owed
+    expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working', reported: true })
+    await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
+    // The person starts a turn there: not the caller's to add to
+    await remote.mgr.send(id, 'please approve my own command')
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+  })
+
+  // #1038 review: after a missed end, the person's own card there was shown and answerable as the caller's
+  it("neither shows nor answers a card of a turn it has not seen take its instruction since the link came back", async () => {
+    const { remote, remoteStore, hub, answer, start, agent } = await rig()
+    // The machine cannot be read for whose turn it is: what is owed stays, and only the evidence decides
+    const reader = (hub.mgr as unknown as { linkedReader: Record<string, unknown> }).linkedReader
+    let asked = false
+    reader.lastUserMessage = async () => {
+      asked = true
+      return { ok: false, error: 'not read' }
+    }
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    const back = await remoteHost(remote.port, remoteStore, {
+      beforeListen: async (mgr) => {
+        await mgr.send(id, 'a question for you')
+        await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+      },
+    })
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => asked)
+    expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'working' })
+    expect(await agent(r.sessionId, 'answer', 'yes', 'any.card')).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(back.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions).toHaveLength(1)
+  })
+
+  // #1038 review: a note that went in as the turn ended started a turn nobody followed
+  it('follows the turn a note starts when the turn it was meant for ended before it went in', async () => {
+    const { remote, answer, start, agent, reports } = await rig()
+    const call = start({ task: 'a question for you', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+    // The machine holds the note until the person has answered there and the turn has ended
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const deliver = remote.mgr.sendFromHub.bind(remote.mgr)
+    const reached = vi.spyOn(remote.mgr, 'sendFromHub').mockImplementation(async (...a) => {
+      await held
+      return deliver(...a)
+    })
+    const note = agent(r.sessionId, 'send', 'use the staging data')
+    await eventually(() => reached.mock.calls.length === 1)
+    const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
+    remote.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    await eventually(() => reports() === 1)
+    release()
+    expect(await note).toMatchObject({ ok: true, state: 'working', reported: true })
+    // The turn the note started is the caller's: its end is reported too
+    await eventually(() => reports() === 2)
+  })
+
+  // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
+  it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
+    const { remote, hub, answer, start, reports } = await rig()
+    const begin = async (task: string) => {
+      const call = start({ task, wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      const id = r.sessionId.slice('m1.'.length)
+      await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+      return id
+    }
+    const allow = (id: string) => remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    const endsWhileDown = await begin('please approve the command')
+    const endsAfter = await begin('please approve this one as well')
+    await hub.links.stop()
+    await hub.mgr.disposeAll()
+    await hub.server.close()
+    await allow(endsWhileDown)
+    // Its turn ends there while no hub hears it
+    await eventually(() => ['idle', 'waiting_input'].includes(remote.mgr.listSessions().find((s) => s.id === endsWhileDown)?.state ?? ''))
+    // The same store, a new host: nothing of the old one's memory
+    const again = await hubHost(() => lineFor(remote.port), hub.store)
+    await eventually(() => status(again) === 'connected')
+    await eventually(() => reports() === 1)
+    await allow(endsAfter)
+    await eventually(() => reports() === 2)
+    // Each once
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(reports()).toBe(2)
+  })
+
+  // #1038 review: after a missed end, a turn the person started there was taken for the caller's, and reported as its answer
+  it("does not take a turn the person started there while the link was down for the caller's, nor report its end", async () => {
+    const { remote, remoteStore, hub, answer, start, told, reports } = await rig()
+    // When the hub has read the child once the link is back: its last message, or (without that read) its state a while ago
+    const reader = (hub.mgr as unknown as { linkedReader: Record<string, (...a: unknown[]) => Promise<unknown>> }).linkedReader
+    let readAt = 0
+    let lastRead = false
+    const read = reader.read!.bind(reader)
+    const last = reader.lastUserMessage?.bind(reader)
+    reader.read = async (...a) => {
+      const r = await read(...a)
+      readAt ||= Date.now()
+      return r
+    }
+    if (last) reader.lastUserMessage = async (...a) => {
+      const r = await last(...a)
+      lastRead = true
+      return r
+    }
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    // The machine's host comes back, and before the hub can reach it the person asks the child a question there
+    const back = await remoteHost(remote.port, remoteStore, {
+      beforeListen: async (mgr) => {
+        await mgr.send(id, 'a question for you')
+        await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
+      },
+    })
+    readAt = 0
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => lastRead || (readAt > 0 && Date.now() - readAt > 1_500))
+    // The person answers there: that turn's end is theirs, not the caller's report
+    const q = back.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
+    back.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    await eventually(() => ['idle', 'waiting_input'].includes(back.mgr.listSessions().find((s) => s.id === id)?.state ?? ''))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(reports()).toBe(0)
+    expect(told().some((t) => t.includes('that you did not give it while the hub could not see it'))).toBe(true)
+  })
+
+  // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there
+  it("counts a working child on the machine under its parent's project ceiling, and frees the place when its turn ends", async () => {
+    const { remote, hub, answer, start, agent } = await rig()
+    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    // A turn that waits on the person there keeps working
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const full = expect.stringContaining('1 agents started by this project\'s sessions are already working')
+    // Another start from this project is refused before any card, here or on the machine
+    expect(await start({ task: 'another' })).toMatchObject({ ok: false, error: full })
+    expect(await hub.mgr.startAgent('h1', { task: 'a local one' })).toMatchObject({ ok: false, error: full })
+    // The person answers there: the turn ends, its report comes, and the place is free again
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+    await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    await eventually(() => (hub.mgr as unknown as { delegationFlow: { remote: { workingIn(p: string): number } } }).delegationFlow.remote.workingIn('p-hub') === 0)
+    // New work for it counts again: a send at rest is refused while another child holds the one place
+    const again = start({ task: 'please approve this one too', wait: false })
+    await answer('allow')
+    const second = await again
+    if (!second.ok) throw new Error(second.error)
+    expect(await agent(r.sessionId, 'send', 'more')).toMatchObject({ ok: false, error: full })
+  })
+
+  // #1038 review: a child deleted there while the link was down, or on a removed machine, kept its place for good
+  it('frees the place of a child deleted on its machine while the link was down, and of a removed machine\'s child', async () => {
+    const { remote, remoteStore, hub, answer, start, records } = await rig()
+    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    const ceiling = () => (hub.mgr as unknown as { delegationFlow: { starts: { agentCeilingError(c: string, p: string): string | null } } }).delegationFlow.starts.agentCeilingError('h1', 'p-hub')
+    const begin = async (task: string) => {
+      const call = start({ task, wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      return r.sessionId
+    }
+    const a = await begin('please approve the command')
+    expect(ceiling()).toContain('already working')
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
+    await there.trashSession(a.slice('m1.'.length))
+    await there.disposeAll()
+    await remoteHost(remote.port, remoteStore)
+    await eventually(() => status(hub) === 'connected')
+    await eventually(() => ceiling() === null)
+    expect(records()).toEqual([])
+    // A child of a machine then removed from Centralu holds no place either
+    await begin('please approve this one too')
+    expect(ceiling()).toContain('already working')
+    await hub.links.remove('m1')
+    expect(ceiling()).toBeNull()
+  })
+
+  // #1038: the sidebar hangs the child under its parent, as a local child, not under the machine's project
+  it("names the session that started it as the child's owner in the hub's rows and events, until that session is gone", async () => {
+    const { hub, answer, start } = await rig()
+    const u = await ui(hub.port)
+    const call = start({ wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const row = async () => (await u.call('sessions.list')).find((s: any) => s.id === r.sessionId)
+    expect(await row()).toMatchObject({ askedBy: 'h1', projectId: 'm1.p-app', machine: 'm1' })
+    // A row the windows already hold from the machine's own event moves too
+    await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === 'h1'))
+    await hub.mgr.trashSession('h1')
+    await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === null))
+    expect((await row()).askedBy ?? null).toBeNull()
   })
 
   // #1038 review: the records outlived the session that started them

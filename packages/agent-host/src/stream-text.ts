@@ -62,10 +62,15 @@ export type LineSplitter = {
  * a `\r` before it (Windows, a CRLF PowerShell) is not part of the line.
  *
  * `maxLine`: an unfinished line longer than this is handed over as it is, so a stream that never
- * writes a newline does not grow memory without end. Absent, a line can be any length: codex's
+ * writes a newline does not grow memory without end. `cut` says where: it returns the part to hand over and the part to
+ * keep for the next chunk (a reader that masks secrets keeps back an end that may be the start of one). Without it the
+ * whole unfinished line goes. `maxLine` absent, a line can be any length: codex's
  * `thread/resume` answer was measured at 23 MB on one line, and a cut there is a lost answer.
  */
-export function lineSplitter(onLine: (line: string) => void, opts: { maxLine?: number } = {}): LineSplitter {
+export function lineSplitter(
+  onLine: (line: string) => void,
+  opts: { maxLine?: number; cut?: (unfinished: string) => { line: string; keep: string } } = {},
+): LineSplitter {
   const decode = decoderFor()
   let partial = ''
   const emit = (line: string) => onLine(line.endsWith('\r') ? line.slice(0, -1) : line)
@@ -79,8 +84,8 @@ export function lineSplitter(onLine: (line: string) => void, opts: { maxLine?: n
         emit(line)
       }
       if (opts.maxLine !== undefined && partial.length > opts.maxLine) {
-        const line = partial
-        partial = ''
+        const { line, keep } = opts.cut ? opts.cut(partial) : { line: partial, keep: '' }
+        partial = keep
         emit(line)
       }
     },

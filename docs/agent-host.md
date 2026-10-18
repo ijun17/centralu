@@ -402,7 +402,9 @@ below retained for `safe` and `normal`:
 2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
-   A child counts while a delegated turn runs. Checked before the card and again after it,
+   A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
+   while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`); a removed machine's child holds no place,
+   and one deleted there while the link was down is forgotten when the link is back (`caughtUp`). Checked before the card and again after it,
    and for a new `agent_session send` turn. The check after the card also takes the place (#673 review,
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
    given back if the start fails, so calls at once cannot pass the ceiling together. A fork takes its place the same way
@@ -566,17 +568,62 @@ send, so a turn that ends at once is its answer, not a report. The hub records i
 caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
-works on it through the link: `status` and `wait` (the machine's state and last words), `send` (refused while it is in
-a turn: no note crosses machines yet), `stop` (`agents.interrupt` there; nothing more is owed), `delete` (to that
-machine's trash, its worktree left there), and `list` names its machine. `answer` does not reach another machine yet:
-its cards are answered there or in the session's own window. When the link drops, a waiting call returns with that
+works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
+(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash, its worktree left there), `answer`,
+and `list` names its machine. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
+wait returns them (`asking`), `status` reads them from the machine (`LinkedSessions.cards`), and a card raised while
+no call waits is told once (`cardNotice`); each card's handle names that turn (`RemoteAgent.turn`, new with each start
+or send at rest). `answer` takes a question card's answer to the machine (`agents.answerQuestion` there). An approval
+card stays the person's on that machine, whatever the caller's preset: the child runs under `normal` at most there, and
+a caller's `auto`, which alone lets it answer a local child's approval, is never carried to another computer. `send`
+into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
+person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
+refused, as neither a queue nor a fork reaches another machine.
+
+The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
+caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything
+of the child passes it: `status` (in a turn and at rest), `wait` (as it opens, on a card, at the turn's end, and before
+owing the turn again when the call is cut short), `answer`, `send` (a start's task, a send at rest, a note into a
+turn), a card's notice, and the linked report's text and preview (`LinkedReports` asks `reportGate`: deliver, withhold,
+or defer while it cannot tell). The gate reads whose the child's current or last turn is (`Whose`) from this hub's own
+evidence: `caller` once the machine recorded the instruction this hub last sent (its `user_message` from this
+machine's `HUB_SENDER`, with the text kept as `sent`, not a replay of one seen before) while no other turn ran there
+(`busy`, from its events) and nothing else since; `other` once anything else came: the person's message (their words
+the same as the caller's included), or the instruction taken into a turn already running (a send that read the child
+at rest just before the person's message, a start's task behind the person's first message, a note that arrived after
+the caller's turn ended); `unknown` while an instruction is on its way, and from a link's loss or a restart until the
+machine's last message is read again (`verify`). Owned, the turn's words are the caller's; live (owned and running,
+not held over its background work), its cards, an answer to them and a note into it are too. Not owned, the caller gets
+the fact ("a turn you did not give it", "the person is using it there") and the state word: no card, no words, no wait
+or report owed for it. Becoming another's ends what the caller was owed: a waiting call returns that fact, and a report
+owed is dropped and the caller told, so once the person speaks into the caller's own running turn, nothing more of it
+is reported. A turn's end the reports held back while whose it was could not be told is settled once it can
+(`settleDeferred`, `caughtUp`). A note that goes in after the caller's turn ended with nothing else running starts a
+turn of its own, whose end is owed as a send's is (`tookInstruction`). The table in `remote-agents-boundary.test.ts`
+runs every such path against each way the person's turn can come about. When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
-is back, a child whose turn ended meanwhile is reported then. The paths its answer names are that machine's, and none
-is made readable here. Not yet: the child is not counted under this host's per-project ceiling (it runs on the other
-computer), and a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
-stored; `list` reads its state from the machine) but no longer owes its report. A child deleted there, or whose
+is back, the child is read (`caughtUp`, `verify`): what ran there meanwhile is the caller's only if the last message the child
+took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link
+qualifies it; `LinkedSessions.lastUserMessage`). Then a turn that ended meanwhile is reported, and one still running
+reports when it ends. Otherwise another's message came after (the person's on that machine), or the instruction never
+went in: the caller is told that what it gave the child ended or was set aside unseen, with nothing the child said
+since, rather than handed another's turn as its report. The paths its answer names are that machine's, and none
+is made readable here. It counts under the caller's project's ceiling (below, "How many"), wherever it runs: the
+ceiling bounds how much one project's sessions set going at once, and the machine counts nothing for a session the
+hub started there; its start holds a place from the card's answer until its wait or report counts it, and a new
+`send` turn is checked as a local one. What is owed of it survives a hub restart: its record keeps `owed` (a call
+waits on its turn or its report is armed, with the background work a held report waits on), written whenever its
+report changes (`ChildOwnership.onLinkedReportChange`). The next host arms the report again for a caller still there
+(`RemoteAgents.restore`; a call that waited is gone, so the end is its report now), and once the machine's link is up
+reads the child: a turn that ended meanwhile is reported then, one still running when it ends if it is the caller's
+(below), and a held report waits for its work once the link's resync has read it (`LinkedReports.resync`), not
+before: a link slow to come up would otherwise settle that work as ended. The orchestrator's own linked reports still live in memory. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
-children's records, and a handoff gives them to the heir.
+children's records, and a handoff gives them to the heir. In the sidebar it hangs under its caller, in the caller's
+project, with its machine's tag: the hub names the caller as its `askedBy` in that machine's rows and owner events
+(`LinkDeps.ownerOf`, `SessionManager.remoteAgentParent`) and sends `session_owner` when it records the child, hands it
+to an heir, or forgets it with its caller; the window places a session whose parent runs on another machine under
+that parent's project (`sidebarProjectOf`).
 
 **Creator and worktree ancestry** (#637). `askedBy` records who started an agent, regardless of its folder.
 `parentSessionId` records worktree ancestry (including former manager children); `start_agent` sets it only

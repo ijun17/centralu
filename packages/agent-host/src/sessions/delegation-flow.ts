@@ -49,7 +49,7 @@ export class DelegationFlow {
     this.forks = new DelegationForks(host, this)
     this.observed = new ObservedTurns(host, this)
     this.actions = new AgentSessionActions(host, this)
-    this.remote = new RemoteAgents(host)
+    this.remote = new RemoteAgents(host, this.starts)
   }
 
   /**

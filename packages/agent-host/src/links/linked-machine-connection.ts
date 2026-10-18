@@ -90,7 +90,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     protected readonly tunnel: Tunnel,
     protected readonly deps: LinkDeps,
   ) {
-    this.q = new Qualifier(record.id, record.slot)
+    this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
     for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
     tunnel.onDown((reason) => this.transportDown(reason))
   }

@@ -89,7 +89,8 @@ describe('what a handoff gave away', () => {
 
 describe('the place a start holds', () => {
   it("a project's running children and its reserved starts count against the ceiling together", () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 2 }) as never }))
+    // The store too: children on linked machines count under the ceiling (#1038), and none are recorded here
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 2 }) as never }))
     const ceiling = flow.starts.agentCeilingError.bind(flow.starts)
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     expect(ceiling('caller', 'p1')).toBeNull()
@@ -106,7 +107,7 @@ describe('the place a start holds', () => {
   })
 
   it('releasing a place twice gives back one place, not two', () => {
-    const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 3 }) as never }))
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 3 }) as never }))
     const reserve = flow.starts.reservePlace.bind(flow.starts)
     children.setDelegation('caller>child', { callerId: 'caller', sessionId: 'child', agent: true, settled: false } as unknown as Delegation)
     const a = reserve('caller', 'p1')

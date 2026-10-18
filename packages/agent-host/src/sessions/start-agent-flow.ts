@@ -69,7 +69,7 @@ export type StartAgentDelegations = {
   awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing?: boolean, boundMs?: number): Promise<ChildRunResult>
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined
   /** start_agent on a linked machine (#1038) */
-  readonly remote: Pick<RemoteAgents, 'startAgent'>
+  readonly remote: Pick<RemoteAgents, 'startAgent' | 'workingIn'>
 }
 
 /**
@@ -91,7 +91,8 @@ export class AgentStartFlow {
     private readonly host: DelegationHost,
     private readonly flow: StartAgentDelegations,
   ) {
-    this.gates = new AgentStartGates(host)
+    // Read when counted: the flow makes its children on linked machines after this
+    this.gates = new AgentStartGates(host, (projectId) => flow.remote.workingIn(projectId))
     this.consents = new AgentConsents(host)
     this.choices = new AgentChoices(host)
     this.requests = new AgentStartRequests(host, flow, this)
