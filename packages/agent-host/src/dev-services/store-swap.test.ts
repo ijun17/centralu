@@ -89,6 +89,22 @@ describe('migrations during a host swap (#280 step 3)', () => {
     next.close()
   })
 
+  /*
+   * A list of owed steps that does not read (#384): `user_version` is already past them, so they never run. Only a
+   * hand edit or a write cut short leaves one, and a step a swap left owes an index or a contraction, never data, so
+   * it is not guessed at: the open says which row it could not read and what it held.
+   */
+  it('a list of owed steps that does not read is said on stderr, naming the row', () => {
+    const file = currentStore()
+    raw(file, (db) => db.pragma('user_version = 38'))
+    new Store(file, { swap: true }).close()
+    raw(file, (db) => db.prepare(`UPDATE app_settings SET value = '[40,5' WHERE key = 'deferred_migrations'`).run())
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    new Store(file).close()
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.deferred_migrations .*"\[40,5"/)
+  })
+
   it('a swap stopped as it leaves a step for later still owes that step (#396)', () => {
     const file = currentStore()
     raw(file, (db) => db.pragma('user_version = 38'))

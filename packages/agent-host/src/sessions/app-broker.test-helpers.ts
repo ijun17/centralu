@@ -29,6 +29,8 @@ export class FakeHandle implements SessionHandle {
   readonly answered: { requestId: string; decision: string }[] = []
   interrupted = false
   disposed = false
+  /** A close the test holds open (#378 review): `dispose` resolves when this does, as a real CLI's exit takes its time */
+  closing: Promise<void> | null = null
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
@@ -53,6 +55,7 @@ export class FakeHandle implements SessionHandle {
   }
   async dispose() {
     this.disposed = true
+    await this.closing
   }
   say(text: string) {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
@@ -72,6 +75,8 @@ export class FakeAdapter implements AgentAdapter {
   onSend: (h: FakeHandle, text: string) => void = () => {}
   handles = new Map<string, FakeHandle>()
   opened: CreateSessionOpts[] = []
+  /** A start the test holds (#378 review): the next `createSession` (a wake included) resolves when this does */
+  starting: Promise<void> | null = null
   constructor(readonly tool: ToolName, label: string) {
     this.descriptor = { name: tool, label, mark: label[0]!, install: 'x', login: `${tool} login` }
   }
@@ -82,6 +87,9 @@ export class FakeAdapter implements AgentAdapter {
   }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     this.opened.push(opts)
+    const held = this.starting
+    this.starting = null
+    await held
     const h = new FakeHandle(opts.sessionId, opts, emit, (hh, t) => this.onSend(hh, t))
     this.handles.set(opts.sessionId, h)
     return h

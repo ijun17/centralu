@@ -282,11 +282,24 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   install` has `--ignore-scripts` (no lifecycle script of the pull request's packages runs), and each
   command gets an allow-listed environment (`commandEnv`: PATH, home, temporary and system folders,
   locale, the cargo, rustup and pnpm homes, `CI=1`), so no GH_TOKEN, GITHUB_TOKEN, API key or any
-  variable Centralu gives its apps reaches it. What remains: files the person's account can read
-  (`~/.npmrc`, `~/.cargo/credentials`, a gh login stored in a file rather than the keychain), and the
-  network. Without install scripts a native module may be missing (better-sqlite3, which the schema
-  doc and the migration goldens need); its command then fails and the conflict goes to the author
-  session, which is the safe way to fail.
+  variable Centralu gives its apps reaches it. HOME stays (pnpm's store and cargo need it), so files
+  the person's account can read (`~/.npmrc`, `~/.cargo/credentials`, a gh login stored in a file
+  rather than the keychain) and the network remain within reach. The owner accepted that
+  (2026-10-18): a pull request from a branch of this repository already runs its code in CI with the
+  same trust, and the queue never runs a fork's (`cannotMergeBase`).
+- **node_modules without an install**: when the merged tree's `pnpm-lock.yaml` is the default
+  branch's and the one the queue's checkout installed (`node_modules/.modules.yaml` there), the
+  checkout's node_modules are linked into the worktree (`mirrorModules`: each workspace package's
+  node_modules a real folder of links, a link to a workspace package pointing at that package in the
+  worktree, so the merged source is what runs) and no `pnpm install` of the list runs, so native
+  modules built for the checkout are there. When the lockfile differs, the list's installs run with
+  `--ignore-scripts`; a native module may then be missing (better-sqlite3, which the schema doc and
+  the migration goldens need), its command fails, and the conflict goes to the author session: the
+  safe way to fail. No rebuild runs (it would run a dependency's install script). **The links are
+  removed before anything is removed recursively** (`dropLinks`: unlinked, never followed; also in
+  the sweep of a killed run's folder): `git worktree remove` follows a junction on Windows, and
+  would delete the checkout's own node_modules. Tests: both paths, and both removals with a link
+  left in place.
 - **The lists** (the owner's, 2026-10-18): `pnpm-lock.yaml` (`pnpm install --lockfile-only --ignore-scripts`; pnpm runs
   the version `package.json` `packageManager` pins), `docs/generated/schema.md` (`pnpm docs:schema`),
   the store migration goldens (`vitest run --update` of `store-migrations.test.ts`), and Tauri's
