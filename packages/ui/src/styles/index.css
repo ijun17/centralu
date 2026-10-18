@@ -946,6 +946,39 @@
 
 /* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
    the run-command dropdown) */
+/*
+ * A layer's backdrop (the palette's and settings' scrim) fades with the panel it sits under (usePresence,
+ * components/presence.ts). Same lengths as cc-drop and cc-drop-out, so the two move as one.
+ */
+@keyframes cc-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-fade {
+  animation: cc-fade 160ms ease-out;
+}
+@keyframes cc-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.cc-fade-out {
+  animation: cc-fade-out 150ms ease-in forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-fade,
+  .cc-fade-out {
+    animation: none;
+  }
+}
+
 @keyframes cc-drop-out {
   from {
     opacity: 1;

@@ -1,3 +1,4 @@
+import { usePresence } from '../../components/presence.js'
 import { isInTurn } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
@@ -84,7 +85,9 @@ export function Inbox() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, items, cursor, openWaiting, toggle, markRead])
 
-  if (!open) return null
+  // Goes back up the way it came down (usePresence keeps it for its exit)
+  const { shown, leaving } = usePresence(open)
+  if (!shown) return null
 
   return (
     <>
@@ -93,14 +96,14 @@ export function Inbox() {
         On the press, not the click, and marked data-no-drag: this sits inside the top bar's window drag region, and on
         Windows a window drag swallows the mouseup, so a click never came and the inbox stayed open (#365, DragRegion.tsx).
       */}
-      <div className="fixed inset-0 z-30" onMouseDown={() => toggle(false)} data-no-drag data-testid="inbox-backdrop" />
+      {!leaving && <div className="fixed inset-0 z-30" onMouseDown={() => toggle(false)} data-no-drag data-testid="inbox-backdrop" />}
       <div
         ref={panelRef}
         data-no-drag
         tabIndex={-1}
         role="dialog"
         aria-label="Waiting"
-        className="cc-drop absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none"
+        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 w-[560px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
         data-testid="inbox"
       >
         <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">

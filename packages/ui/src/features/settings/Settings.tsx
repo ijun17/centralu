@@ -1,3 +1,4 @@
+import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
@@ -207,18 +208,24 @@ export function Settings() {
   const panelRef = useRef<HTMLDivElement>(null)
   const dialog = useDialogFocus(panelRef, open)
 
-  if (!open) return null
+  // Comes down and fades in, and goes the same way (usePresence keeps it for its exit)
+  const { shown, leaving } = usePresence(open)
+  if (!shown) return null
 
   return (
     <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px]"
+      className={`absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(8vh/var(--text-zoom))] backdrop-blur-[2px] ${
+        leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'
+      }`}
       onClick={() => toggle(false)}
       data-testid="settings"
     >
       <div
         ref={panelRef}
         {...dialog}
-        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none"
+        className={`flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none ${
+          leaving ? 'cc-drop-out' : 'cc-drop'
+        }`}
         onClick={(e) => e.stopPropagation()}
         data-testid="settings-panel"
       >
