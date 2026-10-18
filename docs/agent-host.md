@@ -573,11 +573,12 @@ a turn: no note crosses machines yet), `stop` (`agents.interrupt` there; nothing
 machine's trash, its worktree left there), and `list` names its machine. `answer` does not reach another machine yet:
 its cards are answered there or in the session's own window. When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
-is back, a child whose turn ended meanwhile is reported then. A turn running there when the link is back is the
-caller's only if the last message the child took is the instruction this hub sent it (its text kept as `sent`, from
-`HUB_SENDER`; `LinkedSessions.lastUserMessage`); otherwise it is another's turn (the person's on that machine), and the
-caller is told that what it gave the child is no longer followed, rather than handed that turn's end as its report
-(`turnOnReturn`). The paths its answer names are that machine's, and none
+is back, the child is read (`onReturn`): what ran there meanwhile is the caller's only if the last message the child
+took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link
+qualifies it; `LinkedSessions.lastUserMessage`). Then a turn that ended meanwhile is reported, and one still running
+reports when it ends. Otherwise another's message came after (the person's on that machine), or the instruction never
+went in: the caller is told that what it gave the child ended or was set aside unseen, with nothing the child said
+since, rather than handed another's turn as its report. The paths its answer names are that machine's, and none
 is made readable here. It counts under the caller's project's ceiling (below, "How many"), wherever it runs: the
 ceiling bounds how much one project's sessions set going at once, and the machine counts nothing for a session the
 hub started there; its start holds a place from the card's answer until its wait or report counts it, and a new

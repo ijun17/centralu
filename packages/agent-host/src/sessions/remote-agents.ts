@@ -8,7 +8,8 @@ import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedReport } from './child-ownership.js'
-import { fromHub, type LinkedEvent } from './linked-reports.js'
+import type { LinkedEvent } from './linked-reports.js'
+import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
@@ -628,44 +629,57 @@ export class RemoteAgents {
       if (!report || report.orchestratorId !== rec.callerId || report.paused || (!report.busy && !missed)) continue
       const now = await reader.read(rec.sessionId, 1)
       if (!now.ok) continue
-      if (inTurn((now.state ?? 'idle') as SessionState)) {
-        await this.turnOnReturn(rec, report, reader)
-        continue
-      }
-      // Read again: the turn's own end may have come in while the machine was asked
-      if (this.host.children.linkedReports.get(rec.sessionId) === report) this.host.settleLinkedTurn(rec.sessionId)
+      await this.onReturn(rec, report, reader, inTurn((now.state ?? 'idle') as SessionState))
     }
   }
 
   /**
-   * A turn running there when the link is back after the hub missed what happened (a drop, a restart): the caller's
-   * only if the last message the child took is the instruction the hub sent it (`sent`), from this hub (#1038 review).
-   * Then its end is the report's, however the machine says it. Otherwise the turn is someone else's, the person's on
-   * that machine most likely: the turn the caller gave it ended unseen, or was set aside, and nothing of the new one is
-   * the caller's. Its report is dropped and the caller is told, rather than handed another's turn as its answer. Not
-   * read (the machine did not answer), it stays as it is until the link's next resync.
+   * A child read when the link is back after the hub missed what happened (a drop, a restart), its report still owed
+   * (#1038 review). What the hub saw last of it is the caller's turn; what ran there since is the caller's only if the
+   * last message the child took is the instruction this hub sent it (`sent`, from this link's `HUB_SENDER`).
+   *
+   * - Running and the caller's: its end is the report's, however the machine says it.
+   * - At rest and the caller's: that turn ended unseen, and is reported now with its answer.
+   * - Otherwise someone else's message came after (the person's on that machine, most likely), or the instruction never
+   *   went in (a restart between keeping it and sending it). What the caller gave the child ended or was set aside
+   *   unseen; the caller is told so, with nothing of what the child said since, and nothing more is reported.
+   *
+   * Not read (the machine did not answer), it stays as it is until the link's next resync.
    */
-  private async turnOnReturn(rec: RemoteAgent, report: LinkedReport, reader: LinkedSessions): Promise<void> {
+  private async onReturn(rec: RemoteAgent, report: LinkedReport, reader: LinkedSessions, running: boolean): Promise<void> {
     const last = await reader.lastUserMessage(rec.sessionId)
     // Read again after asking: the turn's own end may have come in meanwhile
     if (!last.ok || this.host.children.linkedReports.get(rec.sessionId) !== report) return
     const sent = this.of(rec.sessionId)?.sent
-    if (last.message && sent !== undefined && last.message.text === sent && fromHub(last.message.from)) {
-      report.busy = true
+    if (last.message && sent !== undefined && last.message.text === sent && this.fromHubHere(rec, last.message.from)) {
+      if (running) report.busy = true
+      else this.host.settleLinkedTurn(rec.sessionId)
       return
     }
     this.host.children.dropLinkedReport(rec.sessionId)
+    const what = running
+      ? 'began a turn there that you did not give it (the person on that machine, most likely)'
+      : 'came to rest there while the hub could not see it, after a message that is not the one you gave it (the person\'s on that machine, most likely, or yours never went in)'
     void this.host.tellSession(
       rec.callerId,
-      `[Centralu] While the link to ${rec.machine} was down, "${rec.name}" [${rec.sessionId}] began a turn there that you did not give it ` +
-        '(the person on that machine, most likely). What you gave it ended or was set aside unseen, and nothing more of it is reported. ' +
-        'agent_session status reads where it stands; send to it once it is at rest.',
+      `[Centralu] While the link to ${rec.machine} was down, "${rec.name}" [${rec.sessionId}] ${what}. ` +
+        'What you gave it ended or was set aside unseen, and nothing more of it is reported. ' +
+        `agent_session status reads where it stands${running ? '; send to it once it is at rest' : ''}.`,
       { sessionId: rec.sessionId, name: rec.name },
       true,
     )
   }
 
-  /** The instruction the hub is about to send the child, kept so its turn can be told from another's (`turnOnReturn`) */
+  /**
+   * Whether a message the child took was sent by this hub over this link (#1038 review): the machine records a hub's
+   * instruction from `HUB_SENDER`, which reaches the hub qualified with that machine's id. Another machine's prefix is no
+   * instruction of this link's. Two hubs linked to one machine record the same sender; the text (`sent`) tells them apart
+   */
+  private fromHubHere(rec: RemoteAgent, from: unknown): boolean {
+    return (from as { sessionId?: unknown } | null)?.sessionId === `${rec.machineId}.${HUB_SENDER}`
+  }
+
+  /** The instruction the hub is about to send the child, kept so its turn can be told from another's (`onReturn`) */
   private sentNow(sessionId: string, text: string): void {
     this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...r, sent: text } : r)))
   }

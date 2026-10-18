@@ -17,9 +17,14 @@ let children: ChildOwnership
 let state: string
 let settled: string[]
 let told: string[]
+/** The last message the child took there, as the machine lists it */
+let lastUser: { text: string; from: unknown } | null
+/** This hub's sender as the machine records it, qualified with the machine's id */
+const HUB = { sessionId: 'm1._hub-orchestrator' }
+const PERSON = { sessionId: 'm1.person' }
 
 const caller = { id: 'h1', name: 'Parent', projectId: 'p1', kind: 'worker', permissionPreset: 'normal', ...sessionLiveDefaults() } as unknown as SessionInfo
-const child = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1 }
+const child = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }
 /** A task of the child's own background work there, which a held report waits on (#723) */
 const task = { id: 't1', description: 'build', status: 'running' } as never
 
@@ -29,6 +34,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
     machineLinked: () => true,
     lastWords: async () => 'done there',
+    lastUserMessage: async () => ({ ok: true, message: lastUser }),
   } as unknown as LinkedSessions
   const host = {
     children,
@@ -50,6 +56,8 @@ beforeEach(() => {
   state = 'working'
   settled = []
   told = []
+  // The child last took the instruction this hub sent it: its turn is the caller's
+  lastUser = { text: 'TASK', from: HUB }
 })
 afterEach(() => store.close())
 
@@ -106,6 +114,42 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
   } finally {
     vi.useRealTimers()
   }
+})
+
+// #1038 review (RV12): on the link's return, a turn the person ran there meanwhile was reported as the caller's answer
+describe('a child read at rest when the link is back after a missed end', () => {
+  const returned = async (last: { text: string; from: unknown } | null, sent = 'TASK') => {
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...child, sent }]))
+    lastUser = last
+    const ra = agents()
+    ra.restore()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
+    ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+    state = 'idle'
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await eventually(() => settled.length > 0 || !children.linkedReports.has(child.sessionId))
+  }
+
+  it('reports the turn that ended unseen when the last message it took is the instruction this hub sent', async () => {
+    await returned({ text: 'TASK', from: HUB })
+    expect(settled).toEqual([child.sessionId])
+  })
+
+  it("says only that it ended unseen, with none of its words, when the person's message came after", async () => {
+    await returned({ text: 'my own thing', from: PERSON })
+    expect(settled).toEqual([])
+    const notice = told.find((t) => t.includes('came to rest there while the hub could not see it'))
+    expect(notice).toBeDefined()
+    expect(notice).not.toContain('done there')
+  })
+
+  it('takes neither an instruction that never went in (kept, then the hub restarted) nor another link\'s for its own', async () => {
+    await returned({ text: 'an earlier instruction', from: HUB }, 'TASK')
+    expect(settled).toEqual([])
+    told = []
+    await returned({ text: 'TASK', from: { sessionId: 'hub.x._hub-orchestrator' } })
+    expect(settled).toEqual([])
+  })
 })
 
 describe('a child on a linked machine, as the hub follows it (#1038 review)', () => {
