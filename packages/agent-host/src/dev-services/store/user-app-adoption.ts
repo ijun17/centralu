@@ -16,13 +16,13 @@ import type { SettingsRecords } from './settings.js'
  * second time: copies are `OR IGNORE`, moves only touch rows still under the user folder.
  */
 
-/** Where the record of adopted folders is kept: app id → the project it became, bound to its folder's file id */
+/** Where the record of adopted folders is kept: app id → the project it became, bound to the mark in its folder (`ADOPTION_MARK`) */
 export const ADOPTED_USER_APPS_KEY = 'apps.adoptedUserApps'
 const BUILDERS_KEY = 'apps.builders'
 const VIEW_PORTS_KEY = 'apps.viewPorts'
 const ATTACHED_PREFIX = 'session_apps:'
 
-export type AdoptedRecord = { projectId: string; ino: string; at: number }
+export type AdoptedRecord = { projectId: string; mark: string; at: number }
 
 export class UserAppAdoptionRecords {
   constructor(
@@ -36,7 +36,7 @@ export class UserAppAdoptionRecords {
     const out: Record<string, AdoptedRecord> = {}
     if (!isObj(raw)) return out
     for (const [id, r] of Object.entries(raw)) {
-      if (isObj(r) && typeof r.projectId === 'string' && typeof r.ino === 'string' && typeof r.at === 'number') out[id] = { projectId: r.projectId, ino: r.ino, at: r.at }
+      if (isObj(r) && typeof r.projectId === 'string' && typeof r.mark === 'string' && typeof r.at === 'number') out[id] = { projectId: r.projectId, mark: r.mark, at: r.at }
     }
     return out
   }
@@ -47,7 +47,7 @@ export class UserAppAdoptionRecords {
    * project never stands without its app's state, nor the record without what it says was carried. Returns the
    * project's id and the ids of the sessions moved into it (the manager holds them in memory too).
    */
-  carry(appId: string, project: { path: string; name: string; trusted: boolean; newId: string }, ino: string): { projectId: string; sessions: string[] } {
+  carry(appId: string, project: { path: string; name: string; trusted: boolean; newId: string }, mark: string): { projectId: string; sessions: string[] } {
     return this.db.transaction(() => {
       const known = this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(project.path) as { id: string } | undefined
       const projectId = known?.id ?? project.newId
@@ -135,7 +135,7 @@ export class UserAppAdoptionRecords {
         if (changed) this.settings.saveWorkspace(layout)
       }
       this.updateJson(ADOPTED_USER_APPS_KEY, (adopted) => {
-        adopted[appId] = { projectId, ino, at: Date.now() }
+        adopted[appId] = { projectId, mark, at: Date.now() }
       })
       return { projectId, sessions }
     })()

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
@@ -19,8 +19,10 @@ import type { Store } from './dev-services/store.js'
  * updates them and tells the windows: the builder is found under the new key in this same run. It runs again whenever
  * the user folder gains an app (an MCP server the person approved is written there).
  *
- * Each folder once: the store records it, bound to the folder's file id, so a project the person later deletes is not
- * registered again, while a different folder made later under the same name is.
+ * Each folder once: the store records it, bound to a mark written in the folder (`ADOPTION_MARK`), so a project the
+ * person later deletes is not registered again, while a different folder made later under the same name is. Not the
+ * folder's file id: Linux (ext4) gives a folder made where one was just removed the same inode, and the same birth
+ * time too (a coarse clock), so the new folder read as the deleted project's (#1152, measured under WSL).
  *
  * Not adopted: a folder whose manifest does not pass, or names an id other than its folder (a backup copy such as
  * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
@@ -40,19 +42,30 @@ export type AdoptionDeps = {
   changed(): void
 }
 
-/** The folder's file id, exact (bigint), or null when it cannot be read */
-export function folderFileId(dir: string): string | null {
+/**
+ * Where an adopted folder keeps its mark: in Centralu's own folder inside the project (`.centralu`, where a project's
+ * apps live too). A random token, the same as the store's record, so only this very folder carries it; a folder made
+ * later under the same name has none
+ */
+export const ADOPTION_MARK = ['.centralu', 'adopted'] as const
+
+/** The mark in this folder, or null when it has none (or it cannot be read) */
+export function adoptionMark(dir: string): string | null {
   try {
-    return statSync(dir, { bigint: true }).ino.toString()
+    return readFileSync(join(dir, ...ADOPTION_MARK), 'utf8').trim() || null
   } catch {
     return null
   }
 }
 
-/** The runtime's `adoptedUserApp`: whether this folder is the very one recorded as registered in place */
+/**
+ * The runtime's `adoptedUserApp`: whether this folder is the very one recorded as registered in place. A record with
+ * no mark (written before there was one) matches nothing: the folder is adopted again, in place, which keeps its
+ * project (found by its path) and writes the mark
+ */
 export function adoptedUserApp(store: Pick<Store, 'adoption'>, appId: string, dir: string): boolean {
   const record = store.adoption.adopted()[appId]
-  return !!record && record.ino === folderFileId(dir)
+  return !!record && adoptionMark(dir) === record.mark
 }
 
 /** A path spelled as a registered project's is: resolved, with a capital drive letter (`ProjectCreation.addProject`) */
@@ -131,8 +144,6 @@ export class UserAppAdoption {
   }
 
   private adopt(app: ExternalAppInfo): void {
-    const ino = folderFileId(app.dir)
-    if (ino === null) throw new Error('its folder cannot be read')
     const path = spelled(app.dir)
     // An import the person has not enabled stays off: its project starts untrusted, and trusting it is enabling it
     const held = app.status === 'unconfirmed' || (app.imported !== undefined && app.imported.confirmedAt === null)
@@ -140,7 +151,11 @@ export class UserAppAdoption {
     const projectId = known ?? randomUUID()
     // The files first: copies, made only where the new key has none, so an interrupted run repeats them harmlessly
     this.deps.rt.carryAppState({ projectId: null, appId: app.appId }, { projectId, appId: app.appId })
-    const moved = this.deps.store.adoption.carry(app.appId, { path, name: basename(path), trusted: !held, newId: projectId }, ino)
+    // The mark before the record: a mark the record never took (a failed transaction) is replaced by the next attempt
+    const mark = randomUUID()
+    mkdirSync(join(app.dir, ADOPTION_MARK[0]), { recursive: true })
+    writeFileSync(join(app.dir, ...ADOPTION_MARK), `${mark}\n`)
+    const moved = this.deps.store.adoption.carry(app.appId, { path, name: basename(path), trusted: !held, newId: projectId }, mark)
     this.deps.sessionsMoved(moved.sessions, moved.projectId)
     console.error(`[apps] user-folder app ${app.appId} is now the app of project ${moved.projectId} (${path})${held ? ', untrusted until enabled' : ''}`)
   }

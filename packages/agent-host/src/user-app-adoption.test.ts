@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionLiveDefaults, type NormalizedEvent, type ProjectInfo, type ToolName } from '@cc/protocol'
@@ -219,6 +219,26 @@ describe('a user-folder app becomes a project in place', () => {
     await mgr.deleteProject(project()!.id)
     rmSync(appDir(), { recursive: true })
     plantUserApp('notes')
+    rt.refresh()
+    expect(await adoption.run()).toBe(1)
+    expect(project()).toMatchObject({ trusted: true })
+  })
+
+  /*
+   * #1152's full tier, on Linux: ext4 gives a folder made where one was just removed the same inode, and the same birth
+   * time (a coarse clock; both measured under WSL), so a record bound to the folder's file id took the new folder for the
+   * deleted project's and left it out. Windows and macOS do not hand the id out again at once, so the reuse is made here
+   */
+  it("a folder made later under the same name is new even when it has the old folder's file id, as on ext4", async () => {
+    await mgr.deleteProject(project()!.id)
+    // The deleted project's folder stays out
+    rt.refresh()
+    expect(await adoption.run()).toBe(0)
+    rmSync(appDir(), { recursive: true })
+    plantUserApp('notes')
+    const record = JSON.parse(store.settings.appSetting(ADOPTED_USER_APPS_KEY)!) as Record<string, Record<string, unknown>>
+    record.notes!.ino = statSync(appDir(), { bigint: true }).ino.toString()
+    store.settings.setAppSetting(ADOPTED_USER_APPS_KEY, JSON.stringify(record))
     rt.refresh()
     expect(await adoption.run()).toBe(1)
     expect(project()).toMatchObject({ trusted: true })

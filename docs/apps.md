@@ -81,8 +81,10 @@ visibility is not read as the default: the side that is wrong stays closed.
 - **User-folder apps become projects** (#1141): once the host is ready (where the steps a swap left
   for later run, so a host failing before then has moved nothing), each `<data folder>/apps/<id>/`
   whose manifest is valid and names its folder's id is registered as a project **in place**, in the
-  same store transaction as the move below, and is that project's root app from then on, once (`apps.adoptedUserApps`, bound to the folder's file id, so a project the person deletes is
-  not registered again). What was kept under `_user/<id>` is carried to `<project id>/<id>`: data,
+  same store transaction as the move below, and is that project's root app from then on, once (`apps.adoptedUserApps`, bound to a random mark written in the folder, `.centralu/adopted`, so a
+  project the person deletes is not registered again, and a folder made later under the same name is:
+  not the folder's file id, which ext4 gives again to a folder made where one was just removed, birth
+  time and all). What was kept under `_user/<id>` is carried to `<project id>/<id>`: data,
   logs, kept versions and secrets are copied; grants are copied, and so are other apps' grants to
   call it; runs and the app's sessions move to the project; the builder map, attachments, grid panel,
   view origin port and the window's span and open app follow the new key. The project is trusted,
