@@ -83,7 +83,7 @@ export class TrashMock {
     },
     readRun: async (runId: string, limit = 200, beforeSeq?: number) => {
       const k = this.keptRuns.get(runId)
-      if (!k) throw Object.assign(new Error(`Not in the trash: ${runId}`), { code: 'session_not_found' })
+      if (!k) throw mockError(`Not in the trash: ${runId}`, 'session_not_found')
       const filtered = beforeSeq ? k.messages.filter((m) => m.seq < beforeSeq) : k.messages
       return { request: k.request, answer: k.answer, ...(k.output !== undefined ? { output: k.output } : {}), messages: filtered.slice(-limit) }
     },

@@ -1,5 +1,6 @@
 import { useStore } from '../../store/store.js'
 import type { KeptDraft } from '../../store/state/conversation.js'
+import { Button } from '../../components/Button.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 
@@ -39,14 +40,9 @@ export function KeptDraftCard() {
     >
       <div className="flex items-center gap-2">
         <span>{keptDraftLine(kept)}</span>
-        <button
-          type="button"
-          className="ml-auto shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
-          onClick={copy}
-          data-testid="kept-draft-copy"
-        >
+        <Button size="sm" className="ml-auto shrink-0" onClick={copy} data-testid="kept-draft-copy">
           Copy
-        </button>
+        </Button>
         <IconButton label="Dismiss (the draft is not kept)" onClick={() => dismiss(kept.sessionId)} testId="kept-draft-dismiss" placement="top" align="right">
           <CloseIcon size={11} />
         </IconButton>
