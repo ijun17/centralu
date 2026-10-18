@@ -39,7 +39,8 @@ type Def = {
   discriminator?: string
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+/** A JSON object (not an array, not null): what the tolerant reader and the schema test helpers walk into */
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 function salvage(schema: z.ZodType, raw: unknown): unknown {
   const def = schema.def as unknown as Def

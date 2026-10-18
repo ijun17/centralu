@@ -10,6 +10,7 @@ import { formatBytes } from '../../app/format.js'
 import { isPlainEnter } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { TRUNCATED_NOTICE, wholeFileText } from './copy.js'
 import { useVirtualCopy } from './useVirtualCopy.js'
 import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } from './jump.js'
@@ -234,8 +235,10 @@ export function CodeViewer({ projectId }: { projectId: string }) {
         </span>
         {!showingImage && (
           <>
-            <input
-              className="ml-2 w-40 rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            <TextInput
+              size="xs"
+              surface="raised"
+              className="ml-2 w-40"
               placeholder="Search in file"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
