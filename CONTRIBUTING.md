@@ -309,12 +309,33 @@ Ask these against your change. Put anything you could not check in **Not exercis
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
 
+### Situations checked
+
+Before opening a pull request that changes behaviour, attack it yourself: walk each situation
+below and write what your change does in it, one line each, under **Situations checked** in the
+pull request. Review rounds were the largest delay in landing work, and much of what reviewers
+sent back was one of these (#1181). "Does not apply, because …" is an answer; a blank is not. A
+change with no behaviour (documents, a pure refactor) writes n/a.
+
+- **Host swap.** An older build is still serving the same store while the new one starts
+  (`Store.migrate()`, [docs/agent-host.md](docs/agent-host.md)). What does each of them do with
+  what the other wrote?
+- **Link loss and reconnect.** The window, a remote or a child loses its connection in the middle
+  of this and comes back. What is resent, what is lost, what is done twice?
+- **An older build reading what this one writes.** A field, a message or a file this change adds,
+  read by the build before it (a rollback, a remote not yet updated).
+- **Two of the same thing at once.** Two sends, two deletes, two sessions, two windows doing this
+  at the same moment ([the interleaving rule above](#what-has-to-pass-before-you-send-it)).
+- **The person using the same session.** They type, approve, stop or switch while this runs.
+- **Data loss.** What is deleted, what is kept, and what a crash halfway through leaves behind.
+
 ## Commits and pull requests
 
 - Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):
   Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
   fit the subject.
-- Pull requests use the template (Why / What changed / Verified / Usability / Not exercised / Closes).
+- Pull requests use the template (Why / What changed / Verified / Situations checked / Usability /
+  Not exercised / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
 - **A move-only refactor lands when nothing is in its way.** A pull request that relocates or

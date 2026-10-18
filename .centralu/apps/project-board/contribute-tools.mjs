@@ -119,7 +119,7 @@ async function commitCheck({ message, messages, repo }) {
   return bad.length ? asError(a) : a
 }
 
-const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
+const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
 
 export async function openPr({ title, head, base, draft, repo, sections, dryRun, ...named }) {
   const r = repoOf(repo)
@@ -234,7 +234,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
+        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),
@@ -242,6 +242,7 @@ export const tools = {
         why: z.string().optional(),
         whatChanged: z.string().optional(),
         verified: z.string().optional(),
+        situationsChecked: z.string().optional().describe('What the change does on a host swap, link loss and reconnect, an older build reading what it writes, two at once, the person using the same session, and data loss (CONTRIBUTING.md#situations-checked); n/a when it changes no behaviour'),
         usability: z.string().optional().describe('Discoverable-path numbers before and after for a change on screen, else "n/a" (docs/usability.md)'),
         notExercised: z.string().optional().describe('Surfaces this change touches that were not run; required'),
         closes: z.string().optional().describe('e.g. "Closes #386", or why there is no issue'),

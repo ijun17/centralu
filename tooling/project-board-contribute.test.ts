@@ -125,13 +125,13 @@ describe('the rules for public text', () => {
     expect(commitProblems('fix(ui): keep moonbase focus', CONVENTIONS, ['Moonbase']).problems.join()).toMatch(/private list: "Moonbase"/)
   })
 
-  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
+  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', situationsChecked: 'n/a', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
 
   it("fills this repository's pull request template, without its guidance, in its order", () => {
-    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', Usability: 'n/a', closes: 'Closes #1' })
+    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Host swap: unchanged.', Usability: 'n/a', closes: 'Closes #1' })
     expect(r.problems).toEqual([])
     expect(r.warnings).toEqual([])
-    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
+    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nHost swap: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
   })
 
@@ -140,15 +140,19 @@ describe('the rules for public text', () => {
     expect(r.problems.join()).toMatch(/"Not exercised" is (empty|only)/)
   })
 
-  it('takes "Nothing" for Not exercised, keeps Usability as the template asks, drops other headings left out, and refuses a heading it does not have', () => {
-    expect(fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' }).problems).toEqual([])
-    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing' })
+  it('takes "Nothing" for Not exercised, keeps Situations checked and Usability as the template asks, drops other headings left out, and refuses a heading it does not have', () => {
+    const kept = { 'Not exercised': 'Nothing', 'Situations checked': 'n/a', Usability: 'n/a' }
+    expect(fillTemplate(TEMPLATE, kept).problems).toEqual([])
+    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Situations checked': 'n/a' })
     expect(noUsability.problems.join()).toMatch(/"Usability" is empty, and the template keeps it/)
-    const dropped = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a', Why: 'Because.' })
+    // The self-attack review (#1181): an author who skips it is sent to the situations, not let through
+    const noSituations = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' })
+    expect(noSituations.problems.join()).toMatch(/"Situations checked" is empty, and the template keeps it: .*Host swap/)
+    const dropped = fillTemplate(TEMPLATE, { ...kept, Why: 'Because.' })
     expect(dropped.warnings).toEqual(['"What changed" is left out.', '"Verified" is left out.', '"Closes" is left out.'])
-    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')
+    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Situations checked\n\nn/a\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')
     expect(fillTemplate(TEMPLATE, { ...SECTIONS, Screenshots: 'x' }).problems).toEqual([
-      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Usability, Not exercised, Closes.',
+      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Situations checked, Usability, Not exercised, Closes.',
     ])
   })
 })
@@ -377,6 +381,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     why: 'Procedure errors.',
     whatChanged: 'Tools.',
     verified: 'Tests.',
+    situationsChecked: 'Two at once: each call opens its own.',
     usability: 'n/a',
     notExercised: 'The packaged app.',
     closes: 'Refs #386',
@@ -394,7 +399,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')

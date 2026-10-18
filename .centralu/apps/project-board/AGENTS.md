@@ -359,10 +359,10 @@ and refuses with every reason at once, sending nothing.
   A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
-  `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
+  `situationsChecked`, `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
   heading left out (the template says so) and refuses a name the template does not have. **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a
-  heading whose guidance says "keep the heading" (Usability) must not be empty. The title must pass
+  heading whose guidance says "keep the heading" (Situations checked, Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
   With a `base` that is another open pull request's branch, it turns that one into a draft
