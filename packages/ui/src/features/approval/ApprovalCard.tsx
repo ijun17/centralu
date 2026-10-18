@@ -91,7 +91,7 @@ export function ApprovalCard({
         return
       }
       // The "always allow" toast is shown using the matcher the store sent back (#170)
-      void respond(sessionId, requestId, action.decision, action.scope)
+      void respond(sessionId, requestId, action.decision, keyScope(detail, action))
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
@@ -423,7 +423,7 @@ function AgentStartCard({
             k={keys.always}
             label="Always for this session"
             title={inProject ? `Hold ${projectHint} and click for the whole project` : undefined}
-            onClick={(alt) => onAnswer('always', alt && inProject ? 'project' : 'session')}
+            onClick={(alt) => onAnswer('always', agentStartScope(detail, alt))}
             testId="approve-always"
             disabled={busy}
           />
@@ -598,6 +598,29 @@ export function approvalCardCovered(
   sessionId: string,
 ): boolean {
   return isCovered(st) || st.focusedSessionId !== sessionId
+}
+
+/**
+ * The scope a key answers with: what the key asked for (⌥a is the project), except on a start_agent card, whose "always"
+ * reaches only as far as the card's button lets it (`agentStartScope`).
+ */
+export function keyScope(
+  detail: ApprovalDetail,
+  action: { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' },
+): 'session' | 'project' | undefined {
+  return detail.kind === 'agent_start' && action.decision === 'always'
+    ? agentStartScope(detail, action.scope === 'project')
+    : action.scope
+}
+
+/**
+ * How far "always" on a start_agent card reaches. The project when the person asked for it (⌥a, or ⌥ and a click) and the
+ * child has one; the orchestrator's child works in no project (#853), so there is none to remember it for and it stays
+ * this session's. The button and the key both ask here: the key sent `project` for the orchestrator's card, and the
+ * toast said sessions in a project may start agents when the host had remembered it for this session only.
+ */
+export function agentStartScope(detail: { project: { id: string } }, wantsProject: boolean): 'session' | 'project' {
+  return wantsProject && detail.project.id !== '' ? 'project' : 'session'
 }
 
 /**

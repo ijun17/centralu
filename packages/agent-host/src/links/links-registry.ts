@@ -1,6 +1,7 @@
 import type {
   HostActivity,
   MachineAutostartResult,
+  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineProbe,
@@ -24,9 +25,14 @@ export class Links {
 
   constructor(private readonly deps: LinkDeps) {}
 
-  /** Starts a link for every machine in the registry */
+  /**
+   * Starts a link for every machine in the registry, but one that connects when needed (#1134), unless a session here
+   * still waits on a child there: after a restart its report would otherwise not come until something needed the machine
+   */
   start(): void {
-    for (const record of this.deps.registry.list()) this.startOne(record)
+    for (const record of this.deps.registry.list()) {
+      this.startOne(record, record.connect === 'when_needed' && !this.deps.workOwed?.(record.id))
+    }
   }
 
   all(): LinkedMachine[] {
@@ -99,9 +105,37 @@ export class Links {
     return probeTarget(sshTarget, this.deps.ssh ?? {})
   }
 
+  /** The row's Reconnect, and Connect for a disconnected machine (#1134), which then stays up until disconnected */
   reconnect(id: string): MachineInfo {
     const m = this.need(id)
-    m.reconnect()
+    m.connect()
+    return m.info()
+  }
+
+  /** The row's Disconnect (#1134): the link closes and none is tried; the machine and its lists stay */
+  async disconnect(id: string): Promise<MachineInfo> {
+    const m = this.need(id)
+    const op = m.info().operation
+    if (op) throw rpcError(`${m.name} is busy with ${op.kind}; disconnect it once that is done`)
+    await m.disconnect('disconnected by the person', true)
+    return m.info()
+  }
+
+  /** When the hub opens the machine's link (#1134), kept with the machine */
+  setConnect(id: string, connect: MachineConnect): MachineInfo {
+    const m = this.need(id)
+    this.deps.registry.setConnect(id, connect)
+    m.setConnect(connect)
+    return m.info()
+  }
+
+  /**
+   * The window needs the machine now (`machines.need`, #1134); answers at once, the link comes up meanwhile. `repeat`:
+   * said again while the same thing stays open, which leaves a machine the person disconnected as it is
+   */
+  needs(id: string, repeat = false): MachineInfo {
+    const m = this.need(id)
+    void m.need({ repeat })
     return m.info()
   }
 
@@ -115,23 +149,23 @@ export class Links {
   }
 
   install(id: string): Promise<MachineInstallResult> {
-    return this.need(id).install()
+    return this.active(id).install()
   }
 
   update(id: string): Promise<MachineInstallResult> {
-    return this.need(id).update()
+    return this.active(id).update()
   }
 
   rollback(id: string): Promise<MachineInstallResult> {
-    return this.need(id).rollback()
+    return this.active(id).rollback()
   }
 
   uninstall(id: string): Promise<MachineUninstallResult> {
-    return this.need(id).uninstall()
+    return this.active(id).uninstall()
   }
 
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult> {
-    return this.need(id).autostart(on)
+    return this.active(id).autostart(on)
   }
 
   activity(id: string): Promise<HostActivity | null> {
@@ -148,6 +182,17 @@ export class Links {
   private need(id: string): LinkedMachine {
     const m = this.machines.get(id)
     if (!m) throw rpcError(`No linked machine ${id}`)
+    return m
+  }
+
+  /**
+   * The machine, connected first when it was disconnected (#1134): what the person asks of it runs over its ssh, which
+   * the link closed, and an update waits for the new host's hello on the link. Not pinned: once the job is done, a
+   * machine that connects when needed lets go after its hold, as after any need
+   */
+  private active(id: string): LinkedMachine {
+    const m = this.need(id)
+    m.openForOperation()
     return m
   }
 
@@ -168,10 +213,11 @@ export class Links {
     await Promise.all(this.all().map((m) => m.stop()))
   }
 
-  private startOne(record: MachineRecord): LinkedMachine {
+  private startOne(record: MachineRecord, parked = false): LinkedMachine {
     const m = new LinkedMachine(record, this.deps.tunnelFor(record), this.deps)
     this.machines.set(record.id, m)
-    m.start()
+    if (parked) m.park()
+    else m.start()
     return m
   }
 }

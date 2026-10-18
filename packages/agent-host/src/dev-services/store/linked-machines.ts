@@ -12,6 +12,8 @@ export type LinkedMachineRow = {
   slot: number
   addedAt: number
   acceptedVersions: string | null
+  /** When the hub opens its link (#1134, v59); absent or null in the column: at start */
+  connect?: 'at_start' | 'when_needed'
   /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
   asks?: boolean
 }
@@ -33,6 +35,9 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
 
+/** `connect` as the column keeps it: null for the default, so a store an older host wrote reads the same (v59) */
+const connectColumn = (c: LinkedMachineRow['connect']): string | null => (c === 'when_needed' ? c : null)
+
 /** Linked machines (#82, v46) and the session and project headers mirrored from them */
 export class LinkedMachineRecords {
   constructor(private readonly db: Database.Database, private readonly settings: SettingsRecords) {}
@@ -42,7 +47,7 @@ export class LinkedMachineRecords {
   listLinkedMachines(): LinkedMachineRow[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, asks
+        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect, asks
            FROM linked_machines ORDER BY added_at, id`,
       )
       .all() as {
@@ -55,6 +60,7 @@ export class LinkedMachineRecords {
       slot: number
       added_at: number
       accepted_versions: string | null
+      connect: string | null
       asks: number
     }[]
     return rows.map((r) => ({
@@ -65,6 +71,8 @@ export class LinkedMachineRecords {
       slot: r.slot,
       addedAt: r.added_at,
       acceptedVersions: r.accepted_versions,
+      // Anything but the one other value is the default, as a window reads an unknown one (`MachineConnect`)
+      connect: r.connect === 'when_needed' ? 'when_needed' : 'at_start',
       asks: r.asks === 1,
     }))
   }
@@ -77,16 +85,30 @@ export class LinkedMachineRecords {
   addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
     return this.db.transaction(() => {
       const used = (this.db.prepare(`SELECT MAX(slot) AS s FROM linked_machines`).get() as { s: number | null }).s ?? 0
-      const slot = Math.max(used, Number(this.settings.appSetting(LINK_SLOT_KEY) ?? 0)) + 1
+      const slot = Math.max(used, this.slotHighWater()) + 1
       this.db
         .prepare(
-          `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions)
+        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions, connectColumn(m.connect))
       this.settings.setAppSetting(LINK_SLOT_KEY, String(slot))
-      return { ...m, slot }
+      return { ...m, connect: m.connect ?? 'at_start', slot }
     })()
+  }
+
+  /**
+   * The mark, or 0 for none. One that is not a whole number (#384) made the next slot NaN, and every add failed on the
+   * table's NOT NULL with an error that named nothing. It reads as 0, so the highest slot in use decides, and is named
+   * on stderr: a slot of a machine removed since may come back, which only an approval id still on a screen would see.
+   */
+  private slotHighWater(): number {
+    const raw = this.settings.appSetting(LINK_SLOT_KEY)
+    if (raw === null) return 0
+    const n = Number(raw)
+    if (raw.trim() !== '' && Number.isSafeInteger(n) && n >= 0) return n
+    console.error(`[store] app_settings.${LINK_SLOT_KEY} holds ${JSON.stringify(raw.slice(0, 40))}, not a slot; the next linked machine takes the slot after the highest in use`)
+    return 0
   }
 
   /** Removes a machine with its mirrored headers and its grid panels */
@@ -104,6 +126,11 @@ export class LinkedMachineRecords {
 
   setLinkedMachineAcceptedVersions(id: string, key: string | null): void {
     this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
+  }
+
+  /** When the hub opens the machine's link (#1134) */
+  setLinkedMachineConnect(id: string, connect: 'at_start' | 'when_needed'): void {
+    this.db.prepare(`UPDATE linked_machines SET connect = ? WHERE id = ?`).run(connectColumn(connect), id)
   }
 
   // ── The reverse direction (#550, v60) ───────────────────────────────────────────────────────

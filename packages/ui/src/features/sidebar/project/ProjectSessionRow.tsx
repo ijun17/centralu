@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../../store/store.js'
-import { moveTo } from '../reorder.js'
+import { projectOrderAfterDrop } from '../reorder.js'
 import { SessionListRow } from '../rows/SessionListRow.jsx'
 
 /** A session row of the project's own list: dropping another session on it reorders the list. */
@@ -28,15 +28,7 @@ export function ProjectSessionRow({
           )
         )
           return
-        void reorderSessions(
-          projectId,
-          moveTo(
-            sessions.map((x) => x.id),
-            draggedId,
-            row.row.s.id,
-            before,
-          ),
-        )
+        void reorderSessions(projectId, projectOrderAfterDrop(sessions, projectId, draggedId, row.row.s.id, before))
       }}
     />
   )

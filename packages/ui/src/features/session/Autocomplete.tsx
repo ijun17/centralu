@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CommandInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { loadErrorText, useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
+import { filesView, skillsView, type FileAnswer, type Skills } from './autocompleteState.js'
 import { GUI_COMMANDS } from './guiCommands.js'
 
 /**
@@ -110,21 +112,6 @@ export function useAutocomplete({
   atSource?: 'files' | 'sessions'
 }) {
   const platform = usePlatform()
-  const [commands, setCommands] = useState<{ ready: boolean; commands: CommandInfo[] }>({
-    ready: false,
-    commands: [],
-  })
-  /*
-   * The file results with the search they answer (#842 item 13). They used to be kept bare, so after a keystroke the
-   * list still held the previous query's results until the new answer came, and Enter or Tab in that moment inserted
-   * one of them (after a switch of session, even a path from the previous project).
-   */
-  const [files, setFiles] = useState<{ key: string; projectId: string; query: string; list: { path: string; name: string }[] }>({
-    key: '',
-    projectId: '',
-    query: '',
-    list: [],
-  })
   /** The search that took too long to wait for (`FILE_SEARCH_WAIT_MS`): its key, so the next keystroke waits again */
   const [gaveUp, setGaveUp] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
@@ -160,58 +147,58 @@ export function useAutocomplete({
    * starts (warmSession) — the list is fetched once more from the tool itself.
    */
   const live = useStore((s) => !!s.sessions[sessionId]?.live)
-  const fetchedLive = useRef(false)
+  const wantCommands = trigger?.kind === 'command'
+  /*
+   * The session the list was first wanted for. Once asked it stays asked while the `/` comes and goes, so the list
+   * does not blink back to "Loading skills…" on every `/`; a session of its own (the focus view's pane swaps sessions
+   * without a key change) asks again, and so does a `/` typed after an answer that gave no list.
+   */
+  const [askedFor, setAskedFor] = useState<string | null>(null)
+  if (wantCommands && askedFor !== sessionId) setAskedFor(sessionId)
+  const skills = useLoad<Skills>(
+    () => (askedFor === sessionId ? platform.agents.commands(sessionId).then((r) => ({ sessionId, ...r })) : null),
+    [askedFor, sessionId, platform],
+    // The session came alive: a cached answer is what was true last time, so ask the tool itself (above)
+    [live],
+  )
+  const skillsNow = skillsView(sessionId, skills)
+  const skillsWait = skillsNow.loading || skillsNow.note !== null
   useEffect(() => {
-    if (trigger?.kind !== 'command') return
-    if (commands.ready && (fetchedLive.current || !live)) return
-    let alive = true
-    const askedWhileLive = live
-    void platform.agents
-      .commands(sessionId)
-      .then((r) => {
-        if (!alive) return
-        fetchedLive.current = askedWhileLive
-        setCommands(r)
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [trigger?.kind, commands.ready, live, platform, sessionId])
-
-  // The focus view's SessionPane swaps sessions without a key change — must not keep the
-  // previous session's list
-  useEffect(() => {
-    fetchedLive.current = false
-    setCommands({ ready: false, commands: [] })
-  }, [sessionId])
+    if (!wantCommands && skillsWait && askedFor !== null) setAskedFor(null)
+  }, [wantCommands, skillsWait, askedFor])
 
   // Files are searched on every keystroke (fast, since the host holds the index)
-  const fileKey = trigger?.kind === 'file' && atSource === 'files' ? searchKey(projectId, trigger.query) : null
-  useEffect(() => {
-    if (fileKey === null || trigger?.kind !== 'file') return
-    let alive = true
-    const query = trigger.query
-    void platform.fs
-      .search(projectId, query, 20)
-      .then((r) => alive && setFiles({ key: fileKey, projectId, query, list: r }))
-      .catch(() => alive && setFiles({ key: fileKey, projectId, query, list: [] }))
-    // A search that hangs must not hold the composer: past this the list stops waiting for it (#842 review of item 13)
-    const t = setTimeout(() => alive && setGaveUp(fileKey), FILE_SEARCH_WAIT_MS)
-    return () => {
-      alive = false
-      clearTimeout(t)
-    }
-  }, [fileKey, trigger?.kind, trigger?.query, platform, projectId])
+  const fileQuery = trigger?.kind === 'file' && atSource === 'files' ? trigger.query : null
+  const fileKey = fileQuery !== null ? searchKey(projectId, fileQuery) : null
   /*
-   * The results on screen answer an earlier search: shown until the answer comes, never picked by a key, and Enter and
-   * Tab wait for the answer. Not while the earlier search found nothing and this one only narrows it (it cannot find
-   * more, so the menu does not come back on every keystroke), and not once the wait gave up: then the list is empty, the
-   * menu closes, and Enter sends.
+   * Each answer carries the search it answers (#842 item 13): after a keystroke the list still held the previous
+   * query's results until the new answer came, and Enter or Tab in that moment inserted one of them (after a switch of
+   * session, even a path from the previous project). A failed search is an answer too, with its reason: it is not "no
+   * files" (#1143 U14), and a later query is not known to find nothing either.
    */
-  const narrowsNothing =
-    files.projectId === projectId && files.list.length === 0 && trigger?.kind === 'file' && trigger.query.startsWith(files.query)
-  const filesStale = fileKey !== null && files.key !== fileKey && !narrowsNothing && gaveUp !== fileKey
+  // The search on screen, for the read below: a new keystroke is a refresh of the same subject (the project), not a new one
+  const wanted = useRef({ fileKey, fileQuery })
+  wanted.current = { fileKey, fileQuery }
+  const found = useLoad<FileAnswer>(
+    () => {
+      const { fileKey: key, fileQuery: query } = wanted.current
+      if (key === null || query === null) return null
+      return platform.fs.search(projectId, query, 20).then(
+        (list) => ({ key, projectId, query, list, error: null }),
+        (e: unknown) => ({ key, projectId, query, list: [], error: loadErrorText(e) }),
+      )
+    },
+    [platform, projectId],
+    [fileKey],
+  )
+  useEffect(() => {
+    if (fileKey === null) return
+    // A search that hangs must not hold the composer: past this the list stops waiting for it (#842 review of item 13)
+    const t = setTimeout(() => setGaveUp(fileKey), FILE_SEARCH_WAIT_MS)
+    return () => clearTimeout(t)
+  }, [fileKey])
+  const filesNow = filesView({ fileKey, projectId, query: fileQuery, answer: found.data, gaveUp })
+  const filesStale = filesNow.stale
 
   const items = useMemo<Suggestion[]>(() => {
     if (!trigger) return []
@@ -244,7 +231,7 @@ export function useAutocomplete({
               hint: `${g.description} — opens in app`,
             },
           })),
-        ...commands.commands
+        ...skillsNow.commands
           .map((c) => ({ c, s: scoreCommand(c.name, trigger.query) }))
           .filter((x): x is { c: CommandInfo; s: number } => x.s !== null)
           .map(({ c, s }) => ({
@@ -272,10 +259,8 @@ export function useAutocomplete({
         .slice(0, 20)
         .map((x) => ({ value: `@${x.name} `, label: x.name, hint: projectNames[x.projectId!] ?? '' }))
     }
-    // Another project's results are never shown, not even while this project's are on their way, nor once the wait gave up
-    const list = files.projectId === projectId && (files.key === fileKey || filesStale) ? files.list : []
-    return list.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
-  }, [trigger, commands, files, atSource, sessions, projectNames, projectId, fileKey, filesStale])
+    return filesNow.list.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
+  }, [trigger, skillsNow.commands, filesNow.list, atSource, sessions, projectNames])
 
   // Reset to the first item whenever the list changes — a stale cursor position picks the
   // wrong one
@@ -292,10 +277,13 @@ export function useAutocomplete({
     [trigger, text, caret],
   )
 
-  const loading = (trigger?.kind === 'command' && !commands.ready) || filesStale
+  const loading = (trigger?.kind === 'command' && skillsNow.loading) || filesStale
+  // Why a list is not there, said once nothing is on its way: a failed read is not an empty list (#1143 U13, U14)
+  const note = trigger?.kind === 'command' ? skillsNow.note : filesNow.note
 
   return {
-    open: !!trigger && (items.length > 0 || loading),
+    open: !!trigger && (items.length > 0 || loading || note !== null),
+    note,
     kind: trigger?.kind ?? null,
     items,
     index,
@@ -318,6 +306,7 @@ export function AutocompleteMenu({
   items,
   index,
   loading,
+  note = null,
   kind,
   onPick,
 }: {
@@ -326,6 +315,8 @@ export function AutocompleteMenu({
   items: Suggestion[]
   index: number
   loading: boolean
+  /** Why the list is not there (it could not be read), when nothing is on its way */
+  note?: string | null
   kind: 'command' | 'file' | null
   onPick: (item: Suggestion) => void
 }) {
@@ -382,6 +373,17 @@ export function AutocompleteMenu({
                 data-testid="autocomplete-loading"
               >
                 {kind === 'command' ? 'Loading skills…' : 'Searching…'}
+              </p>
+            </li>
+          )}
+          {/* A list that could not be read says so, in the place "Loading" stood: it is not an empty list (#1143) */}
+          {!loading && note && (
+            <li role="presentation">
+              <p
+                className={`px-2.5 py-1.5 text-xs text-ink-faint ${items.length > 0 ? 'border-t border-line' : ''}`}
+                data-testid="autocomplete-note"
+              >
+                {note}
               </p>
             </li>
           )}

@@ -13,6 +13,9 @@ import { readJsonObjects } from '../dev-services/store/json.js'
  */
 export const PAUSED_REPORT_SETTLE_MS = 60_000
 
+/** The tools a request can be queued through that this build delivers (#677); a row of another is left alone (#384) */
+const QUEUED_VIA: ReadonlySet<string> = new Set<QueuedRequest['via']>(['ask_project', 'agent_session', 'send_to_session'])
+
 /**
  * A start_agent request waiting on the person's card (#673), as stored in `agent_start_requests`: everything the start
  * needs once allowed, so a host that takes over after a swap or restart can raise the card again and start the child.
@@ -285,6 +288,14 @@ export class ChildOwnership {
     for (const r of this.store.children.listQueuedRequests()) {
       if (!sessions.has(r.sessionId) || !sessions.has(r.callerSessionId)) {
         this.store.children.removeQueuedRequest(r.id)
+        continue
+      }
+      /*
+       * Queued by a newer build through a tool this one does not know (#384): no gate here stands for it, so it is not
+       * delivered, and not dropped either. The row stays for a build that knows the tool; the requests behind it go.
+       */
+      if (!QUEUED_VIA.has(r.via)) {
+        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} came through ${JSON.stringify(r.via)}, which this build cannot deliver; it is left for one that can`)
         continue
       }
       // A delivery the old host began and never saw start is delivered again (#684 review)

@@ -3,7 +3,7 @@ import type { SessionState } from '@cc/protocol'
 import { foldSummary, groupAttention } from './fold.js'
 
 // Unread by default: a `waiting_input` session counts only while unread (#669)
-const of = (...states: SessionState[]) => states.map((state) => ({ state, lastSeq: 2, lastReadSeq: 1 }))
+const of = (...states: SessionState[]) => states.map((state) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 1 }))
 
 describe('foldSummary (#205)', () => {
   it('counts waiting sessions and working sessions separately per state — never summed', () => {
@@ -30,10 +30,19 @@ describe('foldSummary (#205)', () => {
   })
 
   it('does not count a read waiting_input session, only an unread one (#669)', () => {
-    const read = { state: 'waiting_input' as const, lastSeq: 3, lastReadSeq: 3 }
-    const unread = { state: 'waiting_input' as const, lastSeq: 4, lastReadSeq: 3 }
+    const read = { state: 'waiting_input' as const, pendingQuestions: [], lastSeq: 3, lastReadSeq: 3 }
+    const unread = { state: 'waiting_input' as const, pendingQuestions: [], lastSeq: 4, lastReadSeq: 3 }
     expect(foldSummary([read])).toEqual([])
     expect(foldSummary([read, unread])).toEqual([{ state: 'waiting_input', count: 1 }])
+  })
+
+  // The inbox lists an open question as an approval whatever state the session is in (`listedState`); the folded line did not
+  it('counts an open question as an approval, as the inbox lists it, working or read', () => {
+    const asking = { pendingQuestions: [{}], lastSeq: 3, lastReadSeq: 3 }
+    expect(foldSummary([{ state: 'working', ...asking }])).toEqual([{ state: 'waiting_approval', count: 1 }])
+    expect(foldSummary([{ state: 'waiting_input', ...asking }])).toEqual([{ state: 'waiting_approval', count: 1 }])
+    // An error outranks the question, as in the inbox
+    expect(foldSummary([{ state: 'error', ...asking }])).toEqual([{ state: 'error', count: 1 }])
   })
 
   it('says nothing when only idle or rate-limited sessions are present', () => {

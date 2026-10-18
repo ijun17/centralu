@@ -494,6 +494,62 @@ describe.each([
     await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the trash/)
   })
 
+  // App-agent run records (#378): the mock never runs an app's agent, but the empty answers match the host's
+  it('the trash lists its app-agent run records, and one that is not there reads and deletes as gone', async () => {
+    const listed = await h.platform.trash.list()
+    expect(listed.runs).toEqual([])
+    await expect(h.platform.trash.readRun('run_missing')).rejects.toThrow(/Not in the trash/)
+    expect(await h.platform.trash.purgeRuns(['run_missing'])).toEqual({ purged: 0 })
+  })
+
+  /*
+   * A session's subagent steps go to the trash without it (#418), and come back or leave for good from there, alike in
+   * both implementations: the e2e scenario for it drives the mock.
+   */
+  it("a session's subagent steps go to the trash and back while the session stays", async () => {
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    const step = (text: string) => ({ type: 'subagent_event' as const, sessionId: s.id, parentCallId: 'toolu_a', step: { type: 'message_delta' as const, sessionId: s.id, role: 'assistant' as const, text } })
+    events.length = 0
+    h.agentSays([step('first'), step('second'), { type: 'turn_complete', sessionId: s.id }])
+    await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
+    const usage = await h.platform.trash.subagentUsage()
+    const held = usage.sessions.find((x) => x.sessionId === s.id)
+    expect(held).toMatchObject({ name: s.name, project: { id: p.id }, runs: 1, steps: 2 })
+    expect(held!.bytes).toBeGreaterThan(0)
+
+    expect(await h.platform.trash.trashSubagentSteps(s.id)).toEqual({ steps: 2, bytes: held!.bytes })
+    expect(await h.platform.agents.loadSubagentMessages(s.id, 'toolu_a')).toEqual([])
+    expect(await h.platform.agents.subagentTrashed(s.id, 'toolu_a')).toEqual({ steps: 2 })
+    expect((await h.platform.agents.listSessions()).some((x) => x.id === s.id)).toBe(true)
+    const listed = await h.platform.trash.list()
+    expect(listed.subagentSteps).toEqual([{ ...held, deletedAt: expect.any(Number) }])
+    expect(listed.bytes).toBe(held!.bytes)
+
+    await h.platform.trash.restoreSubagentSteps(s.id)
+    expect((await h.platform.agents.loadSubagentMessages(s.id, 'toolu_a')).map((m) => m.seq)).toEqual([1, 2])
+    await expect(h.platform.trash.restoreSubagentSteps(s.id)).rejects.toThrow(/No subagent steps .* are in the trash/)
+
+    await h.platform.trash.trashSubagentSteps(s.id)
+    const [seen] = (await h.platform.trash.list()).subagentSteps!
+    // Steps moved after the list was read: neither emptying the trash nor deleting the listed entry takes them (#418 review)
+    events.length = 0
+    h.agentSays([{ ...step('later'), parentCallId: 'toolu_b' }, { type: 'turn_complete', sessionId: s.id }])
+    await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
+    await h.platform.trash.trashSubagentSteps(s.id)
+    await h.platform.trash.empty()
+    expect((await h.platform.trash.list()).subagentSteps).toEqual([expect.objectContaining({ sessionId: s.id, runs: 2, steps: 3 })])
+    await h.platform.trash.purgeSubagentSteps(s.id, seen!.deletedAt)
+    expect(await h.platform.agents.subagentTrashed(s.id, 'toolu_a')).toEqual({ steps: 0 })
+    expect(await h.platform.agents.subagentTrashed(s.id, 'toolu_b')).toEqual({ steps: 1 })
+    await expect(h.platform.trash.purgeSubagentSteps(s.id, seen!.deletedAt)).rejects.toThrow(/No subagent steps of .* are in the trash/)
+    const [later] = (await h.platform.trash.list()).subagentSteps!
+    await h.platform.trash.purgeSubagentSteps(s.id, later!.deletedAt)
+    expect((await h.platform.trash.list()).subagentSteps).toEqual([])
+    expect((await h.platform.trash.subagentUsage()).sessions.some((x) => x.sessionId === s.id)).toBe(false)
+    await expect(h.platform.trash.trashSubagentSteps('nobody')).rejects.toThrow('That session is no longer here')
+  })
+
   /*
    * Where the mock had drifted from the host (#999): each of these answered differently in the mock, so e2e and the
    * demo showed what the app does not.

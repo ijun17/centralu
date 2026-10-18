@@ -85,3 +85,17 @@ export function fitHeight(el: HTMLTextAreaElement): number | null {
   p.value = ''
   return text + padding + border
 }
+
+/** The tallest the composer's text box grows before it scrolls. Must match the box's `max-h-40` */
+export const COMPOSER_MAX_H = 160
+
+/**
+ * Fits a composer's text box to its value. The session's composer and the one before the orchestrator exists both
+ * call it, so a box that grows with its text grows the same way in both (#1143 U17).
+ */
+export function fitComposerHeight(el: HTMLTextAreaElement): void {
+  // Not off the box's own scrollHeight, which can come out a row too many in WebKit (#744)
+  const wanted = fitHeight(el)
+  if (wanted === null) el.style.height = 'auto'
+  el.style.height = `${Math.min(wanted ?? el.scrollHeight, COMPOSER_MAX_H)}px`
+}

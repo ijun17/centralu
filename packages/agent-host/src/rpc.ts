@@ -33,6 +33,7 @@ import type {
   HostActivity,
   HubOffer,
   MachineAutostartResult,
+  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineProbe,
@@ -96,6 +97,11 @@ export type MachinesPort = {
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
   remove(id: string): Promise<void>
   reconnect(id: string): MachineInfo
+  /** Closes the link until it is connected or needed again (#1134) */
+  disconnect(id: string): Promise<MachineInfo>
+  setConnect(id: string, connect: MachineConnect): MachineInfo
+  /** The window needs the machine now (#1134) */
+  needs(id: string, repeat?: boolean): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
   update(id: string): Promise<MachineInstallResult>
@@ -707,6 +713,10 @@ export function createRpcHandler(
       const { sessionId, parentCallId, afterSeq, limit } = RpcMethods['messages.subagent'].params.parse(p)
       return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },
+    'messages.subagentTrashed': async (p) => {
+      const { sessionId, parentCallId } = RpcMethods['messages.subagentTrashed'].params.parse(p)
+      return mgr.subagentTrashed(sessionId, parentCallId)
+    },
     'agents.commands': async (p) =>
       mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
     'agents.usage': async (p) => {
@@ -802,6 +812,24 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'trash.empty': async () => mgr.emptyTrash(),
+    // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
+    'trash.readRun': async (p) => {
+      const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)
+      return mgr.readTrashedRun(runId, limit, beforeSeq)
+    },
+    'trash.purgeRuns': async (p) => mgr.purgeTrashedRuns(RpcMethods['trash.purgeRuns'].params.parse(p).runIds),
+    // A session's subagent steps, to the trash without it and back (#418): the person's too, like the rest of the trash
+    'subagents.usage': async () => mgr.subagentUsage(),
+    'subagents.trash': async (p) => mgr.trashSubagentSteps(RpcMethods['subagents.trash'].params.parse(p).sessionId),
+    'trash.restoreSubagentSteps': async (p) => {
+      await mgr.restoreSubagentSteps(RpcMethods['trash.restoreSubagentSteps'].params.parse(p).sessionId)
+      return { ok: true as const }
+    },
+    'trash.purgeSubagentSteps': async (p) => {
+      const { sessionId, upTo } = RpcMethods['trash.purgeSubagentSteps'].params.parse(p)
+      await mgr.purgeSubagentSteps(sessionId, upTo)
+      return { ok: true as const }
+    },
     // Linked machines (#82). The hub's own: the router never forwards these (links/routes.ts)
     'machines.list': async () => machines?.list() ?? [],
     'machines.add': async (p) => {
@@ -817,6 +845,15 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
+    'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.setConnect': async (p) => {
+      const { machineId, connect } = RpcMethods['machines.setConnect'].params.parse(p)
+      return requireMachines().setConnect(machineId, connect)
+    },
+    'machines.need': async (p) => {
+      const { machineId, repeat } = RpcMethods['machines.need'].params.parse(p)
+      return requireMachines().needs(machineId, repeat === true)
+    },
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),

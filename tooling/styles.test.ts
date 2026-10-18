@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+// @ts-expect-error — plain .mjs, shared with the workflow's script (.github/scripts/bundle-base.mjs)
+import { jsBytesOf, judgeBundle, readBundleBase, readDeclarations, writeBundleRecord } from './bundle-budget.mjs'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -49,6 +51,7 @@ let css = ''
 let js = ''
 let jsBytes = 0
 let outDir = ''
+const declarations = readDeclarations(ROOT)
 
 beforeAll(() => {
   outDir = mkdtempSync(join(tmpdir(), 'cc-css-'))
@@ -74,7 +77,11 @@ beforeAll(() => {
     .filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(join(assets, f)))
   js = chunks.map((b) => b.toString('utf8')).join('\n')
-  jsBytes = chunks.reduce((n, b) => n + b.length, 0)
+  jsBytes = jsBytesOf(assets)
+  // Before any comparison, so main's run uploads its record even when its own comparison fails
+  if (process.env.CC_BUNDLE_RECORD) {
+    writeBundleRecord(process.env.CC_BUNDLE_RECORD, { bytes: jsBytes, sha: process.env.GITHUB_SHA ?? null, declared: declarations.map((d: { name: string }) => d.name) })
+  }
 }, 120_000 * SLOW)
 
 afterAll(() => {
@@ -347,12 +354,24 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS, lazy chunks included, stays under 1.8MB', () => {
-    // The release build's JS, every chunk counted. Crossing this line means a heavy dependency
-    // came in or a feature grew more than it should: find out which before raising it, and give
-    // the measurement and the reason in the commit that raises it. `git log -L` on this line
-    // lists every raise so far with its reason.
-    expect(jsBytes).toBeLessThan(1_800_000)
+  /*
+   * The release build's JS, every chunk counted, against main's and against a ceiling (#1181,
+   * tooling/bundle-budget.mjs). It was a constant here that every UI pull request raised, so they
+   * conflicted with each other in the merge queue (`git log -L` on this test lists those raises).
+   *
+   * CI's verify job hands this test main's record (CC_BUNDLE_BASE, a folder) and keeps this run's
+   * (CC_BUNDLE_RECORD). There the comparison must happen: a missing or unreadable record fails. Any
+   * other CI job running this file names the job that compares instead (CC_BUNDLE_COMPARED_BY), or
+   * fails too, so the comparison cannot drop out of CI unnoticed. A local run checks the ceiling,
+   * and says it did not compare with main.
+   */
+  it('the app\'s total JS, lazy chunks included, stays within main\'s plus the allowance, and under the ceiling, unless declared', () => {
+    const elsewhere = process.env.CC_BUNDLE_COMPARED_BY
+    const base = process.env.CC_BUNDLE_BASE ? readBundleBase(process.env.CC_BUNDLE_BASE) : elsewhere ? { missing: `compared by the ${elsewhere} job` } : null
+    const required = Boolean(process.env.CC_BUNDLE_BASE) || (Boolean(process.env.CI) && !elsewhere)
+    const verdict = judgeBundle({ bytes: jsBytes, base, declarations, required })
+    for (const note of verdict.notes) console.info(note)
+    expect(verdict.problems).toEqual([])
   })
 })
 

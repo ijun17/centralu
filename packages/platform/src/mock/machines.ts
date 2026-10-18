@@ -23,6 +23,10 @@ export class MachinesMock {
    * raises no card of a machine's session
    */
   askPairs: MachineAskConsent[] = []
+  /** Every `machines.need` the window sent (#1134), in order; a repeat is marked `(again)` */
+  needed: string[] = []
+  /** Machines the person disconnected, which the window's repeat does not bring back */
+  private readonly downByPerson = new Set<string>()
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     if (at === -1) throw mockError(`No linked machine ${id}`)
@@ -70,6 +74,7 @@ export class MachinesMock {
         elevated: null,
         // The reverse direction is off for a machine just linked (#550)
         asks: { on: false, note: null },
+        connect: 'at_start',
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })
@@ -93,7 +98,26 @@ export class MachinesMock {
       this.projectStore.list = this.projectStore.list.filter((p) => p.machine !== machineId)
       this.emit({ type: 'machine_resync', machineId })
     },
-    reconnect: async (machineId: string) => this.machineRow(machineId, {}),
+    reconnect: async (machineId: string) => {
+      this.downByPerson.delete(machineId)
+      return this.machineRow(machineId, this.machinesList.find((m) => m.id === machineId)?.status === 'disconnected' ? { status: 'connected', error: null } : {})
+    },
+    /** The mock's link closes and opens at once (#1134): no ssh, no hold */
+    disconnect: async (machineId: string) => {
+      this.downByPerson.add(machineId)
+      return this.machineRow(machineId, { status: 'disconnected', error: null })
+    },
+    setConnect: async (machineId: string, connect: MachineInfo['connect']) => this.machineRow(machineId, { connect }),
+    need: async (machineId: string, repeat?: boolean) => {
+      const m = this.machinesList.find((x) => x.id === machineId)
+      // As the host: the window's repeat leaves a machine the person disconnected as it is
+      const held = !!repeat && this.downByPerson.has(machineId)
+      if (!held) this.downByPerson.delete(machineId)
+      const comes = !held && m?.connect === 'when_needed' && m.status === 'disconnected'
+      // Counted for a test to read: what the window said it needs, in order
+      this.needed.push(repeat ? `${machineId} (again)` : machineId)
+      return this.machineRow(machineId, comes ? { status: 'connected', error: null, lastConnectedAt: Date.now() } : {})
+    },
     acceptVersions: async (machineId: string) => {
       const v = this.machinesList.find((m) => m.id === machineId)?.versions
       if (v && !v.compatible) throw mockError('The two sides speak different protocols; one of them has to be updated first')

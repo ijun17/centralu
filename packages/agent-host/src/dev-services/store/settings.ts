@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { isObj, type Obj } from '../../json-value.js'
 import { parseJson } from './json.js'
 
 /**
@@ -29,6 +30,59 @@ export function flagSetting(settings: SettingAccess, key: string, byDefault: boo
       return v === 'true' ? true : v === 'false' ? false : byDefault
     },
     write: (on) => settings.setAppSetting(key, String(on)),
+  }
+}
+
+/** What a list setting reaches of the store */
+export type ListSettingAccess = SettingAccess & { deleteAppSetting(key: string): void }
+
+/** The row a list setting's unreadable value is set aside in: `<key>.unreadable`, or `<name>.unreadable:<sessionId>` for a session's, so it goes with the session */
+export function asideKeyOf(key: string): string {
+  const i = key.lastIndexOf(':')
+  return i < 0 ? `${key}.unreadable` : `${key.slice(0, i)}.unreadable${key.slice(i)}`
+}
+
+/** The rows already said to be unreadable, and what they held then, so each is said once until it changes */
+const saidUnreadable = new Map<string, string>()
+
+/**
+ * A list of objects kept in one row and written back after a change (#384): what one build writes, another reads and
+ * rewrites, during a host swap and after a person goes back a release. `has` says whether an element is one this
+ * build can use. `read` gives those; an element this build cannot read (a newer build's, in another shape or with a
+ * word this one does not know) is not used, and `write` keeps it, after the elements written. A row that is not a
+ * list reads as empty, and is named on stderr; the first write sets it aside under `asideKeyOf(key)` before replacing
+ * it, so what it held is not lost without a word. An empty result deletes the row.
+ */
+export function listSetting<T extends object>(
+  settings: ListSettingAccess,
+  key: string,
+  has: (x: Obj) => boolean,
+): { read(): T[]; write(items: readonly T[]): void } {
+  const usable = (x: unknown): x is Obj => isObj(x) && has(x)
+  const stored = (): { raw: string | null; list: unknown[] | null } => {
+    const raw = settings.appSetting(key)
+    const v = parseJson(raw)
+    return { raw, list: Array.isArray(v) ? v : null }
+  }
+  return {
+    read: () => {
+      const { raw, list } = stored()
+      if (raw !== null && list === null && saidUnreadable.get(key) !== raw) {
+        saidUnreadable.set(key, raw)
+        console.error(`[store] app_settings.${key} is not a JSON list: ${JSON.stringify(raw.slice(0, 200))}; it reads as empty, and is set aside as app_settings.${asideKeyOf(key)} when next written`)
+      }
+      return (list ?? []).filter(usable) as unknown as T[]
+    },
+    write: (items) => {
+      const { raw, list } = stored()
+      if (raw !== null && list === null) {
+        settings.setAppSetting(asideKeyOf(key), raw)
+        console.error(`[store] app_settings.${key} was not a JSON list; what it held is kept as app_settings.${asideKeyOf(key)}`)
+      }
+      const next = [...items, ...(list ?? []).filter((x) => !usable(x))]
+      if (next.length === 0) settings.deleteAppSetting(key)
+      else settings.setAppSetting(key, JSON.stringify(next))
+    },
   }
 }
 
@@ -65,11 +119,26 @@ export class SettingsRecords {
       .run(JSON.stringify(layout), Date.now())
   }
 
+  /**
+   * The snapshot, or null for none. One that is not a JSON object (a write cut short, a hand edit) reads as none too,
+   * and is named on stderr with what it held (#384): the window comes up as its defaults and its next change replaces
+   * the row, so the line is what is left of it.
+   */
   loadWorkspace<T = unknown>(): T | null {
     const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
       { layout: string } | undefined
-    return (parseJson(row?.layout) ?? null) as T | null
+    if (!row) return null
+    const v = parseJson(row.layout)
+    if (isObj(v)) return v as T
+    // Once per row text: the screen preferences read it too, on every read until an old text size has moved (#312)
+    if (this.brokenWorkspaceSaid !== row.layout) {
+      this.brokenWorkspaceSaid = row.layout
+      console.error(`[store] the workspace snapshot (workspace row 1) is not a JSON object: ${JSON.stringify(row.layout.slice(0, 2000))}; the window opens as its defaults`)
+    }
+    return null
   }
+
+  private brokenWorkspaceSaid: string | null = null
 
   /**
    * A setting that belongs to this install rather than to any project or session (#43).
