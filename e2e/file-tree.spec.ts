@@ -278,7 +278,7 @@ test('after a host resync the tree registers its watches again and re-reads what
  * folded by hand.
  */
 test('the watch set is sent again after a reconnect and after a resync (#842 item 6)', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'src', isDir: true }], src: [{ name: 'a.ts' }] })
   await openTree(page)
   await page.getByTestId('dir-src').click()
