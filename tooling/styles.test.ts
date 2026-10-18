@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { GROWTH_FILE, judgeBundle, readBundleRecord, readGrowthDeclaration, writeBundleRecord } from './bundle-budget.js'
+// @ts-expect-error — plain .mjs, shared with the workflow's script (.github/scripts/bundle-base.mjs)
+import { jsBytesOf, judgeBundle, readBundleBase, readDeclarations, writeBundleRecord } from './bundle-budget.mjs'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -50,9 +51,7 @@ let css = ''
 let js = ''
 let jsBytes = 0
 let outDir = ''
-// Read before this run writes its own record, which in CI is the same file
-const base = readBundleRecord(process.env.CC_BUNDLE_BASE)
-const declared = readGrowthDeclaration(join(ROOT, GROWTH_FILE))
+const declarations = readDeclarations(ROOT)
 
 beforeAll(() => {
   outDir = mkdtempSync(join(tmpdir(), 'cc-css-'))
@@ -78,9 +77,10 @@ beforeAll(() => {
     .filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(join(assets, f)))
   js = chunks.map((b) => b.toString('utf8')).join('\n')
-  jsBytes = chunks.reduce((n, b) => n + b.length, 0)
+  jsBytes = jsBytesOf(assets)
+  // Before any comparison, so main's run uploads its record even when its own comparison fails
   if (process.env.CC_BUNDLE_RECORD) {
-    writeBundleRecord(process.env.CC_BUNDLE_RECORD, { bytes: jsBytes, sha: process.env.GITHUB_SHA ?? null, growth: declared?.reason ?? null })
+    writeBundleRecord(process.env.CC_BUNDLE_RECORD, { bytes: jsBytes, sha: process.env.GITHUB_SHA ?? null, declared: declarations.map((d: { name: string }) => d.name) })
   }
 }, 120_000 * SLOW)
 
@@ -355,21 +355,23 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
   })
 
   /*
-   * The release build's JS, every chunk counted, compared with main's (#1181). It was a constant
-   * here that every UI pull request raised, so they conflicted with each other in the merge queue
-   * (`git log -L` on this test lists those raises and their reasons). tooling/bundle-budget.ts has
-   * the rule; CI's verify job hands this test main's record (CC_BUNDLE_BASE) and keeps this run's
-   * (CC_BUNDLE_RECORD), which only main's runs save. Without a record (a local run) it says so and
-   * skips.
+   * The release build's JS, every chunk counted, against main's and against a ceiling (#1181,
+   * tooling/bundle-budget.mjs). It was a constant here that every UI pull request raised, so they
+   * conflicted with each other in the merge queue (`git log -L` on this test lists those raises).
+   *
+   * CI's verify job hands this test main's record (CC_BUNDLE_BASE, a folder) and keeps this run's
+   * (CC_BUNDLE_RECORD). There the comparison must happen: a missing or unreadable record fails. Any
+   * other CI job running this file names the job that compares instead (CC_BUNDLE_COMPARED_BY), or
+   * fails too, so the comparison cannot drop out of CI unnoticed. A local run checks the ceiling,
+   * and says it did not compare with main.
    */
-  it('the app\'s total JS, lazy chunks included, grows over main\'s by no more than allowed or declared', (ctx) => {
-    const verdict = judgeBundle({ bytes: jsBytes, base, declared })
-    if (verdict.kind === 'no-base') {
-      console.info(verdict.note)
-      ctx.skip()
-      return
-    }
-    expect(jsBytes, verdict.note).toBeLessThanOrEqual(verdict.limit)
+  it('the app\'s total JS, lazy chunks included, stays within main\'s plus the allowance, and under the ceiling, unless declared', () => {
+    const elsewhere = process.env.CC_BUNDLE_COMPARED_BY
+    const base = process.env.CC_BUNDLE_BASE ? readBundleBase(process.env.CC_BUNDLE_BASE) : elsewhere ? { missing: `compared by the ${elsewhere} job` } : null
+    const required = Boolean(process.env.CC_BUNDLE_BASE) || (Boolean(process.env.CI) && !elsewhere)
+    const verdict = judgeBundle({ bytes: jsBytes, base, declarations, required })
+    for (const note of verdict.notes) console.info(note)
+    expect(verdict.problems).toEqual([])
   })
 })
 
