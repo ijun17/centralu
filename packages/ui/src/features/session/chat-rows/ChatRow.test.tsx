@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSummary } from '@cc/core'
+import type { Platform } from '@cc/platform/ports'
 import type { ProjectInfo, StoredMessage } from '@cc/protocol'
+import { PlatformProvider } from '../../../app/PlatformProvider.jsx'
 import type { AppState, ChatItem } from '../../../store/store.js'
 
 /*
@@ -36,7 +38,10 @@ const stored = (seq: number, kind: StoredMessage['kind'], payload: unknown, role
   ({ sessionId: 'sub', seq, role, kind, payload, ts: 0 })
 
 const render = (node: React.ReactNode) => {
-  const html = renderToStaticMarkup(node)
+  // A file link names the platform's file manager (#1143 U23), so the rows are drawn inside a provider as in the app
+  const html = renderToStaticMarkup(
+    <PlatformProvider platform={{ capabilities: { fileManagerName: 'Finder' } } as Platform}>{node}</PlatformProvider>,
+  )
   // Text alone, so assertions read as what a person sees
   const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
   return { html, text: text.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') }
