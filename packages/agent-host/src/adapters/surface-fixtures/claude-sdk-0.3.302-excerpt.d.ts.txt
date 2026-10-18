@@ -1,0 +1,1133 @@
+// An excerpt of @anthropic-ai/claude-agent-sdk 0.3.302 sdk.d.ts, recorded 2026-10-18 for #270: the declarations the
+// surface reader reads, with their top-level doc comments (the
+// members' doc comments are cut for size), otherwise as shipped.
+
+/**
+ * Options for the query function.
+ * Contains callbacks and other non-serializable fields.
+ */
+export declare type Options = {
+    abortController?: AbortController;
+    additionalDirectories?: string[];
+    projectConfigRoot?: string;
+    agent?: string;
+    agents?: Record<string, AgentDefinition>;
+    allowedTools?: string[];
+    canUseTool?: CanUseTool;
+    continue?: boolean;
+    cwd?: string;
+    disallowedTools?: string[];
+    toolAliases?: Record<string, string>;
+    tools?: string[] | {
+        type: 'preset';
+        preset: 'claude_code';
+    };
+    env?: {
+        [envVar: string]: string | undefined;
+    };
+    executable?: 'bun' | 'deno' | 'node';
+    executableArgs?: string[];
+    extraArgs?: Record<string, string | null>;
+    fallbackModel?: string;
+    enableFileCheckpointing?: boolean;
+    toolConfig?: ToolConfig;
+    forkSession?: boolean;
+    betas?: SdkBeta[];
+    hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
+    onElicitation?: OnElicitation;
+    onUserDialog?: OnUserDialog;
+    supportedDialogKinds?: string[];
+    perTaskStopAffordance?: boolean;
+
+
+    persistSession?: boolean;
+    sessionStore?: SessionStore;
+    sessionStoreFlush?: SessionStoreFlush;
+    loadTimeoutMs?: number;
+    includeHookEvents?: boolean;
+    includePartialMessages?: boolean;
+    forwardSubagentText?: boolean;
+    verbatimPrompts?: boolean;
+    thinking?: ThinkingConfig;
+    effort?: EffortLevel;
+    maxThinkingTokens?: number;
+    maxTurns?: number;
+    maxBudgetUsd?: number;
+    taskBudget?: {
+        total: number;
+    };
+    mcpServers?: Record<string, McpServerConfig>;
+    model?: string;
+    outputFormat?: OutputFormat;
+    pathToClaudeCodeExecutable?: string;
+    permissionMode?: PermissionMode;
+    planModeInstructions?: string;
+    allowDangerouslySkipPermissions?: boolean;
+    permissionPromptToolName?: string;
+    permissionPrompts?: 'host' | 'none';
+    plugins?: SdkPluginConfig[];
+    pluginDelivery?: 'argv' | 'initialize';
+
+
+
+
+
+    promptSuggestions?: boolean;
+    agentProgressSummaries?: boolean;
+
+    resume?: string;
+    sessionId?: string;
+    resumeSessionAt?: string;
+    resumeDropsTurn?: string;
+    sandbox?: SandboxSettings;
+    settings?: string | Settings;
+    managedSettings?: Settings;
+    settingSources?: SettingSource[];
+    skills?: string[] | 'all';
+    debug?: boolean;
+    debugFile?: string;
+    stderr?: (data: string) => void;
+    strictMcpConfig?: boolean;
+    systemPrompt?: string | string[] | {
+        type: 'custom';
+        prompt: string | string[];
+        snapshot?: boolean;
+    } | {
+        type: 'preset';
+        preset: 'claude_code';
+        append?: string;
+        excludeDynamicSections?: boolean;
+        snapshot?: boolean;
+    };
+    title?: string;
+
+
+    spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess;
+};
+
+/**
+ * Query interface with methods for controlling query execution.
+ * Extends AsyncGenerator and has methods, so not serializable.
+ */
+export declare interface Query extends AsyncGenerator<SDKMessage, void> {
+    interrupt(): Promise<SDKControlInterruptResponse | undefined>;
+    setPermissionMode(mode: PermissionMode): Promise<void>;
+    setMcpPermissionModeOverride(serverName: string, mode: 'default' | 'auto' | null): Promise<{
+        warning?: string;
+    }>;
+
+
+
+    setModel(model?: string): Promise<void>;
+    setMaxThinkingTokens(maxThinkingTokens: number | null, thinkingDisplay?: 'summarized' | 'omitted' | 'highlights' | null): Promise<void>;
+    applyFlagSettings(settings: {
+        [K in keyof Settings]?: K extends 'effortLevel' ? EffortLevel | null : Settings[K] | null;
+    }): Promise<void>;
+    updateSettings(source: 'localSettings' | 'userSettings', settings: Record<string, unknown>): Promise<void>;
+    initializationResult(): Promise<SDKControlInitializeResponse>;
+    reinitialize(): Promise<SDKControlInitializeResponse>;
+    supportedCommands(): Promise<SlashCommand[]>;
+    supportedModels(): Promise<ModelInfo[]>;
+    supportedAgents(): Promise<AgentInfo[]>;
+    mcpServerStatus(): Promise<McpServerStatus[]>;
+    getContextUsage(opts?: {
+        detail?: 'summary' | 'full';
+    }): Promise<SDKControlGetContextUsageResponse>;
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(opts?: {
+        skipBehaviors?: boolean;
+    }): Promise<SDKControlGetUsageResponse>;
+
+
+
+
+
+
+
+
+    readFile(path: string, options?: {
+        maxBytes?: number;
+        encoding?: 'utf-8' | 'base64';
+    }): Promise<SDKControlReadFileResponse | null>;
+
+    reloadPlugins(options?: {
+        holdOnCacheImpact?: boolean;
+        addPlugins?: SdkPluginConfig[];
+    }): Promise<SDKControlReloadPluginsResponse>;
+    reloadSkills(): Promise<SDKControlReloadSkillsResponse>;
+    reloadOutputStyles(): Promise<SDKControlReloadOutputStylesResponse>;
+    accountInfo(): Promise<AccountInfo>;
+    rewindFiles(userMessageId: string, options?: {
+        dryRun?: boolean;
+    }): Promise<RewindFilesResult>;
+    seedReadState(path: string, mtime: number): Promise<void>;
+
+
+
+
+
+
+
+
+    reconnectMcpServer(serverName: string): Promise<void>;
+    toggleMcpServer(serverName: string, enabled: boolean): Promise<void>;
+    readMcpResource(serverName: string, uri: string): Promise<SDKControlMcpReadResourceResponse>;
+
+
+
+
+
+
+    setMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetServersResult>;
+    streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void>;
+    stopTask(taskId: string): Promise<void>;
+    backgroundTasks(toolUseId?: string): Promise<boolean>;
+    close(): void;
+}
+
+/**
+ * Emitted when the user's /goal Stop hook reports met (clears) or not-yet-met (bumps iterations + last_reason). Any surface with a goal indicator re-renders from this. value is null when the goal is cleared. From internal QueryEvent 'active_goal'.
+ */
+export declare type SDKActiveGoalMessage = {
+    type: 'active_goal';
+    value: {
+        condition: string;
+        iterations: number;
+        set_at: number;
+        tokens_at_start: number;
+        last_reason?: string;
+    } | null;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Emitted when an API request fails with a retryable error and will be retried after a delay. error_status is null for connection errors (e.g. timeouts) that had no HTTP response.
+ */
+export declare type SDKAPIRetryMessage = {
+    type: 'system';
+    subtype: 'api_retry';
+    attempt: number;
+    max_retries: number;
+    retry_delay_ms: number;
+    error_status: number | null;
+    error: SDKAssistantMessageError;
+    no_response?: {
+        waited_ms: number;
+        retry_wait_ms: number;
+    };
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * An assistant message. While a response streams the CLI emits one assistant message per completed content block, so several consecutive assistant messages can share message.id and each carries just that block in message.content; on those, message.stop_reason is null and message.usage is not final — the turn's stop reason and total usage arrive on the result message. parent_tool_use_id is non-null when the message was produced inside a subagent started by that tool_use.
+ */
+export declare type SDKAssistantMessage = {
+    type: 'assistant';
+    message: BetaMessage;
+    parent_tool_use_id: string | null;
+    error?: SDKAssistantMessageError;
+    uuid: UUID;
+
+    session_id: string;
+    request_id?: string;
+
+    user_message_uuid?: string;
+    user_message_uuids?: string[];
+    resume_reason?: string;
+    resumed_from_incomplete_thinking?: true;
+    supersedes?: UUID[];
+    aborted?: true;
+    agent_id?: string;
+    subagent_type?: string;
+    task_description?: string;
+
+
+
+
+
+    timestamp?: string;
+
+    context_usage?: SDKContextUsage;
+    usage_report?: SDKUsageReport;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+};
+
+export declare type SDKAuthStatusMessage = {
+    type: 'auth_status';
+    isAuthenticating: boolean;
+    output: string[];
+    error?: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * The full set of live background tasks, emitted whenever membership changes (start, completion, kill, a foreground agent being backgrounded) or an entry's `ambient` flag or `parent_task_id` changes. A level signal, unlike the task_started/task_notification edge bookends: consumers that only need 'is background work running' should replace their set with each payload rather than pairing edges, so a missed bookend cannot wedge a stale running indicator. Ordering relative to the bookends for the same transition is unspecified (in practice a task that starts in the background joins the level before its task_started, and a finishing task leaves it after its task_updated and task_notification), so do not correlate it with the edge stream. The level is per-process: nothing is emitted at startup, so consumers must reset to the empty set whenever the session's CLI process (re)starts and let the next membership change repopulate it. A host that re-initializes an already-running process (a repeated `initialize` control request, e.g. after reconnecting) is sent a snapshot of the current set right behind the success response to that request, even when it is empty, so it need not wait for a change; CLIs that predate this send nothing there.
+ */
+export declare type SDKBackgroundTasksChangedMessage = {
+    type: 'system';
+    subtype: 'background_tasks_changed';
+    tasks: {
+        task_id: string;
+        run_id?: string;
+        task_type: string;
+        subagent_type?: string;
+        description: string;
+        parent_task_id?: string;
+        ambient?: boolean;
+
+    }[];
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Fire-and-forget push of the full slash-command list after a mid-session change (e.g. skills discovered dynamically as the agent works in a subdirectory). Clients should REPLACE their cached command list with this payload; supportedCommands() tracks the latest push, so a re-fetch returns the same fresh list.
+ */
+export declare type SDKCommandsChangedMessage = {
+    type: 'system';
+    subtype: 'commands_changed';
+    commands: SlashCommand[];
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKCompactBoundaryMessage = {
+    type: 'system';
+    subtype: 'compact_boundary';
+    compact_metadata: {
+        trigger: 'manual' | 'auto';
+        pre_tokens: number;
+        post_tokens?: number;
+
+        duration_ms?: number;
+
+
+
+
+
+        preserved_segment?: {
+            head_uuid: UUID;
+            anchor_uuid: UUID;
+            tail_uuid: UUID;
+        };
+        preserved_messages?: {
+            anchor_uuid: UUID;
+            uuids: UUID[];
+
+        };
+    };
+
+    uuid: UUID;
+    session_id: string;
+
+};
+
+/**
+ * Tells the other side that the sender no longer needs the answer to one of its own in-flight control_requests (for example a pending can_use_tool prompt after the turn was interrupted, or one that another client already answered). Either side may send it for a request it originated. The sender stops waiting at once and ignores any control_response that still arrives for that request_id; a receiver that can abort the work does so and may still reply (typically with an error), otherwise it simply completes the request. There is no reply to the cancel itself.
+ */
+declare type SDKControlCancelRequest = {
+    type: 'control_cancel_request';
+    request_id: string;
+};
+
+/**
+ * Envelope for a control-protocol request, sent by either side on the same stream as the messages. The receiver normally answers with exactly one control_response carrying the same request_id (a few request types document when no answer is sent), and a requester ignores responses for request_ids it is not waiting on. Each request type's own documentation says which side sends it and what its success response carries.
+ */
+export declare type SDKControlRequest = {
+    type: 'control_request';
+    request_id: string;
+    request: SDKControlRequestInner;
+
+
+};
+
+/**
+ * Progress for a long-running client-originated control_request (currently only side_question), correlated by request_id. status 'started' means the worker accepted the request and launched the work; 'api_retry' carries the same retry counters as SDKAPIRetryMessage and is present only for that status.
+ */
+export declare type SDKControlRequestProgressMessage = {
+    type: 'system';
+    subtype: 'control_request_progress';
+    request_id: string;
+    status: 'started' | 'api_retry';
+    attempt?: number;
+    max_retries?: number;
+    retry_delay_ms?: number;
+    error_status?: number | null;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Envelope for the single reply to a control_request, sent by whichever side received the request.
+ */
+export declare type SDKControlResponse = {
+    type: 'control_response';
+    response: ControlResponse | ControlErrorResponse;
+
+
+
+};
+
+/**
+ * Emitted by /clear, plan-mode exit, fresh-session, and onboarding flows. The surface should mount a fresh transcript under new_conversation_id and reset any cached session title. From internal QueryEvent 'conversation_reset'.
+ */
+export declare type SDKConversationResetMessage = {
+    type: 'conversation_reset';
+    new_conversation_id: UUID;
+    uuid: UUID;
+    session_id: string;
+    trigger?: 'clear' | 'plan_mode_exit' | 'fresh_session' | 'onboarding';
+    user_message_uuid?: string;
+    timestamp?: string;
+};
+
+/**
+ * Emitted when an MCP server confirms that a URL-mode elicitation is complete.
+ */
+export declare type SDKElicitationCompleteMessage = {
+    type: 'system';
+    subtype: 'elicitation_complete';
+    mcp_server_name: string;
+    elicitation_id: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKFilesPersistedEvent = {
+    type: 'system';
+    subtype: 'files_persisted';
+    files: {
+        filename: string;
+        file_id: string;
+    }[];
+    failed: {
+        filename: string;
+        error: string;
+    }[];
+    processed_at: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKHookProgressMessage = {
+    type: 'system';
+    subtype: 'hook_progress';
+    hook_id: string;
+    hook_name: string;
+    hook_event: string;
+    stdout: string;
+    stderr: string;
+    output: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKHookResponseMessage = {
+    type: 'system';
+    subtype: 'hook_response';
+    hook_id: string;
+    hook_name: string;
+    hook_event: string;
+    output: string;
+    stdout: string;
+    stderr: string;
+    exit_code?: number;
+    outcome: 'success' | 'error' | 'cancelled';
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKHookStartedMessage = {
+    type: 'system';
+    subtype: 'hook_started';
+    hook_id: string;
+    hook_name: string;
+    hook_event: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Generic text banner emitted by the loop — non-error status lines, hook feedback (e.g. a UserPromptSubmit hook's block reason), slash-command output. Hosts render `content` as plaintext at the given level.
+ */
+export declare type SDKInformationalMessage = {
+    type: 'system';
+    subtype: 'informational';
+    content: string;
+    level: 'info' | 'notice' | 'suggestion' | 'warning';
+    tool_use_id?: string;
+    prevent_continuation?: boolean;
+    tag?: string;
+
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Liveness heartbeat with no payload. Either side may send it at any time (the CLI emits it periodically, for example while a long-running control request is in progress); receivers must ignore it.
+ */
+declare type SDKKeepAliveMessage = {
+    type: 'keep_alive';
+};
+
+/**
+ * Output from a local slash command (e.g. /voice, /usage). Displayed as assistant-style text in the transcript.
+ */
+export declare type SDKLocalCommandOutputMessage = {
+    type: 'system';
+    subtype: 'local_command_output';
+    content: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Emitted when the memory recall supervisor surfaces relevant memories into the turn. Mirrors the CLI relevant_memories attachment so SDK renderers can show "Recalled from memory" inline.
+ */
+export declare type SDKMemoryRecallMessage = {
+    type: 'system';
+    subtype: 'memory_recall';
+    mode: 'select' | 'synthesize';
+    memories: {
+        path: string;
+        scope: 'personal' | 'team' | 'organization';
+        content?: string;
+    }[];
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Every conversational and informational message the CLI emits on its output stream, discriminated by type (and subtype for system/result messages). Consumers should ignore types and subtypes they do not recognize: the set grows over time.
+ */
+export declare type SDKMessage = SDKAssistantMessage | SDKUserMessage | SDKUserMessageReplay | SDKResultMessage | SDKSystemMessage | SDKPartialAssistantMessage | SDKCompactBoundaryMessage | SDKStatusMessage | SDKAPIRetryMessage | SDKControlRequestProgressMessage | SDKModelRefusalFallbackMessage | SDKModelRefusalNoFallbackMessage | SDKLocalCommandOutputMessage | SDKHookStartedMessage | SDKHookProgressMessage | SDKHookResponseMessage | SDKPluginInstallMessage | SDKToolProgressMessage | SDKAuthStatusMessage | SDKTaskNotificationMessage | SDKTaskStartedMessage | SDKTaskUpdatedMessage | SDKTaskProgressMessage | SDKBackgroundTasksChangedMessage | SDKThinkingTokensMessage | SDKSessionStateChangedMessage | SDKWorkerShuttingDownMessage | SDKCommandsChangedMessage | SDKNotificationMessage | SDKFilesPersistedEvent | SDKToolUseSummaryMessage | SDKMemoryRecallMessage | SDKRateLimitEvent | SDKElicitationCompleteMessage | SDKPermissionDeniedMessage | SDKPromptSuggestionMessage | SDKMirrorErrorMessage | SDKInformationalMessage | SDKConversationResetMessage;
+
+/**
+ * Emitted when SessionStore.append() rejects or times out for a transcript-mirror batch after bounded retry (3 attempts with short backoff; timeouts are not retried). The batch is then dropped; this surfaces the failure so consumers are not silent on data loss.
+ */
+export declare type SDKMirrorErrorMessage = {
+    type: 'system';
+    subtype: 'mirror_error';
+    error: string;
+    key: {
+        projectKey: string;
+        sessionId: string;
+        subpath?: string;
+    };
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Emitted when the primary model ends the stream with stop_reason "refusal" and the turn is retried once on a fallback model (direction: "retry"). When `scope` is "session" (or absent — older CLIs), the swap is made persistent for the session; when `scope` is "local", only that subagent/side-question response came from the fallback model and the session model is unchanged. "revert" and "sticky" are retained in the enum for SDK-consumer compat and are no longer emitted.
+ */
+export declare type SDKModelRefusalFallbackMessage = {
+    type: 'system';
+    subtype: 'model_refusal_fallback';
+    trigger: 'refusal';
+    direction: 'retry' | 'revert' | 'sticky';
+    scope?: 'session' | 'local';
+    original_model: string;
+    fallback_model: string;
+    request_id: string | null;
+    api_refusal_category?: string | null;
+
+    api_refusal_explanation?: string | null;
+    retracted_message_uuids?: string[];
+    refused_user_message_uuid?: string | null;
+    content: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Emitted when the model ends the stream with stop_reason "refusal" and no retry runs: no fallback model is configured, or per-category routing declined the retry (the mapped fallback target is unresolvable, or CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL is explicitly disabled and the refusal category has no fallback map entry). The structured counterpart to detecting stop_reason "refusal" on the assistant error frame. Not emitted when the retry ran or the user declined the retry dialog (model_refusal_fallback covers the retry case). Absent from older CLIs.
+ */
+export declare type SDKModelRefusalNoFallbackMessage = {
+    type: 'system';
+    subtype: 'model_refusal_no_fallback';
+    original_model: string;
+    request_id: string | null;
+    api_refusal_category?: string | null;
+    api_refusal_explanation?: string | null;
+    refused_user_message_uuid?: string | null;
+    content: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Loop-side text notification. Mirrors the interactive REPL notification queue (key/priority/timeout). JSX notifications are not emitted on this channel.
+ */
+export declare type SDKNotificationMessage = {
+    type: 'system';
+    subtype: 'notification';
+    key: string;
+    text: string;
+    priority: 'low' | 'medium' | 'high' | 'immediate';
+    color?: string;
+    timeout_ms?: number;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * An incremental streaming event for the assistant message being generated, emitted only when partial messages are requested (--include-partial-messages). The complete assistant message still follows as its own message.
+ */
+export declare type SDKPartialAssistantMessage = {
+    type: 'stream_event';
+    event: BetaRawMessageStreamEvent;
+    parent_tool_use_id: string | null;
+    uuid: UUID;
+    session_id: string;
+    ttft_ms?: number;
+
+
+
+
+    user_message_uuid?: string;
+    user_message_uuids?: string[];
+    resume_reason?: string;
+};
+
+/**
+ * Emitted when a tool call is auto-denied without an interactive permission prompt (e.g. auto-mode classifier, dontAsk mode, headless-agent auto-deny, or a deny rule). With a permission prompt surface (stdio/SDK canUseTool), the 'ask' path surfaces via a can_use_tool control_request and this event covers the 'deny' short-circuit. Without one (bare -p / SDK query() with no canUseTool), 'ask' decisions are terminal, so this event also covers those implicit denials. Best-effort advisory: in rare races a denial can book without a frame or a frame can lack a booking twin — result.permission_denials is the authoritative record. Denials that resolve before canUseTool runs — PreToolUse hook denies, deny-rule overrides of hook allow/ask decisions, and file-tool calls (Read, Edit, Write) refused by a path-scoped deny rule — are not covered here, and neither is the MCP --permission-prompt-tool surface (the prompt tool is the host there).
+ */
+export declare type SDKPermissionDeniedMessage = {
+    type: 'system';
+    subtype: 'permission_denied';
+    tool_name: string;
+    tool_use_id: string;
+    agent_id?: string;
+    decision_reason_type?: string;
+
+    decision_reason?: string;
+    message: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Headless plugin installation progress (CLAUDE_CODE_SYNC_PLUGIN_INSTALL). started/completed bracket the whole install; installed/failed carry a per-marketplace name.
+ */
+export declare type SDKPluginInstallMessage = {
+    type: 'system';
+    subtype: 'plugin_install';
+    status: 'started' | 'installed' | 'failed' | 'completed';
+    name?: string;
+    error?: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Predicted next user prompt, emitted after each turn when promptSuggestions is enabled.
+ */
+export declare type SDKPromptSuggestionMessage = {
+    type: 'prompt_suggestion';
+    suggestion: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Rate limit event emitted when rate limit info changes.
+ */
+export declare type SDKRateLimitEvent = {
+    type: 'rate_limit_event';
+    rate_limit_info: SDKRateLimitInfo;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKResultError = {
+    type: 'result';
+    subtype: 'error_during_execution' | 'error_max_turns' | 'error_max_budget_usd' | 'error_max_structured_output_retries';
+    duration_ms: number;
+    duration_api_ms: number;
+    is_error: boolean;
+    num_turns: number;
+    stop_reason: string | null;
+    total_cost_usd: number;
+    usage: NonNullableUsage;
+    modelUsage: Record<string, ModelUsage>;
+
+
+    permission_denials: SDKPermissionDenial[];
+    queued_turn_count?: number;
+    errors: string[];
+
+    startup_failure_reason?: SDKStartupFailureReason;
+    user_message_uuid?: string;
+    user_message_uuids?: string[];
+    resume_reason?: string;
+    terminal_reason?: TerminalReason;
+
+    result_index?: number;
+    fast_mode_state?: FastModeState;
+    fast_mode_disabled_reason?: FastModeDisabledReason;
+    origin?: SDKMessageOrigin;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * The outcome of a turn. The CLI emits exactly one result message per turn, after that turn's assistant, user and stream_event messages; treat it as the turn-complete signal (informational system messages such as task notifications, session state changes or prompt suggestions may still follow it). subtype "success" carries the final assistant text in result — or, with is_error true, the error text when the turn ended on an API error; the error subtypes say why the turn stopped early. In single-prompt (non-streaming-input) mode the process exits after the turn.
+ */
+export declare type SDKResultMessage = SDKResultSuccess | SDKResultError;
+
+export declare type SDKResultSuccess = {
+    type: 'result';
+    subtype: 'success';
+    duration_ms: number;
+    duration_api_ms: number;
+    ttft_ms?: number;
+    ttft_stream_ms?: number;
+    time_to_request_ms?: number;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    user_message_uuid?: string;
+    user_message_uuids?: string[];
+    resume_reason?: string;
+    local_command?: string;
+    request_sent_wall_ms?: number;
+
+
+    first_content_frame_ms?: number;
+    first_stream_post_ms?: number;
+    first_stream_post_ack_ms?: number;
+    first_stream_post_queue_wait_ms?: number;
+    first_stream_post_queued_behind?: 'durable_post' | 'ephemeral_post' | 'retry_backoff' | 'hold' | 'none';
+    first_stream_post_wall_ms?: number;
+
+
+
+
+
+
+    first_text_post_ms?: number;
+    first_text_post_queue_wait_ms?: number;
+    first_text_post_queued_behind?: 'durable_post' | 'ephemeral_post' | 'retry_backoff' | 'hold' | 'none';
+    first_text_post_wall_ms?: number;
+    time_to_request_from_spawn_ms?: number;
+    warm_spare_claimed?: boolean;
+
+    time_origin_ms?: number;
+    is_error: boolean;
+    api_error_status?: number | null;
+
+
+
+    num_turns: number;
+    result: string;
+    stop_reason: string | null;
+    total_cost_usd: number;
+    usage: NonNullableUsage;
+    modelUsage: Record<string, ModelUsage>;
+
+
+    permission_denials: SDKPermissionDenial[];
+    queued_turn_count?: number;
+    structured_output?: unknown;
+    deferred_tool_use?: SDKDeferredToolUse;
+    terminal_reason?: TerminalReason;
+
+    result_index?: number;
+    fast_mode_state?: FastModeState;
+    fast_mode_disabled_reason?: FastModeDisabledReason;
+    origin?: SDKMessageOrigin;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Mirrors notifySessionStateChanged. 'idle' fires after heldBackResult flushes and the bg-agent do-while exits — authoritative turn-over signal.
+ */
+export declare type SDKSessionStateChangedMessage = {
+    type: 'system';
+    subtype: 'session_state_changed';
+    state: 'idle' | 'running' | 'requires_action';
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKStatusMessage = {
+    type: 'system';
+    subtype: 'status';
+    status: SDKStatus;
+    permissionMode?: PermissionMode;
+    compact_result?: 'success' | 'failed';
+    compact_error?: string;
+
+
+
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Session metadata the CLI emits at the start of each turn, normally ahead of every other message of that turn: session_id, model, working directory, tools, MCP servers, slash commands, permission mode, and the capabilities list for feature detection.
+ */
+export declare type SDKSystemMessage = {
+    type: 'system';
+    subtype: 'init';
+    agents?: string[];
+    apiKeySource: ApiKeySource;
+
+    betas?: string[];
+    claude_code_version: string;
+    cwd: string;
+    tools: string[];
+    mcp_servers: {
+        name: string;
+        status: string;
+        source?: string;
+    }[];
+    model: string;
+    permissionMode: PermissionMode;
+    slash_commands: string[];
+    terminal_slash_commands?: string[];
+    output_style: string;
+    skills: string[];
+    plugins: {
+        name: string;
+        path: string;
+
+        version?: string;
+    }[];
+    plugin_errors?: {
+        plugin: string;
+        type: string;
+        message: string;
+        path?: string;
+    }[];
+
+
+    fast_mode_state?: FastModeState;
+    fast_mode_disabled_reason?: FastModeDisabledReason;
+
+    effort?: ('low' | 'medium' | 'high' | 'xhigh' | 'max') | null;
+
+    view_mode?: 'focus' | 'default';
+    capabilities?: string[];
+
+
+
+
+
+
+
+
+
+
+
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKTaskNotificationMessage = {
+    type: 'system';
+    subtype: 'task_notification';
+    task_id: string;
+    run_id?: string;
+    tool_use_id?: string;
+    status: 'completed' | 'failed' | 'stopped';
+    reason?: 'worker_restart';
+    output_file: string;
+    summary: string;
+    usage?: {
+        total_tokens: number;
+        tool_uses: number;
+        duration_ms: number;
+    };
+    resource_links?: SDKMcpResourceLink[];
+
+
+    skip_transcript?: boolean;
+    ambient?: boolean;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKTaskProgressMessage = {
+    type: 'system';
+    subtype: 'task_progress';
+    task_id: string;
+    run_id?: string;
+    tool_use_id?: string;
+    description: string;
+    subagent_type?: string;
+    usage: {
+        total_tokens: number;
+        tool_uses: number;
+        duration_ms: number;
+    };
+    last_tool_name?: string;
+    summary?: string;
+
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKTaskStartedMessage = {
+    type: 'system';
+    subtype: 'task_started';
+    task_id: string;
+    run_id?: string;
+    tool_use_id?: string;
+    description: string;
+    subagent_type?: string;
+    is_backgrounded?: boolean;
+
+    spawn_depth?: number;
+    parent_task_id?: string;
+    task_type?: string;
+    workflow_name?: string;
+    prompt?: string;
+    skip_transcript?: boolean;
+    ambient?: boolean;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKTaskUpdatedMessage = {
+    type: 'system';
+    subtype: 'task_updated';
+    task_id: string;
+    run_id?: string;
+    patch: {
+        status?: 'pending' | 'running' | 'completed' | 'failed' | 'killed' | 'paused';
+        description?: string;
+        end_time?: number;
+        total_paused_ms?: number;
+        error?: string;
+        is_backgrounded?: boolean;
+    };
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Live thinking-token estimate, digested from thinking_delta.estimated_tokens during the redacted-thinking phase (where the API otherwise streams only pings). estimated_tokens is the running total for the current thinking block; estimated_tokens_delta is the increment carried by this frame. Approximate progress for spinners/pills, not the authoritative billed output_tokens.
+ */
+export declare type SDKThinkingTokensMessage = {
+    type: 'system';
+    subtype: 'thinking_tokens';
+    estimated_tokens: number;
+    estimated_tokens_delta: number;
+    user_message_uuid?: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+export declare type SDKToolProgressMessage = {
+    type: 'tool_progress';
+    tool_use_id: string;
+    tool_name: string;
+    parent_tool_use_id: string | null;
+    elapsed_time_seconds: number;
+    task_id?: string;
+    uuid: UUID;
+    session_id: string;
+    heartbeat?: boolean;
+    subagent_type?: string;
+    subagent_retry?: {
+        agent_id: string;
+        attempt: number;
+        max_retries: number;
+        retry_delay_ms: number;
+        error_status: number | null;
+        error_category: string;
+    };
+};
+
+export declare type SDKToolUseSummaryMessage = {
+    type: 'tool_use_summary';
+    summary: string;
+    preceding_tool_use_ids: string[];
+    uuid: UUID;
+    session_id: string;
+
+};
+
+/**
+ * A user-role message. A client writes one to the CLI to submit a prompt (this starts a turn); the CLI emits them for user-role content it adds to the conversation itself, chiefly the tool_result blocks answering the assistant's tool_use blocks.
+ */
+export declare type SDKUserMessage = {
+    type: 'user';
+    message: MessageParam;
+    parent_tool_use_id: string | null;
+    isSynthetic?: boolean;
+    tool_use_result?: unknown;
+    priority?: 'now' | 'next' | 'later';
+    origin?: SDKMessageOrigin;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    shouldQuery?: boolean;
+    timestamp?: string;
+
+
+    client_composed?: true;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    uuid?: UUID;
+    pasted_content?: MessageParam['content'][];
+    inline_pastes?: string[];
+    session_id?: string;
+    agent_id?: string;
+    subagent_type?: string;
+    task_description?: string;
+
+};
+
+export declare type SDKUserMessageReplay = {
+    type: 'user';
+    message: MessageParam;
+    parent_tool_use_id: string | null;
+    isSynthetic?: boolean;
+    tool_use_result?: unknown;
+    priority?: 'now' | 'next' | 'later';
+    origin?: SDKMessageOrigin;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    shouldQuery?: boolean;
+    timestamp?: string;
+
+
+    client_composed?: true;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    uuid: UUID;
+    session_id: string;
+    isReplay: true;
+    file_attachments?: unknown[];
+};
+
+/**
+ * Emitted by the bridge on opt-in graceful worker teardown (only when the teardown caller supplied a reason), before the heartbeat stops, so remote clients can show why the worker went away instead of waiting for heartbeat timeout. Absence is NOT a dead-host signal: handoffs (/update, /teleport, respawn), auto-disable, mode transitions, and internal fatal-error paths emit nothing by design. A dead host (battery, OOM, kill -9) never reaches teardown and never sends this either. NOTE: this event lands in the durable per-session event stream — a session that is later resumed may carry historical instances mid-stream. Clients MUST treat it as a live-tail signal only (honored when no further activity follows), not a one-shot session-lifetime fact.
+ */
+export declare type SDKWorkerShuttingDownMessage = {
+    type: 'system';
+    subtype: 'worker_shutting_down';
+    reason: string;
+    uuid: UUID;
+    session_id: string;
+};
+
+/**
+ * Everything the CLI writes to its output stream (stdout in stream-json mode): exactly one StdoutMessage per line, as a single JSON object. Besides the SDKMessage members this includes the control protocol - control requests the CLI originates, control responses to the client's requests, cancellations and keep-alives.
+ */
+declare type StdoutMessage = coreTypes.SDKMessage | coreTypes.SDKActiveGoalMessage | SDKControlResponse | SDKControlRequest | SDKControlCancelRequest | SDKKeepAliveMessage;

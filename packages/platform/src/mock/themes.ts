@@ -2,6 +2,7 @@ import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol'
 import { parseThemeFile, formatThemeFile } from '@cc/protocol'
 import type { ThemesPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** The themes folder (#312), behind the `themes` port */
 export class ThemesMock {
@@ -69,9 +70,9 @@ export class ThemesMock {
     },
     importFile: async (path: string) => {
       const text = this.themeImportSources.get(path)
-      if (text === undefined) throw Object.assign(new Error(`No such file: ${path}`), { code: 'invalid_params' })
+      if (text === undefined) throw mockError(`No such file: ${path}`)
       const parsed = parseThemeFile('import', path, text)
-      if (parsed.broken) throw Object.assign(new Error(parsed.problems[0] ?? 'Not a theme file.'), { code: 'invalid_params' })
+      if (parsed.broken) throw mockError(parsed.problems[0] ?? 'Not a theme file.')
       const id = this.freeThemeId(parsed.name)
       this.writeThemeFile(id, text)
       return this.themeEntry(id)

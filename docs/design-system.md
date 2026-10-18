@@ -103,8 +103,9 @@ A capsule is `rounded-full`, 1px border, on a translucent `surface-hover` fill; 
 
 Every card that waits on the person is drawn alike (*owner, 2026-10-18*, `ApprovalCard.tsx`, `QuestionCard.tsx`):
 
-- `rounded-bubble`, on `surface-raised`, with a **white edge** all round (`ink-signal` at 80%).
-- **The kind as a capsule** at the top left, in the signal ink: "Awaiting approval", "Agent is asking";
+- `rounded-bubble`, on `surface-raised`, with a **white edge** all round (`ink-signal` at full strength: an
+  edge that waits on the person is never a fraction of the signal, *owner, 2026-10-18*).
+- **The kind as a capsule** at the top left (`Pill size="label" edge="solid"`), in the signal ink: "Awaiting approval", "Agent is asking";
   a quiet line beside it says what is blocked.
 - The body: the command or question. A question's options are `rounded-field` and lit by a white edge
   when picked.
@@ -126,7 +127,7 @@ Every card that waits on the person is drawn alike (*owner, 2026-10-18*, `Approv
 | Hover | a translucent `surface-hover` (`/60` on capsules and icon buttons), the ink one step up (`ink-faint` to `ink`); a full step where the ground is already a fill (usage donuts) | Shows what the pointer will press without spending white |
 | Pressed, open | `surface-hover`, held while the thing it opened is open (`aria-expanded`) | So the button and its dropdown read as one |
 | Selected | `surface-selected` and the `ink`; a picked option in a waiting card adds the white edge, since there it is the answer being given | Selection is position, not urgency |
-| Disabled | `opacity-40`, no hover | One fade everywhere (#1122's `Button` holds it; 50% and 60% are older copies) |
+| Disabled | `opacity-50`, no hover | One fade everywhere (*owner, 2026-10-18*); the shared components hold it (`Button`, `Segmented`, `IconButton`, `InlineConfirm`) |
 | Focus | `:focus-visible`: a 1px outline in `--color-focus`, 1px off; the accent colours it when set | Keyboard focus must always show, and must never look like the signal |
 | Asleep | **not shown at all**: no dimmed row, nothing in the mark or its tooltip, no line under the conversation. Only waking is said ("Waking session…"), and a wake that failed (its reason and Retry) | Sleep needs nothing from the person: typing to the session wakes it. A state that asks nothing is not announced (*owner, 2026-10-18*, `SessionNotes.tsx` `DormantNote`, `sidebar/marks/ToolMark.tsx`; [ux-writing.md](ux-writing.md) 1.1) |
 
@@ -154,14 +155,16 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A grid span picker | `SpanButton` (`SpanPicker.tsx`) |
 | A command's log, a terminal | `CommandLogView`, `xterm.ts` with `terminalTheme.ts` |
 | Icons | `icons.tsx` |
+| A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame); `xs` / `sm` / `md`; `busy` with `busyText` |
+| One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick) |
+| A capsule | `Pill`: `size="bar"` (the top bar's 28px) or `"label"` (a waiting card's kind); edges `quiet`, `live`, `solid`, `dashed` |
+| A small uppercase label | `Badge` (`readout` among figures) |
+| A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
 
-**Under review (#1122, stack to #1128):** `Button` (primary, secondary, quiet, subtle, danger, ghost;
-xs, sm, md), `Segmented` (one of several, as a radio group), `Pill` (the top bar's capsule), `Badge`
-(a small uppercase label) and `TextInput` / `TextField`. With them comes
-`tooling/shared-components.test.ts`: a screen outside `components/` that draws a framed button, field,
-small caps label or capsule by hand fails, naming the component to use. Its list of sites not moved yet
-**can only shrink**, as the corner guard's does. Once it lands, use these for any new button, toggle,
-label, capsule or field.
+**The guard.** `tooling/shared-components.test.ts` fails when a screen outside `components/` draws a
+framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use
+(the patterns are in `tooling/hand-made-looks.ts`). Its list of sites not moved yet **can only shrink**,
+as the corner guard's does.
 
 ## Settled departures
 

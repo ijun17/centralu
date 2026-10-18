@@ -120,6 +120,34 @@ export function callForm(
 }
 
 /**
+ * `callForm`, or the plain call when the seat is not known or not given the tool: what an answer that tells its reader
+ * to make a call writes. The orchestrator reaches start_agent and agent_session only through centralu_run in the
+ * `commands` tier, so an answer that named them bare sent it to a refusal first (#850).
+ */
+export function namedCall(
+  profile: ToolProfile | 'human' | null,
+  tool: string,
+  args: Record<string, string | number | boolean | typeof FILL>,
+  tier: RareTier = rareTier,
+): string {
+  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : JSON.stringify(v))
+  return callForm(profile, tool, args, tier) ?? `${tool}(${Object.entries(args).map(([k, v]) => `${k}=${value(v)}`).join(', ')})`
+}
+
+/**
+ * For an answer that names tools in prose: how this seat runs those it reaches only as commands, as one sentence ('' when
+ * it calls them all directly, or is not known). A prose name the seat copies bare is refused as "Not a tool" (#850).
+ */
+export function commandsSentence(profile: ToolProfile | 'human' | null, tools: readonly string[], tier: RareTier = rareTier): string {
+  if (profile === null) return ''
+  const commands = commandsFor(profile, tier) as string[]
+  const named = tools.filter((t) => commands.includes(t))
+  if (!named.length) return ''
+  const list = named.join(' and ')
+  return `${list} ${named.length === 1 ? 'is one' : 'are'} of this session's commands: centralu_run(command="${named[0]}", args={…}) runs ${named.length === 1 ? 'it' : 'each'}.`
+}
+
+/**
  * The refusal of a tool this seat was not given (#69). A name that is one of the seat's rare commands in the
  * `commands` tier says how it runs (#850): the model named it bare, most likely from words that did.
  */
