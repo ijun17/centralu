@@ -23,14 +23,15 @@ export function SessionStart({
   tool: string
 }) {
   return (
-    // Fills the space the empty conversation yields (ChatStream's yieldSpace) and stands in its middle (owner,
-    // 2026-10-18); a long list scrolls inside it
-    <div className="flex min-h-0 flex-1 overflow-y-auto">
-      <div
-        className="m-auto flex w-full max-w-[560px] flex-col items-center px-4 py-6"
-        data-testid="session-start"
-      >
-        <ToolSwitch sessionId={sessionId} projectId={projectId} tool={tool} />
+    /*
+     * Fills the space the empty conversation yields (ChatStream's yieldSpace) and stands near its middle (owner,
+     * 2026-10-18). The switch is pinned by fixed shares of the space above and below it, not centred with the list:
+     * centring the whole would move the switch each time the list's height settled (loading, then the rows, or none).
+     */
+    <div className="flex min-h-0 flex-1 flex-col items-center px-4" data-testid="session-start">
+      <div className="min-h-6 flex-[2]" aria-hidden />
+      <ToolSwitch sessionId={sessionId} projectId={projectId} tool={tool} />
+      <div className="flex min-h-0 w-full max-w-[560px] flex-[3] flex-col overflow-y-auto pb-6">
         <PastConversations sessionId={sessionId} projectId={projectId} tool={tool} />
       </div>
     </div>
@@ -51,8 +52,9 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   /*
    * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not
    * logged in there is left out, not shown greyed, since the list will grow (OpenCode and others) and a row of dead
-   * buttons says nothing useful. The session's own tool always stands. Until the machine answers only that one shows;
-   * if the question fails, every tool is offered and the switch itself says what went wrong.
+   * buttons says nothing useful. The session's own tool always stands, alone if it is the only one, so the screen's
+   * shape does not change when the answer comes; until then a placeholder stands for the others. If the question
+   * fails, every tool is offered and the switch itself says what went wrong.
    */
   const ready = (t: ToolName) => {
     if (found.error) return true
@@ -60,7 +62,8 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     return !!d && d.installed && d.loggedIn
   }
   const shown = tools.filter((t) => t.name === tool || ready(t.name))
-  if (shown.length < 2) return null
+  // Still asking the machine: the session's own tool, and a placeholder where the others will stand
+  const asking = found.loading && !found.data && !found.error
 
   // The same session takes the other tool (`agents.switchTool`): nothing was said yet, so nothing is lost, and the slot,
   // its place in the sidebar and a draft already typed all stay
@@ -107,6 +110,13 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
           </button>
         )
       })}
+      {asking && (
+        <span
+          className="cc-skeleton h-7 w-20 animate-pulse rounded-full bg-surface-hover/50"
+          role="status"
+          aria-label="Looking for other tools"
+        />
+      )}
     </div>
   )
 }
