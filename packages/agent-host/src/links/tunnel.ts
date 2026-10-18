@@ -749,17 +749,28 @@ export const SSH_EXEC_TIMEOUT_MS = 30 * 60_000
 /** How much of the end of the forward's stderr is kept, for as long as the link lives */
 const FORWARD_STDERR_KEEP = 16 * 1024
 
-/** A tag or an escape of PowerShell's CLIXML (`_x000D__x000A_` is a line break) */
-const CLIXML_MARK = /<\/?(?:Objs|Obj|S|MS|PR|TN|TNRef|Props|I32|I64|B|AV)[\s>/]|_x000[0-9A-F]_/
+/** A tag or an escape of PowerShell's CLIXML (`_x000D__x000A_` is a line break, `_x001B_` an ESC) */
+const CLIXML_MARK = /<\/?(?:Objs|Obj|S|MS|PR|TN|TNRef|Props|I32|I64|B|AV)[\s>/]|_x00[0-9A-F]{2}_/
+
+/** A terminal escape sequence (colour and the like), which PowerShell 7 puts in its errors: none of it is text */
+// eslint-disable-next-line no-control-regex -- ESC is what the pattern is about
+const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?/g
 
 /**
- * The lines PowerShell writes under an error's message to say where in the script it happened:
- * `At line:4 char:1` (in the machine's language: `위치 줄:4 문자:1` on a Korean one, measured), and
- * `+ throw 'x'`, `+ ~~~~`, `+ CategoryInfo : …`, `+ FullyQualifiedErrorId : …`
+ * One line of an error record as the person should read it, or null for a line that only says where in the script the
+ * error was. Windows PowerShell 5.1 writes those under the message: `At line:4 char:1` (in the machine's
+ * language: `위치 줄:4 문자:1` on a Korean one, measured; `At C:\x.ps1:12 char:5` in a script),
+ * `+ throw 'x'`, `+ ~~~~`, `+ CategoryInfo : …`. PowerShell 7's ConciseView writes them as a gutter around the
+ * message: `Line |`, `   4 |  throw 'x'`, `     |  ~~~~`, then `     | x`, the message itself. The position line is
+ * known by its whole shape (a word, then `<where>:<n> <word>:<n>`), so a message that only ends in `b.log:12 col:5` stays.
  */
-function powershellErrorTrailer(line: string): boolean {
+function powershellErrorLine(line: string): string | null {
   const l = line.trim()
-  return l === '+' || l.startsWith('+ ') || /:\d+ \S+:\d+$/.test(l)
+  if (l === '+' || l.startsWith('+ ')) return null
+  if (/^\S+ \S+:\d+ \S+:\d+$/.test(l) || /^(?:At|위치) .+:\d+ \S+:\d+$/.test(l)) return null
+  if (/^Line \|$/.test(l) || /^\d+ \|/.test(l) || /^\|\s*~*$/.test(l)) return null
+  const gutter = /^\| ?(.*)$/.exec(l)
+  return gutter ? gutter[1]! : line
 }
 
 /**
@@ -774,8 +785,12 @@ function clixmlErrorText(xml: string): string {
         .replace(/&(lt|gt|quot|apos|amp);/g, (_, e: string) => ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' })[e]!),
     )
     .join('')
+    .replace(ANSI, '')
     .split(/\r?\n/)
-    .filter((l) => !powershellErrorTrailer(l))
+    .flatMap((l) => {
+      const kept = powershellErrorLine(l)
+      return kept === null ? [] : [kept]
+    })
     .join('\n')
 }
 
@@ -815,7 +830,7 @@ function withoutClixml(s: string): string[] {
     text = end < 0 ? '' : text.slice(end + '</Objs>'.length)
   }
   parts.push(plainPart(text))
-  return parts.join('').split(/\r?\n/)
+  return parts.join('').replace(ANSI, '').split(/\r?\n/)
 }
 
 /**

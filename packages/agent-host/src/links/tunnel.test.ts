@@ -645,6 +645,9 @@ describe('the remote command per shell (#82)', () => {
     // The XML's escapes are read back, and text around and between blocks is kept
     expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">the &lt;thing&gt; &amp; _x005F_its file could not be read_x000D__x000A_</S></Objs>')).toBe('the <thing> & _its file could not be read')
     expect(lastLine(`before\n#< CLIXML\r\n${progress}\nafter the progress\n#< CLIXML\r\n${progress}`)).toBe('after the progress')
+    // A position line is known by its whole shape: a message that only ends like one is the message (review of #1116)
+    expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">could not write b.log:12 col:5_x000D__x000A_</S></Objs>')).toBe('could not write b.log:12 col:5')
+    expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">download node_x000D__x000A_</S><S S="Error">At C:\\Program Files\\x\\install.ps1:12 char:5_x000D__x000A_</S></Objs>')).toBe('download node')
     // A stream that ends inside the XML keeps its whole records and drops the rest
     expect(lastLine('#< CLIXML\r\nnot found: x\n<Objs Version="1.1.0.1"><S S="Error">Access is denied_x000D__x000A_</S><Obj S="progress" RefId="0"><TN')).toBe('Access is denied')
   })
@@ -677,6 +680,21 @@ describe('the remote command per shell (#82)', () => {
     },
     40_000 * SLOW,
   )
+
+  /*
+   * Review of #1116: PowerShell 7 (a Windows machine whose OpenSSH shell is pwsh) writes an error in its ConciseView, the
+   * place in the script as a gutter around the message, and colours it with terminal escapes, which CLIXML carries as
+   * `_x001B_`. Not measured here (no PowerShell 7 on this PC): the shape is ConciseView's as documented.
+   */
+  it("reads PowerShell 7's ConciseView error: the message out of its gutter, without its colour", () => {
+    const esc = (s: string) => s.replaceAll('\x1b', '_x001B_').replace(/\n/g, '_x000D__x000A_')
+    const concise = '\x1b[31;1mException: \x1b[0m\n\x1b[31;1mLine |\x1b[0m\n\x1b[31;1m   4 | \x1b[0m throw \'download node\'\n\x1b[31;1m     | \x1b[31;1m ~~~~~~~~~~~~~~~~~~~~~\x1b[0m\n\x1b[31;1m\x1b[31;1m     | download node\x1b[0m\n'
+    expect(lastLine(`#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">${esc(concise)}</S></Objs>`)).toBe('download node')
+    // Escapes a command wrote around the XML are not text either
+    expect(lastLine('\x1b[31merror: the disk is full\x1b[0m\n')).toBe('error: the disk is full')
+    // A tail that starts inside a record that only shows an ESC escape is still XML that was cut
+    expect(lastLine('the last plain line\nthe end of a record that was cut_x001B_[0m')).toBe('the last plain line')
+  })
 
   /*
    * #1081 for real: the hub's own `powershell -EncodedCommand`, through cmd.exe as Windows OpenSSH runs it, with a
