@@ -11,7 +11,22 @@ How the screen looks is [design-system.md](design-system.md). This document is a
 
 ## 1. Rules the app already follows
 
-### 1.1 Sentence case
+### 1.1 Say only what the person can act on or would want to know
+
+A state that needs nothing from the person is not announced. A line that stands on screen takes room and
+attention from what does need them, and teaches the person to stop reading such lines (*owner,
+2026-10-18*).
+
+- Follows: a sleeping session used to show "Asleep — it wakes when you type to it" under the conversation,
+  and " · asleep" in its mark's tooltip. Both are gone: sleep needs nothing, since typing to the session
+  wakes it. What stays is what the person would want to know: "Waking session…" while it wakes, and, when it
+  could not wake, the reason and Retry (`session/SessionNotes.tsx` `DormantNote`,
+  `sidebar/marks/ToolMark.tsx`). The design system's states say the same (design-system.md §10).
+- The same rule is why the top bar keeps its words in tooltips, and why a machine with no usable tool is left
+  out of the usage capsules rather than drawn as "Offline" (design-system.md §6). Settings → Machines still
+  lists every machine with its state, for the person who looks for it.
+
+### 1.2 Sentence case
 
 Labels, headings, menu items and tooltips capitalise the first word and proper names only.
 
@@ -22,7 +37,7 @@ Labels, headings, menu items and tooltips capitalise the first word and proper n
   "Open Git" (`palette/CommandPalette.tsx`), where a panel's name is capitalised like a proper name. Also
   a heading in capitals, `GOAL` (`session/SessionHeader.tsx`).
 
-### 1.2 A button says what it does, as a verb
+### 1.3 A button says what it does, as a verb
 
 The label is the action, in as few words as say it fully. It names the consequence when the consequence
 is not the obvious one.
@@ -39,7 +54,7 @@ is not the obvious one.
   (`session/chat-rows/ChatRow.tsx`). These are toggles that open a panel, so they may be a case of their
   own (open question 3.9).
 
-### 1.3 "…" when another step follows
+### 1.4 "…" when another step follows
 
 A label ends in "…" (the single character, never "...") when pressing it opens a dialog or asks for
 more before anything happens.
@@ -54,7 +69,7 @@ more before anything happens.
 - Breaks it: "New folder" and "Add project" (`sidebar/Sidebar.tsx`) open a dialog or a folder picker
   without "…"; "running…" (`session/chat-rows/CentraluCall.tsx`) is the one progress word in lower case.
 
-### 1.4 An error says what happened, why, and what to do
+### 1.5 An error says what happened, why, and what to do
 
 The common shape is "Could not <verb> <what>: <reason>", with a way to try again where there is one.
 
@@ -72,7 +87,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   among "Could not" and "cannot".
 - Open: how much of the reason to pass through as the system wrote it (open question 3.3).
 
-### 1.5 An empty state says there is nothing, and how to get something
+### 1.6 An empty state says there is nothing, and how to get something
 
 - Follows: "No projects yet." then "Start with Add project below." (`sidebar/Sidebar.tsx`); "Nothing
   waiting" then "Finished agents collect here" (`inbox/Inbox.tsx`); "Drag sessions and apps here from the
@@ -83,7 +98,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   their neighbours. Periods are mixed: "No projects yet." and "No runs yet." have one, most do not
   (open question 3.4).
 
-### 1.6 Counts and times
+### 1.7 Counts and times
 
 - Digits, not words, and pluralised by the count: "3 background tasks running"
   (`session/BackgroundTasks.tsx`), "1 run" / "2 runs" (`pinned-app/RunsPanel.tsx`), "Attaching a file…" /
@@ -97,7 +112,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
 - Breaks it: "2 error", "3 limit reached" (`sidebar/marks/FoldSummary.tsx`, the state label lower-cased
   and not pluralised); "Reconnecting for 5+ min" (`components/primitives.tsx`), the one "min" among "m".
 
-### 1.7 Tool, machine and product names
+### 1.8 Tool, machine and product names
 
 - Tools are named as their makers name them, from the adapter's label: "Claude Code", "Codex"
   ("Install or sign in to Claude Code or Codex", `usage/UsageDonuts.tsx`). Never "Claude" alone for the
@@ -110,7 +125,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   `project/CreateProjectDialog.tsx`) and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
   `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (open question 3.7).
 
-### 1.8 No internal words on screen unless the person needs them
+### 1.9 No internal words on screen unless the person needs them
 
 Words for how Centralu is built (host, keeper, swap, sidecar, RPC, adapter, manifest, bridge) stay off the
 screen unless the person can act on them. "swap", "sidecar", "RPC", "adapter" and "PID" are not on screen.
@@ -130,7 +145,7 @@ These are:
 
 Where one of these stays, it should be because the next step needs it (open question 3.6).
 
-### 1.9 Tooltips are short
+### 1.10 Tooltips are short
 
 A phrase, often with no period. It names what a control does, or adds the one thing the label could not
 hold.
@@ -147,7 +162,7 @@ hold.
   new, empty folder as a project, in the Centralu folder of your home unless you choose another"
   (`sidebar/Sidebar.tsx`).
 
-### 1.10 A confirmation asks, says what follows, and repeats the verb
+### 1.11 A confirmation asks, says what follows, and repeats the verb
 
 - Follows: "Move this session to the trash?" then "Move to trash" (`sidebar/dialogs/ConfirmDelete.tsx`);
   "Delete “<name>” for good? Its conversation, attachments and handoff note leave this machine… This cannot
@@ -160,7 +175,7 @@ hold.
   "the Trash" (the OS's) and "trash" (Centralu's) are both written for different things, and not always
   the right one (open question 3.8).
 
-### 1.11 One state, one wording
+### 1.12 One state, one wording
 
 A state the person has to recognise should read the same everywhere. Today: "Awaiting approval"
 (`components/primitives.tsx`, `approval/ApprovalCard.tsx`), "Needs approval" (`inbox/Inbox.tsx`) and
@@ -169,10 +184,10 @@ A state the person has to recognise should read the same everywhere. Today: "Awa
 (`components/primitives.tsx`) beside "A network error ended the last turn before it finished."
 (`session/SessionNotes.tsx`).
 
-### 1.12 Voice, as it is
+### 1.13 Voice, as it is
 
 - "you" and "your" are used directly where the person is the subject: "Needs your answer"
-  (`inbox/Inbox.tsx`), "Asleep — it wakes when you type to it" (`session/SessionNotes.tsx`), "Faster
+  (`inbox/Inbox.tsx`), "Nothing restarts until you apply it." (`settings/UpdateLine.tsx`), "Faster
   answers spend more of your usage." (`session/SessionSettings.tsx`).
 - No "please", no exclamation marks, no "we".
 - Spelling is British ("Customise…", "Accent colour", `settings/ThemeSection.tsx`), while dates and times

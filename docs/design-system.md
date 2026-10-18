@@ -33,7 +33,7 @@ Every corner is a step of this scale. Tailwind's own radii are cleared, so `roun
 | `--radius-lg` (`rounded-lg`) | 8px | panels, menus, dropdowns, dialogs, tool cards, sidebar tiles | A container, a step rounder than what is in it |
 | `--radius-field` (`rounded-field`) | 10px | the top bar's search field, a question's options and its answer box | An input, so not a capsule's full round (*owner, 2026-10-18*, `SearchField.tsx`) |
 | `--radius-field-key` (`rounded-field-key`) | 10 − 5 = 5px | the keycap inside a field (the search field's ⌘K) | The field's corner less the gap around the key, so the two curves run parallel |
-| `--radius-bubble` (`rounded-bubble`) | 14px | both speakers' bubbles, the pinned message, approval and question cards | What is said and what waits on the person read as speech, not as boxes (*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
+| `--radius-bubble` (`rounded-bubble`) | 14px | both speakers' bubbles, the pinned message, approval and question cards, the conversation's own cards (a new session's past conversations) | What is said and what waits on the person read as speech, not as boxes (*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
 | `--radius-full` (`rounded-full`) | full | the top bar's capsules, a card's kind label, dots, the scrollbar thumb | A status, not a container |
 
 - **A shape inside a bordered shape takes the outer corner less the border**, written as a calc on the
@@ -128,6 +128,7 @@ Every card that waits on the person is drawn alike (*owner, 2026-10-18*, `Approv
 | Selected | `surface-selected` and the `ink`; a picked option in a waiting card adds the white edge, since there it is the answer being given | Selection is position, not urgency |
 | Disabled | `opacity-40`, no hover | One fade everywhere (#1122's `Button` holds it; 50% and 60% are older copies) |
 | Focus | `:focus-visible`: a 1px outline in `--color-focus`, 1px off; the accent colours it when set | Keyboard focus must always show, and must never look like the signal |
+| Asleep | **not shown at all**: no dimmed row, nothing in the mark or its tooltip, no line under the conversation. Only waking is said ("Waking session…"), and a wake that failed (its reason and Retry) | Sleep needs nothing from the person: typing to the session wakes it. A state that asks nothing is not announced (*owner, 2026-10-18*, `SessionNotes.tsx` `DormantNote`, `sidebar/marks/ToolMark.tsx`; [ux-writing.md](ux-writing.md) 1.1) |
 
 ## 11. Components
 

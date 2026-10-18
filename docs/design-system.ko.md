@@ -31,7 +31,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | `--radius-lg` (`rounded-lg`) | 8px | 패널, 메뉴, 드롭다운, 대화상자, 도구 카드, 사이드바 타일 | 담는 것, 안에 든 것보다 한 단계 둥글게 |
 | `--radius-field` (`rounded-field`) | 10px | 상단 바의 검색칸, 질문의 선택지와 답 입력칸 | 입력칸이므로 캡슐처럼 완전히 둥글지 않다(*owner, 2026-10-18*, `SearchField.tsx`) |
 | `--radius-field-key` (`rounded-field-key`) | 10 − 5 = 5px | 입력칸 안의 키캡(검색칸의 ⌘K) | 입력칸의 모서리에서 키 둘레의 틈을 뺀 값이라 두 곡선이 나란히 간다 |
-| `--radius-bubble` (`rounded-bubble`) | 14px | 두 화자의 말풍선, 고정된 메시지, 승인 카드와 질문 카드 | 말한 것과 사람을 기다리는 것은 상자가 아니라 말로 읽힌다(*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
+| `--radius-bubble` (`rounded-bubble`) | 14px | 두 화자의 말풍선, 고정된 메시지, 승인 카드와 질문 카드, 대화 자체의 카드(새 세션의 지난 대화) | 말한 것과 사람을 기다리는 것은 상자가 아니라 말로 읽힌다(*owner, 2026-10-18*, `ChatStream.tsx`, `ApprovalCard.tsx`) |
 | `--radius-full` (`rounded-full`) | 완전히 둥글게 | 상단 바의 캡슐, 카드의 종류 표시, 점, 스크롤바 손잡이 | 담는 것이 아니라 상태 |
 
 - **테두리 있는 모양 안의 모양은 바깥 모서리에서 테두리를 뺀다.** 호출하는 자리에서 토큰에 calc로 쓴다(접힌
@@ -123,6 +123,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 선택 | `surface-selected`와 `ink`. 대기 카드의 고른 선택지는 흰 테두리를 더한다. 거기서는 그것이 주는 답이기 때문이다 | 선택은 위치이지 긴급함이 아니다 |
 | 비활성 | `opacity-40`, 호버 없음 | 어디서나 같은 흐림(#1122의 `Button`이 지킨다. 50%, 60%는 예전 복사본) |
 | 포커스 | `:focus-visible`: `--color-focus`의 1px 외곽선, 1px 떨어져서. 강조색을 정하면 그 색 | 키보드 포커스는 언제나 보여야 하고, 신호처럼 보여서는 안 된다 |
+| 잠듦 | **어디에도 보이지 않는다**: 흐린 행도, 표시나 그 툴팁의 말도, 대화 아래의 줄도 없다. 깨어나는 중("Waking session…")과 깨우지 못했을 때(이유와 Retry)만 말한다 | 잠은 사람에게 아무것도 요구하지 않는다: 세션에 입력하면 깨어난다. 아무것도 묻지 않는 상태는 알리지 않는다(*owner, 2026-10-18*, `SessionNotes.tsx` `DormantNote`, `sidebar/marks/ToolMark.tsx`, [ux-writing.md](ux-writing.md) 1.1) |
 
 ## 11. 컴포넌트
 
