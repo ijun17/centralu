@@ -4,7 +4,7 @@ import { isInTurn, shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { Kbd, canContinue } from '../../components/primitives.jsx'
-import { useSessionAway } from '../../store/selectors.js'
+import { useSessionAway, useSessionFolder } from '../../store/selectors.js'
 import { lazyComponent } from '../../components/lazy.jsx'
 import { isFileDrag } from '../files/dragPath.js'
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
@@ -109,7 +109,8 @@ export function SessionPane({
   const session = useStore((s) => s.sessions[sessionId])
   const chat = useStore((s) => s.chat[sessionId] ?? EMPTY_CHAT)
   /*
-   * The directory a path in this conversation would be relative to (#39).
+   * The directory a path in this conversation would be relative to (#39): the session's folder, its worktree when it
+   * has one (#1209), so a link opens the file the agent changed rather than the main checkout's.
    *
    * It is read from this session rather than from whatever is focused because a grid cell
    * renders this same component for a session that is not the focused one — asking the
@@ -117,10 +118,7 @@ export function SessionPane({
    * orchestrator has no project at all and so gets null, which is what stops its messages
    * from linking anywhere (see `parseFileRef`).
    */
-  const projectRoot = useStore((s) => {
-    const pid = s.sessions[sessionId]?.projectId
-    return (pid && s.projects[pid]?.path) || null
-  })
+  const projectRoot = useSessionFolder(sessionId)
   const markRead = useStore((s) => s.markRead)
 
   /*
