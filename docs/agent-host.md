@@ -2828,49 +2828,18 @@ mirror. `schema-doc.test.ts` fails until both are done.
 ### 5.2 Stored shapes another build reads (#384)
 
 The store's tables are one shape that two builds share; §5.1 covers them. Many other shapes are stored or exchanged
-the same way: JSON rows in `app_settings`, files in the data folder, files a person or another build writes, and
-the lines and frames between processes. An older and a newer build read each of them during a host swap, after a
-person goes back a release, and between two machines on different releases.
+the same way: JSON rows in `app_settings`, JSON columns, files in the data folder, files a person or another build
+writes, and the lines and frames between processes. An older and a newer build read each of them during a host swap,
+after a person goes back a release, and between two machines on different releases.
 
-A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
-`tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
-`purgeSession`), so a new per-session key needs no line in the purge.
+The rules for every shape: a field added is ignored by an older reader, and kept where it writes the record back; a
+field removed gets its default in a newer reader; a value this build cannot read takes its default alone, and a
+permission that cannot be read is a refusal; a broken file or row gives a clear message that names it, never a crash
+and never a setting reset without a word.
 
-The rules for every shape:
-
-- **A field added:** an older reader ignores it, and, where it writes the record back, keeps it.
-- **A field removed or not yet written:** a newer reader uses the default.
-- **A value this build cannot read** (a word from a newer enum): that value takes its default, alone; the rest of
-  the record still reads. A permission that cannot be read is a refusal, never a grant.
-- **A broken file:** a clear message that names the file or row, never a crash, and never a setting reset without
-  a word.
-
-| Shape | Where | Reader / writer | Older shape | Newer shape | Broken | Tests |
-|---|---|---|---|---|---|---|
-| Screen preferences (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | each missing field is its default | an unreadable value shows its default; unknown fields and unreadable values are kept when this build writes a change | defaults, one stderr line naming the row; the next change replaces it | `theme.test.ts`, `ui-preferences.test.ts` |
-| Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store-layout.test.ts` (ui), `notify.test.ts` |
-| Theme and typography cache | the page's `localStorage` | `applyCachedTheme`, `applyCachedTypography` | each value checked | ignored | same as no cache: only the first frame, the host's answer follows | (cache only) |
-| Keeper settings | `keeper-settings.json` | `source::load_settings` / `save_background` (keeper) | `background` defaults to off | unknown fields kept and written back; a `background` that is not true or false reads as off, alone, with a stderr line | reads as off, one stderr line naming the file; the next save replaces it | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
-| Grid placements | `grid_layout` | `Store.listGridView` / `setGridView` | a row without a span reads as none chosen (v43) | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. A span out of bounds reads as none | (rows) | `store.test.ts` (v42, v43) |
-| Consents between projects (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (rows) | a kind this build does not know stays in the store and is not listed (#384) | (rows) | `store.test.ts` |
-| A session's app consents | `app_settings.session_apps:<id>` | `parse` in `sessions/app-access.ts` | (list) | an element with an unknown consent is dropped | empty list | |
-| App permissions | `app_permissions` | `desk.ts` | a decision recorded for an older `uses` asks again | any decision but `allow` refuses | (rows) | `app-capabilities.test.ts` |
-| App manifest | `centralu.app.json` | `parseManifest` | optional fields default (`view.origin` opaque, `uses` empty) | an unknown field is a warning; an unknown `uses.host` capability is a warning and refused; another `manifestVersion` is an error naming both versions | an error naming the file, shown in the app list | `manifest.test.ts` |
-| App secrets | `app-secrets.json` | `AppSecrets` | (map) | extra keys ignored | apps start without secrets, said on stderr | `app-secrets.test.ts` (not the broken file) |
-| Imported-app marks | `app-imports.json` | `ImportBook` | (map) | extra keys kept | moved aside as `.unreadable-<time>` and reported, so an imported app asks again | |
-| App versions | `app-versions/<app>/<id>/meta.json` | `AppVersions.list` | | extra fields kept | a record without `id` and `at` is skipped, like a half-deleted one (#384) | `versions.test.ts` |
-| Theme files | `<data>/themes/*.json` | `parseThemeFile` (protocol) | missing tokens fall back to the base theme | an unknown key or token is listed as a problem and ignored | listed as broken, with the reason | `theme.test.ts`, `themes.test.ts` |
-| Orchestrator proposals and skills | `app_settings.orchestrator_*` | `OrchestratorProposals` | | an element keeps its extra fields | not a list reads as empty; an element without a name or content is skipped (#384) | `orchestrator-proposals.test.ts` |
-| View hand-over | `app_settings.views.handover` | `restoreViewHandover` | | an element that is not a view is skipped (#384) | nothing reopens; the row is deleted all the same | `view-handover.test.ts` |
-| View origin ports, agent versions seen, project JSON columns | `app_settings.apps.viewPorts`, `agents.versionsSeen`, `projects.*` | `readBook`, `readSeen`, `Store` | each value checked | ignored | read as none | |
-| Host build record | `CC_HOST_SOURCE` (keeper to host) | `hostBuild` (`keeper-link.ts`) | missing keys are left out | ignored | the host's own commit only | `keeper-link.test.ts` |
-| Start status | `shell-status.json` | the window's `start.rs`, field by field, matched by nonce | | ignored | treated as no status yet | `start.rs` tests |
-| Keeper record | `keeper.json` | written for a person; no build reads it | | | | |
-| Remote connection line | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version` and `dataDir` default | another `v` is an error that says which side to update; a missing port or token is an error | lines that are not JSON are skipped | `tunnel.test.ts` |
-| Host ↔ UI payloads | RPC results, events, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | defaults applied | undeclared fields dropped; an unreadable value is kept as sent, alone | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
-
-Not covered yet: an e2e that opens a newer store with the previous release's host; `older-host.spec.ts` covers the
-payload half.
+Every such shape, its owner, its parser and what it does today with each of those, with the tests that feed it the
+other build's shapes: [stored-shapes.md](stored-shapes.md). A new stored shape, or a new field in one, gets its row
+there in the same pull request.
 
 ## 6. Usage and limits (FR-9)
 
