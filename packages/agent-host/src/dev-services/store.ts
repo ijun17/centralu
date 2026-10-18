@@ -188,8 +188,9 @@ export class Store extends MigrationRunner {
   }
 
   /*
-   * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: open
-   * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
+   * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: #1099,
+   * in the merge queue, still calls them on `Store` and hands the whole store to `labelOf` (#428), and they go once it
+   * lands. New code names the module.
    */
 
   // ── MessageRecords (store/messages.ts) ──

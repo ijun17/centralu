@@ -1412,7 +1412,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await answer('allow')
     expect(await call).toMatchObject({ ok: true, state: 'done' })
     expect(sent).toHaveBeenCalledWith('w1', expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
-    await eventually(() => remote.store.appSetting('hub_ask_depth:w1') === null)
+    await eventually(() => remote.store.settings.appSetting('hub_ask_depth:w1') === null)
   })
 
   it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {

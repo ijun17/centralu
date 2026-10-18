@@ -308,7 +308,7 @@ describe("a child's turn and the call waiting on it", () => {
     // No clean-up line: the work is not over
     expect(r).not.toHaveProperty('cleanUp')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
-    expect(JSON.parse(store.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
+    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
   })
 
   it("new work from the same caller ends its pause; another caller's pause stands", () => {
