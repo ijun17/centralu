@@ -143,7 +143,7 @@ export function popoverDragTests(): void {
       await expect(list).toBeVisible()
       await resetDrags(page)
 
-      await pressOn(page, list.getByText('Background tasks', { exact: true }))
+      await pressOn(page, list.getByText('Background', { exact: true }))
       await page.mouse.up()
       expect(await drags(page)).toBe(0)
       await expect(list).toBeVisible()

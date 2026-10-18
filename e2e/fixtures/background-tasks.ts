@@ -90,7 +90,10 @@ export function backgroundTasksTests(): void {
       const id = await start(page)
       const badge = page.getByTestId('background-badge')
       await expect(badge).toHaveAttribute('data-count', '2')
-      await expect(badge).toContainText('2 background')
+      // The top bar's capsule shape (owner, 2026-10-18): the number and a steady dot on it, its words for a screen reader
+      await expect(badge).toHaveText('2')
+      await expect(badge).toHaveAttribute('aria-label', '2 background')
+      await expect(badge.getByTestId('background-running-dot')).toBeVisible()
       await expect(page.getByTestId(`background-mark-${id}`)).toHaveText('2 bg')
     })
 
@@ -100,8 +103,8 @@ export function backgroundTasksTests(): void {
       const list = page.getByTestId('background-list')
       await expect(list).toBeVisible()
       await expect(list.getByTestId(`background-task-${AGENT.id}`)).toContainText(AGENT.description)
-      await expect(page.getByTestId(`background-note-${AGENT.id}`)).toHaveText('stops with the turn')
-      await expect(page.getByTestId(`background-note-${SHELL.id}`)).toHaveText('survives Stop')
+      await expect(page.getByTestId(`background-note-${AGENT.id}`)).toHaveText(' · stops with the turn')
+      await expect(page.getByTestId(`background-note-${SHELL.id}`)).toHaveText(' · survives Stop')
       await expect(page.getByTestId(`background-status-${WATCH.id}`)).toHaveText('ambient')
 
       await page.getByTestId(`background-stop-${SHELL.id}`).click()
@@ -148,7 +151,9 @@ export function backgroundTasksTests(): void {
       })
       const badge = page.getByTestId('background-badge')
       await expect(badge).toHaveAttribute('data-count', '0')
-      await expect(badge).toContainText('background · 1 failed · 1 stopped')
+      await expect(badge).toHaveAttribute('aria-label', 'background · 1 failed · 1 stopped')
+      await expect(badge).toHaveText('1 failed')
+      await expect(badge.getByTestId('background-running-dot')).toHaveCount(0)
       await expect(page.getByTestId(`background-mark-${id}`)).toHaveCount(0)
       await badge.click()
       await expect(page.getByTestId(`background-note-${AGENT.id}`)).toHaveText('API Error: 529 overloaded')
@@ -192,9 +197,10 @@ export function backgroundTasksTests(): void {
       await badge.click()
       await expectListUsable(page)
       const under = (await badge.boundingBox())!.y + (await badge.boundingBox())!.height
-      const gap = (await list.boundingBox())!.y - under
-      expect(gap).toBeGreaterThanOrEqual(0)
-      expect(gap).toBeLessThanOrEqual(8)
+      // Read once the list has come down (it drops in from a few pixels up, cbb5ad8e)
+      const gap = async () => (await list.boundingBox())!.y - under
+      await expect.poll(gap).toBeGreaterThanOrEqual(0)
+      expect(await gap()).toBeLessThanOrEqual(8)
       await page.keyboard.press('Escape')
       await page.evaluate(() => (window as any).__store.setState((s: any) => ({ prefs: { ...s.prefs, textSize: 1 } })))
 
