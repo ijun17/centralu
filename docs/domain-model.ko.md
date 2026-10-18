@@ -65,7 +65,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다 | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41) | |
 | 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | 권한 요청 |
 | 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다. 호스트의 적용·인계 카드도 `about`을 달고 여기에 실린다), `capability`, `project_access`, `agent_start`, `centralu_update`, `project_create`(호스트가 올린다) | `ApprovalDetail`, `entities/approvals.ts` | |
-| 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다. 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | 허용 목록 |
+| 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다(프로젝트가 없는 세션은 프로젝트 범위로 답해도 그 세션에만 남는다). 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | 허용 목록 |
 | 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities/sessions.ts` | 프롬프트 |
 | 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities/approvals.ts`; `project_consents`(스토어 v44) | |
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`(`manager.ts`가 쥐고 `sessions/delegation-host.ts`로 넘긴다), `readableGrants`, `ask-project.ts` | |

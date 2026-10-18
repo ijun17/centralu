@@ -773,6 +773,9 @@ describe('a call to a client: the reverse direction (#550)', () => {
     await a.c.wait(() => calls(a.c).length === 2)
     expect(calls(a.c)[1]).toMatchObject({ method: 'call.cancel', params: { id: calls(a.c)[0]!.id } })
     await expect(server.call(a.client, 'hub.projects', {}, { timeoutMs: 30 })).rejects.toThrow('did not answer hub.projects in time')
+    // Run out, it is withdrawn there as well, so the other side's work (a card) does not wait for nobody
+    await a.c.wait(() => calls(a.c).length === 4)
+    expect(calls(a.c)[3]).toMatchObject({ method: 'call.cancel', params: { id: calls(a.c)[2]!.id } })
   })
 
   it('never calls a bridge, and takes no answer from a socket before hello', async () => {

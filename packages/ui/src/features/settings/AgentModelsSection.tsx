@@ -3,6 +3,7 @@ import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useModels } from '../session/SessionSettings.jsx'
 import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
+import { Badge } from '../../components/Badge.jsx'
 
 const LEVELS: { id: AgentDifficulty; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -66,7 +67,9 @@ function ToolRows({
   const { models } = useModels(tool.name, false)
   return (
     <div className="mt-3" data-testid={`settings-agent-models-${tool.name}`}>
-      <p className="readout text-2xs uppercase text-ink-faint">{tool.label}</p>
+      <Badge as="p" readout>
+        {tool.label}
+      </Badge>
       <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-ink-muted">
         {LEVELS.map((l) => (
           <LevelRow

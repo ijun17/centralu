@@ -19,6 +19,7 @@ import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import { claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
+import { initSurfaceLines } from './surface.js'
 import { ClaudeScheduleLook } from './schedule-look.js'
 import { keepAttachedAppMarks } from '../tool-titles.js'
 
@@ -64,6 +65,8 @@ export class ClaudeSession implements SessionHandle {
   sendTracked?: (text: string, observer?: InputObserver) => Promise<void>
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
+  /** The init message's command list was compared with the adapter's limitations (#270): once per process */
+  private surfaceNoted = false
   private notify: (() => void) | null = null
   private closed = false
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
@@ -371,6 +374,10 @@ export class ClaudeSession implements SessionHandle {
     if (Array.isArray(m.slash_commands)) {
       this.goalCommand = m.slash_commands.includes('goal')
       this.settleGoalKnown()
+      if (!this.surfaceNoted) {
+        this.surfaceNoted = true
+        for (const line of initSurfaceLines(this.sessionId, m.slash_commands)) console.error(line)
+      }
     }
   }
 

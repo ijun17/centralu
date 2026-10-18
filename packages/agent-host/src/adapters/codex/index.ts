@@ -17,6 +17,7 @@ import { listCodexModels } from './models.js'
 import { raceTimeout } from '../../timing.js'
 import { threadIdOf } from './turn-reads.js'
 import { CodexSession, LAZY_RESUME_WAIT_MS } from './session.js'
+import { CODEX_SURFACE } from './surface.js'
 import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 
 export { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, LAZY_RESUME_WAIT_MS, repoFilesConfig }
@@ -44,6 +45,8 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+  /** What Codex offers against what this adapter limits (#270) */
+  readonly surface = CODEX_SURFACE
 
   readonly descriptor: ToolDescriptor = {
     name: 'codex',

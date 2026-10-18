@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore, type ChatItem } from '../../../store/store.js'
+import { Button } from '../../../components/Button.jsx'
 
 /*
  * The rows and the badge that point at another session or project: a manager's worktree proposal
@@ -135,26 +136,28 @@ export function AskedByBadge({ callerId, projectId }: { callerId: string; projec
   // A session of the same project started this one with start_agent (#561): the session, not the project, is named
   if (caller.projectId && caller.projectId === projectId) {
     return (
-      <button
-        type="button"
-        className="min-w-0 shrink truncate rounded-md border border-line px-1.5 text-2xs text-ink-muted hover:text-ink"
+      <Button
+        variant="quiet"
+        size="xs"
+        className="min-w-0 shrink truncate"
         onClick={() => focus(callerId)}
         data-testid="asked-by-badge"
         title={`Go back to ${caller.name}`}
       >
         ↩ Started by {caller.name}
-      </button>
+      </Button>
     )
   }
   return (
-    <button
-      type="button"
-      className="min-w-0 shrink truncate rounded-md border border-line px-1.5 text-2xs text-ink-muted hover:text-ink"
+    <Button
+      variant="quiet"
+      size="xs"
+      className="min-w-0 shrink truncate"
       onClick={() => focus(callerId)}
       data-testid="asked-by-badge"
       title={`Go back to ${caller.name}`}
     >
       ↩ Asked by {projectName ?? caller.name}
-    </button>
+    </Button>
   )
 }
