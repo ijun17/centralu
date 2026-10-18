@@ -432,6 +432,8 @@ export class MockPlatform implements Platform {
   // rules.ts
   get searchResults() { return this.rulesMock.searchResults }
   set searchResults(value: RulesMock['searchResults']) { this.rulesMock.searchResults = value }
+  get searchHold() { return this.rulesMock.searchHold }
+  set searchHold(value: RulesMock['searchHold']) { this.rulesMock.searchHold = value }
   get rulesList() { return this.rulesMock.rulesList }
   set rulesList(value: RulesMock['rulesList']) { this.rulesMock.rulesList = value }
   get consentsList() { return this.rulesMock.consentsList }
