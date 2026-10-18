@@ -62,10 +62,17 @@ const startingNow = new Set<string>()
  * nothing new is set; if not, it is appended after what is there (an event arriving after the
  * response then confirms this row).
  */
-function withOpeningPrompt(chat: Record<string, ChatItem[]>, id: string, text: string): Record<string, ChatItem[]> {
+function withOpeningPrompt(
+  chat: Record<string, ChatItem[]>,
+  id: string,
+  text: string,
+): Record<string, ChatItem[]> {
   const have = chat[id] ?? []
   if (have.some((it) => it.kind === 'user' && it.text === text)) return chat
-  return { ...chat, [id]: [...have, { kind: 'user', seq: nextChatKey(), text, pending: true }] }
+  return {
+    ...chat,
+    [id]: [...have, { kind: 'user', seq: nextChatKey(), text, pending: true, at: Date.now() }],
+  }
 }
 
 /** The store's actions that create, list and remove sessions */
@@ -145,25 +152,30 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
      */
     const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool], project.machine)
     // The host records the tool as this project's default while it makes the session (#719): a list read must not undo it
-    const info = await writingProject(projectId, () => void get().refreshProjects(), () => platform.agents.createSession({
+    const info = await writingProject(
       projectId,
-      cwd: project.path,
-      // The chosen value travels straight to the host — the preset used to be pinned to 'normal' and the model was not even passed
-      tool,
-      model: opts?.model ?? remembered.model ?? undefined,
-      // Effort follows the memory too (#69 ⑤) — remembering only the model meant Opus came back but high still had to be pressed again
-      effort: opts?.effort ?? remembered.effort ?? undefined,
-      verbosity: opts?.verbosity,
-      serviceTier: opts?.serviceTier,
-      permissionPreset: opts?.permissionPreset ?? 'normal',
-      initialPrompt: opts?.initialPrompt,
-      handoff: opts?.handoff,
-      resumeExternalId: opts?.resumeExternalId,
-      importHistory: opts?.importHistory,
-      worktree: opts?.worktree,
-      worktreeBranch: opts?.worktreeBranch,
-      worktreeBase: opts?.worktreeBase,
-    }))
+      () => void get().refreshProjects(),
+      () =>
+        platform.agents.createSession({
+          projectId,
+          cwd: project.path,
+          // The chosen value travels straight to the host — the preset used to be pinned to 'normal' and the model was not even passed
+          tool,
+          model: opts?.model ?? remembered.model ?? undefined,
+          // Effort follows the memory too (#69 ⑤) — remembering only the model meant Opus came back but high still had to be pressed again
+          effort: opts?.effort ?? remembered.effort ?? undefined,
+          verbosity: opts?.verbosity,
+          serviceTier: opts?.serviceTier,
+          permissionPreset: opts?.permissionPreset ?? 'normal',
+          initialPrompt: opts?.initialPrompt,
+          handoff: opts?.handoff,
+          resumeExternalId: opts?.resumeExternalId,
+          importHistory: opts?.importHistory,
+          worktree: opts?.worktree,
+          worktreeBranch: opts?.worktreeBranch,
+          worktreeBase: opts?.worktreeBase,
+        }),
+    )
     set((s) => ({
       sessions: {
         ...s.sessions,
@@ -297,7 +309,11 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       set({ toast: `Could not rename: ${(e as Error).message}` })
       return
     }
-    set(ifSessionStill(sessionId, (s, cur) => ({ sessions: { ...s.sessions, [sessionId]: renamePure(cur, next) } })))
+    set(
+      ifSessionStill(sessionId, (s, cur) => ({
+        sessions: { ...s.sessions, [sessionId]: renamePure(cur, next) },
+      })),
+    )
   },
 
   async markRead(sessionId) {
@@ -314,7 +330,11 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       set({ toast: `Could not mark as read: ${(e as Error).message}` })
       return
     }
-    set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
+    set(
+      ifSessionStill(sessionId, (st, cur) => ({
+        sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) },
+      })),
+    )
   },
 
   async reorderSessions(projectId, orderedIds) {
@@ -338,7 +358,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
        * while the order shown is still this drag's: a later drag that was saved is not undone by this one failing.
        */
       set((st) => ({
-        ...(stillInOrder(st.sessions, orderedIds) ? { sessions: inOrder(st.sessions, Object.keys(before)) } : {}),
+        ...(stillInOrder(st.sessions, orderedIds)
+          ? { sessions: inOrder(st.sessions, Object.keys(before)) }
+          : {}),
         toast: `Could not save order: ${(e as Error).message}`,
       }))
     }

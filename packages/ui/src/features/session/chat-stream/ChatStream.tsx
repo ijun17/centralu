@@ -7,7 +7,7 @@ import { ChatSkeleton } from '../../../components/Skeleton.jsx'
 import { OverlayScrollbar } from '../../../components/OverlayScrollbar.jsx'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
-import { ChatRow } from '../chat-rows/ChatRow.jsx'
+import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
@@ -286,7 +286,7 @@ export function ChatStream({
             */
               style={{ top: v.start }}
             >
-              <AnswerBubble part={bubbleOf(chat, v.index)}>
+              <AnswerBubble part={bubbleOf(chat, v.index)} at={chat[v.index]?.at}>
                 <ChatRow
                   item={chat[v.index]!}
                   projectRoot={projectRoot}
@@ -366,12 +366,17 @@ const BUBBLE_EDGE: Record<BubblePart, string> = {
   last: 'rounded-b-[14px] border border-t-0 pb-3',
 }
 
-function AnswerBubble({ part, children }: { part: BubblePart | null; children: ReactNode }) {
+function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: number; children: ReactNode }) {
   if (!part) return <>{children}</>
+  const ends = part === 'last' || part === 'solo'
   return (
-    <div className={`min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
-      {children}
-    </div>
+    <>
+      <div className={`min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
+        {children}
+      </div>
+      {/* When the answer was said, under its end, as a chat app writes it under a bubble */}
+      {ends && at !== undefined && <SaidAt at={at} className="pl-2 pt-1" />}
+    </>
   )
 }
 

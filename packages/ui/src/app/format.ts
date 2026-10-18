@@ -34,7 +34,8 @@ export const formatBytes = (n: number): string => scaled(n, 1024, BYTE_UNITS)
 export const formatCount = (n: number): string => scaled(n, 1000, COUNT_UNITS)
 
 /** A count of changed files, "10k+" when the host stopped counting at its cap (`more`, #850 review) */
-export const formatChangedCount = (n: number, more?: boolean): string => (more ? `${formatCount(n)}+` : String(n))
+export const formatChangedCount = (n: number, more?: boolean): string =>
+  more ? `${formatCount(n)}+` : String(n)
 
 /**
  * A length of time, in one style: the two largest units that matter, no space before a unit ("1.5s", "3m 20s", "2h 5m",
@@ -58,4 +59,21 @@ export function formatDuration(ms: number, { coarse = false }: { coarse?: boolea
   if (m < 60) return `${m}m`
   if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`
   return `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h`
+}
+
+/**
+ * The time under a message's bubble (owner, 2026-10-18), as a chat app writes it: the clock time for today
+ * ("3:42 PM"), the date with it before that ("Oct 17, 3:42 PM"), the year too when it is not this one.
+ */
+export function formatSaidAt(at: number, now: number = Date.now()): string {
+  const d = new Date(at)
+  const n = new Date(now)
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (d.toDateString() === n.toDateString()) return time
+  const date = d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(d.getFullYear() === n.getFullYear() ? {} : { year: 'numeric' }),
+  })
+  return `${date}, ${time}`
 }

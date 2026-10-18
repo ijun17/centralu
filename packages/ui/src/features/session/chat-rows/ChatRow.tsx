@@ -5,6 +5,7 @@ import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
 import { FileLink, Markdown } from '../Markdown.jsx'
 import { titlePieces } from '../filePath.js'
+import { formatSaidAt } from '../../../app/format.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
@@ -114,6 +115,7 @@ export const ChatRow = memo(function ChatRow({
             {item.text}
           </div>
         )}
+        {item.at !== undefined && <SaidAt at={item.at} className="pr-2" />}
       </div>
     )
   }
@@ -202,7 +204,9 @@ export const ChatRow = memo(function ChatRow({
       <ToolCard item={item} sessionId={sessionId} projectRoot={projectRoot} projectId={projectId} />
       {/* The app view this call opened (M4 B-1) — its own view is looked up by the card's id.
       Nothing is rendered if there is none */}
-      {item.callId && !nested && <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />}
+      {item.callId && !nested && (
+        <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />
+      )}
     </>
   )
 })
@@ -288,10 +292,15 @@ export function ToolCard({
    * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
    * window knows, since a repository's own server may carry that name (#730 review)
    */
-  const knownApp = useStore((s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app))
+  const knownApp = useStore(
+    (s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app),
+  )
   const call = knownApp ? read : null
   // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
-  const pieces = useMemo(() => titlePieces(item.title, item.paths, projectRoot), [item.title, item.paths, projectRoot])
+  const pieces = useMemo(
+    () => titlePieces(item.title, item.paths, projectRoot),
+    [item.title, item.paths, projectRoot],
+  )
   const linked = pieces.some((p) => p.ref)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
@@ -324,7 +333,8 @@ export function ToolCard({
    * practice. The full output is what `result` delivers.)
    */
   /** The whole input shows once the card is open, when it says more than the title row can (below) */
-  const showInput = !call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60)
+  const showInput =
+    !call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60)
   /** Still running: no answer yet and no failure */
   const running = item.result === undefined && item.ok === undefined
   const liveTail =
@@ -349,7 +359,13 @@ export function ToolCard({
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
     >
       {call ? (
-        <CentraluCallHeader item={item} call={call} sessionId={sessionId} open={open} onToggle={() => setOpen((o) => !o)} />
+        <CentraluCallHeader
+          item={item}
+          call={call}
+          sessionId={sessionId}
+          open={open}
+          onToggle={() => setOpen((o) => !o)}
+        />
       ) : linked ? (
         /*
          * A title with a file the viewer can open (the audit of 2026-10, item 6). A link cannot sit inside the
@@ -363,9 +379,15 @@ export function ToolCard({
             aria-expanded={open}
             data-testid="tool-card-toggle"
           >
-            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">{item.tool}</span>
+            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+              {item.tool}
+            </span>
           </button>
-          <span className="readout min-w-0 truncate py-2 text-xs text-ink-muted" data-testid="tool-card-title" title={item.title}>
+          <span
+            className="readout min-w-0 truncate py-2 text-xs text-ink-muted"
+            data-testid="tool-card-title"
+            title={item.title}
+          >
             {pieces.map((p, i) =>
               p.ref ? (
                 <FileLink key={i} refInfo={p.ref} projectId={projectId}>
@@ -398,8 +420,12 @@ export function ToolCard({
           title={item.title}
         >
           {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
-          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">{item.tool}</span>
-          <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">{item.title === item.tool ? '' : item.title}</span>
+          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">
+            {item.tool}
+          </span>
+          <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">
+            {item.title === item.tool ? '' : item.title}
+          </span>
           {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" aria-label="running" />}
           {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted">failed</span>}
           {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
@@ -444,7 +470,11 @@ export function ToolCard({
       {!call && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
           {/* Named only beside a shown input, where the two would otherwise read as one block */}
-          {showInput && <span className="readout mb-1 block px-0.5 text-2xs uppercase tracking-wide text-ink-faint">Output</span>}
+          {showInput && (
+            <span className="readout mb-1 block px-0.5 text-2xs uppercase tracking-wide text-ink-faint">
+              Output
+            </span>
+          )}
           <pre
             ref={outRef}
             className={`whitespace-pre-wrap break-words font-mono text-xs leading-body text-ink-muted ${
@@ -469,7 +499,12 @@ export function ToolCard({
       )}
 
       {launchesSubagent(item.tool) && item.callId && (
-        <SubagentSteps sessionId={sessionId} callId={item.callId} projectRoot={projectRoot} projectId={projectId} />
+        <SubagentSteps
+          sessionId={sessionId}
+          callId={item.callId}
+          projectRoot={projectRoot}
+          projectId={projectId}
+        />
       )}
     </div>
   )
@@ -519,22 +554,36 @@ export function SubagentSteps({
         <span className="readout text-xs text-ink-faint">Subagent&apos;s steps</span>
       </button>
       {open && (
-        <div className="flex flex-col gap-2 border-t border-line px-2.5 py-2" data-testid="subagent-steps-list">
+        <div
+          className="flex flex-col gap-2 border-t border-line px-2.5 py-2"
+          data-testid="subagent-steps-list"
+        >
           {items.map((it) => (
-            <ChatRow key={it.seq} item={it} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} nested />
+            <ChatRow
+              key={it.seq}
+              item={it}
+              projectRoot={projectRoot}
+              projectId={projectId}
+              sessionId={sessionId}
+              nested
+            />
           ))}
           {steps?.loading && <p className="readout text-xs text-ink-faint">Loading the steps…</p>}
           {steps?.error && (
             <p className="text-xs text-ink" data-testid="subagent-steps-error">
               Could not load the steps — {steps.error}{' '}
-              <button className="readout text-ink-faint underline hover:text-ink" onClick={() => void loadMore(sessionId, callId)}>
+              <button
+                className="readout text-ink-faint underline hover:text-ink"
+                onClick={() => void loadMore(sessionId, callId)}
+              >
                 Try again
               </button>
             </p>
           )}
           {steps && !steps.loading && !steps.error && items.length === 0 && (
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-empty">
-              No steps were recorded for this agent. One that ran before Centralu kept them left only its report.
+              No steps were recorded for this agent. One that ran before Centralu kept them left only its
+              report.
             </p>
           )}
           {steps?.more && !steps.loading && (
@@ -548,6 +597,15 @@ export function SubagentSteps({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink */
+export function SaidAt({ at, className = '' }: { at: number; className?: string }) {
+  return (
+    <div className={`text-2xs text-ink-faint ${className}`} data-testid="said-at">
+      {formatSaidAt(at)}
     </div>
   )
 }
