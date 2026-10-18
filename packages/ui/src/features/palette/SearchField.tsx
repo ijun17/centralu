@@ -26,7 +26,7 @@ export function SearchField() {
   const open = useStore((s) => s.paletteOpen)
   return (
     <button
-      className={`pointer-events-auto flex h-7 w-full min-w-0 items-center gap-2 rounded-[10px] border pl-3 pr-1 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
+      className={`pointer-events-auto flex h-7 w-full min-w-0 items-center gap-2 rounded-field border pl-3 pr-1 text-left text-sm transition-colors hover:border-line-strong hover:text-ink ${
         open ? 'border-line-strong text-ink' : 'border-line text-ink-faint'
       }`}
       onClick={() => useStore.getState().togglePalette(true)}
@@ -38,10 +38,11 @@ export function SearchField() {
       <SearchIcon />
       <span className="truncate">Search</span>
       {/*
-        A 10px field (owner, 2026-10-18: an input, so not the status capsules' full round). The key inside follows it:
-        its corner is the field's less the gap around it (10 - 5 = 5px, the gap even on top and right), so the curves run parallel.
+        A field's corner, 10px (`rounded-field`; owner, 2026-10-18: an input, so not the status capsules' full round). The
+        key inside follows it: its corner is the field's less the gap around it (`rounded-field-key`, 10 - 5 = 5px, the gap
+        even on top and right), so the curves run parallel.
       */}
-      <span className="ml-auto shrink-0 text-2xs [&_.keycap]:rounded-[5px]">
+      <span className="ml-auto shrink-0 text-2xs [&_.keycap]:rounded-field-key">
         <Kbd>{sc('mod', 'K')}</Kbd>
       </span>
     </button>

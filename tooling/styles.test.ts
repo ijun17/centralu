@@ -41,6 +41,8 @@ const REQUIRED = [
   { needle: 'cc-mark', why: 'the four looks of a session mark (data-look on .cc-mark)' },
   { needle: 'cc-panel', why: 'the four looks of a panel border (data-look on .cc-panel)' },
   { needle: 'cc-chip', why: 'the inner shadow on a session marker chip (@layer components)' },
+  // A corner step Tailwind has no name of its own for: were its utility not generated, bubbles and cards would be square
+  { needle: 'rounded-bubble', why: 'a corner from the radius scale (--radius-bubble)' },
 ]
 
 let css = ''
@@ -143,6 +145,12 @@ describe('the built CSS actually contains styles', () => {
       // high contrast light: diff and danger, terminal
       '0b5a1f', 'd1f5d8', 'a1001f', 'ffe1e1',
       '0550ae', '6639ba', '135e65', '3d444d', '82071e', '044f1e', '3b2300', '033d8b', '512a97', '0b4a4f', '424a53',
+      /*
+       * The window's close button where the top bar draws it (Windows, app/WindowControls.tsx): Windows' own red under
+       * the pointer, as the OS title bar it replaces has it (owner, 2026-10-18). A control of the OS's, not a state of
+       * ours, so it stays out of the brightness hierarchy; it is shown only while hovered.
+       */
+      'c42b1c',
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
@@ -179,33 +187,34 @@ describe('our own classes are actually used', () => {
   })
 })
 
+/** The UI's source files a screen is drawn from, tests left out */
+const UI_FILES = execFileSync('git', ['ls-files', 'packages/ui/src', 'apps/web/src', 'apps/desktop/src'], {
+  cwd: ROOT,
+  encoding: 'utf8',
+})
+  .split('\n')
+  .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+
 /**
- * The type and radius scales hold (#312 step 2).
+ * The type scale holds (#312 step 2).
  *
- * Tailwind's own scales are cleared in index.css, so a size or radius that is not a token can only
- * come back as an arbitrary value (`text-[9px]`, `rounded-[5px]`). That is exactly how the app
- * had drifted to nine text sizes and ten radii, one call site at a time. The few arbitrary values
- * that are allowed say why where they are written: rows of a fixed height that a virtual list
- * or a drawn lane depends on, and a radius derived from a token.
+ * Tailwind's own scales are cleared in index.css, so a size that is not a token can only come back
+ * as an arbitrary value (`text-[9px]`). That is exactly how the app had drifted to nine text sizes,
+ * one call site at a time. The few arbitrary values that are allowed say why where they are
+ * written: rows of a fixed height that a virtual list or a drawn lane depends on. Corners have
+ * their own check below.
  */
-describe('type and radius stay on the scale', () => {
+describe('type stays on the scale', () => {
   const ALLOWED = new Set([
     'leading-[18px]', // CodeViewer: the virtual list's row height
     'leading-[1.5]', // GitPanel's diff: the virtual list's ~17px rows
-    'rounded-b-[calc(var(--radius-lg)-1px)]', // the folded composer inside the pane's 1px border
   ])
-  const files = execFileSync('git', ['ls-files', 'packages/ui/src', 'apps/web/src', 'apps/desktop/src'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
 
-  it('no arbitrary text size, line height or radius outside the listed exceptions', () => {
+  it('no arbitrary text size or line height outside the listed exceptions', () => {
     const offenders: string[] = []
-    for (const f of files) {
+    for (const f of UI_FILES) {
       const text = readFileSync(join(ROOT, f), 'utf8')
-      for (const m of text.matchAll(/(?<![\w-])(?:text|leading|rounded(?:-[trblse]{1,2})?)-\[[^\]\s]+\]/g)) {
+      for (const m of text.matchAll(/(?<![\w-])(?:text|leading)-\[[^\]\s]+\]/g)) {
         // text-[…] is also how a colour is written arbitrarily; only sizes are the scale's business
         if (m[0].startsWith('text-[') && !/^text-\[[\d.]+(px|rem|em)\]$/.test(m[0])) continue
         if (!ALLOWED.has(m[0])) offenders.push(`${f}: ${m[0]}`)
@@ -213,6 +222,84 @@ describe('type and radius stay on the scale', () => {
       for (const m of text.matchAll(/fontSize: ['"`]?\d/g)) offenders.push(`${f}: ${m[0]}`)
     }
     expect(offenders, 'use a token from the scale in styles/index.css, or add the exception here with its reason').toEqual([])
+  })
+})
+
+/**
+ * Corners come from the radius scale (docs/design-system.md, Shape).
+ *
+ * The scale is in styles/index.css (`--radius-sm` to `--radius-bubble`, and `--radius-full`), each step named for what
+ * takes it. A corner written as a number at a call site (`rounded-[14px]`, `style={{ borderRadius: 6 }}`) is how the
+ * app drifted to ten radii once (#312 step 2), and how the 14px bubbles and 10px fields of 2026-10-18 first came in:
+ * as copies that the next change had to find one by one. So outside the shared components
+ * (packages/ui/src/components/, where a component decides its own shape once for every screen that uses it) and the
+ * stylesheet, a corner names a token.
+ *
+ * ALLOWED lists the files that still write one, how many and why. It can only shrink: a count higher than what the
+ * file holds fails too, so the change that removes a site takes its line out of the list, and the list never says
+ * more than is true.
+ */
+describe('corners come from the radius scale', () => {
+  type Allowed = { file: string; count: number; why: string }
+  const ALLOWED: Allowed[] = [
+    {
+      file: 'packages/ui/src/features/session/SessionView.tsx',
+      count: 1,
+      why: "the folded composer inside the pane's 1px border: the panel corner less the border, a calc on the token",
+    },
+    {
+      file: 'packages/ui/src/features/pinned-app/PinnedApps.tsx',
+      count: 1,
+      why: 'the same folded composer under a pinned app: the panel corner less the border, a calc on the token',
+    },
+    {
+      file: 'apps/web/src/harness/shell-banner.tsx',
+      count: 1,
+      why: "the browser harness draws macOS's traffic lights as circles; not a screen of the app",
+    },
+  ]
+
+  /** Every corner written as a value rather than a token: an arbitrary `rounded-…-[…]`, or an inline borderRadius */
+  const CORNER = /(?<![\w-])rounded(?:-[trblse]{1,2})?-\[[^\]\s]+\]|\bborderRadius\s*:/g
+  const corners = (text: string) => [...text.matchAll(CORNER)].map((m) => m[0])
+
+  const shared = (f: string) => f.startsWith('packages/ui/src/components/') || f.startsWith('packages/ui/src/styles/')
+  const found = new Map<string, string[]>()
+  for (const f of UI_FILES.filter((f) => !shared(f))) {
+    const hits = corners(readFileSync(join(ROOT, f), 'utf8'))
+    if (hits.length > 0) found.set(f, hits)
+  }
+  const allowed = new Map(ALLOWED.map((a) => [a.file, a]))
+
+  it('no screen writes a corner as a number beyond the list', () => {
+    const extra = [...found]
+      .filter(([f, hits]) => hits.length > (allowed.get(f)?.count ?? 0))
+      .map(([f, hits]) => `${f}: ${hits.join(', ')}; use a --radius-* token (rounded-sm, -md, -lg, -field, -bubble, -full)`)
+    expect(extra).toEqual([])
+  })
+
+  it('the list holds only sites that are still there, so it can only shrink', () => {
+    const stale = ALLOWED.filter((a) => (found.get(a.file)?.length ?? 0) < a.count).map(
+      (a) => `${a.file}: listed ${a.count}, found ${found.get(a.file)?.length ?? 0}; lower the count or remove the line`,
+    )
+    expect(stale).toEqual([])
+  })
+
+  it('every listed site says why it stays', () => {
+    for (const a of ALLOWED) {
+      expect(existsSync(join(ROOT, a.file)), a.file).toBe(true)
+      expect(a.why.length, a.file).toBeGreaterThan(10)
+      expect(a.count, a.file).toBeGreaterThan(0)
+    }
+    expect(ALLOWED.length).toBe(new Set(ALLOWED.map((a) => a.file)).size)
+  })
+
+  it('reads what a corner written as a value looks like', () => {
+    expect(corners('<div className="rounded-[14px] border" />')).toEqual(['rounded-[14px]'])
+    expect(corners('cls = "rounded-t-[14px] rounded-br-[3px]"')).toEqual(['rounded-t-[14px]', 'rounded-br-[3px]'])
+    expect(corners('<span className="[&_.keycap]:rounded-[5px]" />')).toEqual(['rounded-[5px]'])
+    expect(corners('style={{ borderRadius: 6 }}')).toEqual(['borderRadius:'])
+    expect(corners('<div className="rounded-bubble rounded-t-field rounded-full rounded-md" />')).toEqual([])
   })
 })
 
