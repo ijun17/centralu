@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
@@ -256,7 +256,7 @@ export function ChatStream({
               measurements are undisturbed.
             */
             className={`absolute left-0 w-full min-w-0 ${
-              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : 'pb-3'
+              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : bubbleOf(chat, v.index) ? '' : 'pb-3'
             } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
               chat[v.index]?.storedSeq === searchTarget?.seq ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70' : ''
             }`}
@@ -271,7 +271,9 @@ export function ChatStream({
             */
             style={{ top: v.start }}
           >
-            <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
+            <AnswerBubble part={bubbleOf(chat, v.index)}>
+              <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
+            </AnswerBubble>
           </div>
         ))}
       </div>
@@ -292,6 +294,45 @@ export function ChatStream({
       ))}
 
       {working && <ActivityRow sessionId={sessionId} activity={activity} />}
+    </div>
+  )
+}
+
+/**
+ * Where a row stands in the agent's answer bubble (owner, 2026-10-18): everything the agent did between two of the
+ * person's messages (text, reasoning, tool calls, images, approvals) is one bubble, like the person's own message
+ * on the right, so a turn reads as one reply and not as loose rows. Markers (compaction, handoff, an error line)
+ * belong to the conversation, not to the answer, so they stand outside and split it.
+ *
+ * The list is virtual, so the bubble is drawn in pieces, one per row: the first rounds the top, the last the
+ * bottom, the ones between carry only the sides. No gap between rows inside a bubble: the spacing is the piece's
+ * own padding, so the background runs on. Full width, with a rounder corner than the theme's scale has (14px).
+ */
+type BubblePart = 'solo' | 'first' | 'mid' | 'last'
+
+function inBubble(item: ChatItem | undefined): boolean {
+  return item !== undefined && item.kind !== 'user' && item.kind !== 'mark'
+}
+
+function bubbleOf(chat: readonly ChatItem[], i: number): BubblePart | null {
+  if (!inBubble(chat[i])) return null
+  const before = inBubble(chat[i - 1])
+  const after = inBubble(chat[i + 1])
+  return before ? (after ? 'mid' : 'last') : after ? 'first' : 'solo'
+}
+
+const BUBBLE_EDGE: Record<BubblePart, string> = {
+  solo: 'rounded-[14px] border pt-3 pb-3',
+  first: 'rounded-t-[14px] border border-b-0 pt-3 pb-3',
+  mid: 'border-x pb-3',
+  last: 'rounded-b-[14px] border border-t-0 pb-3',
+}
+
+function AnswerBubble({ part, children }: { part: BubblePart | null; children: ReactNode }) {
+  if (!part) return <>{children}</>
+  return (
+    <div className={`min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
+      {children}
     </div>
   )
 }
