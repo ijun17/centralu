@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-window-controls-drawn"
+description = "Enables the window_controls_drawn command without any pre-configured scope."
+commands.allow = ["window_controls_drawn"]
+
+[[permission]]
+identifier = "deny-window-controls-drawn"
+description = "Denies the window_controls_drawn command without any pre-configured scope."
+commands.deny = ["window_controls_drawn"]
