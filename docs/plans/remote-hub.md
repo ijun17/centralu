@@ -1013,7 +1013,7 @@ machine, `takeInTurns` at every limit). No live model read through it, and no re
   The watch starts before the send (the machine's first events can reach the hub before its answer) and is put back
   if the send fails. It reads nothing until the machine's `user_message` of that instruction (from the hub's
   orchestrator, the same text): a link relays one machine's events in order, so a turn end before it is an earlier
-  turn's that was still on its way (#1082). A turn ends as it does here (#166): `turn_complete`, `error`, `limit_reached`, or a state out of
+  turn's that was still on its way (#1082). A record that never comes (lost in a host swap there) stops being waited for once the send has answered, which comes after it on the same link. A turn ends as it does here (#166): `turn_complete`, `error`, `limit_reached`, or a state out of
   work once the turn was seen working, so the session waking before its turn is not its end. The report is the same
   message as for this computer's sessions (`deliverReport`), its project named with the machine (`api on Ubuntu box`,
   from the headers mirror) and its last words read with `host.readSession`.

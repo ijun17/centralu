@@ -2659,7 +2659,7 @@ delivered there as an instruction from `<orchestrator> on <this computer>`; with
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
 session's own background work running included (§1.2.1 step 7, #723). The watch starts at the instruction's own
 `user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
-is an earlier turn's.
+is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
 refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s

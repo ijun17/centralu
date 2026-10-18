@@ -117,7 +117,8 @@ export class LinkedReports {
      * end the machine sent before it recorded the instruction can still be on its way: a link relays one machine's
      * events in order, so what comes before the instruction's own `user_message` happened there before it, and is the
      * end of an earlier turn. From that message on, as before: a turn running there then takes the instruction as
-     * mid-turn input and its end is the report, as a local session's is.
+     * mid-turn input and its end is the report, as a local session's is. A record that never comes (lost before it was
+     * relayed) is not waited for past the send's answer (`sendToSession`, orchestrator-seat.ts).
      */
     if (wait.instruction !== undefined) {
       if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) delete wait.instruction

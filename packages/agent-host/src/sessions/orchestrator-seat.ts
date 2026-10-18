@@ -520,7 +520,7 @@ export function orchestratorToolsFor(
          * that came in that moment is not the new wait's, and is not told again.
          */
         const earlier = host.children.linkedReports.get(sessionId)
-        const mine = reportBack ? { orchestratorId, busy: false, instruction: text } : undefined
+        const mine: LinkedReport | undefined = reportBack ? { orchestratorId, busy: false, instruction: text } : undefined
         if (mine) host.children.setLinkedReport(sessionId, mine)
         const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
         // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
@@ -537,6 +537,16 @@ export function orchestratorToolsFor(
             } else host.children.dropLinkedReport(sessionId)
           } else if (mine) failedSends.add(mine)
           return r
+        }
+        /*
+         * The machine records the instruction before it answers, and its events and answers come in order on one link,
+         * read as they come: by now its record has been heard, unless it was lost (the machine's host swapped or restarted
+         * before it went out, past what a reconnect replays). Then nothing would ever start the wait, so it reads turn
+         * ends from here on, as before #1082: anything older came before this answer, and was not taken for its end
+         */
+        if (mine?.instruction !== undefined) {
+          console.error(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`)
+          delete mine.instruction
         }
         // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
         if (!reportBack && earlier?.orchestratorId === orchestratorId && current === earlier) host.children.dropLinkedReport(sessionId)

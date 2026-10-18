@@ -406,22 +406,39 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
-  it('the wait starts at its own instruction, also when the record of it comes after the send answered (#1082)', async () => {
+  it("another instruction's record, or one this hub did not send, does not start the wait (#1082)", async () => {
     const h = await hub()
-    h.recordLate()
+    h.whileSending(() => {
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'something else', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go' })
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    })
     await h.send(true)
-    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
-    // Another instruction's record, or one this hub did not send, is not this one's
-    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'something else', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
-    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go' })
-    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(0)
     expect(h.reports()).toEqual([])
-    h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
     // A turn running when the machine took it in ends with it in it (mid-turn input), as a local session's does
     h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     await h.settle(1)
     expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work finished.')])
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  /*
+   * Review of #1117: the machine's record of the instruction can be lost (its host swapped or restarted before it went
+   * out, past what a reconnect replays). Its events and its answer come in order on one link, so once the send has
+   * answered, nothing older is still on its way: the next turn end is the report, as before #1082, not never.
+   */
+  it('a record that never came does not hold the report past the send answering (#1082 review)', async () => {
+    const h = await hub()
+    h.recordLate()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work finished.')])
+    expect(log.mock.calls.some((c) => String(c[0]).includes('the next turn end reports'))).toBe(true)
+    log.mockRestore()
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
