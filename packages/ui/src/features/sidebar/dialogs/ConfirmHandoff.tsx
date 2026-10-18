@@ -2,6 +2,9 @@ import { useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { useToolMeta, useTools } from '../../../store/selectors.js'
 import { Modal } from '../../../components/Modal.jsx'
+import { Badge } from '../../../components/Badge.jsx'
+import { Button } from '../../../components/Button.jsx'
+import { Segmented } from '../../../components/Segmented.jsx'
 
 /**
  * The handoff confirmation dialog (a dogfooding request).
@@ -61,31 +64,19 @@ export function ConfirmHandoff({
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
 
         {/* Where the note comes from — the app builds it from the transcript by default (#694), or the session writes it itself */}
-        <p className="mt-3 text-2xs uppercase text-ink-faint">Handoff note</p>
-        <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
-          {(
-            [
-              { key: 'agent', label: 'Ask the agent' },
-              { key: 'record', label: 'From the record' },
-            ] as const
-          ).map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              role="radio"
-              aria-checked={mode === m.key}
-              data-testid={`handoff-mode-${m.key}`}
-              onClick={() => setMode(m.key)}
-              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
-                mode === m.key
-                  ? 'border-ink-muted bg-surface-hover text-ink'
-                  : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <Badge as="p" className="mt-3">
+          Handoff note
+        </Badge>
+        <Segmented
+          label="Handoff note source"
+          value={mode}
+          onChange={setMode}
+          className="mt-1"
+          options={[
+            { value: 'agent', label: 'Ask the agent', testId: 'handoff-mode-agent' },
+            { value: 'record', label: 'From the record', testId: 'handoff-mode-record' },
+          ]}
+        />
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="handoff-mode-note">
           {mode === 'agent'
             ? 'This session writes a handoff note, the app saves it outside the project, then a fresh session starts by reading it.'
@@ -100,27 +91,25 @@ export function ConfirmHandoff({
         )}
 
         {/* The receiving agent — choosing a different tool does not carry over tool-specific settings like model or reasoning effort */}
-        <p className="mt-3 text-2xs uppercase text-ink-faint">Hand off to</p>
-        <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Hand off to">
-          {tools.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              role="radio"
-              aria-checked={heirTool === t.name}
-              data-testid={`handoff-tool-${t.name}`}
-              onClick={() => setHeirTool(t.name)}
-              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
-                heirTool === t.name
-                  ? 'border-ink-muted bg-surface-hover text-ink'
-                  : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
-              }`}
-            >
-              {t.label}
-              {t.name === tool && <span className="ml-1 text-2xs text-ink-faint">(current)</span>}
-            </button>
-          ))}
-        </div>
+        <Badge as="p" className="mt-3">
+          Hand off to
+        </Badge>
+        <Segmented
+          label="Hand off to"
+          value={heirTool}
+          onChange={setHeirTool}
+          className="mt-1"
+          options={tools.map((t) => ({
+            value: t.name,
+            label: (
+              <>
+                {t.label}
+                {t.name === tool && <span className="ml-1 text-2xs text-ink-faint">(current)</span>}
+              </>
+            ),
+            testId: `handoff-tool-${t.name}`,
+          }))}
+        />
 
         {deleteOld ? (
           <p
@@ -155,18 +144,14 @@ export function ConfirmHandoff({
           <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className={`rounded-md border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-              deleteOld
-                ? 'border-danger/40 bg-danger-bg text-danger hover:border-danger/70'
-                : 'border-line bg-surface-raised text-ink hover:border-line-strong'
-            }`}
+          <Button
+            variant={deleteOld ? 'danger' : 'primary'}
             onClick={() => onConfirm(heirTool, deleteOld, mode)}
             disabled={mode === 'agent' && !!blocked}
             data-testid="confirm-handoff-yes"
           >
             Hand off
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

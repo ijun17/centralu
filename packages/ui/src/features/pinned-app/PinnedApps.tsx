@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
+import { Button } from '../../components/Button.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { RunsPanel } from './RunsPanel.jsx'
 import { MessageAsk } from './MessageAsk.jsx'
@@ -516,14 +517,9 @@ function Body({
       <Notice testId="pinned-untrusted" title={app.status.reason ?? ''}>
         Trusting lets this project&apos;s apps run and its settings apply.
         {app.projectId && (
-          <button
-            type="button"
-            className="mt-3 block rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong"
-            onClick={() => void trust(app.projectId!, true)}
-            data-testid="pinned-trust"
-          >
+          <Button variant="primary" className="mt-3 block" onClick={() => void trust(app.projectId!, true)} data-testid="pinned-trust">
             Trust this project
-          </button>
+          </Button>
         )}
       </Notice>
     )
@@ -565,14 +561,9 @@ function Body({
 
 function RestartButton({ onClick, className = '' }: { onClick: () => void; className?: string }) {
   return (
-    <button
-      type="button"
-      className={`shrink-0 rounded-md border border-line bg-surface-floor px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong ${className}`}
-      onClick={onClick}
-      data-testid="pinned-restart"
-    >
+    <Button variant="primary" onRaised className={`shrink-0 ${className}`} onClick={onClick} data-testid="pinned-restart">
       Restart
-    </button>
+    </Button>
   )
 }
 

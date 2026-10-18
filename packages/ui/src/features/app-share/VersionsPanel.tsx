@@ -5,6 +5,8 @@ import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatClock, formatDay } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { Badge } from '../../components/Badge.jsx'
+import { Button } from '../../components/Button.jsx'
 
 /**
  * An app's versions (M4 E-1) — an expandable panel next to the pinned view (the same spot and
@@ -61,7 +63,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="versions-panel" aria-label="Versions">
       <header className="flex h-8 shrink-0 items-center border-b border-line px-3">
-        <span className="readout text-2xs uppercase text-ink-faint">Versions</span>
+        <Badge readout>Versions</Badge>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {error && (
@@ -76,14 +78,9 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
               Kept on this machine each time the app starts on new code. The last five stay.
             </p>
             {previous && !asking && (
-              <button
-                type="button"
-                className="mx-3 mt-2 rounded-md border border-line bg-surface-raised px-2.5 py-1 text-xs text-ink transition-colors hover:border-line-strong"
-                onClick={() => setAsking(previous)}
-                data-testid="versions-restore-previous"
-              >
+              <Button variant="primary" size="sm" className="mx-3 mt-2" onClick={() => setAsking(previous)} data-testid="versions-restore-previous">
                 Restore previous version
-              </button>
+              </Button>
             )}
             {asking && (
               <div className="mx-3 mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="versions-confirm">
@@ -95,15 +92,16 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
                   <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink" onClick={() => setAsking(null)} data-testid="versions-confirm-cancel">
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => void restore(asking)}
-                    disabled={busy}
+                    busy={busy}
+                    busyText="Restoring…"
                     data-testid="versions-confirm-yes"
                   >
-                    {busy ? 'Restoring…' : 'Restore'}
-                  </button>
+                    Restore
+                  </Button>
                 </div>
               </div>
             )}

@@ -6,6 +6,7 @@ import { useProjectApps } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
+import { Button } from '../../components/Button.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { lookOf } from '../session/look.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
@@ -193,14 +194,13 @@ export function ProjectView({ projectId }: { projectId: string }) {
               </span>
             </p>
             {sessions.length === 0 && (
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong"
+              <Button
+                className="flex items-center gap-1.5"
                 onClick={() => openNewSession(projectId)}
                 data-testid="project-empty-new-session"
               >
                 <PlusIcon size={12} /> New session
-              </button>
+              </Button>
             )}
           </div>
         ) : (
