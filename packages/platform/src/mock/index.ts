@@ -251,6 +251,8 @@ export class MockPlatform implements Platform {
   set machineDetected(value: ToolsMock['machineDetected']) { this.toolsMock.machineDetected = value }
   get commandState() { return this.toolsMock.commandState }
   set commandState(value: ToolsMock['commandState']) { this.toolsMock.commandState = value }
+  get commandsError() { return this.toolsMock.commandsError }
+  set commandsError(value: ToolsMock['commandsError']) { this.toolsMock.commandsError = value }
 
   // usage.ts
   get usageState() { return this.usageMock.usageState }
@@ -353,6 +355,8 @@ export class MockPlatform implements Platform {
 
   // files.ts
   get fileOps() { return this.filesMock.fileOps }
+  get searchError() { return this.filesMock.searchError }
+  set searchError(value: FilesMock['searchError']) { this.filesMock.searchError = value }
   get watchedDirs() { return this.filesMock.watchedDirs }
   set watchedDirs(value: FilesMock['watchedDirs']) { this.filesMock.watchedDirs = value }
   get trashed() { return this.filesMock.trashed }

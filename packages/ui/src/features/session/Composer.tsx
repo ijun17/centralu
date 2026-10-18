@@ -610,6 +610,7 @@ export const Composer = memo(function Composer({
             items={ac.items}
             index={ac.index}
             loading={ac.loading}
+            note={ac.note}
             kind={ac.kind}
             onPick={pick}
           />

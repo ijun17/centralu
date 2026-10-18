@@ -68,9 +68,14 @@ export class ToolsMock {
       ready: true,
       commands: [],
     }
+  /** For tests: when set, the slash command list fails with this reason (a machine away, a call that timed out) */
+  commandsError: string | null = null
   readonly agents: Pick<AgentPort, 'models' | 'commands' | 'capabilities' | 'detect'> = {
     models: async (tool: ToolName) => ({ supported: true, models: this.mockToolProfiles.get(tool)?.models ?? [] }),
-    commands: async (_sessionId: string) => ({ ...this.commandState }),
+    commands: async (_sessionId: string) => {
+      if (this.commandsError !== null) throw new Error(this.commandsError)
+      return { ...this.commandState }
+    },
     capabilities: async (tool: ToolName): Promise<AdapterCapabilities> => ({
       approvals: true,
       contextUsage: 'exact',
