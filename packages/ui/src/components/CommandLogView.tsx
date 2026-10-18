@@ -40,7 +40,7 @@ export function CommandLogView({
       })
       const offExit = platform.terminal.onExit((e) => {
         if (e.terminalId !== runId) return
-        term.write(`\r\n\x1b[2m— exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
+        log.exit(e.exitCode)
       })
       void platform.commands
         .log(projectId, command)
@@ -48,10 +48,7 @@ export function CommandLogView({
           if (!run) return log.fail()
           // If a re-run gave it a different runId, this view is about to be replaced — the old log is not drawn
           if (run.runId !== runId) return log.drop()
-          log.replay(run.history)
-          if (!run.running && run.exitCode !== null) {
-            term.write(`\r\n\x1b[2m— exited (${run.exitCode}) —\x1b[0m\r\n`)
-          }
+          log.replay(run.history, run.running ? null : run.exitCode)
         })
         .catch(() => log.fail())
 

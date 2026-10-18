@@ -1,6 +1,7 @@
 import { Fragment, memo, useRef, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Options, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useCapability } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
 import { parseFileRef, type FileRef } from './filePath.js'
@@ -208,7 +209,7 @@ function tryDecode(href: string): string {
 
 /**
  * A single file link inside the conversation — a backticked path and a markdown link are the
- * same button. Click opens the read-only viewer (#39), right-click opens Finder. Right-click
+ * same button. Click opens the read-only viewer (#39), right-click reveals it in the file manager. Right-click
  * opens directly instead of showing a menu because a menu with only one entry just slows the
  * hand down (the file tree has several entries, so a menu makes sense there).
  */
@@ -234,11 +235,13 @@ export function FileLink({
 }) {
   const openFile = useStore((s) => s.openFile)
   const revealFile = useStore((s) => s.revealFile)
+  // The OS's own name for it, as the file tree's menu and a reply's image say it (#1143 U23)
+  const fileManager = useCapability('fileManagerName')
   return (
     <button
       type="button"
       className="cursor-pointer underline decoration-ink-faint underline-offset-2 hover:decoration-ink"
-      title={`Open ${refInfo.path}${refInfo.line === null ? '' : ` at line ${refInfo.line}`} · Right-click: Reveal in Finder`}
+      title={`Open ${refInfo.path}${refInfo.line === null ? '' : ` at line ${refInfo.line}`} · Right-click: Reveal in ${fileManager}`}
       data-testid="file-link"
       onClick={() => {
         // The line goes first: by the time `openFile` renders the viewer, the

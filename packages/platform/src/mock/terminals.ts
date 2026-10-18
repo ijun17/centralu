@@ -17,6 +17,8 @@ export class TerminalsMock {
     resized: { terminalId: string; cols: number; rows: number }[]
     closed: string[]
   } = { byCwd: new Map(), input: [], resized: [], closed: [] }
+  /** For tests: when set, opening a terminal fails with this reason */
+  createError: string | null = null
   termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
 
@@ -52,6 +54,7 @@ export class TerminalsMock {
       }))
     },
     create: async (projectId: string) => {
+      if (this.createError !== null) throw new Error(this.createError)
       const cwd = this.cwdOf(projectId)
       const list = this.terminalState.byCwd.get(cwd) ?? []
       const t = {

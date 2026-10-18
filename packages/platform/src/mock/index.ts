@@ -251,6 +251,8 @@ export class MockPlatform implements Platform {
   set machineDetected(value: ToolsMock['machineDetected']) { this.toolsMock.machineDetected = value }
   get commandState() { return this.toolsMock.commandState }
   set commandState(value: ToolsMock['commandState']) { this.toolsMock.commandState = value }
+  get commandsError() { return this.toolsMock.commandsError }
+  set commandsError(value: ToolsMock['commandsError']) { this.toolsMock.commandsError = value }
 
   // usage.ts
   get usageState() { return this.usageMock.usageState }
@@ -345,6 +347,8 @@ export class MockPlatform implements Platform {
   set sshConfig(value: MachinesMock['sshConfig']) { this.machinesMock.sshConfig = value }
   get probeAnswers() { return this.machinesMock.probeAnswers }
   set probeAnswers(value: MachinesMock['probeAnswers']) { this.machinesMock.probeAnswers = value }
+  /** What the window said it needs, in order (#1134) */
+  get machinesNeeded() { return this.machinesMock.needed }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }
@@ -354,6 +358,8 @@ export class MockPlatform implements Platform {
   // files.ts
   get fileOps() { return this.filesMock.fileOps }
   get sessionFiles() { return this.filesMock.sessionFiles }
+  get searchError() { return this.filesMock.searchError }
+  set searchError(value: FilesMock['searchError']) { this.filesMock.searchError = value }
   get watchedDirs() { return this.filesMock.watchedDirs }
   set watchedDirs(value: FilesMock['watchedDirs']) { this.filesMock.watchedDirs = value }
   get trashed() { return this.filesMock.trashed }
@@ -364,6 +370,8 @@ export class MockPlatform implements Platform {
   // terminals.ts
   get terminalState() { return this.terminalsMock.terminalState }
   set terminalState(value: TerminalsMock['terminalState']) { this.terminalsMock.terminalState = value }
+  get terminalCreateError() { return this.terminalsMock.createError }
+  set terminalCreateError(value: TerminalsMock['createError']) { this.terminalsMock.createError = value }
 
   // commands.ts
   get commandRuns() { return this.commandsMock.commandRuns }
@@ -429,6 +437,8 @@ export class MockPlatform implements Platform {
   // rules.ts
   get searchResults() { return this.rulesMock.searchResults }
   set searchResults(value: RulesMock['searchResults']) { this.rulesMock.searchResults = value }
+  get searchHold() { return this.rulesMock.searchHold }
+  set searchHold(value: RulesMock['searchHold']) { this.rulesMock.searchHold = value }
   get rulesList() { return this.rulesMock.rulesList }
   set rulesList(value: RulesMock['rulesList']) { this.rulesMock.rulesList = value }
   get consentsList() { return this.rulesMock.consentsList }

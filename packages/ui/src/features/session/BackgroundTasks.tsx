@@ -46,6 +46,16 @@ function badgeText(tasks: readonly BackgroundTask[]): string {
 }
 
 /**
+ * What the list's header counts: the tasks running, by the same rule as the capsule's number (ambient ones are left
+ * out), or how many are listed once none runs. The header used to count every running row, so a session with one real
+ * and one ambient task said "1" on the capsule and "2 running" in the list (#1143 U25).
+ */
+export function listCount(tasks: readonly BackgroundTask[]): string {
+  const running = backgroundCount(tasks)
+  return running > 0 ? `${running} running` : `${tasks.length}`
+}
+
+/**
  * The header's count, and the list it opens. Drawn only while there is something to show: a running task that is
  * activity, or an ended one still listed.
  *
@@ -172,7 +182,6 @@ function BackgroundTaskList({
 }) {
   const clear = useStore((s) => s.clearBackgroundTasks)
   const hasEnded = tasks.some((t) => t.status !== 'running')
-  const running = tasks.filter((t) => t.status === 'running').length
   const at = useAnchoredPlacement(anchorRef, listRef, true)
   return (
     <div
@@ -196,7 +205,7 @@ function BackgroundTaskList({
       <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-sm font-medium text-ink">Background</h2>
         <span className="readout text-xs text-ink-faint">
-          {running > 0 ? `${running} running` : `${tasks.length}`}
+          {listCount(tasks)}
         </span>
         {hasEnded && (
           <button

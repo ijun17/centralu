@@ -286,7 +286,50 @@ test('When skills have not loaded yet, it does not claim there are none', async 
   await newSession(page, 'alpha', 'task')
 
   await page.getByTestId('prompt-input').fill('/')
-  await expect(page.getByTestId('autocomplete-loading')).toContainText('Loading skills')
+  // "Not yet" is said, and then it ends: the tool answered that it is not ready, and the menu does not wait for ever (#1143 U13)
+  await expect(page.getByTestId('autocomplete-note')).toContainText('Skills are not ready yet')
+  await expect(page.getByTestId('autocomplete-loading')).toBeHidden()
+})
+
+test('A skills list that could not be read says so, and is asked again on the next slash (#1143 U13)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.commandsError = 'the machine did not answer'
+    m.commandState = { ready: true, commands: [{ name: 'review', description: '', argumentHint: '' }] }
+  })
+  await newSession(page, 'alpha', 'task')
+  const input = page.getByTestId('prompt-input')
+
+  await input.fill('/rev')
+  await expect(page.getByTestId('autocomplete-note')).toContainText('Could not load skills: the machine did not answer')
+  await expect(page.getByTestId('autocomplete-loading')).toBeHidden()
+
+  // The next slash asks again, and the answer replaces the note
+  await page.evaluate(() => ((window as any).__mock.commandsError = null))
+  await input.fill('hello')
+  await input.fill('/rev')
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('/review')
+  await expect(page.getByTestId('autocomplete-note')).toBeHidden()
+})
+
+test('A file search that failed is not "no files", and Enter waits for the next one (#1143 U14)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.searchError = 'the index is not ready'
+    m.fsState.entries[''] = [{ name: 'SessionView.tsx', path: 'src/SessionView.tsx', isDir: false, ignored: false }]
+  })
+  await newSession(page, 'alpha', 'task')
+  const input = page.getByTestId('prompt-input')
+
+  await input.fill('see @Ses')
+  await expect(page.getByTestId('autocomplete-note')).toContainText('Could not search files: the index is not ready')
+
+  // The host recovers: a longer query is not taken for "no files" just because the last one found none
+  await page.evaluate(() => ((window as any).__mock.searchError = null))
+  await input.pressSequentially('s')
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
 })
 
 test('A slash in the middle of a sentence is not treated as a command', async ({ page }) => {
