@@ -240,6 +240,9 @@ export class MockPlatform implements Platform {
   // trash.ts
   get externallyDeleted() { return this.trashMock.externallyDeleted }
   get trashBin() { return this.trashMock.trashBin }
+  /** The app-agent run records in the trash (#378); a test seeds one with `keepRun` */
+  get keptRuns() { return this.trashMock.keptRuns }
+  keepRun(...a: Parameters<TrashMock['keepRun']>): void { this.trashMock.keepRun(...a) }
 
   // tools.ts
   get detected() { return this.toolsMock.detected }

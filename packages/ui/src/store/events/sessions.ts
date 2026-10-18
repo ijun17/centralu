@@ -1,4 +1,4 @@
-import { SessionInfo, type NormalizedEvent } from '@cc/protocol'
+import { SessionInfo, parseTolerant, type NormalizedEvent } from '@cc/protocol'
 import { initialSession, sessionPanelId, withPanel } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
 import { forgetSessions, liveEventWatchers, liveFactsOf, replayPendingEvents } from '../sessionList.js'
@@ -85,9 +85,9 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
    * is silently discarded for that case.
    */
   if (e.type === 'session_created') {
-    const parsed = SessionInfo.safeParse(e.session)
-    if (parsed.success && !get().sessions[parsed.data.id]) {
-      const s = parsed.data
+    // Read as the session list reads it (#384): a value a newer host invented costs that value, not the session
+    const s = parseTolerant(SessionInfo, e.session) as SessionInfo | undefined
+    if (typeof s === 'object' && s !== null && typeof s.id === 'string' && !get().sessions[s.id]) {
       set((st) => ({
         sessions: {
           ...st.sessions,

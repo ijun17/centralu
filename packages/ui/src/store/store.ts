@@ -199,6 +199,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     tools: [] as ToolStatus[],
     chat: {},
     drafts: {},
+    keptDrafts: [],
     stickToBottom: {},
     scrollAnchor: {},
     searchTargets: {},

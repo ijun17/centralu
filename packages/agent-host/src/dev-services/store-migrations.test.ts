@@ -172,7 +172,7 @@ describe('the whole migration list, from v1 to the newest', () => {
     const ran = store.migrationsRun
     const version = store.schemaVersion
     store.close()
-    // Every step of the list ran. Not `version - 1`: a number can be held for a step that lands later (v57 and v58, #1134)
+    // Every step of the list ran. Not `version - 1`: a number can be held for a step that lands later (v58, #1134)
     expect(ran).toBe(stepList().length)
 
     await expect(JSON.stringify({ steps: stepList(), version, ran, store: dump(file) }, null, 1) + '\n').toMatchFileSnapshot(

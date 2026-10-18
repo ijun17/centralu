@@ -840,6 +840,120 @@ describe('restoring the workspace saves nothing until it is done', () => {
 })
 
 /*
+ * A snapshot that could not be read (#384): `workspace.load` failed (a timeout under load, a host that threw), or the
+ * restore threw partway. The screen came up as the defaults with no word, and the next change saved those defaults
+ * over the stored snapshot, which held settings as well as the layout (the notification switches, the app spans,
+ * `introSeen`). Now it is said, and nothing is saved over the stored snapshot until it has been read.
+ */
+describe('a workspace snapshot that could not be read', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true }
+
+  it('is said, and a change made meanwhile is not saved over it', async () => {
+    const mock = new MockPlatform()
+    await mock.workspace.save(stored)
+    const load = mock.workspace.load
+    // The mock's preferences read the snapshot too (an old text size); only the snapshot's own read fails here
+    const prefs = await mock.prefs.load()
+    mock.prefs.load = async () => prefs
+    mock.workspace.load = async () => {
+      throw Object.assign(new Error('RPC timed out: workspace.load'), { code: 'timeout', retryable: true })
+    }
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().toast).toContain('Could not read the window layout')
+
+    useStore.getState().toggleProjectFold('new-fold')
+    await tick()
+    expect(mock.workspaceSnapshot).toEqual(stored)
+
+    // Read on the next attach, it is restored and saved as usual again
+    mock.workspace.load = load
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState().foldedProjects).toEqual(['kept-fold'])
+    useStore.getState().toggleProjectFold('after-read')
+    await tick()
+    expect((mock.workspaceSnapshot as { foldedProjects?: string[] }).foldedProjects).toEqual(['kept-fold', 'after-read'])
+  })
+
+  /** A window attached to a mock whose snapshot read fails `times` times, then reads as usual */
+  async function failedFirstRead(times: number) {
+    const mock = new MockPlatform()
+    await mock.workspace.save(stored)
+    const load = mock.workspace.load
+    const prefs = await mock.prefs.load()
+    mock.prefs.load = async () => prefs
+    let failures = 0
+    mock.workspace.load = async () => {
+      if (failures < times) {
+        failures++
+        throw Object.assign(new Error('RPC timed out: workspace.load'), { code: 'timeout', retryable: true })
+      }
+      return load()
+    }
+    await useStore.getState().attach(mock)
+    await vi.advanceTimersByTimeAsync(0)
+    return { mock, failures: () => failures }
+  }
+  const folds = (mock: MockPlatform) => (mock.workspaceSnapshot as { foldedProjects?: string[] }).foldedProjects
+
+  // attach runs once per window: a reconnect is the window's next chance to read it, and a timer the one after
+  it('is read again on a reconnect, brought back, and saved as usual from then on', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock } = await failedFirstRead(1)
+      expect(useStore.getState().foldedProjects).toEqual([])
+      mock.setConnectionState('disconnected')
+      mock.setConnectionState('connected')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(useStore.getState()).toMatchObject({ foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true })
+      useStore.getState().toggleProjectFold('after-reconnect')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(folds(mock)).toEqual(['kept-fold', 'after-reconnect'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('is read again on a timer while connected, and saved as usual once read', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock } = await failedFirstRead(2)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useStore.getState().foldedProjects).toEqual([])
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(useStore.getState().foldedProjects).toEqual(['kept-fold'])
+      useStore.getState().toggleProjectFold('after-retry')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(folds(mock)).toEqual(['kept-fold', 'after-retry'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A row that never reads must not stop saving for good: past the last try, what the window holds is saved over it
+  it('that never reads is saved over with what the window holds, said once, after the last try', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock, failures } = await failedFirstRead(Infinity)
+      useStore.getState().toggleProjectFold('kept-meanwhile')
+      await vi.advanceTimersByTimeAsync(1_000 + 5_000)
+      expect(mock.workspaceSnapshot).toEqual(stored)
+      useStore.setState({ toast: null })
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(failures()).toBe(4)
+      expect(useStore.getState().toast).toBe('Could not read the window layout after 4 tries; the one on screen is saved in its place')
+      expect(folds(mock)).toEqual(['kept-meanwhile'])
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(failures()).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/*
  * A failed save is retried, not dropped (`workspaceSave` in store.ts). On 2026-09-30 the machine froze for hours,
  * the person folded every project during that time, every save timed out, and after a restart the folds were gone:
  * the stored snapshot never received them.

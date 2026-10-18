@@ -1,6 +1,7 @@
 import type { BackgroundTask, RebuildCause, SessionInfo } from '@cc/protocol'
 import type { CreateSessionOpts, LaunchSettings } from '../adapters/contract.js'
-import { readJsonObjects } from '../dev-services/store/json.js'
+import { parseJson } from '../dev-services/store/json.js'
+import { isObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { RestartHost } from './restart-policy.js'
@@ -40,10 +41,20 @@ export class LaunchRecords {
     return `background_tasks:${sessionId}`
   }
 
+  /**
+   * The list as kept, or null for "unknown". A record this build cannot read whole (#384: cut short, not a list, or a
+   * task in a newer build's shape) is no record: read as "nothing running", it let the adopted process sleep, which
+   * kills its shells silently. Only running tasks are ever written, so any other element is another build's.
+   */
   keptBackgroundTasks(sessionId: string): BackgroundTask[] | null {
-    const raw = this.host.store.settings.appSetting(this.backgroundTasksKey(sessionId))
+    const key = this.backgroundTasksKey(sessionId)
+    const raw = this.host.store.settings.appSetting(key)
     if (raw === null) return null
-    return readJsonObjects<BackgroundTask>(raw, (t) => typeof t.id === 'string' && t.status === 'running')
+    const list = parseJson(raw)
+    const readable = (t: unknown) => isObj(t) && typeof t.id === 'string' && t.status === 'running'
+    if (Array.isArray(list) && list.every(readable)) return list as BackgroundTask[]
+    console.error(`[agent-host] app_settings.${key} holds ${JSON.stringify(raw.slice(0, 200))}, which this build cannot read; the session's background work reads as unknown`)
+    return null
   }
 
   rememberBackgroundTasks(m: SessionInfo): void {

@@ -611,6 +611,22 @@ describe('the remote command per shell (#82)', () => {
     expect(() => parseConnectionLine('nothing here')).toThrow(/did not print a connection line/)
   })
 
+  /*
+   * The line another release's `serve` prints (#384): an older remote's line lacks what was added since and reads with
+   * its defaults, a newer one's extra fields are not this build's to read, and a line missing what a connection needs
+   * is an error that says so, never a connection made on a guess.
+   */
+  it("reads an older remote's line with defaults, ignores a newer one's extra fields, and refuses one without what it needs", () => {
+    expect(parseConnectionLine('{"v":1,"port":17175,"token":"t","protocolVersion":1}')).toEqual({
+      v: 1, port: 17175, token: 't', version: 'unknown', protocolVersion: 1, dataDir: '', hostRunning: false,
+    })
+    const newer = parseConnectionLine('{"v":1,"port":17175,"token":"t","protocolVersion":2,"version":"9.0.0","laterField":{"a":1},"hostRunning":"yes"}')
+    expect(newer).toEqual({ v: 1, port: 17175, token: 't', version: '9.0.0', protocolVersion: 2, dataDir: '', hostRunning: false })
+    for (const line of ['{"v":1,"token":"t","protocolVersion":1}', '{"v":1,"port":"17175","token":"t","protocolVersion":1}', '{"v":1,"port":17175,"protocolVersion":1}', '{"v":1,"port":17175,"token":"t"}']) {
+      expect(() => parseConnectionLine(line)).toThrow('The remote answered with an incomplete connection line')
+    }
+  })
+
   it('reads the reason out of what ssh, PowerShell and Node print around it (measured on Windows)', () => {
     const pq = '** WARNING: connection is not using a post-quantum key exchange algorithm.\n** This session may be vulnerable to "store now, decrypt later" attacks.\n'
     expect(lastLine(`${pq}ssh: connect to host 192.168.0.24 port 22: Operation timed out\n`)).toBe('ssh: connect to host 192.168.0.24 port 22: Operation timed out')

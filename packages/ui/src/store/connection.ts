@@ -56,6 +56,14 @@ import { settleUnsureSends } from './sessions/send.js'
 export let restoringWorkspace = false
 
 /**
+ * True when the last `attach` could not read the workspace snapshot, or its restore threw partway (#384).
+ * `saveWorkspace` does nothing then, until an attach reads it: the screen is on its defaults, and a save would write
+ * them over the stored snapshot, which holds settings as well as the layout (the notification switches, the app
+ * spans, `introSeen`). A layout changed meanwhile is not kept; the stored one comes back with the next read.
+ */
+let workspaceUnread = false
+
+/**
  * The waits before reading again what a reconnect has to re-read (the session list, a conversation page) when the
  * read fails. Same steps as a failed workspace save: a host that fails every read is not helped by being asked
  * forever, and the next reconnect or opening the conversation reads again.
@@ -174,6 +182,216 @@ export function goodThemes(
 }
 
 /** The store's actions for the connection to the host and the saved workspace */
+
+/**
+ * Lays a stored snapshot onto the window (C-3), field by field. With `screen`, it also goes back to the screen the
+ * snapshot names (the focused session, the view, the pinned app); a snapshot read late (#384, `readWorkspaceAgain`)
+ * brings back the settings and the layout only, because the person is already working on some screen. Returns whether
+ * the project screens' arrangements came in an older shape and need saving once.
+ */
+function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): boolean {
+  /*
+   * Folded projects are restored **first of all** (#205). `focusSession` right below this
+   * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
+   * writes an empty list back over the snapshot just read, erasing the fold — the same thing
+   * that happens to `introSeen` (see the comment below). Anything that is not a string is
+   * discarded. (Saves are now held off for the whole restore, `restoringWorkspace`, so this order
+   * is no longer what protects the fold.)
+   */
+  const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
+  if (Array.isArray(savedFolds)) {
+    set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
+  }
+  // The project screens' arrangements (#203), first for the same reason as the fold above
+  const arrangements = sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels)
+  set({
+    projectPanels: Object.fromEntries(
+      Object.entries(arrangements).map(([pid, saved]) => {
+        const present = [
+          ...Object.values(get().sessions)
+            .filter((s) => s.projectId === pid)
+            .map((s) => sessionPanelId(s.id)),
+          ...get()
+            .externalApps.filter((a) => a.projectId === pid)
+            .sort(
+              (a, b) =>
+                (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId),
+            )
+            .map((a) => appPanelId(a.appId)),
+        ]
+        return [pid, migrateArrangement(present, saved)]
+      }),
+    ),
+  })
+  // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
+  const savedSpans = (snap as { appSpans?: unknown }).appSpans
+  if (savedSpans && typeof savedSpans === 'object' && !Array.isArray(savedSpans)) {
+    const spans: Record<string, GridSpan> = {}
+    for (const [key, raw] of Object.entries(savedSpans)) {
+      const span = sanitizeGridSpan(raw)
+      if (span) spans[key] = span
+    }
+    set({ appSpans: spans })
+  }
+  if (screen && snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
+    /*
+     * Reviving a session never unfolds it (#205). If the app was closed with the session's
+     * project folded, that fold was left deliberately by the person too — unfolding it would
+     * have this erase the remembered fold on every restart.
+     */
+    get().focusSession(snap.focusedSessionId, { reveal: false })
+  }
+  /*
+   * The view comes back *after* the session, on purpose: focusSession forces
+   * view:'focus' (selecting a session must show it), so restoring in the other
+   * order would have the session restore quietly undo the view restore — the
+   * exact bug being fixed, reintroduced by ordering.
+   *
+   * The orchestrator goes through its own door (openOrchestrator) rather than a
+   * bare set: the view alone would be a "Waking the orchestrator…" screen that
+   * nothing is actually waking.
+   */
+  /*
+   * `introSeen` is restored **before** `view` (#63). `openOrchestrator` below calls
+   * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
+   * writes `false` back over the snapshot just read, erasing the stored value — the next launch
+   * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
+   * field is restored last). That class is now closed by `restoringWorkspace`.
+   */
+  if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
+  const savedView = screen ? (snap as { view?: unknown }).view : undefined
+  if (savedView === 'grid') set({ view: 'grid' })
+  else if (savedView === 'orchestrator') void get().openOrchestrator()
+  else if (savedView === 'app') {
+    /*
+     * The app that was being viewed as a pinned view (B-2). The list is already loaded from
+     * the first snapshot above — if the app no longer exists (its folder disappeared, its
+     * project was deleted), it is not restored and the focus view is left as is. Opening it
+     * has the host call `home`: what comes back to that spot is a single app process.
+     */
+    const app = snap.focusedApp
+    if (app && get().externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))) {
+      get().openApp(app.projectId, app.appId, { machine: app.machine })
+    }
+  }
+  /*
+   * Layout prefs come back even when the focused session is gone (#20). They used
+   * to sit inside the session check above, so a snapshot whose session had been
+   * deleted threw the whole arrangement away with it — but the panel's shape is a
+   * fact about the person, not about any session. (The legacy `snap.tab` field is
+   * still ignored: that tab structure was replaced by the three lanes.)
+   */
+  if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
+  /*
+   * The arrangement survives restart, globally (#20 decision). `panelLayout` is
+   * the arrangement; `panelTab` is the pre-#20 single-tab field, kept as the
+   * fallback so a snapshot written before the arrangement existed still restores
+   * the tab that was showing.
+   */
+  const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
+  if (savedLayout != null) {
+    set({ panelLayout: sanitizeLayout(savedLayout) })
+    // The split ratio is also part of the arrangement — it comes back alongside the arrangement itself
+    const savedSplit = (snap as { panelSplit?: unknown }).panelSplit
+    if (typeof savedSplit === 'number' && Number.isFinite(savedSplit)) {
+      get().setPanelSplit(savedSplit)
+    }
+  } else if (
+    snap.panelTab === 'files' ||
+    snap.panelTab === 'git' ||
+    snap.panelTab === 'history' ||
+    snap.panelTab === 'terminal'
+  ) {
+    set({ panelLayout: activateTab(defaultLayout(), snap.panelTab) })
+  }
+  if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
+  if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
+  const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
+  if (savedPolicy != null) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
+  // Whether the tree shows ignored files is a way of looking, so it comes back with
+  // the rest of the panel's layout rather than being re-chosen every launch (#17).
+  //
+  // The `typeof` guard is what lets the default move. Reading the field as a plain
+  // falsy check would make "never wrote one" indistinguishable from "turned it off",
+  // and flipping the default to on would then quietly turn it back on for the one
+  // person who had deliberately turned it off. An absent field takes the new default;
+  // a stored `false` is a decision and outranks it.
+  const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
+  if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
+  // The text size used to be restored here too; it is a preference now (UiPreferences.textSize),
+  // and the host moved the snapshot's old step into it once (#312 step 5)
+  // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
+  const savedFold = (snap as { foldComposer?: boolean }).foldComposer
+  if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
+  return Object.values(arrangements).some((saved) => saved.panels === undefined)
+}
+
+/**
+ * Reading a snapshot again after a read that failed (#384). `attach` runs once per window, so without this one
+ * timeout at startup held every save (`workspaceUnread`) until the window was opened again. It is read again on every
+ * reconnect and on these waits while connected; read, it is brought back (`applyWorkspaceSnapshot`, without the screen)
+ * and saving resumes. Past the last wait, the snapshot the window holds is saved in its place, said once: a row that
+ * never reads must not stop the window saving for good.
+ */
+const WORKSPACE_READ_RETRY_MS = [1_000, 5_000, 30_000] as const
+const workspaceRead = {
+  timer: null as ReturnType<typeof setTimeout> | null,
+  /** Which step of `WORKSPACE_READ_RETRY_MS` the next wait is */
+  attempt: 0,
+  inFlight: false,
+  /** Bumped by every attach, so a read from before it does nothing after it */
+  epoch: 0,
+}
+
+function resetWorkspaceRead(): void {
+  if (workspaceRead.timer) clearTimeout(workspaceRead.timer)
+  workspaceRead.timer = null
+  workspaceRead.attempt = 0
+  workspaceRead.inFlight = false
+  workspaceRead.epoch++
+}
+
+function scheduleWorkspaceRead(get: () => AppState, set: StoreSet): void {
+  const wait = WORKSPACE_READ_RETRY_MS[workspaceRead.attempt]
+  if (wait === undefined) {
+    workspaceUnread = false
+    set({ toast: `Could not read the window layout after ${WORKSPACE_READ_RETRY_MS.length + 1} tries; the one on screen is saved in its place` })
+    get().saveWorkspace()
+    return
+  }
+  workspaceRead.attempt++
+  workspaceRead.timer = setTimeout(() => {
+    workspaceRead.timer = null
+    void readWorkspaceAgain(get, set)
+  }, wait)
+}
+
+async function readWorkspaceAgain(get: () => AppState, set: StoreSet): Promise<void> {
+  const platform = get().platform
+  if (!workspaceUnread || workspaceRead.inFlight || !platform) return
+  if (workspaceRead.timer) clearTimeout(workspaceRead.timer)
+  workspaceRead.timer = null
+  const epoch = workspaceRead.epoch
+  workspaceRead.inFlight = true
+  try {
+    const snap = await platform.workspace.load()
+    if (epoch !== workspaceRead.epoch || !workspaceUnread) return
+    restoringWorkspace = true
+    try {
+      if (snap) applyWorkspaceSnapshot(snap, get, set, false)
+    } finally {
+      restoringWorkspace = false
+    }
+    workspaceUnread = false
+    workspaceRead.attempt = 0
+  } catch {
+    if (epoch !== workspaceRead.epoch || !workspaceUnread) return
+    scheduleWorkspaceRead(get, set)
+  } finally {
+    if (epoch === workspaceRead.epoch) workspaceRead.inFlight = false
+  }
+}
+
 type ConnectionActions = Pick<AppState, 'attach' | 'saveWorkspace' | 'recoverAfterReconnect'>
 
 export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActions => ({
@@ -193,6 +411,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      */
     detachAll()
     resetWorkspaceSave()
+    resetWorkspaceRead()
     set({ platform })
     subscriptions.push(
       platform.agents.subscribe((e) => get().dispatchEvent(e)),
@@ -366,144 +585,13 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     let migratedProjectPanels = false
     try {
       const snap = await platform.workspace.load()
-      if (snap) {
-        /*
-         * Folded projects are restored **first of all** (#205). `focusSession` right below this
-         * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
-         * writes an empty list back over the snapshot just read, erasing the fold — the same thing
-         * that happens to `introSeen` (see the comment below). Anything that is not a string is
-         * discarded. (Saves are now held off for the whole restore, `restoringWorkspace`, so this order
-         * is no longer what protects the fold.)
-         */
-        const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
-        if (Array.isArray(savedFolds)) {
-          set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
-        }
-        // The project screens' arrangements (#203), first for the same reason as the fold above
-        const arrangements = sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels)
-        set({
-          projectPanels: Object.fromEntries(
-            Object.entries(arrangements).map(([pid, saved]) => {
-              const present = [
-                ...Object.values(get().sessions)
-                  .filter((s) => s.projectId === pid)
-                  .map((s) => sessionPanelId(s.id)),
-                ...get()
-                  .externalApps.filter((a) => a.projectId === pid)
-                  .sort(
-                    (a, b) =>
-                      (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId),
-                  )
-                  .map((a) => appPanelId(a.appId)),
-              ]
-              return [pid, migrateArrangement(present, saved)]
-            }),
-          ),
-        })
-        // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
-        const savedSpans = (snap as { appSpans?: unknown }).appSpans
-        if (savedSpans && typeof savedSpans === 'object' && !Array.isArray(savedSpans)) {
-          const spans: Record<string, GridSpan> = {}
-          for (const [key, raw] of Object.entries(savedSpans)) {
-            const span = sanitizeGridSpan(raw)
-            if (span) spans[key] = span
-          }
-          set({ appSpans: spans })
-        }
-        if (snap.focusedSessionId && get().sessions[snap.focusedSessionId]) {
-          /*
-           * Reviving a session never unfolds it (#205). If the app was closed with the session's
-           * project folded, that fold was left deliberately by the person too — unfolding it would
-           * have this erase the remembered fold on every restart.
-           */
-          get().focusSession(snap.focusedSessionId, { reveal: false })
-        }
-        /*
-         * The view comes back *after* the session, on purpose: focusSession forces
-         * view:'focus' (selecting a session must show it), so restoring in the other
-         * order would have the session restore quietly undo the view restore — the
-         * exact bug being fixed, reintroduced by ordering.
-         *
-         * The orchestrator goes through its own door (openOrchestrator) rather than a
-         * bare set: the view alone would be a "Waking the orchestrator…" screen that
-         * nothing is actually waking.
-         */
-        /*
-         * `introSeen` is restored **before** `view` (#63). `openOrchestrator` below calls
-         * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
-         * writes `false` back over the snapshot just read, erasing the stored value — the next launch
-         * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
-         * field is restored last). That class is now closed by `restoringWorkspace`.
-         */
-        if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
-        const savedView = (snap as { view?: unknown }).view
-        if (savedView === 'grid') set({ view: 'grid' })
-        else if (savedView === 'orchestrator') void get().openOrchestrator()
-        else if (savedView === 'app') {
-          /*
-           * The app that was being viewed as a pinned view (B-2). The list is already loaded from
-           * the first snapshot above — if the app no longer exists (its folder disappeared, its
-           * project was deleted), it is not restored and the focus view is left as is. Opening it
-           * has the host call `home`: what comes back to that spot is a single app process.
-           */
-          const app = snap.focusedApp
-          if (app && get().externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))) {
-            get().openApp(app.projectId, app.appId, { machine: app.machine })
-          }
-        }
-        /*
-         * Layout prefs come back even when the focused session is gone (#20). They used
-         * to sit inside the session check above, so a snapshot whose session had been
-         * deleted threw the whole arrangement away with it — but the panel's shape is a
-         * fact about the person, not about any session. (The legacy `snap.tab` field is
-         * still ignored: that tab structure was replaced by the three lanes.)
-         */
-        if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
-        /*
-         * The arrangement survives restart, globally (#20 decision). `panelLayout` is
-         * the arrangement; `panelTab` is the pre-#20 single-tab field, kept as the
-         * fallback so a snapshot written before the arrangement existed still restores
-         * the tab that was showing.
-         */
-        const savedLayout = (snap as { panelLayout?: unknown }).panelLayout
-        if (savedLayout != null) {
-          set({ panelLayout: sanitizeLayout(savedLayout) })
-          // The split ratio is also part of the arrangement — it comes back alongside the arrangement itself
-          const savedSplit = (snap as { panelSplit?: unknown }).panelSplit
-          if (typeof savedSplit === 'number' && Number.isFinite(savedSplit)) {
-            get().setPanelSplit(savedSplit)
-          }
-        } else if (
-          snap.panelTab === 'files' ||
-          snap.panelTab === 'git' ||
-          snap.panelTab === 'history' ||
-          snap.panelTab === 'terminal'
-        ) {
-          set({ panelLayout: activateTab(defaultLayout(), snap.panelTab) })
-        }
-        if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
-        if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
-        const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
-        if (savedPolicy != null) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
-        // Whether the tree shows ignored files is a way of looking, so it comes back with
-        // the rest of the panel's layout rather than being re-chosen every launch (#17).
-        //
-        // The `typeof` guard is what lets the default move. Reading the field as a plain
-        // falsy check would make "never wrote one" indistinguishable from "turned it off",
-        // and flipping the default to on would then quietly turn it back on for the one
-        // person who had deliberately turned it off. An absent field takes the new default;
-        // a stored `false` is a decision and outranks it.
-        const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
-        if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
-        // The text size used to be restored here too; it is a preference now (UiPreferences.textSize),
-        // and the host moved the snapshot's old step into it once (#312 step 5)
-        // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
-        const savedFold = (snap as { foldComposer?: boolean }).foldComposer
-        if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
-        migratedProjectPanels = Object.values(arrangements).some((saved) => saved.panels === undefined)
-      }
-    } catch {
-      /* The app works normally even with no snapshot */
+      workspaceUnread = false
+      if (snap) migratedProjectPanels = applyWorkspaceSnapshot(snap, get, set, true)
+    } catch (e) {
+      // The app works normally even with no snapshot, but it is said, not saved over (`workspaceUnread`), and read again
+      workspaceUnread = true
+      set({ toast: `Could not read the window layout (${(e as Error).message}); it is shown as the defaults, and not saved over until it is read again` })
+      scheduleWorkspaceRead(get, set)
     } finally {
       restoringWorkspace = false
     }
@@ -534,8 +622,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
    * it, so a save that fails is sent again rather than dropped (see `workspaceSave`).
    */
   saveWorkspace() {
-    // Nothing is saved while the snapshot is being restored: see `restoringWorkspace`
-    if (restoringWorkspace) return
+    // Nothing is saved while the snapshot is being restored, or when it could not be read: see `restoringWorkspace`, `workspaceUnread`
+    if (restoringWorkspace || workspaceUnread) return
     const s = get()
     if (!s.platform) return
     workspaceSave.pending = {
@@ -579,6 +667,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
   async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
+    // A snapshot the window could not read is read again: a reconnect is when a host that timed out answers (#384)
+    void readWorkspaceAgain(get, set)
     // An install/check can end on the outgoing host without its final event reaching this window.
     // Re-read only: replaying an install after a swap could run it twice.
     void get().checkUpdate(false)
