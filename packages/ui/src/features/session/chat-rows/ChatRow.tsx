@@ -10,6 +10,7 @@ import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
 import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
+import { CentraluCallBody } from './CentraluCallBody.jsx'
 
 /*
  * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
@@ -329,11 +330,17 @@ export function ToolCard({
 
   return (
     /*
-      A Centralu call's card (#730) keeps the card's shape and adds a left edge in the strong hairline: emphasis by
-      shape and weight, never the signal's white, which is kept for what waits on the person.
+      A Centralu call's card (#730; owner, 2026-10-18: it should stand out from the other tool calls and read as what
+      happened): a rounder card on its own tint with a stronger hairline, a sentence instead of a tool name, and the
+      session it reached as a chip. Emphasis by shape and weight, never the signal's white, which is kept for what waits
+      on the person. A failed call is dashed, as an error is on the inbox's capsule.
     */
     <div
-      className={`rounded-md border border-line bg-surface-raised/60 ${call ? 'border-l-2 border-l-line-strong' : ''}`}
+      className={
+        call
+          ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong/70'}`
+          : 'rounded-md border border-line bg-surface-raised/60'
+      }
       data-testid="tool-card"
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
     >
@@ -405,7 +412,14 @@ export function ToolCard({
         </div>
       )}
 
-      {lines.length > 0 && (
+      {/* A Centralu call folds to its sentence: the answer shows only when the card is opened (owner, 2026-10-18) */}
+      {call && open && item.result && item.result.trim() && (
+        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-output">
+          <CentraluCallBody result={item.result} open={open} onOpen={() => setOpen(true)} />
+        </div>
+      )}
+
+      {!call && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
           <pre
             ref={outRef}
