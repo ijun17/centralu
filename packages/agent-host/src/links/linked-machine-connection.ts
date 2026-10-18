@@ -32,6 +32,13 @@ function hiddenKind(s: unknown): boolean {
   return isObj(s) && (s.kind === 'orchestrator' || s.kind === 'coordinator')
 }
 
+/**
+ * The backoff while a machine is away: from 2 s, doubling, up to 5 minutes (#1134). A laptop that is often closed, or
+ * a server used once a week, cost an ssh attempt every minute at the earlier 1-minute cap for as long as the hub ran;
+ * a machine that comes back waits at most 5 minutes, or none at all with Reconnect
+ */
+const RETRY_MS: [number, number] = [2_000, 5 * 60_000]
+
 export abstract class LinkedMachineConnection implements RoutedMachine {
   readonly q: Qualifier
   protected status: MachineStatus = 'connecting'
@@ -473,7 +480,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected retryLater(fixedMs?: number): void {
     if (this.stopped || this.held) return
     clearTimeout(this.retryTimer)
-    const [first, max] = this.deps.retryMs ?? [2_000, 60_000]
+    const [first, max] = this.deps.retryMs ?? RETRY_MS
     const delay = fixedMs ?? Math.min(max, first * 2 ** this.attempt++)
     this.retryTimer = setTimeout(() => void this.open(), delay)
     this.retryTimer.unref?.()

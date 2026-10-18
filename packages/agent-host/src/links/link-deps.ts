@@ -57,7 +57,7 @@ export type LinkDeps = {
   ownerOf?: (sessionId: string) => string | undefined
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>
-  /** Backoff between attempts while a machine is away; doubles up to the second value */
+  /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
   installer?: LinkInstaller

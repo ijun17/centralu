@@ -1676,7 +1676,7 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 | ssh 프로세스는 허브 호스트의 자식이고 `Tunnel` 인터페이스 뒤에 있다 | 계획 문서의 probe 4(§10.6, 2026-10-08)가 실제 허브 교체를 건너 대안들을 쟀다: 지금 그대로면 교체 한 번에 링크가 약 1.1초 떨어지고, OpenSSH `ControlPersist`면 0.8초(교체마다 포워드를 하나씩 남기고 "완전히 종료"보다 오래 산다), keeper의 자식이면 약 0.14초일 것이다. 원격의 에이전트는 허브 교체를 알아채지도 못하므로 여기에 둔다 |
 
 **링크의 상태**(`MachineInfo.status`, `machine_status`로 보낸다): `connecting`; `connected`; `unreachable`(ssh 실패,
-포워드나 소켓이 끊김. 2초에서 1분까지 늘려 가며 다시 시도); `starting`(호스트가 돌지 않아 링크가 `centralu serve --detach`로
+포워드나 소켓이 끊김. 2초에서 5분까지 늘려 가며 다시 시도, #1134); `starting`(호스트가 돌지 않아 링크가 `centralu serve --detach`로
 띄우는 중. 묻지 않는다, 계획 문서 §10.9 결정 7. WMI가 막힌 기기에서는 포워드의 ssh 세션이 호스트를 돌리고 링크와 함께 끝난다);
 `not_running`(Centralu는 답하지만 `centralu serve`가 돌지 않고, 띄우기도 실패했다. `error`가 까닭. 다시 시도); `versions_differ`; `refused`(토큰이 연달아 두 번 거절됨. 연결 줄은 바로 한 번 다시 읽는다.
 `--rotate-token`은 토큰을 바꾸지만 돌고 있는 serve는 재시작할 때까지 이전 것을 쓰기 때문이다).
