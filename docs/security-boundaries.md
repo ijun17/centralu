@@ -1213,9 +1213,10 @@ then who may call it:
   secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`app-start-env.ts` `spawnSpec`; test "receives its
   data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
-  run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
-  `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
-  name"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
+  run records (arguments, errors, kept failures), error bundles and the text of a failed start, which the list, a check
+  and a caller's refusal carry (`secrets.ts` `redactor`, `app-process.ts` `AppLog` and `AppProcess.start`; tests "stderr
+  goes to the app's own log, with secret values masked by name", "an app that fails to start with the value in its
+  error leaves only the name in the list, the bundles, the check and the refusal"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
   arguments as JSON, where a multi-line key or one with quotes is spelled differently, and each line of a
   multi-line value of 16 characters or more on its own, since the app's log is masked a line at a time. A run record's
   arguments and kept result are masked string by string before they become JSON, then as JSON (`runs.ts`

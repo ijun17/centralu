@@ -31,7 +31,7 @@ export type SpawnSpec = {
   env: NodeJS.ProcessEnv
   logPath: string
   logMaxBytes: number
-  /** Masks secret values before writing to the log */
+  /** Masks secret values: in the log, and in the text of a failed start (`AppStartError`) */
   redact: (text: string) => string
   /** The spec generation discovered last time for this app — skips the probe if present */
   prior?: PriorDiscovery
@@ -185,7 +185,7 @@ export class AppProcess {
        * an 'error': it is a failed start like any other, with the log closed rather than held open for good.
        */
       const shim = /\.(cmd|bat)$/i.test(launch.command) ? ' (a .cmd or .bat that is not a package manager shim needs a shell: name the program it starts)' : ''
-      const head = `could not run ${launch.command}: ${(e as Error).message}${shim}`
+      const head = spec.redact(`could not run ${launch.command}: ${(e as Error).message}${shim}`)
       log.note(head)
       log.close()
       throw new AppStartError(head, head, [])
@@ -206,7 +206,11 @@ export class AppProcess {
        * message alone makes it look like the generation probe itself is the problem.
        */
       await proc.waitExit(spec.exitWaitMs)
-      const head = proc.exit ? `exited before it was ready (${describeExit(proc.exit)})` : (e as Error).message
+      /*
+       * Masked like the stderr lines in the log (`AppLog`): the text is the app's own (an error its tool list threw), and
+       * it goes on to the list, the error bundle, a check report and a caller's refusal.
+       */
+      const head = proc.exit ? `exited before it was ready (${describeExit(proc.exit)})` : spec.redact((e as Error).message)
       const reason = proc.reason(head)
       const stderr = proc.log.tailLines()
       await proc.stop(0)

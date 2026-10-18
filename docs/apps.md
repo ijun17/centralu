@@ -99,7 +99,8 @@ app wrote there while running would reach the whole team.
   a moved-aside copy is found in the data folder, so a restart says it again until the copy is
   removed or each app's values are back. An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
-  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
+  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, and in the text of a failed start
+  (the list, a check, a caller's refusal), also where JSON
   escapes them (a multi-line key in an argument, #838). The app's log is masked a line at a time, so each line of a
   multi-line value (a PEM) of 16 characters or more is masked on its own; shorter lines of it (`}`, an empty line)
   are not.
