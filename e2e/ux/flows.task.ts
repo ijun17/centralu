@@ -274,6 +274,35 @@ uxTask({
 })
 
 uxTask({
+  id: 'trash-subagent-steps.mouse',
+  task: "Free the space a session's subagent steps take, keeping the session",
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ["Settings, then Trash: what each session's subagent steps take, its Move to trash capsule, then the confirmation (#418)"],
+  start: async (page) => {
+    await demo(page)
+    const id = await sessionId(page, DONE)
+    // The demo keeps no subagent steps: one launch card with a step of its own
+    await page.evaluate((sid: string) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'tool_call', sessionId: sid, callId: 'toolu_ux', summary: { tool: 'Agent', title: 'Research', paths: [] } })
+      m.emit({ type: 'subagent_event', sessionId: sid, parentCallId: 'toolu_ux', step: { type: 'message_delta', sessionId: sid, role: 'assistant', text: 'Found it.' } })
+    }, id)
+  },
+  run: async (u, page) => {
+    await u.click(page.getByTestId('open-settings'))
+    await u.until('settings', () => expect(page.getByTestId('settings')).toBeVisible())
+    await u.click(page.getByTestId('settings-tab-trash'))
+    await u.until('the trash', () => expect(page.locator('[data-testid^="subagent-steps-move-"]').first()).toBeVisible())
+    await u.click(page.locator('[data-testid^="subagent-steps-move-"]').first(), { label: 'subagent-steps-move' })
+    await u.until('the confirmation', () => expect(page.getByTestId('subagent-steps-confirm')).toBeVisible())
+    await u.click(page.getByTestId('subagent-steps-confirm-yes'))
+  },
+  goal: async (page) => expect(page.getByTestId('subagent-steps-held-empty')).toBeVisible(),
+  budget: { operators: 19, M: 4, seconds: 12.3 },
+})
+
+uxTask({
   id: 'worktree-session.mouse',
   task: 'Start a session in its own git worktree',
   path: 'mouse',
