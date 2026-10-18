@@ -40,6 +40,27 @@ describe('worktree recovery follow-ups (#608)', () => {
     await removeTree(dir)
   })
 
+  /*
+   * The snapshot a restore reads back is a file in the data folder (#384): cut short by a stop mid-write, or edited by
+   * hand. The restore failed with JSON's own SyntaxError, which named nothing. It names the file now, and its patches
+   * and bundles stay where they are for a restore by hand.
+   */
+  it.each([
+    ['not JSON', '{"repositories":[{"path":'],
+    ['without a repository', '{"repositories":[]}'],
+  ])('a snapshot that is %s fails the restore naming the file, and its files stay', async (_label, text) => {
+    const snapshot = randomUUID()
+    const kept = join(worktreeRecoveryDir(sessionId), snapshot)
+    mkdirSync(kept, { recursive: true })
+    writeFileSync(join(kept, 'snapshot.json'), text)
+    writeFileSync(join(kept, '0.patch'), 'a patch')
+    const recovery = { snapshot, tip: 'a'.repeat(40), changedFiles: 1, commits: 0 }
+    await expect(restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})).rejects.toThrow(
+      `The recovery snapshot ${join(kept, 'snapshot.json')} could not be read`,
+    )
+    expect(existsSync(join(kept, '0.patch'))).toBe(true)
+  })
+
   const commit = (cwd: string, content: string) => {
     writeFileSync(join(cwd, 'file.txt'), content)
     git(cwd, ['add', '.'])
