@@ -14,7 +14,10 @@ import {
   type SessionInfo,
   type StoredMessage,
   type TrashedRun,
+  type SubagentStepsHeld,
   type TrashedSession,
+  type TrashedSubagentSteps,
+  type ToolName,
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
@@ -28,6 +31,7 @@ import type { WorktreeSessions } from './worktree-sessions.js'
 import type { HostCards } from './host-cards.js'
 import type { SessionRecord } from './session-record.js'
 import { rpcError } from '../rpc-error.js'
+import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
 
 /**
  * What the trash reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -334,8 +338,11 @@ export class SessionTrash {
     }
   }
 
-  /** The trash as Settings lists it (#204), with the records of deleted app-agent sessions (#378) and the total it takes on this machine */
-  async listTrash(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number }> {
+  /**
+   * The trash as Settings lists it (#204), with the records of deleted app-agent sessions (#378), the subagent steps moved
+   * there without their session (#418), and the total it takes on this machine
+   */
+  async listTrash(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number; subagentSteps: TrashedSubagentSteps[] }> {
     const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p]))
     const sessions = await Promise.all(
       this.host.store.trash.listTrash().map(async (r): Promise<TrashedSession> => {
@@ -380,7 +387,9 @@ export class SessionTrash {
       messages: r.messages,
       bytes: r.bytes,
     }))
-    return { sessions, runs, bytes: sessions.reduce((a, s) => a + s.bytes, 0) + runs.reduce((a, r) => a + r.bytes, 0) }
+    const subagentSteps = this.host.store.subagentSteps.listTrashed().map((r) => ({ ...subagentStepsHeld(r), deletedAt: r.deletedAt }))
+    const bytes = [...sessions, ...runs, ...subagentSteps].reduce((a, x) => a + x.bytes, 0)
+    return { sessions, runs, bytes, subagentSteps }
   }
 
   /** An app-agent run's record, read-only (#378): its request, answer and structured output, and a page of its conversation */
@@ -567,5 +576,85 @@ export class SessionTrash {
       }
     }
     return { purged, failed }
+  }
+
+  // ── A session's subagent steps, in the trash without it (#418) ──
+  //
+  // The steps of the subagents a session launched (#222) can be most of what it holds, and the session may be one in
+  // use. They go to the trash on their own and come back under their cards; deleting them for good is the trash's rule,
+  // as for a session: only the person, from Settings, one at a time or by emptying the trash.
+
+  /** One move, restore or purge of a session's subagent steps at a time */
+  private readonly subagentBusy = new Set<string>()
+
+  private async subagentOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    if (this.subagentBusy.has(sessionId)) throw rpcError("That session's subagent steps are already being moved")
+    this.subagentBusy.add(sessionId)
+    try {
+      return await run()
+    } finally {
+      this.subagentBusy.delete(sessionId)
+    }
+  }
+
+  /** What each live session's subagent steps take, largest first; Settings lists them beside the trash */
+  subagentUsage(): { sessions: SubagentStepsHeld[] } {
+    return { sessions: this.host.store.subagentSteps.listHeld().map(subagentStepsHeld) }
+  }
+
+  /** Moves a live session's subagent steps to the trash; the conversation and its launch cards stay */
+  async trashSubagentSteps(sessionId: string): Promise<{ steps: number; bytes: number }> {
+    if (!this.host.meta.has(sessionId) || this.trashing.has(sessionId)) throw sessionGone()
+    return this.subagentOp(sessionId, async () => {
+      const moved = await this.host.store.subagentSteps.trash(sessionId)
+      if (!moved) throw sessionGone()
+      return moved
+    })
+  }
+
+  /** Puts a session's trashed subagent steps back under their cards */
+  async restoreSubagentSteps(sessionId: string): Promise<void> {
+    return this.subagentOp(sessionId, async () => {
+      if (!(await this.host.store.subagentSteps.restore(sessionId))) throw this.notInTrash(sessionId)
+    })
+  }
+
+  /**
+   * Deletes a session's trashed subagent steps for good, those moved there at or before `upTo` (the `deletedAt` the
+   * window listed); the session, the steps under its cards and steps moved to the trash since stay
+   */
+  async purgeSubagentSteps(sessionId: string, upTo: number): Promise<void> {
+    return this.subagentOp(sessionId, async () => {
+      if (!(await this.host.store.subagentSteps.purge(sessionId, upTo))) throw this.notInTrash(sessionId)
+    })
+  }
+
+  /** The refusal for steps not in the trash, naming the session as the person knows it, never by its id */
+  private notInTrash(sessionId: string) {
+    const name = this.host.meta.get(sessionId)?.name
+    return rpcError(`No subagent steps of ${name ? `“${name}”` : 'that session'} are in the trash`, 'session_not_found')
+  }
+
+  /** How many of one launch card's steps are in the trash */
+  subagentTrashed(sessionId: string, parentCallId: string): { steps: number } {
+    return { steps: this.host.store.subagentSteps.trashedOf(sessionId, parentCallId) }
+  }
+}
+
+/** A session that is not live (gone, or in the trash itself): said without its id, which means nothing on screen */
+function sessionGone() {
+  return rpcError('That session is no longer here: it was deleted, or is in the trash', 'session_not_found')
+}
+
+/** A row of `SubagentStepRecords` as the protocol says it */
+function subagentStepsHeld(r: SubagentStepsRow): SubagentStepsHeld {
+  return {
+    sessionId: r.sessionId,
+    name: r.name,
+    tool: r.tool as ToolName,
+    project: r.projectId ? { id: r.projectId, name: r.projectName ?? r.projectId } : null,
+    runs: r.runs,
+    steps: r.steps,
+    bytes: r.bytes,
   }
 }

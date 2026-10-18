@@ -350,6 +350,40 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     expect(useStore.getState().chat[s]!.length).toBeLessThanOrEqual(100)
     expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
   })
+
+  // #418: the steps went to the trash, and a card still showing them, or reading as "none recorded", was wrong
+  it('moving the steps to the trash and back makes an open card read again and say where they went', async () => {
+    const s = 'sub-trash'
+    const mock = await setup(s)
+    mock.emit(grep(s))
+    mock.emit(said(s, 'The test holds.'))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries', 'The test holds.']))
+    expect(useStore.getState().subagentSteps[s]![AGENT]!.trashed).toBe(0)
+
+    expect(await useStore.getState().trashSubagentSteps(s)).toBeNull()
+    await vi.waitFor(() => expect(useStore.getState().subagentSteps[s]![AGENT]).toMatchObject({ open: true, rows: [], trashed: 2, loading: false }))
+    expect(useStore.getState().toast).toMatch(/^Moved 2 subagent steps of .* to the trash$/)
+
+    expect(await useStore.getState().restoreSubagentSteps(s)).toBeNull()
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Grep: boundaries', 'The test holds.']))
+    expect(useStore.getState().subagentSteps[s]![AGENT]!.trashed).toBe(0)
+    // Nothing is in the trash now, and the host says so
+    expect(await useStore.getState().restoreSubagentSteps(s)).toMatch(/No subagent steps .* are in the trash/)
+  })
+
+  it('a closed card forgets what it read when its steps go to the trash, and reads again when opened', async () => {
+    const s = 'sub-trash-closed'
+    const mock = await setup(s)
+    mock.emit(said(s, 'Done.'))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(steps(s)).toEqual(['Done.']))
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await useStore.getState().trashSubagentSteps(s)
+    expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
+    useStore.getState().toggleSubagentSteps(s, AGENT)
+    await vi.waitFor(() => expect(useStore.getState().subagentSteps[s]![AGENT]).toMatchObject({ rows: [], trashed: 1, loading: false }))
+  })
 })
 
 /**

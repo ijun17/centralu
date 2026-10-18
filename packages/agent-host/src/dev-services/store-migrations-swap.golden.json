@@ -184,6 +184,12 @@
    "sql": null
   },
   {
+   "type": "index",
+   "name": "subagent_messages_trash",
+   "tbl_name": "subagent_messages",
+   "sql": "CREATE INDEX subagent_messages_trash ON subagent_messages(session_id, trashed_at, parent_call_id)"
+  },
+  {
    "type": "table",
    "name": "agent_start_requests",
    "tbl_name": "agent_start_requests",
@@ -361,7 +367,7 @@
    "type": "table",
    "name": "subagent_messages",
    "tbl_name": "subagent_messages",
-   "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
+   "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL, trashed_at INTEGER,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
   },
   {
    "type": "table",

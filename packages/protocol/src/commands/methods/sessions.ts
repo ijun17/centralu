@@ -25,7 +25,9 @@ import {
   SessionInfo,
   StoredMessage,
   TrashedRun,
+  SubagentStepsHeld,
   TrashedSession,
+  TrashedSubagentSteps,
   UpdateSettingsParams,
   UpdateSettingsResult,
 } from '../sessions.js'
@@ -358,6 +360,14 @@ export const sessionMethods = {
     result: z.array(StoredMessage),
   },
   /**
+   * How many of one launch card's steps are in the trash (#418), so the card says they were moved there rather than
+   * that none were recorded. Asked with the first page of `messages.subagent`; an older host does not know it.
+   */
+  'messages.subagentTrashed': {
+    params: z.object({ sessionId: SessionId, parentCallId: z.string() }),
+    result: z.object({ steps: z.number() }),
+  },
+  /**
    * A project's terminal list.
    *
    * **A terminal's identity is its cwd** — not a session.
@@ -447,6 +457,12 @@ export const sessionMethods = {
       runs: z.array(TrashedRun).default([]),
       bytes: z.number(),
       unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+      /**
+       * The subagent steps moved to the trash without their session (#418), most recently moved first. Their bytes
+       * are in `bytes`. `trash.empty` leaves them: the window deletes each one it listed (`trash.purgeSubagentSteps`).
+       * Absent from a host before it.
+       */
+      subagentSteps: z.array(TrashedSubagentSteps).optional(),
     }),
   },
   /**
@@ -485,9 +501,46 @@ export const sessionMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * The subagent steps each live session holds (#418), largest first; a session with none is not listed, and one in
+   * the trash is counted in its own trash entry. Settings shows them beside the trash, where what the store holds is said.
+   * `unreached` as in `trash.list`.
+   */
+  'subagents.usage': {
+    params: z.object({}),
+    result: z.object({
+      sessions: z.array(SubagentStepsHeld),
+      unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+    }),
+  },
+  /**
+   * Moves a live session's subagent steps to the trash (#418); the conversation and its launch cards stay. A subagent
+   * still running goes on writing its new steps under its card. Answers what was moved.
+   */
+  'subagents.trash': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ steps: z.number(), bytes: z.number() }),
+  },
+  /** Puts a session's trashed subagent steps back under their cards (#418) */
+  'trash.restoreSubagentSteps': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * Deletes a session's trashed subagent steps for good (#418); the session and its steps not in the trash stay.
+   *
+   * `upTo` is the entry's `deletedAt` as the window listed it: only steps moved to the trash at or before it go, so steps
+   * moved there after the list was read (from another window, or while a machine was not reached) are not deleted
+   * unseen. Moves of one session are stamped strictly later than the one before, so the bound is exact.
+   */
+  'trash.purgeSubagentSteps': {
+    params: z.object({ sessionId: SessionId, upTo: z.number() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
    * Deletes every session in the trash for good. One that fails stays in the trash and is reported; the rest go on.
    * The app-agent run records (#378) are not touched: the window deletes the ones it listed with `trash.purgeRuns`, so
-   * emptying across linked machines never takes records nobody was shown.
+   * emptying across linked machines never takes records nobody was shown. Nor are the subagent steps in the trash (#418),
+   * for the same reason: the window deletes each one it listed with `trash.purgeSubagentSteps` and its `upTo`.
    */
   'trash.empty': {
     params: z.object({}),
