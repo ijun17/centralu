@@ -29,6 +29,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 | [agent-host.md](agent-host.md) | Inside the Node sidecar: AgentAdapter, how to add a new tool, and the rule for store migrations | protocol |
 | [themes.md](themes.md) | Themes: choosing (mode, a theme per side, accent), the theme file format and its schema, live editing, the urgency-order check, what app views receive | tech-stack |
 | [design-system.md](design-system.md) | The rules every screen is drawn by: colour (brightness is importance, white only for what waits), the corner scale and its guard, lines, type, icons, the top bar's capsules, the conversation, waiting cards, motion, states, and which shared component to use | themes |
+| [ux-writing.md](ux-writing.md) | The words on screen (**draft**, to be settled with the owner; English only until then): the rules the app already follows, with its own strings, and the open questions | design-system |
 | [apps.md](apps.md) | Apps (M4): the manifest, where apps live, trust, lifecycle, the one call path, inline and pinned views and what is standard, the build loop, attaching to sessions, the broker | agent-host |
 | [state-management.md](state-management.md) | Front-end state: event → store → selector, persistence and restore | architecture, protocol |
 | [releasing.md](releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |
