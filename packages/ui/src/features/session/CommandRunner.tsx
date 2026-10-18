@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SavedCommand } from '@cc/protocol'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
 import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { CommandLogView } from '../../components/CommandLogView.jsx'
@@ -180,12 +182,14 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
                   className="min-w-0 flex-1 px-3 py-1.5 text-left"
                 >
                   {renaming === c.command ? (
-                    <input
+                    <TextInput
+                      size="xs"
+                      surface="raised"
                       autoFocus
                       defaultValue={c.label ?? ''}
                       placeholder="Name (blank removes it)"
                       data-testid={`run-rename-input-${i}`}
-                      className="w-full rounded-md border border-line bg-surface-raised px-1 py-0.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                      className="w-full"
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
                         // An Enter that ends a composition does not save (#181) — the last
@@ -255,7 +259,10 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
         is the boundary */}
         <div className="shrink-0 p-2">
           <div className="flex items-center gap-1">
-            <input
+            <TextInput
+              size="md"
+              text="sm"
+              font="readout"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -263,9 +270,10 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               }}
               placeholder="Command, e.g. pnpm dev"
               data-testid="run-add-input"
-              className="readout min-w-0 flex-1 rounded-md border border-line bg-surface-floor px-2 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="min-w-0 flex-1"
             />
-            <input
+            <TextInput
+              size="md"
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
@@ -273,16 +281,12 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
               }}
               placeholder="Name (optional)"
               data-testid="run-add-name"
-              className="w-32 shrink-0 rounded-md border border-line bg-surface-floor px-2 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              className="w-32 shrink-0"
             />
-            <button
-              type="button"
-              data-testid="run-add"
-              onClick={add}
-              className="shrink-0 rounded-md border border-line px-2 py-1.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
-            >
+            {/* As tall as the fields beside it: the small button alone would sit shorter than them */}
+            <Button variant="quiet" size="sm" data-testid="run-add" onClick={add} className="shrink-0 self-stretch">
               Add
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -291,23 +295,13 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
         {current && (
           <>
             <div className="flex items-center gap-2 border-y border-line px-3 py-1.5">
-              <button
-                type="button"
-                data-testid="run-exec"
-                onClick={() => void run(current)}
-                className="rounded-md border border-line px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
-              >
+              <Button variant="secondary" size="md" data-testid="run-exec" onClick={() => void run(current)}>
                 {currentRun?.running ? 'Restart' : 'Run'}
-              </button>
+              </Button>
               {currentRun?.running && (
-                <button
-                  type="button"
-                  data-testid="run-stop"
-                  onClick={() => void stop(current)}
-                  className="rounded-md border border-line px-3 py-1 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
-                >
+                <Button variant="quiet" size="md" data-testid="run-stop" onClick={() => void stop(current)}>
                   Stop
-                </button>
+                </Button>
               )}
               <span className="readout min-w-0 truncate text-xs text-ink-faint" data-testid="run-selected">
                 {sel?.label ? `${sel.label} · ${current}` : current}

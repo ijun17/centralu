@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Button } from '../components/Button.jsx'
 
 /**
  * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
@@ -46,22 +47,17 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
           {detail}
         </pre>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="app-crashed-reload"
-            onClick={() => location.reload()}
-            className="rounded-md border border-line px-3 py-1.5 text-sm text-ink transition-colors hover:border-line-strong hover:bg-surface-hover/25"
-          >
+          <Button variant="secondary" size="md" data-testid="app-crashed-reload" onClick={() => location.reload()}>
             Reload
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="quiet"
+            size="md"
             data-testid="app-crashed-copy"
             onClick={() => void navigator.clipboard?.writeText(`${error.message}\n${error.stack ?? ''}`)}
-            className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
           >
             Copy details
-          </button>
+          </Button>
         </div>
       </div>
     )

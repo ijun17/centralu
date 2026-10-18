@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { ProjectInfo } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 
 /**
  * Deleting a project (a dogfooding request).
@@ -116,7 +118,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         <label className="mt-3 block text-xs text-ink-muted" htmlFor="delete-project-name">
           Type <span className="readout text-ink">{project.name}</span> to confirm
         </label>
-        <input
+        <TextInput
           id="delete-project-name"
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
@@ -124,7 +126,8 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           spellCheck={false}
           autoComplete="off"
           data-testid="delete-project-name-input"
-          className="mt-1 w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          font="mono"
+          className="mt-1 w-full"
         />
 
         {error && (
@@ -145,14 +148,9 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             Cancel
           </button>
           {/* The action button is also in the delete palette — the trigger for something irreversible must not be a neutral color */}
-          <button
-            type="submit"
-            disabled={!armed || busy}
-            data-testid="delete-project-confirm"
-            className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger transition-colors hover:border-danger/70 disabled:opacity-50"
-          >
+          <Button type="submit" variant="danger" disabled={!armed || busy} data-testid="delete-project-confirm">
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
