@@ -143,6 +143,12 @@ describe('the built CSS actually contains styles', () => {
       // high contrast light: diff and danger, terminal
       '0b5a1f', 'd1f5d8', 'a1001f', 'ffe1e1',
       '0550ae', '6639ba', '135e65', '3d444d', '82071e', '044f1e', '3b2300', '033d8b', '512a97', '0b4a4f', '424a53',
+      /*
+       * The window's close button where the top bar draws it (Windows, app/WindowControls.tsx): Windows' own red under
+       * the pointer, as the OS title bar it replaces has it (owner, 2026-10-18). A control of the OS's, not a state of
+       * ours, so it stays out of the brightness hierarchy; it is shown only while hovered.
+       */
+      'c42b1c',
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
