@@ -147,7 +147,7 @@ describe("a child's turn and the call waiting on it", () => {
     store.projects.addProject({ id: 'p1', path: root, name: 'P1', trusted: true })
     meta.set('child', session('child', { name: 'Child', askedBy: 'caller' }))
     // The child's row, which its conversation is stored under
-    store.upsertSession({
+    store.sessions.upsertSession({
       ...sessionLiveDefaults(),
       id: 'child', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Child', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,

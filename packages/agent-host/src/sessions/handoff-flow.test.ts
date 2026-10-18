@@ -34,7 +34,7 @@ beforeEach(() => {
   store = new Store()
   store.projects.addProject({ id: 'p1', path: '/work/p1', name: 'P1' })
   const t = target()
-  store.upsertSession(t)
+  store.sessions.upsertSession(t)
   meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null })]])
   turnObservers = new Map()
   steps = []

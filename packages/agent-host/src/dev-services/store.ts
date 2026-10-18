@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { SessionInfo, StoredMessage } from '@cc/protocol'
+import type { StoredMessage } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -191,12 +191,6 @@ export class Store extends MigrationRunner {
    * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: open
    * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
    */
-
-  // ── SessionRecords (store/sessions.ts) ──
-
-  upsertSession(s: SessionInfo): void {
-    return this.sessions.upsertSession(s)
-  }
 
   // ── MessageRecords (store/messages.ts) ──
 
