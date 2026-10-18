@@ -240,6 +240,91 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     expect(reportOwed()).toBe(false)
   })
 
+  // RV13-A: a wait opened on the person's turn with no evidence, and returned the person's card, leaving a report armed
+  it("opens no wait on a turn the person runs there, and returns none of its cards", async () => {
+    const ra = following()
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    const waiting = act(ra, 'wait')
+    await Promise.resolve()
+    ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
+    const r = await waiting
+    expect(r).toMatchObject({ ok: true, state: 'working', reported: false })
+    expect(JSON.stringify(r)).not.toContain('Delete prod?')
+    expect(reportOwed()).toBe(false)
+  })
+
+  // RV13-B: a wait on the person's turn returned the person's answer as its result
+  it("returns nothing of a turn the person runs there at that turn's end", async () => {
+    const ra = following()
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    const waiting = act(ra, 'wait')
+    await Promise.resolve()
+    ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+    expect(JSON.stringify(await waiting)).not.toContain('private answer')
+  })
+
+  // RV13-C: after the notice that it ended unwatched, status at rest read the person's words
+  it('reads none of the words of a turn that ended unwatched after the person spoke there', async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
+    ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+    state = 'idle'
+    lastUser = { text: 'my own thing', from: PERSON }
+    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    await eventually(() => !reportOwed())
+    const r = await act(ra, 'status')
+    expect(r).toMatchObject({ ok: true, state: 'at_rest' })
+    expect(JSON.stringify(r)).not.toContain('private answer')
+  })
+
+  // RV13-D: a wait cut short owed the person's turn to the caller again, and took a place under the ceiling
+  it("owes nothing of a turn the person runs there when a wait on it is cut short", async () => {
+    const ra = following()
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    const ctl = new AbortController()
+    const waiting = ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action: 'wait' } as never, ctl.signal)
+    await Promise.resolve()
+    ctl.abort()
+    await waiting
+    expect(reportOwed()).toBe(false)
+    expect(ra.workingIn('p1')).toBe(0)
+  })
+
+  // RV13 LOW: a turn the person began, which the machine said after the state the send read, still keeps the send out
+  it('takes a turn its events said began for running, though the state read before them said at rest', async () => {
+    const ra = following()
+    state = 'idle'
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    expect(await act(ra, 'send', { text: 'do X' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(sentTexts).toEqual([])
+  })
+
+  // RV13 LOW, the rule chosen: once the person speaks into the caller's running turn, nothing more of it is the caller's
+  it("ends what is owed of the caller's turn once the person speaks into it, and tells the caller", async () => {
+    const ra = following()
+    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: 'my own thing', from: PERSON })
+    expect(reportOwed()).toBe(false)
+    expect(told.some((t) => t.includes('took a message there that you did not send'))).toBe(true)
+    expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working', reported: false })
+  })
+
+  // RV13 LOW: an instruction with no record of it as a turn of its own was still followed (a start's own race is in the table)
+  it("follows no send whose instruction did not come back as a turn of its own", async () => {
+    const ra = following()
+    state = 'idle'
+    // The send goes, but no record of it comes back as this hub's instruction
+    const r = await ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action: 'send', text: 'do X' } as never)
+    expect(r).toMatchObject({ ok: true, state: 'working', reported: false, notice: expect.stringContaining('did not go in as a turn of its own') })
+    expect(reportOwed()).toBe(false)
+  })
+
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {
     const ra = following()
     children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
@@ -276,7 +361,7 @@ describe('a child read at rest when the link is back after a missed end', () => 
   it("says only that it ended unseen, with none of its words, when the person's message came after", async () => {
     await returned({ text: 'my own thing', from: PERSON })
     expect(settled).toEqual([])
-    const notice = told.find((t) => t.includes('came to rest there while the hub could not see it'))
+    const notice = told.find((t) => t.includes('that you did not give it while the hub could not see it'))
     expect(notice).toBeDefined()
     expect(notice).not.toContain('done there')
   })

@@ -578,19 +578,31 @@ card stays the person's on that machine, whatever the caller's preset: the child
 a caller's `auto`, which alone lets it answer a local child's approval, is never carried to another computer. `send`
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
-refused, as neither a queue nor a fork reaches another machine. "The turn the caller gave it" rests on evidence: the
-hub has seen the machine record the instruction it last sent (its `user_message` from this machine's `HUB_SENDER`, with
-the text it keeps as `sent`, not a replay of one seen before) while no other turn ran there, and no other message
-since (`instructed`, `messageTaken`). A link drop and a restart clear it until the machine's last message is read again
-(below); so does any message the child takes that is not that instruction (the person's). A report held over the
-background work of a turn that ended is no turn running: no card of what runs there is the caller's, and a message the
-person sends then ends what the caller is owed, with the caller told. An instruction the machine takes into a turn
-already running there (a send that read the child at rest just before the person's message, a note that arrived after
-the caller's turn ended and the person's began) is only a message in that turn: the send says so and nothing of that
-turn is reported. A note that goes in after the caller's turn ended with nothing else running starts a turn of its
-own, and that turn's end is owed as a send's is (`tookInstruction`). When the link drops, a waiting call returns with that
+refused, as neither a queue nor a fork reaches another machine.
+
+The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
+caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything
+of the child passes it: `status` (in a turn and at rest), `wait` (as it opens, on a card, at the turn's end, and before
+owing the turn again when the call is cut short), `answer`, `send` (a start's task, a send at rest, a note into a
+turn), a card's notice, and the linked report's text and preview (`LinkedReports` asks `reportGate`: deliver, withhold,
+or defer while it cannot tell). The gate reads whose the child's current or last turn is (`Whose`) from this hub's own
+evidence: `caller` once the machine recorded the instruction this hub last sent (its `user_message` from this
+machine's `HUB_SENDER`, with the text kept as `sent`, not a replay of one seen before) while no other turn ran there
+(`busy`, from its events) and nothing else since; `other` once anything else came: the person's message (their words
+the same as the caller's included), or the instruction taken into a turn already running (a send that read the child
+at rest just before the person's message, a start's task behind the person's first message, a note that arrived after
+the caller's turn ended); `unknown` while an instruction is on its way, and from a link's loss or a restart until the
+machine's last message is read again (`verify`). Owned, the turn's words are the caller's; live (owned and running,
+not held over its background work), its cards, an answer to them and a note into it are too. Not owned, the caller gets
+the fact ("a turn you did not give it", "the person is using it there") and the state word: no card, no words, no wait
+or report owed for it. Becoming another's ends what the caller was owed: a waiting call returns that fact, and a report
+owed is dropped and the caller told, so once the person speaks into the caller's own running turn, nothing more of it
+is reported. A turn's end the reports held back while whose it was could not be told is settled once it can
+(`settleDeferred`, `caughtUp`). A note that goes in after the caller's turn ended with nothing else running starts a
+turn of its own, whose end is owed as a send's is (`tookInstruction`). The table in `remote-agents-boundary.test.ts`
+runs every such path against each way the person's turn can come about. When the link drops, a waiting call returns with that
 said, and a caller still owed a report is told once that the child cannot be followed until the link is back; when it
-is back, the child is read (`onReturn`): what ran there meanwhile is the caller's only if the last message the child
+is back, the child is read (`caughtUp`, `verify`): what ran there meanwhile is the caller's only if the last message the child
 took is the instruction this hub sent it (its text kept as `sent`, from this machine's `HUB_SENDER` as the link
 qualifies it; `LinkedSessions.lastUserMessage`). Then a turn that ended meanwhile is reported, and one still running
 reports when it ends. Otherwise another's message came after (the person's on that machine), or the instruction never

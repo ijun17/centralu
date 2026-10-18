@@ -2011,7 +2011,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await eventually(() => ['idle', 'waiting_input'].includes(back.mgr.listSessions().find((s) => s.id === id)?.state ?? ''))
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(reports()).toBe(0)
-    expect(told().some((t) => t.includes('began a turn there that you did not give it'))).toBe(true)
+    expect(told().some((t) => t.includes('that you did not give it while the hub could not see it'))).toBe(true)
   })
 
   // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there

@@ -2232,6 +2232,8 @@ export class SessionManager {
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
+      // Whose a linked child's turn is decides whether its report goes (#1038 review)
+      reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
       skillsPrompt: () => self.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
