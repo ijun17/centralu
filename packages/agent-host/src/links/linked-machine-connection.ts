@@ -364,6 +364,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   private idle(): boolean {
     if (this.connectMode !== 'when_needed' || this.pinned || this.parked || this.stopped || this.operating()) return false
+    // An attempt under way is let finish: the next check after it decides, connected or away
+    if (this.opening) return false
     if (Date.now() - this.neededAt < (this.deps.needHoldMs ?? NEED_HOLD_MS)) return false
     return ![...this.states.values()].some((state) => isInTurn(state))
   }
