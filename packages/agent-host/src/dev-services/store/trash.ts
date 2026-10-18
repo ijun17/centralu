@@ -209,6 +209,17 @@ export class TrashRecords {
     while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
+  /**
+   * A trashed session keeps the tool's conversation file when deleted for good (#378 review). A delete the person asked
+   * for while the host's own was under way ends in the trash, with the person's choice: the host's had chosen to
+   * delete the file, which only the person may.
+   */
+  keepConversationFile(sessionId: string): void {
+    this.db
+      .prepare(`UPDATE sessions SET trash = json_set(trash, '$.removeExternal', json('false')) WHERE id = ? AND deleted_at IS NOT NULL AND json_valid(trash)`)
+      .run(sessionId)
+  }
+
   isTrashed(sessionId: string): boolean {
     return !!this.db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).get(sessionId)
   }

@@ -543,6 +543,69 @@ describe('run_agent — a finished session goes, its record stays in the trash (
     expect(claude.handles.get(agent.id)!.sent.at(-1)).toContain('one more thing')
   })
 
+  /*
+   * #378 review (LOW): a restart applied at the turn's end (a setting changed during the run) was not counted as in use.
+   * Deleted while it ran, the restart's late dispose found a session that was gone and said restart_failed for it.
+   */
+  it('a session whose restart at the turn end is still under way stays', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const restarts = (mgr as unknown as { restartPolicy: { deferredRestarts: Map<string, Promise<void>> } }).restartPolicy.deferredRestarts
+    const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
+    const verdict = sessions.agentRunEnded.bind(sessions)
+    const restart = held()
+    vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
+      restarts.set(run.sessionId, restart.promise)
+      try {
+        return await verdict(run as Parameters<typeof verdict>[0])
+      } finally {
+        restarts.delete(run.sessionId)
+        restart.release()
+      }
+    })
+    expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(agentSessions().map((s) => s.id)).toEqual([agentsMade()[0]!.id])
+    expect(store.keptRuns.listKeptRuns()).toEqual([])
+  })
+
+  /*
+   * #378 review (LOW): the person's delete that joined the host's own delete under way ended as the host's purge, so a
+   * session the person moved to the trash was gone for good, its conversation file with it
+   */
+  it('a session the person deletes while the host is deleting it stays in the trash, with its conversation file', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = answering('Done.')
+    const removed: string[] = []
+    Object.assign(claude, { deleteExternalConversation: async (id: string) => void removed.push(id) })
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    // The host's move into the trash is held once the session has left the lists, so the person's delete joins it
+    const move = held()
+    const moving = held()
+    const trashSession = store.trash.trashSession.bind(store.trash)
+    vi.spyOn(store.trash, 'trashSession').mockImplementationOnce(async (...a) => {
+      moving.release()
+      await move.promise
+      return trashSession(...a)
+    })
+    const call = callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
+    await moving.promise
+    const agent = agentsMade()[0]!
+    const deleted = rpc('agents.deleteSession', { sessionId: agent.id })
+    move.release()
+    expect(brokerSaid(await call).isError).toBe(false)
+    await deleted
+
+    expect(agentSessions()).toEqual([])
+    const trashed = store.trash.listTrash().find((t) => t.id === agent.id)
+    expect(trashed?.record.removeExternal).toBe(false)
+    expect(removed).toEqual([])
+    // The run's record was kept as well: the conversation is in both, and the person deletes either
+    expect(store.keptRuns.listKeptRuns()).toHaveLength(1)
+  })
+
   it('a session holding an attachment stays: the record copies the conversation, not files', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()

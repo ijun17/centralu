@@ -66,8 +66,11 @@ export type AppSessionsHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly record: SessionRecord
   rename: (sessionId: string, name: string) => void
-  /** The way a finished app-agent session goes (#378): to the trash if still unused (`SessionTrash.trashIf`), then deleted for good */
-  trashIf: (sessionId: string, removeExternal: boolean, onlyIf: () => boolean) => Promise<boolean>
+  /**
+   * The way a finished app-agent session goes (#378): to the trash if still unused (`SessionTrash.trashIf`), then deleted
+   * for good unless a delete the person asked for joined it (`joined`)
+   */
+  trashIf: (sessionId: string, removeExternal: boolean, onlyIf: () => boolean) => Promise<'moved' | 'joined' | false>
   purgeSession: (sessionId: string) => Promise<void>
   emit: (e: NormalizedEvent) => void
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
@@ -78,6 +81,8 @@ export type AppSessionsHost = {
   inputsHeld: (sessionId: string) => boolean
   /** Requests queued for a session until it is free (#677) */
   readonly children: { readonly queued: ReadonlyMap<string, readonly unknown[]> }
+  /** Restarts applied at a turn's end and still under way (#378 review: a finished app-agent session restarting is in use) */
+  readonly restartPolicy: { readonly deferredRestarts: ReadonlyMap<string, unknown> }
 }
 
 /**
@@ -485,12 +490,17 @@ export class AppSessions {
       return this.host.store.keptRuns.keepRun({ runId, sessionId, sessionName: now.name, appName: answered.appName, projectName, tool: now.tool, keptAt: Date.now() })
     })
     if (!trashed) return
-    await this.host.purgeSession(sessionId)
+    // The person deleted it meanwhile, which keeps a session in the trash: theirs to purge, as any session they delete
+    if (trashed === 'moved') await this.host.purgeSession(sessionId)
     // The app's runs panel reads the run as kept now
     if (m.appId) this.host.emit({ type: 'external_app_runs_changed', appId: m.appId, projectId: m.projectId })
   }
 
-  /** Woken since its run (a message, a card), waking, or holding something sent to it: in use, so it stays (#378) */
+  /**
+   * Woken since its run (a message, a card), waking, restarting, or holding something sent to it: in use, so it stays
+   * (#378). A restart applied at the turn's end (a setting changed during the run) closes the process and starts
+   * another; deleted in between, the restart then failed on a session that was gone.
+   */
   private inUse(m: SessionInfo): boolean {
     const id = m.id
     return (
@@ -498,6 +508,7 @@ export class AppSessions {
       this.host.handles.has(id) ||
       this.host.agentRuns.has(id) ||
       this.host.resuming.has(id) ||
+      this.host.restartPolicy.deferredRestarts.has(id) ||
       this.host.inputsHeld(id) ||
       (this.host.children.queued.get(id)?.length ?? 0) > 0 ||
       !!m.pendingApproval ||

@@ -79,6 +79,12 @@ export class SessionTrash {
   constructor(private readonly host: SessionTrashHost) {}
 
   readonly trashing = new Map<string, Promise<void>>()
+  /**
+   * The host's own deletes under way (`trashIf`), and whether a delete somebody asked for joined one (#378 review): a
+   * joined delete is the person's, so the session stays in the trash instead of being purged after it, and the tool's
+   * conversation file stays unless they asked for it to go
+   */
+  private readonly hostDeletes = new Map<string, { joined: { removeExternal: boolean } | null }>()
 
   /**
    * Moves a session to the trash (#204) — what deleting a session means now. Nothing is destroyed: the process
@@ -107,11 +113,25 @@ export class SessionTrash {
    * so. It is asked at the last moment, with nothing of the session touched yet and nothing awaited from there until
    * the session has left `meta`, so no message, wake or card can come in between; false keeps the session as it is.
    * Such a delete never withdraws a wake (`onlyIf` is there to refuse a waking session), and never rides on a delete
-   * already under way: that one is the person's, and keeps the session in the trash.
-   * @returns whether this call moved the session to the trash
+   * already under way: that one is the person's, and keeps the session in the trash. A delete that rides on this one is
+   * the person's too, for the same reason.
+   * @returns `moved` when this call moved the session to the trash and nobody asked for a delete meanwhile, `joined`
+   * when it moved it and a delete somebody asked for joined it (the session then stays in the trash), false when it
+   * stays where it was
    */
-  trashIf(sessionId: string, removeExternal: boolean, onlyIf: () => boolean): Promise<boolean> {
-    return this.trashShared(sessionId, false, removeExternal, undefined, false, onlyIf)
+  async trashIf(sessionId: string, removeExternal: boolean, onlyIf: () => boolean): Promise<'moved' | 'joined' | false> {
+    if (this.trashing.has(sessionId)) return false
+    const own: { joined: { removeExternal: boolean } | null } = { joined: null }
+    this.hostDeletes.set(sessionId, own)
+    try {
+      if (!(await this.trashShared(sessionId, false, removeExternal, undefined, false, onlyIf))) return false
+    } finally {
+      if (this.hostDeletes.get(sessionId) === own) this.hostDeletes.delete(sessionId)
+    }
+    if (!own.joined) return 'moved'
+    // The file goes only when the person asked for it too: the host's choice was made for a session nobody wanted
+    if (removeExternal && !own.joined.removeExternal) this.host.store.trash.keepConversationFile(sessionId)
+    return 'joined'
   }
 
   private async trashShared(
@@ -136,7 +156,10 @@ export class SessionTrash {
       if (recovery || fromCleanup) throw rpcError('The session is already being deleted without its recovery snapshot')
       // The person's own delete, which keeps the session in the trash: not the host's to purge after it (`trashIf`)
       if (onlyIf) return false
-      // Joined, not moved by this call: only `trashIf` reads the answer, and it never joins
+      // Joined, not moved by this call: only `trashIf` reads the answer, and it never joins. A host delete it joins
+      // becomes this one, which keeps the session in the trash (`hostDeletes`)
+      const host = this.hostDeletes.get(sessionId)
+      if (host) host.joined = { removeExternal: (host.joined?.removeExternal ?? false) || removeExternal }
       await pending
       return false
     }
