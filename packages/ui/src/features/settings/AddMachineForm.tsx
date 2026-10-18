@@ -188,7 +188,7 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
                     disabled={!!c.linkedAs}
                     onClick={() => choose(c)}
                     data-testid={`machines-add-choice-${c.key}`}
-                    className={`flex items-baseline gap-2 px-2 py-1 text-left disabled:cursor-default disabled:opacity-60 ${radioClass(choiceKey === c.key)}`}
+                    className={`flex items-baseline gap-2 px-2 py-1 text-left disabled:cursor-default disabled:opacity-50 ${radioClass(choiceKey === c.key)}`}
                   >
                     <span className="shrink-0">{c.label}</span>
                     <span className="min-w-0 truncate text-ink-faint">{c.linkedAs ? `Linked as ${c.linkedAs}` : c.detail}</span>

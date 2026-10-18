@@ -129,7 +129,7 @@ export function BackgroundTasksBadge({
               <span className="readout translate-y-px text-xs leading-none">{count}</span>
               {/* Steady white while work runs (owner, 2026-10-18): a lit dot, not a blinking one */}
               <span
-                className="size-1.5 rounded-full bg-white"
+                className="size-1.5 rounded-full bg-ink-signal"
                 aria-hidden
                 data-testid="background-running-dot"
               />
@@ -263,7 +263,7 @@ function BackgroundTaskRow({
         */}
         <span className="flex size-3 shrink-0 items-center justify-center" aria-hidden>
           {running ? (
-            <span className="size-1.5 rounded-full bg-white" />
+            <span className="size-1.5 rounded-full bg-ink-signal" />
           ) : task.status === 'completed' ? (
             <span className="size-2 rounded-full border border-ink-faint" />
           ) : (

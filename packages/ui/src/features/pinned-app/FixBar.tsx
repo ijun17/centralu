@@ -77,7 +77,7 @@ export function FixBar({
         </p>
         <button
           type="button"
-          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+          className="shrink-0 rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-ink transition-colors hover:border-line-strong disabled:opacity-50"
           onClick={() => void builder.start()}
           disabled={builder.starting}
           data-testid="fix-bar-start-builder"

@@ -152,7 +152,7 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
             </button>
           )}
           <button
-            className="shrink-0 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="shrink-0 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
             disabled={!draft || busy || stuck !== null}
             title={stuck ?? undefined}
             data-testid="secret-save"

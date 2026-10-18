@@ -111,7 +111,7 @@ export function Sidebar() {
         */}
         <div className="flex gap-1.5 px-2 py-2">
           <button
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
             /*
              * **There should be exactly one way to pick a folder in this app.**
              *

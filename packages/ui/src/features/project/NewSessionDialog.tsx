@@ -572,7 +572,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <button
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+            className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
             disabled={busy || blocked}
             data-testid="create-session-confirm"
           >

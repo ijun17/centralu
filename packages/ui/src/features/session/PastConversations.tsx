@@ -84,7 +84,7 @@ export function PastConversations({
             disabled={busy !== null}
             onClick={() => void pick(s)}
             data-testid={`past-conversation-${s.externalId}`}
-            className="flex w-full flex-col gap-0.5 px-4 py-2.5 text-left text-ink-muted transition-colors hover:bg-surface-hover/40 hover:text-ink disabled:opacity-60"
+            className="flex w-full flex-col gap-0.5 px-4 py-2.5 text-left text-ink-muted transition-colors hover:bg-surface-hover/40 hover:text-ink disabled:opacity-50"
           >
             <span className="truncate text-sm leading-tight">
               {busy === s.externalId ? 'Loading…' : s.title}

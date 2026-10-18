@@ -26,7 +26,7 @@ export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; on
    * The border says what waits that only the person can settle (owner, 2026-10-18): white and solid for an approval,
    * white and dashed for an error. An error outranks an approval, so with both the border is dashed.
    */
-  const edge = counts.error > 0 ? 'border-dashed border-ink' : counts.approval > 0 ? 'border-solid border-ink' : 'border-solid border-line'
+  const edge = counts.error > 0 ? 'border-dashed border-ink-signal' : counts.approval > 0 ? 'border-solid border-ink-signal' : 'border-solid border-line'
   return (
     <button
       type="button"

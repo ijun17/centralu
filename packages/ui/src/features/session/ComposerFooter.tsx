@@ -71,11 +71,12 @@ export const ComposerFooter = memo(function ComposerFooter({
           now, so a blank truly only ever means "never reported at all".)
         */}
       {/*
+        In the UI face, with figures of one width so the number does not jitter as it counts (owner, 2026-10-18).
         A thin bar under the number (owner, 2026-10-18), so how full it is reads at a glance: the track is a hairline,
         the fill steps up to ink from 80% as the number does; unknown draws the track alone.
       */}
       <span
-        className={`readout ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs ${
+        className={`ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs tabular-nums ${
           ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"

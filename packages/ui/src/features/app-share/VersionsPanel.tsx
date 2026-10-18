@@ -97,7 +97,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+                    className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
                     onClick={() => void restore(asking)}
                     disabled={busy}
                     data-testid="versions-confirm-yes"

@@ -68,7 +68,7 @@ export function RowApproval({
     ? view.openWhy
     : 'The line is longer than the row: open the session to read it whole on its card'
   const button =
-    'flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40'
+    'flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50'
 
   /*
    * The waiting list is wide enough for the line and its buttons side by side; their slot has one width whether it

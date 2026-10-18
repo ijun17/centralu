@@ -129,7 +129,7 @@ export function QuestionCard({
 
   return (
     <div
-      className="overflow-hidden rounded-bubble border border-ink-signal/80 bg-surface-raised"
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
       data-testid="question-card"
     >
       <div className="flex items-center gap-2 px-3 pt-3">
@@ -252,7 +252,7 @@ export function QuestionCard({
           data-testid="question-submit"
           disabled={!ready || sending}
           onClick={() => void submit()}
-          className="rounded-full border border-line-strong px-3 py-1 text-xs text-ink enabled:hover:bg-surface-selected disabled:opacity-40"
+          className="rounded-full border border-line-strong px-3 py-1 text-xs text-ink enabled:hover:bg-surface-selected disabled:opacity-50"
         >
           {sending ? 'Sending…' : 'Answer'}
         </button>

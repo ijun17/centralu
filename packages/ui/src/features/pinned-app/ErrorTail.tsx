@@ -171,7 +171,7 @@ export function ErrorTail({
           ) : builder.id ? (
             <button
               type="button"
-              className="rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-40"
+              className="rounded-md border border-line bg-surface-floor px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
               onClick={() => void send()}
               disabled={busy}
               title="Hand this error to the app's builder session, once"
