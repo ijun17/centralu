@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { projectLabelOf, useInbox } from '../../store/selectors.js'
 import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
+import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import {
   CONTINUE_TEXT,
@@ -13,7 +14,6 @@ import {
   StateDot,
   canContinue,
   formatWaiting,
-  interruptionLabel,
   waitingTone,
 } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
@@ -182,18 +182,7 @@ export function Inbox() {
                         title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
                         data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
                       >
-                        {/* Why the turn stopped says more than the state it stopped in (#698) */}
-                        {it.arrival
-                          ? arrivalAsks(it.arrival.asks)
-                          : it.proposal
-                          ? 'Needs your answer'
-                          : it.interruption
-                            ? interruptionLabel(it.interruption)
-                            : it.state === 'waiting_approval'
-                              ? 'Needs approval'
-                              : it.state === 'error'
-                                ? 'Error'
-                                : 'Waiting for input'}
+                        {it.arrival ? arrivalAsks(it.arrival.asks) : inboxStateLabel(it)}
                       </span>
                       {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
                       <WaitingTime since={it.waitingSince} />

@@ -10,6 +10,10 @@
 //             between main and the head, and the head. A lower pull request must build on its own,
 //             since it lands on its own.
 //   orphans   dependency-cruiser's `no-orphans` rule as an error (in `pnpm verify` it only warns).
+//   store-step  a store step number this branch adds (a new `to: N,` under the migrations folder) that main
+//             already has, or that another open pull request adds (#1203): two parallel changes picking the
+//             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
+//             requests; the stack's own are left out. The orchestrator assigns the numbers; this is the backstop.
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
@@ -139,8 +143,16 @@ function pnpm(args, dir) {
   }
 }
 
-/** The real tools. Each takes a worktree; tests replace them. */
+/** The real tools. Each takes a worktree (`gh`: the checkout, to run in); tests replace them. */
 export const realRunners = {
+  /** Runs `gh` in the checkout; answers its stdout. */
+  gh(args, dir) {
+    try {
+      return execFileSync('gh', args, { cwd: dir, encoding: 'utf8', env: ENV, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+    } catch (e) {
+      throw new Error(`gh ${args.slice(0, 3).join(' ')} failed: ${tail(`${e.stderr ?? ''}${e.message}`, 3)}`)
+    }
+  },
   /**
    * Gives a worktree its dependencies. When the worktree's lockfile is the one the checkout
    * installed, its node_modules folders are linked in (seconds, no network); otherwise pnpm installs
@@ -184,7 +196,88 @@ export const realRunners = {
 // --- Worktrees, and taking them away again ---------------------------------------------------------
 
 /** The checks a pull request can be exempted from, each with a reason. `main` is only ever a warning. */
-export const CHECKS = ['tsc', 'orphans', 'revert']
+export const CHECKS = ['tsc', 'orphans', 'store-step', 'revert']
+
+// --- Store step numbers (#1203) ----------------------------------------------------------------------
+
+/** Where the store's migration steps are written: each step is a `to: N,` line of one of these files. */
+export const STEP_DIR = 'packages/agent-host/src/dev-services/store/migrations/'
+const STEP_LINE = /^[ \t]*to:[ \t]*(\d+)[ \t]*,/
+
+/** The step numbers a file's text declares. */
+export function stepNumbers(text) {
+  return [...String(text).matchAll(new RegExp(STEP_LINE.source, 'gm'))].map((m) => Number(m[1]))
+}
+
+/**
+ * The step numbers a unified diff adds under {@link STEP_DIR}: a `to: N,` line added and not removed again
+ * in the same diff (a step moved to another file, or reformatted, is not a new number).
+ */
+export function stepsAddedByDiff(diff) {
+  const added = new Set()
+  const removed = new Set()
+  let inSteps = false
+  for (const line of String(diff).split('\n')) {
+    if (line.startsWith('diff --git ')) inSteps = line.slice(line.lastIndexOf(' b/') + 3).startsWith(STEP_DIR)
+    else if (inSteps && (line.startsWith('+') || line.startsWith('-')) && !line.startsWith('+++') && !line.startsWith('---')) {
+      const m = STEP_LINE.exec(line.slice(1))
+      if (m) (line[0] === '+' ? added : removed).add(Number(m[1]))
+    }
+  }
+  return [...added].filter((n) => !removed.has(n)).sort((a, b) => a - b)
+}
+
+/**
+ * The findings for the step numbers a branch adds: one for each that main already has, and for each that
+ * another open pull request adds. `onMain` maps a number to the file that declares it; `others` is
+ * `[{ number, title, head, steps }]`.
+ */
+export function stepFindings({ added, onMain, others }) {
+  const findings = []
+  const ask = 'The orchestrator assigns store step numbers (CONTRIBUTING.md): ask for a free one and renumber, or exempt this check with the reason it stands.'
+  for (const n of added) {
+    if (onMain.has(n)) findings.push({ check: 'store-step', message: `Store step ${n} is already on main (${onMain.get(n)}). ${ask}` })
+    for (const pr of others) {
+      if (pr.steps.includes(n)) findings.push({ check: 'store-step', message: `Store step ${n} is also added by open pull request #${pr.number} "${pr.title}" (${pr.head}): whichever lands second conflicts. ${ask}` })
+    }
+  }
+  return findings
+}
+
+/** The number to file of each step under {@link STEP_DIR} at a commit. */
+function stepsAt(root, commit) {
+  const found = new Map()
+  let out = ''
+  try {
+    out = git(root, ['grep', '-n', '-E', '^[[:space:]]*to:[[:space:]]*[0-9]+[[:space:]]*,', commit, '--', STEP_DIR])
+  } catch {
+    return found // git grep exits 1 when nothing matches
+  }
+  for (const l of out.split('\n').filter(Boolean)) {
+    const [path, , ...text] = l.slice(commit.length + 1).split(':')
+    const m = STEP_LINE.exec(text.join(':'))
+    if (m) found.set(Number(m[1]), path.slice(STEP_DIR.length))
+  }
+  return found
+}
+
+/**
+ * The open pull requests that add store steps, leaving out the stack's own (a head that is one of its
+ * `commits`, or one of its branches' `names`). Only a pull request that touches {@link STEP_DIR} costs a full diff.
+ */
+function otherPrsAddingSteps({ gh, root, commits, names }) {
+  const own = new Set(commits)
+  const listed = JSON.parse(gh(['pr', 'list', '--state', 'open', '--limit', '500', '--json', 'number,title,headRefName,headRefOid'], root))
+  const others = []
+  for (const pr of listed) {
+    if (own.has(pr.headRefOid) || names.has(pr.headRefName)) continue
+    const files = String(gh(['pr', 'diff', String(pr.number), '--name-only'], root)).split('\n')
+    if (!files.some((f) => f.trim().startsWith(STEP_DIR))) continue
+    const steps = stepsAddedByDiff(gh(['pr', 'diff', String(pr.number)], root))
+    if (steps.length) others.push({ number: pr.number, title: pr.title, head: pr.headRefName, steps })
+  }
+  return others
+}
 
 /** Every run keeps its worktrees in one folder of the temporary folder, named after the run. */
 export const RUN_PREFIX = 'cc-pre-pr-'
@@ -385,6 +478,23 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
       log('dependency-cruiser, orphans as errors')
       for (const file of orphansOf(runners.depcruise(top))) {
         findings.push({ check: 'orphans', message: `${file} is imported by nothing (no-orphans): delete it, import it, or list it in tooling/dependency-cruiser.cjs with why.` })
+      }
+    }
+
+    // store-step: the numbers this branch (the whole stack) adds over where it forked from main
+    if (!skip('store-step')) {
+      const forkMain = git(root, ['merge-base', at.main, at.head]).trim()
+      const added = stepsAddedByDiff(git(root, ['diff', '--no-renames', '-U0', forkMain, at.head, '--', STEP_DIR]))
+      if (added.length) {
+        log(`Store step(s) ${added.join(', ')}: looking at main and the open pull requests`)
+        const names = new Set(heads.flatMap((h) => h.names).flatMap((n) => [n, n.replace(`${remote}/`, ''), n.replace(/^refs\/centralu-pre-pr\/[^/]+\//, '')]))
+        let others
+        try {
+          others = otherPrsAddingSteps({ gh: runners.gh, root, commits, names })
+        } catch (e) {
+          throw new Error(`Store step(s) ${added.join(', ')} are new here, and the open pull requests could not be read (${e.message}). Run it where gh is logged in, or exempt store-step with the reason.`)
+        }
+        findings.push(...stepFindings({ added, onMain: stepsAt(root, at.main), others }))
       }
     }
 

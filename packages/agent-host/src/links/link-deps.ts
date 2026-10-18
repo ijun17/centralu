@@ -1,4 +1,4 @@
-import type { MachineSide, NormalizedEvent } from '@cc/protocol'
+import type { MachineConnect, MachineSide, NormalizedEvent } from '@cc/protocol'
 import type { RemoteRuntime } from './install.js'
 import type { RegistryOptions } from './registry.js'
 import type { RemoteClientOptions } from './remote-client.js'
@@ -18,6 +18,8 @@ export type MachineRecord = {
   addedAt: number
   /** The version pair the person chose to connect without aligning, if any (versions.ts) */
   acceptedVersions: string | null
+  /** When the hub opens the link (#1134); absent: at start */
+  connect?: MachineConnect
 }
 
 export interface MachineRegistry {
@@ -25,6 +27,7 @@ export interface MachineRegistry {
   add(record: Omit<MachineRecord, 'slot'>): MachineRecord
   remove(id: string): void
   setAcceptedVersions(id: string, key: string | null): void
+  setConnect(id: string, connect: MachineConnect): void
 }
 
 /**
@@ -57,8 +60,21 @@ export type LinkDeps = {
   ownerOf?: (sessionId: string) => string | undefined
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>
-  /** Backoff between attempts while a machine is away; doubles up to the second value */
+  /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
+  /**
+   * Whether a session here waits on a session of the machine (#1134): a report owed of a child there, whose turn runs
+   * or whose background work does (`SessionManager.linkedWorkOwed`). A machine that connects when needed stays up for
+   * it, and is connected at start for it after a restart. Absent: nothing waits
+   */
+  workOwed?: (machineId: string) => boolean
+  /**
+   * For tests, a machine that connects when needed (#1134): how long it stays up after the last need, how often that
+   * is looked at, and how long an agent's call waits for it to connect
+   */
+  needHoldMs?: number
+  idleCheckMs?: number
+  needWaitMs?: number
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
   installer?: LinkInstaller
   /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */

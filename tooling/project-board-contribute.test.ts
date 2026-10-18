@@ -892,6 +892,15 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     )
   })
 
+  it('passes an exemption from the store step check on to pre-pr', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, warnings: [], exempted: [{ check: 'store-step', reason: 'Number 60 was assigned to this branch.' }] })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { 'store-step': 'Number 60 was assigned to this branch.' } })
+    expect(r.isError, r.text).toBe(false)
+    expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'store-step=Number 60 was assigned to this branch.'])
+  })
+
   it('opens nothing when the call is cancelled, and stops pre-pr\'s whole process tree and cleans up after it', async () => {
     const c = prePrCheckout()
     prePrAnswers({ ok: true, findings: [], notes: [], heads: [], head: c.tools, hangMs: 60_000 })

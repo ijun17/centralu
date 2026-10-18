@@ -155,6 +155,26 @@ test('A row menu stays fully on screen even when the sidebar is narrow', async (
   expect(sm.x).toBeGreaterThanOrEqual(0)
 })
 
+/*
+ * The ⋯ that opens a row menu also closes it. Pressing it was a press outside the menu: the menu closed on mousedown
+ * and the button's click, a toggle, opened it again, so the menu never went away from its own button.
+ */
+test('Pressing the ⋯ of an open row menu closes it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'a menu to close')
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+
+  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('project-menu-open-alpha')).toHaveCount(0)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`session-menu-open-${id}`)).toBeVisible()
+  await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`session-menu-open-${id}`)).toHaveCount(0)
+})
+
 test('Clicking a project name while viewing one of its sessions opens the project screen (reported by the person, 2026-09-28)', async ({
   page,
 }) => {
