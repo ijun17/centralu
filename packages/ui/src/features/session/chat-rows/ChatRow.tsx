@@ -323,6 +323,8 @@ export function ToolCard({
    * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
    * practice. The full output is what `result` delivers.)
    */
+  /** Still running: no answer yet and no failure */
+  const running = item.result === undefined && item.ok === undefined
   const liveTail =
     item.result === undefined && item.live
       ? item.live.replace(/\s+$/, '').split('\n').slice(-PREVIEW_LINES)
@@ -339,7 +341,7 @@ export function ToolCard({
       className={
         call
           ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong/70'}`
-          : 'rounded-md border border-line bg-surface-raised/60'
+          : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line'}`
       }
       data-testid="tool-card"
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
@@ -354,17 +356,14 @@ export function ToolCard({
          */
         <div className="flex w-full items-center">
           <button
-            className="flex shrink-0 items-center gap-2 py-1.5 pl-2.5 pr-2 text-left"
+            className="flex shrink-0 items-center py-2 pl-3 pr-2.5 text-left"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             data-testid="tool-card-toggle"
           >
-            <span className="shrink-0 text-ink-faint">
-              <ChevronIcon open={open} />
-            </span>
-            <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
+            <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">{item.tool}</span>
           </button>
-          <span className="readout min-w-0 truncate py-1.5 text-xs text-ink-faint" data-testid="tool-card-title">
+          <span className="readout min-w-0 truncate py-2 text-xs text-ink-muted" data-testid="tool-card-title" title={item.title}>
             {pieces.map((p, i) =>
               p.ref ? (
                 <FileLink key={i} refInfo={p.ref} projectId={projectId}>
@@ -377,28 +376,47 @@ export function ToolCard({
           </span>
           {/* Not focusable: the toggle button above is the keyboard's way to the same action */}
           <div
-            className="flex min-h-[2rem] flex-1 shrink-0 items-center justify-end gap-2 self-stretch px-2.5"
+            className="flex min-h-[2rem] flex-1 shrink-0 items-center justify-end gap-2.5 self-stretch px-3"
             onClick={() => setOpen((o) => !o)}
             aria-hidden
           >
-            {item.ok === false && <span className="text-xs text-ink">Failed</span>}
+            {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" />}
+            {item.ok === false && <span className="text-2xs text-ink-muted">failed</span>}
+            <span className="shrink-0 text-ink-faint">
+              <ChevronIcon open={open} />
+            </span>
           </div>
         </div>
       ) : (
         <button
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           data-testid="tool-card-toggle"
+          title={item.title}
         >
+          {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
+          <span className="readout shrink-0 rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted">{item.tool}</span>
+          <span className="readout min-w-0 flex-1 truncate text-xs text-ink-muted">{item.title === item.tool ? '' : item.title}</span>
+          {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" aria-label="running" />}
+          {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted">failed</span>}
           {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
           <span className="shrink-0 text-ink-faint">
             <ChevronIcon open={open} />
           </span>
-          <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
-          <span className="readout truncate text-xs text-ink-faint">{item.title}</span>
-          {item.ok === false && <span className="ml-auto shrink-0 text-xs text-ink">Failed</span>}
         </button>
+      )}
+
+      {/*
+        What the tool was given, whole, once the card is open (owner, 2026-10-18: a long command was cut to one line in
+        the title and could not be read anywhere). Only when it says more than the title row could.
+      */}
+      {!call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60) && (
+        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-input">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-hover/25 px-2.5 py-1.5 font-mono text-xs leading-body text-ink-muted">
+            {item.title}
+          </pre>
+        </div>
       )}
 
       {liveTail.length > 0 && (
