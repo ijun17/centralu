@@ -78,7 +78,11 @@ uxTask({
     await u.press('Enter')
   },
   goal: startedThere,
-  budget: { operators: 26, M: 2, H: 2, seconds: 10.6 },
+  /*
+   * One click and one mental step more than the + took (owner, 2026-10-18: the + on the project row moved the row's
+   * marks on hover, so it went; the project menu's New session is the one door, and it starts at once)
+   */
+  budget: { operators: 30, M: 3, H: 2, seconds: 12.8 },
 })
 
 uxTask({

@@ -497,7 +497,7 @@ uxTask({
   task: 'Update the app when a new version is out',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['The "Update to …" line in the top bar installs; "Apply now" relaunches into it (#352)'],
+  notes: ['The "Update" capsule in the top bar installs, its version in the tooltip (owner, 2026-10-18); pressed again it relaunches into it (#352)'],
   start: async (page) => {
     await demo(page)
     await page.evaluate(() => {
@@ -505,7 +505,7 @@ uxTask({
       m.relaunchCheck = { ready: true }
       m.offerUpdate('9.9.9')
     })
-    await expect(page.getByTestId('update-line')).toContainText('9.9.9')
+    await expect(page.getByTestId('update-line')).toHaveText('Update')
   },
   run: async (u, page) => {
     await u.click(page.getByTestId('update-line'))
