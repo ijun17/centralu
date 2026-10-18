@@ -185,6 +185,15 @@ describe('attaching and detaching', () => {
     expect(a.current().map((x) => x.server)).toEqual(['app-notes', 'app-helper'])
   })
 
+  // A value another build may write there (#384): only `1` shares, so a word this build does not know is a refusal
+  it('reads anything but 1 in the share switch as not shared', () => {
+    const ref = { projectId: 'p2', appId: 'board' }
+    for (const [value, shared] of [['1', true], ['true', false], ['yes', false], ['2', false], ['', false]] as const) {
+      w.store.settings.setAppSetting('app_shared:p2/board', value)
+      expect(readShared(w.store.settings, ref)).toBe(shared)
+    }
+  })
+
   it('refuses an app that is not shared, and says only the person can share it', async () => {
     session('w1', 'p1')
     expect(await access.attach('w1', 'Beta/secret')).toMatchObject({ ok: false, error: expect.stringContaining('not shared') })

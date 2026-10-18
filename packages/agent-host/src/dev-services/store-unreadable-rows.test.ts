@@ -171,4 +171,17 @@ describe('a value a newer build wrote that this build cannot read (#384)', () =>
     expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('projects.default_models of p1')
     said.mockRestore()
   })
+
+  /*
+   * Why a session's last turn did not finish (#698): a reason a newer build added reads as `interrupted`, alone, and a
+   * value that does not read at all is no interruption, never a lost session row.
+   */
+  it('an interruption with a reason this build does not know reads as interrupted, and one that does not read as none', () => {
+    const s = seeded()
+    s.sessions.upsertSession(session('s2'))
+    dbOf(s).prepare(`UPDATE sessions SET interruption = ? WHERE id = 's1'`).run(JSON.stringify({ reason: 'power-cut', at: 5, laterField: 1 }))
+    dbOf(s).prepare(`UPDATE sessions SET interruption = '{"reason":"net' WHERE id = 's2'`).run()
+    const byId = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.interruption]))
+    expect(byId).toEqual({ s1: { reason: 'interrupted', at: 5 }, s2: null })
+  })
 })
