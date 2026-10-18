@@ -1136,8 +1136,7 @@
    */
   .cc-md th,
   .cc-md td {
-    /* 2px (owner, 2026-10-18: a touch heavier). Not 1.5px: the engines snap a border to whole pixels, so it drew as 1 */
-    border: 2px solid var(--color-line-strong);
+    border: 1px solid var(--color-line-strong);
     padding: 0.3em 0.6em;
     text-align: left;
   }
