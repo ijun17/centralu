@@ -23,7 +23,10 @@ export function SessionStart({
   tool: string
 }) {
   return (
-    <div className="mx-auto w-full max-w-[560px] px-4 pt-6" data-testid="session-start">
+    <div
+      className="mx-auto flex w-full max-w-[560px] flex-col items-center px-4 pt-6"
+      data-testid="session-start"
+    >
       <ToolSwitch sessionId={sessionId} projectId={projectId} tool={tool} />
       <PastConversations sessionId={sessionId} projectId={projectId} tool={tool} />
     </div>

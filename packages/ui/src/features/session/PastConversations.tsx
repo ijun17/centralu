@@ -73,8 +73,8 @@ export function PastConversations({
   }
 
   return (
-    <div className="mt-5" data-testid="past-conversations">
-      <p className="mb-2 px-1 text-xs text-ink-faint">Or continue a past conversation</p>
+    <div className="mt-5 w-full" data-testid="past-conversations">
+      <p className="mb-2 text-center text-xs text-ink-faint">Or continue a past conversation</p>
       {/* The conversation's card shape (owner, 2026-10-18): 14px, rows split by a faint hairline */}
       <div className="max-h-72 divide-y divide-line/60 overflow-y-auto rounded-[14px] border border-line bg-surface-raised">
         {sessions.map((s) => (
@@ -104,8 +104,8 @@ export function PastConversations({
 /** The list while it is read: the heading as it will stand, and three rows of a title over a dim line */
 function PastSkeleton() {
   return (
-    <div className="mt-5" data-testid="past-conversations-loading">
-      <p className="mb-2 px-1 text-xs text-ink-faint">Or continue a past conversation</p>
+    <div className="mt-5 w-full" data-testid="past-conversations-loading">
+      <p className="mb-2 text-center text-xs text-ink-faint">Or continue a past conversation</p>
       <div className="divide-y divide-line/60 rounded-[14px] border border-line bg-surface-raised">
         {[0, 1, 2].map((i) => (
           <SkeletonLines key={i} lines={2} className="px-4 py-2.5" label="Looking for past conversations" />
