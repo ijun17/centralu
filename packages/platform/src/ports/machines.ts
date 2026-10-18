@@ -1,5 +1,6 @@
 import type {
   MachineAutostartResult,
+  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineUninstallResult,
@@ -27,8 +28,14 @@ export interface MachinesPort {
   probe(sshTarget: string): Promise<MachineProbe>
   /** Unlinks it: its sessions and projects leave the lists. Nothing on the machine changes */
   remove(machineId: string): Promise<void>
-  /** Tries the link again now instead of waiting out its backoff */
+  /** Tries the link again now instead of waiting out its backoff; connects a disconnected one, which then stays up (#1134) */
   reconnect(machineId: string): Promise<MachineInfo>
+  /** Closes the link until it is connected or needed again; the machine stays linked (#1134) */
+  disconnect(machineId: string): Promise<MachineInfo>
+  /** When the host opens the link: at start, or when needed (#1134) */
+  setConnect(machineId: string, connect: MachineConnect): Promise<MachineInfo>
+  /** This window needs the machine now: one of its projects or sessions is open (#1134). Answers at once */
+  need(machineId: string): Promise<MachineInfo>
   /** Connects although the versions differ (one protocol only): the person declined to align them (plan §4) */
   acceptVersions(machineId: string): Promise<MachineInfo>
   /**

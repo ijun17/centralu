@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, machinesInUse, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -254,6 +254,16 @@ describe('a machine whose host runs with administrator rights (#702)', () => {
 })
 
 describe('a machine that connects when needed (#1134)', () => {
+  const machines = { lap: machine({ id: 'lap', connect: 'when_needed' }), srv: machine({ id: 'srv' }) }
+
+  it('is needed while its focused session or open project is on screen; a machine connected at start never is', () => {
+    expect(machinesInUse({ session: { machine: 'lap' } }, machines)).toEqual(['lap'])
+    expect(machinesInUse({ projects: [null, { machine: 'lap' }, { machine: 'lap' }] }, machines)).toEqual(['lap'])
+    expect(machinesInUse({ session: { machine: 'srv' }, projects: [{ machine: null }, undefined] }, machines)).toEqual([])
+    // A machine the window has no row for yet is not asked about
+    expect(machinesInUse({ session: { machine: 'gone' } }, machines)).toEqual([])
+  })
+
   it('is disconnected without a problem to fix, and the row says so', () => {
     expect(machineProblem(machine({ status: 'disconnected' }))).toBeNull()
     expect(MACHINE_STATUS_LABEL.disconnected).toBe('disconnected')

@@ -342,6 +342,8 @@ export class MockPlatform implements Platform {
   set sshConfig(value: MachinesMock['sshConfig']) { this.machinesMock.sshConfig = value }
   get probeAnswers() { return this.machinesMock.probeAnswers }
   set probeAnswers(value: MachinesMock['probeAnswers']) { this.machinesMock.probeAnswers = value }
+  /** What the window said it needs, in order (#1134) */
+  get machinesNeeded() { return this.machinesMock.needed }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }

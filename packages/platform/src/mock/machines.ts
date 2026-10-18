@@ -17,6 +17,8 @@ export class MachinesMock {
    */
   sshConfig: SshHostList = { configFile: '~/.ssh/config', hosts: [], notes: [] }
   probeAnswers: Record<string, Omit<MachineProbe, 'sshTarget'>> = {}
+  /** Every `machines.need` the window sent (#1134), in order */
+  needed: string[] = []
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     if (at === -1) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
@@ -85,7 +87,18 @@ export class MachinesMock {
       this.projectStore.list = this.projectStore.list.filter((p) => p.machine !== machineId)
       this.emit({ type: 'machine_resync', machineId })
     },
-    reconnect: async (machineId: string) => this.machineRow(machineId, {}),
+    reconnect: async (machineId: string) =>
+      this.machineRow(machineId, this.machinesList.find((m) => m.id === machineId)?.status === 'disconnected' ? { status: 'connected', error: null } : {}),
+    /** The mock's link closes and opens at once (#1134): no ssh, no hold */
+    disconnect: async (machineId: string) => this.machineRow(machineId, { status: 'disconnected', error: null }),
+    setConnect: async (machineId: string, connect: MachineInfo['connect']) => this.machineRow(machineId, { connect }),
+    need: async (machineId: string) => {
+      const m = this.machinesList.find((x) => x.id === machineId)
+      const comes = m?.connect === 'when_needed' && m.status === 'disconnected'
+      // Counted for a test to read: what the window said it needs, in order
+      this.needed.push(machineId)
+      return this.machineRow(machineId, comes ? { status: 'connected', error: null, lastConnectedAt: Date.now() } : {})
+    },
     acceptVersions: async (machineId: string) => {
       const v = this.machinesList.find((m) => m.id === machineId)?.versions
       if (v && !v.compatible) throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })

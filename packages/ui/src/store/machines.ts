@@ -28,6 +28,9 @@ type MachineActions = Pick<
   | 'probeMachine'
   | 'removeMachine'
   | 'reconnectMachine'
+  | 'disconnectMachine'
+  | 'setMachineConnect'
+  | 'needMachine'
   | 'changeMachineInstall'
   | 'setMachineAutostart'
   | 'machineActivity'
@@ -82,6 +85,35 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
       set({ toast: `Could not reconnect: ${(e as Error).message}` })
+    }
+  },
+
+  async disconnectMachine(machineId) {
+    try {
+      const m = await get().platform!.machines.disconnect(machineId)
+      set((s) => ({ machines: withAnswered(s.machines, m) }))
+    } catch (e) {
+      set({ toast: `Could not disconnect: ${(e as Error).message}` })
+    }
+  },
+
+  async setMachineConnect(machineId, connect) {
+    try {
+      const m = await get().platform!.machines.setConnect(machineId, connect)
+      // The setting is the answer's: a `machine_status` sent before it may predate the change
+      set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), connect: m.connect } } }))
+      return true
+    } catch (e) {
+      set({ toast: `Could not change when it connects: ${(e as Error).message}` })
+      return false
+    }
+  },
+
+  async needMachine(machineId) {
+    try {
+      await get().platform!.machines.need(machineId)
+    } catch {
+      // An older host has no such call; its machines connect at start anyway
     }
   },
 

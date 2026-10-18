@@ -619,6 +619,9 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('machines.remove', { machineId })
       },
       reconnect: (machineId) => rpc.call('machines.reconnect', { machineId }),
+      disconnect: (machineId) => rpc.call('machines.disconnect', { machineId }),
+      setConnect: (machineId, connect) => rpc.call('machines.setConnect', { machineId, connect }),
+      need: (machineId) => rpc.call('machines.need', { machineId }),
       acceptVersions: (machineId) => rpc.call('machines.acceptVersions', { machineId }),
       install: (machineId) => rpc.call('machines.install', { machineId }),
       update: (machineId) => rpc.call('machines.update', { machineId }),
