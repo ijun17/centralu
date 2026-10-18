@@ -16,13 +16,17 @@ export type MovedChild = { handle: string; name: string; state: string; can: str
 /** A moved child with nothing owed (#738): finished and reported, and often waiting for the next instruction */
 const SETTLED_CHILD = 'finished; waiting for more work'
 
-/** The section a handoff note opens with when live children moved (#693): what they are, and what can be done with each */
-export function movedChildrenNote(moved: readonly MovedChild[]): string {
+/**
+ * The section a handoff note opens with when live children moved (#693): what they are, and what can be done with each.
+ * `commands` says how the new session runs a tool the lines name that it reaches only through centralu_run (#850).
+ */
+export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): string {
   return [
     '## Work handed over with this note (added by Centralu)',
     '',
     'The previous session started or asked for these. They now answer to you as each line says (a finished one waits',
     'for more work); use the handle with the tool it names.',
+    ...(commands ? [commands] : []),
     '',
     ...moved.map((c) => `- ${movedLabel(c)} — ${c.state} — handle: ${c.handle}. ${c.can}`),
     '',

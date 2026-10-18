@@ -2,6 +2,7 @@ import { TEXT_SIZES, type LineHeight } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { BODY_FONTS, CODE_FONTS, isUsableFont } from '../../app/typography.js'
 import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
 
 const LINE_HEIGHTS: { id: LineHeight; label: string }[] = [
   { id: 'compact', label: 'Compact' },
@@ -39,25 +40,15 @@ export function TypographySection() {
           onPick={(codeFont) => void setPrefs({ codeFont })}
         />
         <span className="py-1">Line height</span>
-        <div className="flex gap-2" role="radiogroup" aria-label="Line height">
-          {LINE_HEIGHTS.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              role="radio"
-              aria-checked={prefs.lineHeight === l.id}
-              data-testid={`settings-line-height-${l.id}`}
-              onClick={() => void setPrefs({ lineHeight: l.id })}
-              className={`rounded-md border px-2.5 py-1 text-sm leading-none transition-colors ${
-                prefs.lineHeight === l.id
-                  ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                  : 'border-line text-ink-muted hover:bg-surface-hover/25 hover:text-ink'
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Line height"
+          value={prefs.lineHeight}
+          onChange={(lineHeight) => void setPrefs({ lineHeight })}
+          size="md"
+          className="gap-2"
+          optionClassName="leading-none"
+          options={LINE_HEIGHTS.map((l) => ({ value: l.id, label: l.label, testId: `settings-line-height-${l.id}` }))}
+        />
       </div>
       <p className="mt-2 text-xs leading-body text-ink-faint">
         The app’s own fonts stay behind the one you pick, so a font that is not installed, or one without Korean, falls

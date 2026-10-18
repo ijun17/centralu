@@ -5,6 +5,7 @@ import type { ProjectStore } from './project-store.js'
 import type { ToolsMock } from './tools.js'
 import type { GridMock } from './grid.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** The trash (#204), behind the `trash` port: deleting a session moves it here until it is deleted for good */
 export class TrashMock {
@@ -93,13 +94,13 @@ export class TrashMock {
     },
     read: async (sessionId: string, limit = 200, beforeSeq?: number) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const filtered = beforeSeq ? t.messages.filter((m) => m.seq < beforeSeq) : t.messages
       return filtered.slice(-limit)
     },
     restore: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
       let registered: ProjectInfo | null = null
       let projectId: string | null = null
       if (t.project) {
@@ -128,7 +129,7 @@ export class TrashMock {
     },
     purge: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
       // The same rule as the host: if removing the original was specified, that fact stays on the record (a point tests verify)
       if (t.removeExternal) this.externallyDeleted.push(sessionId)
       this.trashBin.delete(sessionId)

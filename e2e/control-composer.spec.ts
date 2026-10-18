@@ -820,6 +820,11 @@ test('narrowing an @ query that found nothing does not bring the menu back', asy
   await page.evaluate(() => {
     const m = (window as any).__mock
     m.fsState.entries[''] = [{ name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false }]
+    // Which searches have answered: the menu could only come back on an answer, so the check waits for the last one
+    const real = m.fs.search
+    ;(window as any).__answered = []
+    m.fs.search = (projectId: string, query: string, limit: number) =>
+      real(projectId, query, limit).then((r: unknown) => ((window as any).__answered.push(query), r))
     ;(window as any).__menuSeen = 0
     new MutationObserver(() => {
       if (document.querySelector('[data-testid="autocomplete"]')) (window as any).__menuSeen++
@@ -832,6 +837,8 @@ test('narrowing an @ query that found nothing does not bring the menu back', asy
   await page.evaluate(() => ((window as any).__menuSeen = 0))
   await page.keyboard.type('zzz')
   await expect(input).toHaveValue('look at @zzzzz')
-  await page.waitForTimeout(300)
+  // Not a fixed sleep (#845 item 9): the last keystroke's search has answered, and two frames have drawn what it gave
+  await page.waitForFunction(() => (window as any).__answered.includes('zzzzz'))
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   expect(await page.evaluate(() => (window as any).__menuSeen)).toBe(0)
 })

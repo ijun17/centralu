@@ -4,6 +4,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
 import { externalAppKey, useStore } from '../../store/store.js'
+import { Badge } from '../../components/Badge.jsx'
 
 /**
  * One app's run history (M4 B-7) — a panel that opens and closes beside the pinned view.
@@ -48,7 +49,7 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="runs-panel" aria-label="Runs">
       <header className="flex h-8 shrink-0 items-center gap-2 border-b border-line px-3">
-        <span className="readout text-2xs uppercase text-ink-faint">Runs</span>
+        <Badge readout>Runs</Badge>
         <button
           type="button"
           className="ml-auto rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
@@ -118,7 +119,9 @@ function Permissions({ appId, projectId, machine, changed }: { appId: string; pr
   if (!list || list.length === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-permissions">
-      <p className="readout text-2xs uppercase text-ink-faint">Permissions</p>
+      <Badge as="p" readout>
+        Permissions
+      </Badge>
       <ul className="mt-1 space-y-1">
         {list.map((p) => (
           <li key={p.capability} className="flex items-baseline gap-2 text-xs" data-testid="permission-row" data-capability={p.capability} data-decision={p.decision}>
@@ -158,7 +161,9 @@ function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; p
   if (!use || use.month.runs === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-agent-use">
-      <p className="readout text-2xs uppercase text-ink-faint">Agent use</p>
+      <Badge as="p" readout>
+        Agent use
+      </Badge>
       <dl className="mt-1 space-y-0.5 text-xs">
         <UseLine label="24 h" use={use.day} testId="agent-use-day" />
         <UseLine label="30 days" use={use.month} testId="agent-use-month" />

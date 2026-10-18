@@ -3,6 +3,8 @@ import { repoNameOf, type GitSource } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
+import { Button } from '../../components/Button.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 import { useStore } from '../../store/store.js'
 
 type Preview = { parent: string; path: string | null; error: string | null }
@@ -61,8 +63,6 @@ export function CreateProjectForm({
   }, [platform, name, parent, machine, sourceKey])
 
   const ready = (!!name.trim() || !!source) && !!preview?.path && !busy
-  const field =
-    'w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none'
 
   return (
     <form
@@ -100,7 +100,7 @@ export function CreateProjectForm({
       </label>
       {clone && (
         <div className="mt-2 flex gap-2">
-          <input
+          <TextInput
             autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -112,9 +112,10 @@ export function CreateProjectForm({
             spellCheck={false}
             autoComplete="off"
             data-testid="create-project-git"
-            className={`min-w-0 flex-1 font-mono ${field}`}
+            font="mono"
+            className="min-w-0 flex-1"
           />
-          <input
+          <TextInput
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
             onKeyDown={(e) => {
@@ -125,14 +126,15 @@ export function CreateProjectForm({
             spellCheck={false}
             autoComplete="off"
             data-testid="create-project-branch"
-            className={`w-24 shrink-0 font-mono ${field}`}
+            font="mono"
+            className="w-24 shrink-0"
           />
         </div>
       )}
       <label className="mt-3 block text-xs text-ink-muted" htmlFor="create-project-name">
         Folder name
       </label>
-      <input
+      <TextInput
         id="create-project-name"
         autoFocus
         value={name}
@@ -145,7 +147,7 @@ export function CreateProjectForm({
         spellCheck={false}
         autoComplete="off"
         data-testid="create-project-name"
-        className={`mt-1 ${field}`}
+        className="mt-1 w-full"
       />
       <div className="mt-2 text-xs leading-body text-ink-muted">
         {parent === null ? (
@@ -166,7 +168,7 @@ export function CreateProjectForm({
           </p>
         ) : (
           <div className="flex items-center gap-2">
-            <input
+            <TextInput
               value={parent}
               onChange={(e) => setParent(e.target.value)}
               onKeyDown={(e) => {
@@ -177,7 +179,8 @@ export function CreateProjectForm({
               spellCheck={false}
               autoComplete="off"
               data-testid="create-project-parent"
-              className={`font-mono ${field}`}
+              font="mono"
+              className="w-full"
             />
             {machine === null && (
               <button
@@ -228,14 +231,9 @@ export function CreateProjectForm({
         <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={!ready}
-          className="rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong disabled:opacity-50"
-          data-testid="create-project-confirm"
-        >
+        <Button type="submit" variant="primary" disabled={!ready} data-testid="create-project-confirm">
           {busy ? (source ? 'Cloning…' : 'Creating…') : source ? 'Clone project' : 'Create project'}
-        </button>
+        </Button>
       </div>
     </form>
   )

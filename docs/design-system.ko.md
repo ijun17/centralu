@@ -99,8 +99,9 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 
 사람을 기다리는 카드는 모두 같게 그린다(*owner, 2026-10-18*, `ApprovalCard.tsx`, `QuestionCard.tsx`):
 
-- `rounded-bubble`, `surface-raised` 위, 사방에 **흰 테두리**(`ink-signal` 80%).
-- 왼쪽 위에 **종류를 캡슐로**, 신호색 잉크로: "Awaiting approval", "Agent is asking". 옆의 조용한 한 줄이
+- `rounded-bubble`, `surface-raised` 위, 사방에 **흰 테두리**(`ink-signal` 그대로: 사람을 기다리는 테두리는 신호색을
+  덜어 쓰지 않는다, *owner, 2026-10-18*).
+- 왼쪽 위에 **종류를 캡슐로**(`Pill size="label" edge="solid"`), 신호색 잉크로: "Awaiting approval", "Agent is asking". 옆의 조용한 한 줄이
   무엇이 막혀 있는지 말한다.
 - 본문: 명령이나 질문. 질문의 선택지는 `rounded-field`이고, 고르면 흰 테두리로 밝아진다.
 - 가는 선 아래 **꾸밈없는 바닥글**: 답이 키와 함께 버튼으로(Allow, Deny, Always allow).
@@ -121,7 +122,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 호버 | 반투명 `surface-hover`(캡슐과 아이콘 버튼은 `/60`), 잉크 한 단계 위(`ink-faint`에서 `ink`로). 바탕이 이미 칠해진 곳은 한 단계 전체(사용량 도넛) | 흰색을 쓰지 않고 포인터가 누를 것을 보여 준다 |
 | 누름, 열림 | `surface-hover`, 연 것이 열려 있는 동안 유지(`aria-expanded`) | 버튼과 드롭다운이 하나로 읽히게 |
 | 선택 | `surface-selected`와 `ink`. 대기 카드의 고른 선택지는 흰 테두리를 더한다. 거기서는 그것이 주는 답이기 때문이다 | 선택은 위치이지 긴급함이 아니다 |
-| 비활성 | `opacity-40`, 호버 없음 | 어디서나 같은 흐림(#1122의 `Button`이 지킨다. 50%, 60%는 예전 복사본) |
+| 비활성 | `opacity-50`, 호버 없음 | 어디서나 같은 흐림(*owner, 2026-10-18*). 공유 컴포넌트가 지킨다(`Button`, `Segmented`, `IconButton`, `InlineConfirm`) |
 | 포커스 | `:focus-visible`: `--color-focus`의 1px 외곽선, 1px 떨어져서. 강조색을 정하면 그 색 | 키보드 포커스는 언제나 보여야 하고, 신호처럼 보여서는 안 된다 |
 | 잠듦 | **어디에도 보이지 않는다**: 흐린 행도, 표시나 그 툴팁의 말도, 대화 아래의 줄도 없다. 깨어나는 중("Waking session…")과 깨우지 못했을 때(이유와 Retry)만 말한다 | 잠은 사람에게 아무것도 요구하지 않는다: 세션에 입력하면 깨어난다. 아무것도 묻지 않는 상태는 알리지 않는다(*owner, 2026-10-18*, `SessionNotes.tsx` `DormantNote`, `sidebar/marks/ToolMark.tsx`, [ux-writing.md](ux-writing.md) 1.1) |
 
@@ -149,12 +150,15 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 그리드 칸 수 고르기 | `SpanButton`(`SpanPicker.tsx`) |
 | 명령의 로그, 터미널 | `CommandLogView`, `xterm.ts`와 `terminalTheme.ts` |
 | 아이콘 | `icons.tsx` |
+| 테두리 있는 글자 버튼 | `Button`: `primary`(대화상자가 하려는 동작), `secondary`, `quiet`(호버 전까지 회색), `subtle`(흐림, 대화 안), `danger`, `ghost`(테두리 없음); `xs` / `sm` / `md`; `busy`와 `busyText` |
+| 한 번에 보이는 여럿 중 하나 | `Segmented`(라디오 그룹: Tab 한 번, 방향키로 고른다) |
+| 캡슐 | `Pill`: `size="bar"`(상단 바의 28px) 또는 `"label"`(기다리는 카드의 종류); 테두리 `quiet`, `live`, `solid`, `dashed` |
+| 작은 대문자 라벨 | `Badge`(숫자 사이에선 `readout`) |
+| 테두리 있는 입력칸 | `TextInput`, 또는 라벨·힌트·문제를 함께 그리는 `TextField` |
 
-**검토 중(#1122, #1128까지의 스택):** `Button`(primary, secondary, quiet, subtle, danger, ghost; xs, sm, md),
-`Segmented`(여럿 중 하나, 라디오 그룹), `Pill`(상단 바의 캡슐), `Badge`(작은 대문자 라벨), `TextInput` /
-`TextField`. 함께 `tooling/shared-components.test.ts`가 온다: `components/` 밖의 화면이 테두리 있는 버튼,
-입력칸, 작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다. 아직 옮기지 않은 자리의 목록은
-모서리 가드처럼 **줄어들 수만 있다**. 들어오면 새 버튼, 토글, 라벨, 캡슐, 입력칸에는 이것들을 쓴다.
+**가드.** `tooling/shared-components.test.ts`는 `components/` 밖의 화면이 테두리 있는 버튼, 테두리 있는 입력칸,
+작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다(판별 규칙은 `tooling/hand-made-looks.ts`).
+아직 옮기지 않은 자리의 목록은 모서리 가드처럼 **줄어들 수만 있다**.
 
 ## 정리된 어긋남
 

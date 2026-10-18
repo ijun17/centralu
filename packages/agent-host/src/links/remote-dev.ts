@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { DATA_DIR, PROTOCOL_VERSION } from '@cc/protocol'
 import { runGit } from '../dev-services/git-exec.js'
+import { LinkedMachineRecords } from '../dev-services/store/linked-machines.js'
+import { SettingsRecords } from '../dev-services/store/settings.js'
 import { devUpdateRemote } from './dev-build.js'
 import { installScript, type InstallResult } from './install.js'
 import type { MachineRecord } from './link-deps.js'
@@ -54,24 +56,14 @@ export function findMachine(dataDir: string, name: string): MachineRecord {
   if (!existsSync(file)) throw new Error(`No Centralu store at ${file}; set CC_DATA_DIR to the hub's data folder`)
   const db = new Database(file, { readonly: true, fileMustExist: true })
   try {
-    const rows = db
-      .prepare(`SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions FROM linked_machines ORDER BY added_at, id`)
-      .all() as { id: string; name: string; ssh_target: string; shell: string; wsl_distro: string | null; command: string | null; slot: number; added_at: number; accepted_versions: string | null }[]
-    const hit = rows.find((r) => r.id === name) ?? rows.find((r) => r.name === name) ?? rows.find((r) => r.ssh_target === name)
+    // The store's own reading of the table; it only reads, so the read-only handle is enough
+    const rows = new LinkedMachineRecords(db, new SettingsRecords(db)).listLinkedMachines()
+    const hit = rows.find((r) => r.id === name) ?? rows.find((r) => r.name === name) ?? rows.find((r) => r.sshTarget === name)
     if (!hit) {
-      const known = rows.map((r) => `${r.id} (${r.name}, ${r.ssh_target})`).join(', ')
+      const known = rows.map((r) => `${r.id} (${r.name}, ${r.sshTarget})`).join(', ')
       throw new Error(`No linked machine is called ${name}${known ? `; linked: ${known}` : '; this computer links none'}`)
     }
-    const shell = hit.shell === 'powershell' || hit.shell === 'wsl' ? hit.shell : 'posix'
-    return {
-      id: hit.id,
-      name: hit.name,
-      sshTarget: hit.ssh_target,
-      remote: { shell, wslDistro: hit.wsl_distro, command: hit.command },
-      slot: hit.slot,
-      addedAt: hit.added_at,
-      acceptedVersions: hit.accepted_versions,
-    }
+    return hit
   } finally {
     db.close()
   }

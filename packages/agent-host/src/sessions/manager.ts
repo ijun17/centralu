@@ -1532,11 +1532,13 @@ export class SessionManager {
     // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
     // restart (C-2)
     // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
+    // A session with no project (#994) has no project to remember for: its project answer is kept for the session
     if (decision === 'always' && m && remembered) {
+      const projectId = scope === 'project' ? m.projectId : null
       this.store.permissions.addApprovalRule({
-        scope: scope ?? 'session',
-        sessionId: scope === 'project' ? undefined : sessionId,
-        projectId: scope === 'project' ? (m.projectId ?? undefined) : undefined,
+        scope: projectId !== null ? 'project' : 'session',
+        sessionId: projectId !== null ? undefined : sessionId,
+        projectId: projectId ?? undefined,
         matcher: remembered,
         decision: 'allow',
       })
@@ -1825,11 +1827,14 @@ export class SessionManager {
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
-  /** Saved rules that apply to this session (session-scoped plus project-scoped) */
+  /**
+   * Saved rules that apply to this session (session-scoped plus project-scoped). A project rule with no project
+   * (an earlier build stored one from a session with no project) belongs to no project, so it applies to no session.
+   */
   private rulesFor(sessionId: string, projectId: string | null): string[] {
     return this.store
       .permissions.listApprovalRules()
-      .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
+      .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId !== null && r.projectId === projectId))
       .map((r) => r.matcher)
       .filter(Boolean)
   }
