@@ -72,7 +72,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
               className="text-xs text-ink-faint hover:text-ink"
               onClick={() => void reconnect(m.id)}
               data-testid={`machine-reconnect-${m.id}`}
-              title={m.status === 'disconnected' ? 'Stays connected until you disconnect it.' : undefined}
+              title={m.status === 'disconnected' ? 'Stays connected until you disconnect it' : undefined}
             >
               {m.status === 'disconnected' ? 'Connect' : 'Reconnect'}
             </button>
@@ -83,7 +83,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
               className="text-xs text-ink-faint hover:text-ink"
               onClick={() => void disconnect(m.id)}
               data-testid={`machine-disconnect-${m.id}`}
-              title="Its sessions keep running there."
+              title="Its sessions keep running there"
             >
               Disconnect
             </button>
