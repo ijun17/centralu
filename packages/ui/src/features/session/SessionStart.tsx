@@ -23,12 +23,16 @@ export function SessionStart({
   tool: string
 }) {
   return (
-    <div
-      className="mx-auto flex w-full max-w-[560px] flex-col items-center px-4 pt-6"
-      data-testid="session-start"
-    >
-      <ToolSwitch sessionId={sessionId} projectId={projectId} tool={tool} />
-      <PastConversations sessionId={sessionId} projectId={projectId} tool={tool} />
+    // Fills the space the empty conversation yields (ChatStream's yieldSpace) and stands in its middle (owner,
+    // 2026-10-18); a long list scrolls inside it
+    <div className="flex min-h-0 flex-1 overflow-y-auto">
+      <div
+        className="m-auto flex w-full max-w-[560px] flex-col items-center px-4 py-6"
+        data-testid="session-start"
+      >
+        <ToolSwitch sessionId={sessionId} projectId={projectId} tool={tool} />
+        <PastConversations sessionId={sessionId} projectId={projectId} tool={tool} />
+      </div>
     </div>
   )
 }
