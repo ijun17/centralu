@@ -202,3 +202,141 @@ test('the records of finished app-agent runs are listed by app, read, and delete
   await expect(page.getByTestId('trash-list-empty')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__mock.keptRuns.size)).toBe(0)
 })
+
+/*
+ * #1143 (rows U11, U12 of the audit): the list is read by `useLoad`, "Load earlier messages" merges pages by `seq` and
+ * ignores a press while a page is on its way, and one confirmation is open on the screen at a time.
+ */
+test('a trash that could not be read says so and offers a retry, instead of loading for good', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await deleteSession(page, id)
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    mock.realTrashList = mock.trash.list
+    mock.trash.list = async () => {
+      throw new Error('the host went away')
+    }
+  })
+  await openTrash(page)
+  await expect(page.getByTestId('trash-load-error')).toContainText('Could not read the trash: the host went away')
+  // The total does not say "Loading…" next to the failure
+  await expect(page.getByTestId('trash-total')).not.toContainText('Loading')
+
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    mock.trash.list = mock.realTrashList
+  })
+  await page.getByTestId('trash-load-error-retry').click()
+  await expect(page.getByTestId('trash-total')).toContainText('1 session ·')
+  await expect(page.getByTestId('trash-load-error')).toHaveCount(0)
+  await expect(page.getByTestId(`trash-row-${id}`)).toBeVisible()
+})
+
+/** A trashed session holding `count` messages numbered from 1, each saying `said <seq>.` */
+async function trashedLongSession(page: Page, count: number): Promise<string> {
+  const id = await answeredSession(page, 'alpha', 'a long one')
+  await deleteSession(page, id)
+  await page.evaluate(
+    ([sid, n]) => {
+      const bin = (window as any).__mock.trashBin.get(sid)
+      bin.messages = Array.from({ length: n as number }, (_, i) => ({
+        sessionId: sid, seq: i + 1, role: 'user', kind: 'text', payload: { text: `said ${i + 1}.` }, ts: 1,
+      }))
+    },
+    [id, count] as const,
+  )
+  return id
+}
+
+test('pressing "Load earlier messages" twice in a row reads one page and shows each message once', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await trashedLongSession(page, 450)
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    const read = mock.trash.read
+    mock.readsBefore = []
+    mock.trash.read = async (sessionId: string, limit: number, beforeSeq?: number) => {
+      mock.readsBefore.push(beforeSeq ?? null)
+      await new Promise((r) => setTimeout(r, 300))
+      return read(sessionId, limit, beforeSeq)
+    }
+  })
+  await openTrash(page)
+  await page.getByTestId(`trash-read-${id}`).click()
+  const older = page.getByTestId('trash-reader-older')
+  await expect(older).toBeVisible()
+  const messages = page.getByTestId('trash-reader-messages')
+  await expect(messages.getByText('said 450.', { exact: true })).toBeVisible()
+
+  await older.dblclick()
+  await expect(messages.getByText('said 51.', { exact: true })).toBeVisible()
+  // The second press found a page on its way and asked for nothing
+  expect(await page.evaluate(() => (window as any).__mock.readsBefore)).toEqual([null, 251])
+  await expect(messages.getByText('said 100.', { exact: true })).toHaveCount(1)
+  await expect(messages.getByText('said 251.', { exact: true })).toHaveCount(1)
+  await expect(messages.locator('li')).toHaveCount(400)
+})
+
+test('an earlier page that overlaps what is shown does not draw a message twice', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await trashedLongSession(page, 450)
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    const read = mock.trash.read
+    // A page that reaches five messages past the cursor, as a trash that gained rows between two reads would answer
+    mock.trash.read = async (sessionId: string, limit: number, beforeSeq?: number) =>
+      read(sessionId, limit, beforeSeq === undefined ? undefined : beforeSeq + 5)
+  })
+  await openTrash(page)
+  await page.getByTestId(`trash-read-${id}`).click()
+  const messages = page.getByTestId('trash-reader-messages')
+  await expect(messages.getByText('said 450.', { exact: true })).toBeVisible()
+  await page.getByTestId('trash-reader-older').click()
+  await expect(messages.getByText('said 56.', { exact: true })).toBeVisible()
+  await expect(messages.getByText('said 253.', { exact: true })).toHaveCount(1)
+  await expect(messages.locator('li')).toHaveCount(395)
+})
+
+test('"Empty trash" and a "Delete for good" of subagent steps or app runs are never open together', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sessionId = await newSession(page, 'alpha', 'look into the boundaries test')
+  await page.evaluate((sid: string) => {
+    const mock = (window as any).__mock
+    mock.emit({ type: 'tool_call', sessionId: sid, callId: 'toolu_agent', summary: { tool: 'Agent', title: 'Research', paths: [] } })
+    mock.emit({
+      type: 'subagent_event', sessionId: sid, parentCallId: 'toolu_agent',
+      step: { sessionId: sid, type: 'message_delta', role: 'assistant', text: 'The boundaries test holds.' },
+    })
+    mock.emit({ type: 'turn_complete', sessionId: sid })
+    const project = mock.projectsList[0]
+    mock.keepRun({
+      run: { runId: 'run_a', app: { id: 'notes', name: 'Notes', projectId: project.id, projectName: 'alpha' }, sessionName: 'Notes · agent',
+        tool: 'claude', status: 'ok', startedAt: Date.now(), keptAt: 2, durationMs: 4000, tokens: { input: 1, output: 1 } },
+      request: 'Summarize the notes', answer: 'Done',
+      messages: [{ sessionId: 's-gone', seq: 1, role: 'user', kind: 'text', payload: { text: 'Summarize the notes' }, ts: 1 }],
+    })
+  }, sessionId)
+  await openTrash(page)
+  await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
+  await page.getByTestId('subagent-steps-confirm-yes').click()
+  await expect(page.getByTestId(`trash-steps-row-${sessionId}`)).toBeVisible()
+
+  const confirm = page.getByTestId('trash-confirm')
+  // A steps row's confirmation, then Empty trash: only the latter stays
+  await page.getByTestId(`trash-steps-purge-${sessionId}`).click()
+  await expect(confirm).toContainText('subagent steps of')
+  await page.getByTestId('trash-empty').click()
+  await expect(confirm).toHaveCount(1)
+  await expect(confirm).toContainText('Delete all 2 for good?')
+
+  // Empty trash, then an app run's: only the run's stays
+  await page.getByTestId('trash-run-purge-run_a').click()
+  await expect(confirm).toHaveCount(1)
+  await expect(confirm).toContainText('Delete this run of Notes for good?')
+
+  // And a steps row's again takes over from the run's
+  await page.getByTestId(`trash-steps-purge-${sessionId}`).click()
+  await expect(confirm).toHaveCount(1)
+  await expect(confirm).toContainText('subagent steps of')
+})

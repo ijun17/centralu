@@ -841,6 +841,17 @@ export class SessionManager {
   }
 
   /**
+   * Whether a session here still waits on a session of that linked machine (#1134): the report of a child there is
+   * owed, its turn running or paused over its background work (`ChildOwnership.linkedReports`, restored at start). The
+   * link of a machine that connects when needed stays up for it (`LinkDeps.workOwed`)
+   */
+  linkedWorkOwed(machineId: string): boolean {
+    const prefix = `${machineId}.`
+    for (const id of this.children.linkedReports.keys()) if (id.startsWith(prefix)) return true
+    return false
+  }
+
+  /**
    * The session here that started a linked machine's session with start_agent (#1038), by its hub-side id; none for any
    * other. The links name it as the session's `askedBy` (`LinkDeps.ownerOf`), so the sidebar hangs it under its parent.
    */

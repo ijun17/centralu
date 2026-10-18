@@ -48,6 +48,7 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
 
 function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
   const reconnect = useStore((s) => s.reconnectMachine)
+  const disconnect = useStore((s) => s.disconnectMachine)
   const remove = useStore((s) => s.removeMachine)
   const setToast = useStore((s) => s.setToast)
   const [confirming, setConfirming] = useState(false)
@@ -71,8 +72,20 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
               className="text-xs text-ink-faint hover:text-ink"
               onClick={() => void reconnect(m.id)}
               data-testid={`machine-reconnect-${m.id}`}
+              title={m.status === 'disconnected' ? 'Stays connected until you disconnect it' : undefined}
             >
-              Reconnect
+              {m.status === 'disconnected' ? 'Connect' : 'Reconnect'}
+            </button>
+          )}
+          {m.status !== 'disconnected' && !m.operation && (
+            <button
+              type="button"
+              className="text-xs text-ink-faint hover:text-ink"
+              onClick={() => void disconnect(m.id)}
+              data-testid={`machine-disconnect-${m.id}`}
+              title="Its sessions keep running there"
+            >
+              Disconnect
             </button>
           )}
           {confirming ? (
@@ -121,6 +134,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         </div>
       )}
       <InstalledRow m={m} />
+      <ConnectWhenNeeded m={m} />
       <AutostartSwitch m={m} />
       {started && (
         <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
@@ -244,6 +258,43 @@ function InstalledRow({ m }: { m: MachineInfo }) {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * When this computer opens the machine's link (#1134, owner decision 2026-10-18). Connecting at start stays the default:
+ * an orchestrator working through the machine hears its reports and cards as they happen. A laptop that is often
+ * closed, or a server used once a week, can connect only when something needs it instead. The box shows what the host
+ * answered, as the autostart switch does.
+ */
+function ConnectWhenNeeded({ m }: { m: MachineInfo }) {
+  const setConnect = useStore((s) => s.setMachineConnect)
+  const [pending, setPending] = useState(false)
+  const on = m.connect === 'when_needed'
+  return (
+    <div className="mt-1.5">
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-ink-muted"
+          checked={on}
+          disabled={pending || !!m.operation}
+          onChange={(e) => {
+            setPending(true)
+            void setConnect(m.id, e.target.checked ? 'when_needed' : 'at_start').finally(() => setPending(false))
+          }}
+          data-testid={`machine-connect-when-needed-${m.id}`}
+        />
+        <span>Connect only when needed</span>
+      </label>
+      {on && (
+        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-connect-note-${m.id}`}>
+          Not connected when Centralu starts. It connects when you open one of its projects or sessions, or an agent is
+          started or sent work there, and disconnects once nothing has needed it for 10 minutes and no session there is
+          working. Its sessions keep running there meanwhile.
+        </p>
       )}
     </div>
   )

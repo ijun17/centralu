@@ -1,4 +1,5 @@
 import { needsAnswer, type SessionSummary } from '@cc/core'
+import { treeParentOf } from '../../store/sidebarTree.js'
 
 export type ProjectAppSessions = {
   /** Sessions that still belong in the project's ordinary tree. */
@@ -55,11 +56,7 @@ export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
  */
 export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; nested: boolean; depth: number }[] {
   const here = new Set(sessions.map((x) => x.id))
-  const parentOf = (s: SessionSummary): string | null =>
-    s.forkedFrom && s.forkedFrom !== s.id && here.has(s.forkedFrom) ? s.forkedFrom
-    : s.parentSessionId && s.parentSessionId !== s.id && here.has(s.parentSessionId) ? s.parentSessionId
-    : s.askedBy && s.askedBy !== s.id && here.has(s.askedBy) ? s.askedBy
-    : null
+  const parentOf = (s: SessionSummary): string | null => treeParentOf(s, (id) => here.has(id))
   const kids = new Map<string, SessionSummary[]>()
   for (const s of sessions) {
     const parent = parentOf(s)

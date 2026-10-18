@@ -24,6 +24,23 @@ export function isAway(row: Placed | undefined, machines: Readonly<Record<string
   return !!m && m.status !== 'connected'
 }
 
+/**
+ * The linked machines the window needs now (#1134): the machine of the focused session, of the focused project and of
+ * the project the code viewer shows, those that connect when needed only. The window tells the host while they stay
+ * so (`machines.need`); a machine connected at start needs no telling. Sorted, so the same set reads the same
+ */
+export function machinesInUse(
+  open: { session?: Placed | null; projects?: readonly (Placed | null | undefined)[] },
+  machines: Readonly<Record<string, Pick<MachineInfo, 'connect'>>>,
+): string[] {
+  const ids = new Set<string>()
+  for (const row of [open.session, ...(open.projects ?? [])]) {
+    const id = row?.machine
+    if (id && machines[id]?.connect === 'when_needed') ids.add(id)
+  }
+  return [...ids].sort()
+}
+
 /** One word or two for a link's state, as Add project's machine menu and Settings say it */
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   connected: 'connected',
@@ -34,6 +51,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   refused: 'refused',
   starting: 'starting',
   updating: 'updating',
+  disconnected: 'disconnected',
 }
 
 export type MachineProblem = {
@@ -49,7 +67,8 @@ export type MachineProblem = {
  * time, each with the one step that fixes it. Anything not recognised is shown as the host said it.
  */
 export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell'>>): MachineProblem | null {
-  if (m.status === 'connected') return null
+  // Disconnected on purpose (#1134): nothing is wrong, and the row says how it connects again
+  if (m.status === 'connected' || m.status === 'disconnected') return null
   const e = m.error ?? ''
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
