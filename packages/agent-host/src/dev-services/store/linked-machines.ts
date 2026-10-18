@@ -62,7 +62,7 @@ export class LinkedMachineRecords {
   addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
     return this.db.transaction(() => {
       const used = (this.db.prepare(`SELECT MAX(slot) AS s FROM linked_machines`).get() as { s: number | null }).s ?? 0
-      const slot = Math.max(used, Number(this.settings.appSetting(LINK_SLOT_KEY) ?? 0)) + 1
+      const slot = Math.max(used, this.slotHighWater()) + 1
       this.db
         .prepare(
           `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions)
@@ -72,6 +72,20 @@ export class LinkedMachineRecords {
       this.settings.setAppSetting(LINK_SLOT_KEY, String(slot))
       return { ...m, slot }
     })()
+  }
+
+  /**
+   * The mark, or 0 for none. One that is not a whole number (#384) made the next slot NaN, and every add failed on the
+   * table's NOT NULL with an error that named nothing. It reads as 0, so the highest slot in use decides, and is named
+   * on stderr: a slot of a machine removed since may come back, which only an approval id still on a screen would see.
+   */
+  private slotHighWater(): number {
+    const raw = this.settings.appSetting(LINK_SLOT_KEY)
+    if (raw === null) return 0
+    const n = Number(raw)
+    if (raw.trim() !== '' && Number.isSafeInteger(n) && n >= 0) return n
+    console.error(`[store] app_settings.${LINK_SLOT_KEY} holds ${JSON.stringify(raw.slice(0, 40))}, not a slot; the next linked machine takes the slot after the highest in use`)
+    return 0
   }
 
   /** Removes a machine with its mirrored headers and its grid panels */

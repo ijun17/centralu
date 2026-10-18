@@ -198,4 +198,9 @@ export type SessionsSlice = {
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
+  /**
+   * The person has an app's agent session on screen (#378): the host keeps it as theirs instead of deleting it when its
+   * run ends. Said at once, with nothing unread too, which `markRead` skips
+   */
+  markOpened(sessionId: string): Promise<void>
 }

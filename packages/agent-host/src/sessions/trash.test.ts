@@ -140,7 +140,7 @@ describe('emptying the trash', () => {
     expect(full.bytes).toBeGreaterThan(0)
 
     expect(await rpc('trash.empty', {})).toEqual({ purged: 2, failed: [] })
-    expect(await trash()).toEqual({ sessions: [], bytes: 0 })
+    expect(await trash()).toEqual({ sessions: [], runs: [], bytes: 0 })
     expect(await rpc('messages.load', { sessionId: a.id, limit: 10 })).toEqual([])
   })
 })
@@ -179,6 +179,13 @@ describe('who can delete for good', () => {
     expect(callers.sort()).toEqual([
       'rpc.ts: mgr.emptyTrash',
       'rpc.ts: mgr.purgeSession',
+      /*
+       * The one deletion the host makes itself (#378): a finished app-agent session, once its record (request, answer,
+       * the whole conversation) is kept in the trash. It reaches the purge only through `agentRunEnded` after a clean run
+       * (app-agents.test.ts holds when it does and when the session stays); the manager hands it the same purge
+       */
+      'sessions/app-sessions.ts: this.host.purgeSession',
+      'sessions/manager.ts: self.purgeSession',
       // The manager passes the two calls on to its trash (session-trash.ts, #428); the same calls, not other callers
       'sessions/manager.ts: this.trash.emptyTrash',
       'sessions/manager.ts: this.trash.purgeSession',
