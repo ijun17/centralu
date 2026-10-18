@@ -4,6 +4,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
 import { ChatSkeleton } from '../../../components/Skeleton.jsx'
+import { OverlayScrollbar } from '../../../components/OverlayScrollbar.jsx'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow } from '../chat-rows/ChatRow.jsx'
@@ -116,7 +117,13 @@ export function ChatStream({
       const last = base[base.length - 1] ?? -1
       const held: number[] = []
       chat.forEach((item, i) => {
-        if ((i < first || i > last) && item.kind === 'tool' && item.callId && inlineFrameShown(sessionId, item.callId)) held.push(i)
+        if (
+          (i < first || i > last) &&
+          item.kind === 'tool' &&
+          item.callId &&
+          inlineFrameShown(sessionId, item.callId)
+        )
+          held.push(i)
       })
       return held.length ? [...base, ...held].sort((a, b) => a - b) : base
     },
@@ -178,76 +185,78 @@ export function ChatStream({
   })
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={onScroll}
-      /*
+    /* The box the overlay scrollbar is placed in: the scroller's own size, so the thumb floats over its right edge */
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        /*
         The moment a person touches the conversation, "settling at the bottom" ends right there
         (#31). The same touch is what lets the follow effect read a drop as theirs — a wheel only
         when it turns upward, a pointer (the scrollbar) or a finger for as long as it is held;
         keys are watched on the window, in useChatScroll.ts.
       */
-      onWheel={(e) => {
-        endLanding()
-        if (e.deltaY !== 0) noteInput()
-      }}
-      onPointerDown={() => {
-        endLanding()
-        held.current = true
-        noteInput()
-      }}
-      onTouchStart={() => {
-        held.current = true
-      }}
-      onKeyDown={endLanding}
-      /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
-      /*
-       * invisible (visibility:hidden) is only for while it settles into position (see the
-       * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
-       * not the layout.
-       */
-      className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
-        bottomPeek ? 'pb-14' : 'pb-4'
-      } ${settling ? 'invisible' : ''}`}
-      /* The empty space the card will settle onto. Follows size, not state, so there is no
+        onWheel={(e) => {
+          endLanding()
+          if (e.deltaY !== 0) noteInput()
+        }}
+        onPointerDown={() => {
+          endLanding()
+          held.current = true
+          noteInput()
+        }}
+        onTouchStart={() => {
+          held.current = true
+        }}
+        onKeyDown={endLanding}
+        /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
+        /*
+         * invisible (visibility:hidden) is only for while it settles into position (see the
+         * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
+         * not the layout.
+         */
+        className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
+          bottomPeek ? 'pb-14' : 'pb-4'
+        } ${settling ? 'invisible' : ''}`}
+        /* The empty space the card will settle onto. Follows size, not state, so there is no
       transition or animation */
-      style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
-      data-testid="chat-stream"
-      data-settling={settling || undefined}
-    >
-      {/*
+        style={bottomPad === undefined ? undefined : { paddingBottom: `${bottomPad}px` }}
+        data-testid="chat-stream"
+        data-settling={settling || undefined}
+      >
+        {/*
         Which question the turn being viewed answers — left as a single line so reading a long
         response never requires scrolling back up to check.
       */}
-      <StickyUser sticky={sticky} />
+        <StickyUser sticky={sticky} />
 
-      <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
-      {reading && !gaveUp && <ChatSkeleton />}
+        <OlderSentinel sessionId={sessionId} scrollRef={scrollRef} />
+        {reading && !gaveUp && <ChatSkeleton />}
 
-      {/*
+        {/*
         No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll
         anchoring sees, while a transform it did not; the virtualizer already keeps the view in
         place when a row above changes size, and anchoring on top of it would move it twice.
       */}
-      {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
-      <div
-        className="relative w-full [overflow-anchor:none]"
-        style={{ height: `${virtualizer.getTotalSize()}px` }}
-        data-sized-rows={virtualizer.itemSizeCache.size}
-      >
-        {virtualizer.getVirtualItems().map((v) => (
-          <div
-            key={v.key}
-            ref={virtualizer.measureElement}
-            data-index={v.index}
-            /*
+        {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
+        <div
+          className="relative w-full [overflow-anchor:none]"
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+          data-sized-rows={virtualizer.itemSizeCache.size}
+        >
+          {virtualizer.getVirtualItems().map((v) => (
+            <div
+              key={v.key}
+              ref={virtualizer.measureElement}
+              data-index={v.index}
+              /*
               More margin is added at turn boundaries. If every row had the same spacing, my
               message and the model's answer would look like a single block, making it
               impossible to find where my turn started after a long response. There is generous
               space before my message (separating it from the previous turn) and only a little
               after it (grouping it with the answer that follows).
             */
-            /*
+              /*
               Since the banner takes up space in the flow and pushes the rest of the list down
               by its own height, the original message that was judged to have "fully passed"
               gets pushed back down below the banner, and the same text shows up twice. The
@@ -255,13 +264,19 @@ export function ChatStream({
               visibility, so its position and size stay the same and the virtual scroller's
               measurements are undisturbed.
             */
-            className={`absolute left-0 w-full min-w-0 ${
-              chat[v.index]?.kind === 'user' ? 'pb-4 pt-6' : joinsNext(bubbleOf(chat, v.index)) ? '' : 'pb-3'
-            } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
-              chat[v.index]?.storedSeq === searchTarget?.seq ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70' : ''
-            }`}
-            data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
-            /*
+              className={`absolute left-0 w-full min-w-0 ${
+                chat[v.index]?.kind === 'user'
+                  ? 'pb-4 pt-6'
+                  : joinsNext(bubbleOf(chat, v.index))
+                    ? ''
+                    : 'pb-3'
+              } ${v.index === stickyIndex && stickyText !== null ? 'invisible' : ''} ${
+                chat[v.index]?.storedSeq === searchTarget?.seq
+                  ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
+                  : ''
+              }`}
+              data-search-hit={chat[v.index]?.storedSeq === searchTarget?.seq ? 'true' : undefined}
+              /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller
               of its own), WebKit composited nearly every later row for overlap: six idle grid
@@ -269,31 +284,48 @@ export function ChatStream({
               as anything repaints (docs/spikes/2026-10-memory-heavy-store.md §10). Rows only move when
               a size is measured, so `top` costs one positioned layout then, nothing on scroll.
             */
-            style={{ top: v.start }}
-          >
-            <AnswerBubble part={bubbleOf(chat, v.index)}>
-              <ChatRow item={chat[v.index]!} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} leaving={isLeaving(virtualizer.range, v.index)} />
-            </AnswerBubble>
-          </div>
-        ))}
-      </div>
+              style={{ top: v.start }}
+            >
+              <AnswerBubble part={bubbleOf(chat, v.index)}>
+                <ChatRow
+                  item={chat[v.index]!}
+                  projectRoot={projectRoot}
+                  projectId={projectId}
+                  sessionId={sessionId}
+                  leaving={isLeaving(virtualizer.range, v.index)}
+                />
+              </AnswerBubble>
+            </div>
+          ))}
+        </div>
 
-      {pending && (
-        <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
-      )}
+        {pending && (
+          <ApprovalCard sessionId={sessionId} requestId={pending.requestId} detail={pending.detail} />
+        )}
 
-      {/* Several question cards can stack up — rendering only one leaves the rest with no way
+        {/* Several question cards can stack up — rendering only one leaves the rest with no way
       to be answered */}
-      {questions.map((q) => (
-        <QuestionCard
-          key={q.requestId}
-          sessionId={sessionId}
-          requestId={q.requestId}
-          questions={q.questions}
-        />
-      ))}
+        {questions.map((q) => (
+          <QuestionCard
+            key={q.requestId}
+            sessionId={sessionId}
+            requestId={q.requestId}
+            questions={q.questions}
+          />
+        ))}
 
-      {working && <ActivityRow sessionId={sessionId} activity={activity} />}
+        {working && <ActivityRow sessionId={sessionId} activity={activity} />}
+      </div>
+      {/* Pressing the thumb is a person taking over, as a press on the native bar was */}
+      <OverlayScrollbar
+        scrollRef={scrollRef}
+        onGrab={() => {
+          endLanding()
+          held.current = true
+          noteInput()
+        }}
+        testId="chat-scrollbar"
+      />
     </div>
   )
 }

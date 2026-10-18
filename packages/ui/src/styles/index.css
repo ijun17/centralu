@@ -710,6 +710,11 @@
     background-clip: content-box;
     border-radius: var(--scrollbar-radius);
   }
+  /* A scroller whose bar is drawn over its content by OverlayScrollbar: its own bar takes no width */
+  .cc-scroll-overlay::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-scrollbar-thumb-hover);
     background-clip: content-box;
