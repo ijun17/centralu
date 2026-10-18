@@ -120,3 +120,36 @@ test('the new session dialog says a failed tool check failed, and does not call 
   await page.getByTestId('tool-detect-failed-retry').click()
   await expect(page.getByTestId('tool-detect-failed')).toHaveCount(0)
 })
+
+test('the branches view says a failed read of the branches failed, not that there are none', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.branches = [{ name: 'main', current: true, remote: false }]
+  })
+  await newSession(page, 'alpha')
+  const heal = await failing(page, 'git', 'branches', 'git branch did not answer')
+  await page.getByTestId('evidence-branch').click()
+
+  await expect(page.getByTestId('git-branches-failed')).toContainText('git branch did not answer')
+  await expect(page.getByTestId('branches-local')).toHaveCount(0)
+
+  await heal()
+  await page.getByTestId('git-branches-failed-retry').click()
+  await expect(page.getByTestId('git-branches-failed')).toHaveCount(0)
+  await expect(page.getByTestId('branches-local').getByTestId('branch-main')).toBeVisible()
+})
+
+test('a commit whose read fails says so, rather than asking to pick the commit just picked', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.commits = [
+      { sha: 'aaa111', shortSha: 'aaa111', subject: 'First commit', author: 'me', when: Date.now(), parents: [] },
+    ]
+  })
+  await newSession(page, 'alpha')
+  await failing(page, 'git', 'commitDetail', 'git show did not answer')
+  await page.getByTestId('evidence-tab-history').click()
+  await page.getByTestId('history-commit-aaa111').click()
+
+  await expect(page.getByTestId('toast')).toContainText('Could not load the commit: git show did not answer')
+})
