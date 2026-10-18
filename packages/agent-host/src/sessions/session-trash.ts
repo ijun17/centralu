@@ -108,7 +108,7 @@ export class SessionTrash {
    * the session has left `meta`, so no message, wake or card can come in between; false keeps the session as it is.
    * Such a delete never withdraws a wake (`onlyIf` is there to refuse a waking session), and never rides on a delete
    * already under way: that one is the person's, and keeps the session in the trash.
-   * @returns whether the session went to the trash
+   * @returns whether this call moved the session to the trash
    */
   trashIf(sessionId: string, removeExternal: boolean, onlyIf: () => boolean): Promise<boolean> {
     return this.trashShared(sessionId, false, removeExternal, undefined, false, onlyIf)
@@ -136,8 +136,9 @@ export class SessionTrash {
       if (recovery || fromCleanup) throw rpcError('The session is already being deleted without its recovery snapshot')
       // The person's own delete, which keeps the session in the trash: not the host's to purge after it (`trashIf`)
       if (onlyIf) return false
+      // Joined, not moved by this call: only `trashIf` reads the answer, and it never joins
       await pending
-      return !this.host.meta.has(sessionId)
+      return false
     }
     // The first request owns the options; concurrent sidebar/agent deletes share its result.
     let moved = false
