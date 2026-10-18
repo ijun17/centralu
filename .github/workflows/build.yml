@@ -325,7 +325,30 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The app's JS is judged against main's, not a constant every UI pull request raised (#1181,
+      # tooling/bundle-budget.ts). Every run downloads the newest record a run on main uploaded,
+      # styles.test.ts compares with it, and every run uploads its own; the same steps on every event
+      # (.github/scripts/bundle-base.mjs says why).
+      - name: Main's bundle size
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node .github/scripts/bundle-base.mjs "$RUNNER_TEMP/bundle-base"
+
       - run: pnpm verify
+        env:
+          CC_BUNDLE_BASE: ${{ runner.temp }}/bundle-base/bundle-size.json
+          CC_BUNDLE_RECORD: ${{ runner.temp }}/bundle-size/bundle-size.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-size
+          path: ${{ runner.temp }}/bundle-size/bundle-size.json
+          if-no-files-found: error
+          # A re-run of the job uploads it again under the same name
+          overwrite: true
+          # The runs after this one read main's newest record; a long quiet spell on main must not expire it
+          retention-days: 90
 
   # The content verifier (docs/plans/thin-shell.md §4): the signature check and the copy the shell
   # and the keeper will run before starting anything from a content folder. A small crate with no

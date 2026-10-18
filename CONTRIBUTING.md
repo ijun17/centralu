@@ -225,6 +225,14 @@ numbers: [docs/ux-metrics.md](docs/ux-metrics.md).
 The principles behind those numbers (judge the path a person can see, not its shortcut) and what
 a pull request's **Usability** field holds: [docs/usability.md](docs/usability.md).
 
+**The app's JS is compared with main's, not with a fixed number** (#1181). `tooling/styles.test.ts`
+builds the release bundle, and CI's `verify` job compares it with the size main's newest run
+recorded: a change may add 30 KB without saying anything (`tooling/bundle-budget.ts`). Over that,
+find out what grew first; if the growth is meant, write `tooling/bundle-growth.json` in the same
+pull request, `{ "bytes": <beyond the allowance>, "reason": "<what grew and why>" }`, and the test's
+message gives the number. The declaration is spent once it lands: main's next record carries its
+reason. A local run has no record of main and skips the comparison, saying so.
+
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
 with the fix removed is not testing the fix.
@@ -309,6 +317,13 @@ Ask these against your change. Put anything you could not check in **Not exercis
 - Pull requests use the template (Why / What changed / Verified / Usability / Not exercised / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
+- **A move-only refactor lands when nothing is in its way.** A pull request that relocates or
+  splits files (moving a module, splitting a test file) conflicts with every open pull request that
+  touches those files, and each of them has to be redone by hand. Land it when the merge queue is
+  empty, or after checking that no open pull request touches the files it moves:
+  `gh pr list --state open --json number,files --jq '.[] | select(any(.files[]; .path == "<path>")) | .number'`
+  for each moved path. Keep it move-only, so whoever does have to rebase over it can redo the
+  move instead of reading a diff.
 
 ## Running things safely
 

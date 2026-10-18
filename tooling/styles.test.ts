@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { GROWTH_FILE, judgeBundle, readBundleRecord, readGrowthDeclaration, writeBundleRecord } from './bundle-budget.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -49,6 +50,9 @@ let css = ''
 let js = ''
 let jsBytes = 0
 let outDir = ''
+// Read before this run writes its own record, which in CI is the same file
+const base = readBundleRecord(process.env.CC_BUNDLE_BASE)
+const declared = readGrowthDeclaration(join(ROOT, GROWTH_FILE))
 
 beforeAll(() => {
   outDir = mkdtempSync(join(tmpdir(), 'cc-css-'))
@@ -75,6 +79,9 @@ beforeAll(() => {
     .map((f) => readFileSync(join(assets, f)))
   js = chunks.map((b) => b.toString('utf8')).join('\n')
   jsBytes = chunks.reduce((n, b) => n + b.length, 0)
+  if (process.env.CC_BUNDLE_RECORD) {
+    writeBundleRecord(process.env.CC_BUNDLE_RECORD, { bytes: jsBytes, sha: process.env.GITHUB_SHA ?? null, growth: declared?.reason ?? null })
+  }
 }, 120_000 * SLOW)
 
 afterAll(() => {
@@ -347,12 +354,22 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS, lazy chunks included, stays under 1.8MB', () => {
-    // The release build's JS, every chunk counted. Crossing this line means a heavy dependency
-    // came in or a feature grew more than it should: find out which before raising it, and give
-    // the measurement and the reason in the commit that raises it. `git log -L` on this line
-    // lists every raise so far with its reason.
-    expect(jsBytes).toBeLessThan(1_800_000)
+  /*
+   * The release build's JS, every chunk counted, compared with main's (#1181). It was a constant
+   * here that every UI pull request raised, so they conflicted with each other in the merge queue
+   * (`git log -L` on this test lists those raises and their reasons). tooling/bundle-budget.ts has
+   * the rule; CI's verify job hands this test main's record (CC_BUNDLE_BASE) and keeps this run's
+   * (CC_BUNDLE_RECORD), which only main's runs save. Without a record (a local run) it says so and
+   * skips.
+   */
+  it('the app\'s total JS, lazy chunks included, grows over main\'s by no more than allowed or declared', (ctx) => {
+    const verdict = judgeBundle({ bytes: jsBytes, base, declared })
+    if (verdict.kind === 'no-base') {
+      console.info(verdict.note)
+      ctx.skip()
+      return
+    }
+    expect(jsBytes, verdict.note).toBeLessThanOrEqual(verdict.limit)
   })
 })
 
