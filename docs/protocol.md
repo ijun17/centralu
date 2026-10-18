@@ -477,7 +477,8 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   is `{ kind: 'dev', commit, dirty }` for a dev build made there from a commit (`pnpm remote-dev`), absent for a release.
   `connect` (#1134, additive) is `at_start` (the default, and what an older hub's rows read as) or `when_needed`: such
   a machine is not connected at start, and is connected while something needs it (the window has one of its projects
-  or sessions open and says so with `machines.need` every 2 minutes, or an agent is started, sent work or read there),
+  or sessions open and says so with `machines.need` every 2 minutes, with `repeat` after the first, which does not undo
+  the person's `machines.disconnect`; or an agent is started, sent work or read there),
   and while a session there is in a turn. `status` `disconnected` (#1134, additive; an older window reads it as
   `unreachable`) is a link closed on purpose and not tried: by `machines.disconnect`, at start for `when_needed`, or
   once nothing needed it for 10 minutes. `machines.reconnect` connects such a machine and keeps it so until

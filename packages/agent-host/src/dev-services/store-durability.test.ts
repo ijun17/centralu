@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Store } from './store.js'
+import { stepsAfter } from './store-steps.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 const dirs: string[] = []
@@ -138,7 +139,7 @@ writeSync(1, 'survived\\n')
 
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(s.latestKnownVersion - 40) // the steps after v40; v40 itself is not run again
+    expect(s.migrationsRun).toBe(stepsAfter(40)) // the steps after v40; v40 itself is not run again
     s.close()
     expect(freePages(file)).toBe(0)
     expect(owed(file)).toBe(false)

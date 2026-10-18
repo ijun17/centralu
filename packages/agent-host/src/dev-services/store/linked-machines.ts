@@ -12,7 +12,7 @@ export type LinkedMachineRow = {
   slot: number
   addedAt: number
   acceptedVersions: string | null
-  /** When the hub opens its link (#1134, v57); absent or null in the column: at start */
+  /** When the hub opens its link (#1134, v59); absent or null in the column: at start */
   connect?: 'at_start' | 'when_needed'
 }
 
@@ -22,7 +22,7 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
 
-/** `connect` as the column keeps it: null for the default, so a store an older host wrote reads the same (v57) */
+/** `connect` as the column keeps it: null for the default, so a store an older host wrote reads the same (v59) */
 const connectColumn = (c: LinkedMachineRow['connect']): string | null => (c === 'when_needed' ? c : null)
 
 /** Linked machines (#82, v46) and the session and project headers mirrored from them */

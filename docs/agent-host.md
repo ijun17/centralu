@@ -2692,21 +2692,26 @@ the connection line is read again once at once, since `--rotate-token` changes t
 it restarts); `disconnected` (#1134: closed on purpose and not tried, below).
 
 **When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
-column, v57). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
+column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
 after every drop, so an orchestrator working through it hears reports and cards as they happen. `when_needed` is for a
 laptop that is often closed or a server used once a week: the machine is not connected at start, and no attempt is
 made until something needs it. A need is the window opening one of its projects or sessions (`machines.need`, said
 again every 2 minutes while it stays open), or the orchestrator acting there: `start_agent` with the machine,
 `agent_session`, `ask_project` on one of its projects, `read_session` of one of its sessions (`linked-sessions.ts`
 waits up to 60 s for the link). Looking a name up is not a need: such a machine's projects stand as last listed, not as
-away. The link stays up for 10 minutes after the last need, and for as long as a session there is in a turn as the
-hub last heard it (followed event by event, so a turn open when the link dropped keeps it tried); then it closes
-(`disconnected`), also while it was away. Its sessions keep running there meanwhile; on the next connect the window
+away, also while it is connecting or between attempts, so the act that follows waits for the link instead of being
+refused. Each act there starts the hold again. The link stays up for 10 minutes after the last need, for as long as a
+session there is in a turn as the hub last heard it (followed event by event, so a turn open when the link dropped
+keeps it tried), and for as long as a session here waits on a child there (its report owed, over its turn or over its
+background work; `SessionManager.linkedWorkOwed`); then it closes (`disconnected`), also while it was away. A
+restarted hub connects such a machine at start while a report of a child there is owed. Its sessions keep running there meanwhile; on the next connect the window
 re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
-unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. A machine connected at
-start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
+unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
+Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
+does not bring it back; Connect, the window opening something of it again, or an agent's work does. A machine connected
+at start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
 back. An install, update or autostart change on a disconnected machine connects it first, since it runs over the link's
-ssh. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
+ssh, without pinning it: its hold runs from the end of the job. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
 `unreachable` and shows no setting.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
