@@ -74,8 +74,9 @@ test('A dormant session automatically resumes when spoken to (C-1, FR-10)', asyn
     store.setState({ sessions: { ...st.sessions, [id]: { ...st.sessions[id], live: false } } })
   })
 
-  // It does not block. It only announces that the session is dormant, and input stays open
-  await expect(page.getByTestId('dormant-note')).toBeVisible()
+  // It does not block, and says nothing about sleep (owner, 2026-10-18): input stays open
+  await expect(page.locator('[data-asleep]')).toHaveCount(1)
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await expect(page.getByTestId('prompt-input')).toBeEnabled()
 
   await page.getByTestId('prompt-input').fill('keep going')
@@ -545,7 +546,8 @@ test('When a session cannot be woken, the reason is shown right there with a way
   // reason remains
   await page.getByTestId('project-header-alpha').click()
   await page.getByTestId(`session-row-${id}`).click()
-  await expect(page.getByTestId('dormant-note')).toContainText('Asleep')
+  await expect(page.getByTestId('chat-stream')).toBeVisible()
+  await expect(page.getByTestId('dormant-note')).toHaveCount(0)
   await page.getByTestId('prompt-input').click()
   await expect(page.getByTestId('dormant-note')).toContainText('Could not resume')
   await expect(page.getByTestId('dormant-note')).toContainText('cannot be resumed')
