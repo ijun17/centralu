@@ -148,6 +148,11 @@ export class Links {
     return m.info()
   }
 
+  /** Why installing on or updating the machine would be refused before it starts, or null (#1219) */
+  installRefusal(id: string, kind: 'install' | 'update'): string | null {
+    return this.need(id).operationRefusal(kind)
+  }
+
   install(id: string): Promise<MachineInstallResult> {
     return this.active(id).install()
   }

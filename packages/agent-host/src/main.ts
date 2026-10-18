@@ -565,6 +565,8 @@ mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => li
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
 // The orchestrator's list_machines reads the list Settings shows (#1220)
 mgr.useMachineList(() => links.list())
+// And changes them, behind the person's card where it matters (#1219)
+mgr.useMachineOps(links)
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity

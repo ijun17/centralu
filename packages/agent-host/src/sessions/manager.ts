@@ -11,6 +11,7 @@ import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
+import { MachineFlow, type MachineOps } from './machine-flow.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
@@ -204,6 +205,7 @@ export class SessionManager {
   private readonly merges: MergeChecks
   /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
   private readonly projectCreation: ProjectCreation
+  private readonly machineFlow: MachineFlow
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
@@ -326,6 +328,7 @@ export class SessionManager {
     this.consents = new ProjectConsents(this.parts())
     this.updatesAsked = new UpdatesAsked(this.parts())
     this.projectCreation = new ProjectCreation(this.parts())
+    this.machineFlow = new MachineFlow(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
@@ -493,6 +496,11 @@ export class SessionManager {
 
   useMachineList(list: () => MachineInfo[]): void {
     this.machineList = list
+  }
+
+  /** The hub's links, for the orchestrator's machine commands (#1219); main.ts wires them */
+  useMachineOps(ops: MachineOps): void {
+    this.machineFlow.useOps(ops)
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -2474,6 +2482,7 @@ export class SessionManager {
       addFolderAsked: (sessionId, path, signal) => this.projectCreation.addFolderAsked(sessionId, path, signal),
       addFolderOnMachine: (sessionId, reader, machine, path, signal) => this.projectCreation.addFolderOnMachine(sessionId, reader, machine, path, signal),
       machineList: () => this.machineList(),
+      machineRequest: (sessionId, req, signal) => this.machineFlow.run(sessionId, req, signal),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),

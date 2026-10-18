@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApprovalDetail, NO_PATH, UNKNOWN_CARD } from '@cc/protocol'
+import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
 import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
@@ -211,6 +211,11 @@ describe('offersAlways', () => {
     const unread = ApprovalDetail.parse({ kind: 'machine_link', text: 'Link this computer?' })
     expect(offersAlways(unread)).toBe(false)
     expect(offersAlways({ kind: 'other', raw: 'Link this computer?', about: UNKNOWN_CARD })).toBe(false)
+  })
+
+  // The orchestrator's change to a linked machine (#1219): each is asked on its own, and the host remembers nothing
+  it("is off for the orchestrator's change to a linked machine", () => {
+    expect(offersAlways({ kind: 'other', raw: 'Remove the linked machine Laptop (me@laptop)?', about: MACHINE_CHANGE })).toBe(false)
   })
 })
 

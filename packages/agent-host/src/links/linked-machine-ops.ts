@@ -211,14 +211,25 @@ export class LinkedMachine extends LinkedMachineConnection {
    * installer or shell, a development build, a command of the person's own), one at a time, with its
    * steps in the row. Afterwards the link opens again, also after a failure
    */
-  private async operate<T>(kind: MachineOperation['kind'], target: string | null, fn: (c: HostControl, installer: LinkInstaller) => Promise<T>): Promise<T> {
-    const installer = this.deps.installer
-    const tunnelExec = this.tunnel.exec?.bind(this.tunnel)
-    if (!installer || !tunnelExec) throw linkError(`This computer cannot install on ${this.name}`)
+  /**
+   * Why an install, update or another operation on the machine would be refused before it starts, or null: this
+   * computer installs nothing, a development hub has nothing published to install, or the machine runs a command of
+   * its own. `operate` refuses with it; the orchestrator's install_machine says it before its card (#1219)
+   */
+  operationRefusal(kind: MachineOperation['kind']): string | null {
+    if (!this.deps.installer || !this.tunnel.exec) return `This computer cannot install on ${this.name}`
     if (this.deps.hub.dev && (kind === 'install' || kind === 'update')) {
-      throw linkError(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${shimNames(this.record.remote).npm} i -g centralu)`)
+      return `A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${shimNames(this.record.remote).npm} i -g centralu)`
     }
-    if (this.record.remote.command) throw linkError(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
+    if (this.record.remote.command) return `${this.name} runs a command of its own in place of centralu; clear it to use an installed one`
+    return null
+  }
+
+  private async operate<T>(kind: MachineOperation['kind'], target: string | null, fn: (c: HostControl, installer: LinkInstaller) => Promise<T>): Promise<T> {
+    const refused = this.operationRefusal(kind)
+    if (refused) throw linkError(refused)
+    const installer = this.deps.installer!
+    const tunnelExec = this.tunnel.exec!.bind(this.tunnel)
     const done = this.begin(kind, null, target)
     const at = Date.now()
     const step = (s: UpdateStep) => {

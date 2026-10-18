@@ -348,3 +348,16 @@ export function projectAddQuestion(d: { name: string; path: string; machine?: st
   const repo = d.git ? (d.origin ? `a git repository (origin ${d.origin})` : 'a git repository with no origin') : 'not a git repository'
   return `Add the existing folder ${where} as the project ${d.name}? It is ${repo}.`
 }
+
+/**
+ * The `about` of the orchestrator's card for a change to a linked machine (#1219: adding, installing on, updating,
+ * removing one, or turning its start at boot on or off), on an `other` detail: the question is whole in `raw`, so a
+ * window of any build reads it. Allow or deny only: a window that knows the name offers no "always", and the host
+ * remembers nothing for one (an older window's "always" is read as allow, once).
+ */
+export const MACHINE_CHANGE = 'machine_change'
+
+/** The orchestrator's card for a change to a linked machine (#1219) */
+export function isMachineChange(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === MACHINE_CHANGE
+}
