@@ -46,6 +46,8 @@ export function Overlay() {
     const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
     return sess ? sess.projectId : s.focusedProjectId
   })
+  // The session a file link named, whose folder (its worktree) the file is read from (#1209); only with its project
+  const sessionId = useStore((s) => (s.overlay?.kind === 'viewer' && s.viewerProjectId ? s.viewerSessionId : null))
 
   /*
    * Dismissed with Esc. It has to dismiss even when pressed inside an input field — the person must
@@ -87,7 +89,7 @@ export function Overlay() {
         </button>
       </header>
       {overlay.kind === 'viewer' ? (
-        <CodeViewer projectId={projectId} />
+        <CodeViewer projectId={projectId} sessionId={sessionId} />
       ) : (
         <GitPanel
           projectId={projectId}

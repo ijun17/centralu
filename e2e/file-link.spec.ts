@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './fixtures/control.js'
+import { openSessionDialog } from './fixtures/new-session.js'
 
 /**
  * Clicking a file an agent named (#39).
@@ -349,4 +350,47 @@ test('the path in a tool card opens the file; a path outside the project stays t
   await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'true')
   await page.getByTestId('tool-card-toggle').first().press('Enter')
   await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'false')
+})
+
+/**
+ * A worktree session's links open its worktree's file (#1209). The agent changed the file there, so the main checkout's
+ * copy is the old version, and a file only on its branch is not in the main checkout at all. The conversation resolved
+ * its paths against the project's folder and the viewer read through the project, so the person reviewing the change
+ * saw the old version or "not found". A path in the main checkout is outside the session's folder and stays text.
+ */
+test("a worktree session's link opens the worktree's file, not the main checkout's", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
+  await seedFiles(page, { 'src/a.ts': 'main checkout copy' })
+  await openSessionDialog(page, 'alpha')
+  await page.getByTestId('worktree-toggle').locator('input').check()
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
+  const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+  const wt = `/mock/worktrees/${sid}`
+  await page.evaluate(
+    ({ id }: { id: string }) => {
+      ;(window as any).__mock.sessionFiles.set(id, { 'src/a.ts': 'worktree copy', 'src/new.ts': 'only on the branch' })
+    },
+    { id: sid },
+  )
+  await agentSays(page, `Changed \`src/a.ts\`, added \`${wt}/src/new.ts\`, did not touch \`/tmp/alpha/src/a.ts\`.`)
+
+  const links = page.getByTestId('file-link')
+  await expect(links).toHaveText(['src/a.ts', `${wt}/src/new.ts`])
+
+  await links.nth(0).click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
+  await expect(page.getByTestId('code-viewer')).toContainText('worktree copy')
+  await page.keyboard.press('Escape')
+
+  await links.nth(1).click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('src/new.ts')
+  await expect(page.getByTestId('code-viewer')).toContainText('only on the branch')
+  await page.keyboard.press('Escape')
+
+  // Revealing it in the file manager names the session too, so the host resolves it in the worktree
+  await links.nth(0).dispatchEvent('contextmenu')
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mock.fileOps.filter((o: any) => o.op === 'reveal').at(-1)))
+    .toMatchObject({ op: 'reveal', path: 'src/a.ts', sessionId: sid })
 })

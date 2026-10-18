@@ -364,6 +364,7 @@ export class MockPlatform implements Platform {
 
   // files.ts
   get fileOps() { return this.filesMock.fileOps }
+  get sessionFiles() { return this.filesMock.sessionFiles }
   get searchError() { return this.filesMock.searchError }
   set searchError(value: FilesMock['searchError']) { this.filesMock.searchError = value }
   get watchedDirs() { return this.filesMock.watchedDirs }
