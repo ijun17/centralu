@@ -357,30 +357,33 @@ test('dropping leaves it exactly as previewed — panels move as the same node (
 })
 
 /**
- * The path in from a notification **prefers the grid** (dogfooding request).
+ * The path in from a notification **prefers the grid** (dogfooding request). The notification cards are gone (owner,
+ * 2026-10-18): a finished turn is written out in the inbox's capsule, and the inbox is the way in.
  *
  * A session placed in a panel was placed there to be watched. If that session finishing its
  * response tore down the grid and swapped in one big screen, a single notification would end up
  * clearing every other panel off the screen. Instead, that panel lights up and its composer gets
  * focus — because the reason for coming here was to reply.
  */
-test('a session clicked from a notification that is in the grid goes to that panel in the grid', async ({ page }) => {
+test('a finished session opened from the inbox that is in the grid goes to that panel in the grid', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', 'first')
   const b = await newSession(page, 'alpha', 'claude', 'second')
   await openGrid(page, [a, b])
   await expect(page.getByTestId('grid')).toBeVisible()
 
-  // b finishes its response while the grid is being watched — since it is not the session being watched, a card shows up
+  // b finishes its response while the grid is being watched — since it is not the session being watched, the inbox lists it
   await page.evaluate((id: string) => (window as any).__store.getState().focusSession(id), a)
 
   await page.evaluate((id: string) => {
     const m = (window as any).__mock
     m.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'done over here' })
     m.emit({ type: 'turn_complete', sessionId: id })
   }, b)
 
-  await page.getByTestId('notice-open').click()
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`inbox-item-${b}`).click()
 
   // Stays in the grid, and the panel that caused the notification is lit
   expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('grid')
@@ -389,7 +392,7 @@ test('a session clicked from a notification that is in the grid goes to that pan
 })
 
 /** A session not in the grid behaves as before — it goes to the big screen */
-test('a session that is not in the grid still goes to the focus view when clicked from a notification', async ({ page }) => {
+test('a session that is not in the grid still goes to the focus view when opened from the inbox', async ({ page }) => {
   await setup(page)
   const onGrid = await newSession(page, 'alpha', 'claude', 'in a panel')
   const outside = await newSession(page, 'alpha', 'claude', 'session outside the panel')
@@ -401,9 +404,12 @@ test('a session that is not in the grid still goes to the focus view when clicke
   await page.evaluate((id: string) => {
     const m = (window as any).__mock
     m.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'done outside' })
     m.emit({ type: 'turn_complete', sessionId: id })
   }, outside)
 
-  await page.getByTestId('notice-open').click()
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`inbox-item-${outside}`).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(outside)
   expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('focus')
 })
