@@ -123,7 +123,7 @@ export const ChatRow = memo(function ChatRow({
   if (item.kind === 'assistant') {
     return (
       <div className="min-w-0" data-testid="msg-assistant">
-        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} sessionId={sessionId} linkSessionId={sessionId} />
       </div>
     )
   }
@@ -136,7 +136,7 @@ export const ChatRow = memo(function ChatRow({
      */
     return (
       <div className="min-w-0 text-md text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
-        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} />
+        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} />
       </div>
     )
   }
@@ -369,7 +369,7 @@ export function ToolCard({
           >
             {pieces.map((p, i) =>
               p.ref ? (
-                <FileLink key={i} refInfo={p.ref} projectId={projectId}>
+                <FileLink key={i} refInfo={p.ref} projectId={projectId} sessionId={sessionId}>
                   {p.text}
                 </FileLink>
               ) : (
