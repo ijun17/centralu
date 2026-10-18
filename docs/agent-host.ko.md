@@ -912,7 +912,7 @@ interface AdapterCapabilities {
 2. `@cc/protocol`의 `ToolName`에 도구를 넣고 `TOOL_META` 항목을 준다 — 표시 이름, 한 글자
    마크, 설치 명령, 로그인 명령. 그다음 `main.ts`의 `adapters` Map에 어댑터를 등록한다.
 3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증.
-4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1) —
+4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1). 계약의 `surface`(#270)도 채운다 —
    측정으로 얻은 프로토콜 지식은 그냥 두면 조용히 썩는다.
 5. 끝. **ui, core, platform은 변경되지 않고**, protocol은 2번의 두 항목만큼만 바뀐다.
    (그 이상이 필요했다면 그것은 어댑터의 잘못이 아니라 프로토콜에 개념이 부족한 것이다 —
@@ -941,6 +941,7 @@ interface AdapterCapabilities {
 | Codex | `adapters/codex/protocol-contract.json` — 우리가 보내거나 읽는 모든 RPC 메서드·알림, 승인 enum 값 | `pnpm codex:bindings --check` (설치된 CLI에서 바인딩을 재생성해 우리 이름을 대조) | 메서드/알림이 프로토콜에서 사라지는 것 (변경 축 C4) |
 | Claude | `scripts/claude-sdk-drift.mjs` 안의 이름 목록 — SDK export, 옵션 키, 응답 필드 — 과 런타임 모양 검사 하나: `permissionMode`를 생략하면 CLI에 `--permission-mode` 플래그가 아예 가지 않아야 한다 (`normal` 프리셋이 여기에 기댄다, #275) | `pnpm drift:claude [버전]` (`@latest` 또는 지정한 버전을 임시 폴더에 설치 — 워크스페이스는 건드리지 않는다) | 업그레이드가 우리에게 닿기 **전에** 이름이 `.d.ts`에서 사라지거나, SDK가 생략된 모드를 다시 `default`로 굳히는 것 |
 | Claude (재개) | 재개한 프로세스가 살아 있는 프로세스처럼 프롬프트 캐시를 읽는지 (#568, §4.6.1): 유휴 세션을 재우는 것이 공짜인 이유 | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (실제 모델, haiku, 임시 데이터 폴더. 깨운 턴이 캐시에서 90% 미만을 읽으면 1로 끝난다) | 재개할 때 요청을 다르게 짜는 CLI: 세션은 여전히 깨어나지만 더 느리고 비싸지고, 다른 무엇도 그것을 알려 주지 않는다 |
+| 모든 어댑터 (반대 방향, #270) | 계약의 `surface` (`adapters/contract/surface.ts`): 설치된 도구가 내놓는 것을 읽는 리더 (Claude: SDK의 stdout 메시지 유니온, `Options` 키, `Query` 메서드, CLI `--help`; Codex: 생성된 클라이언트 요청·알림·서버 요청 메서드, `--help`), 어댑터가 막거나 버리거나 우회하는 것(`limitations`, 각각 측정 근거와 함께), 마지막으로 검토한 표면(`adapters/<tool>/surface-baseline.ts`) | `pnpm drift:surface` (세션도 턴도 없이 최신 도구를 읽는다. `--record`는 기준선을 다시 쓰고, `--file-issue`는 주간 잡) | 아무도 검토하지 않은 새 명령·메시지 타입·기능, 근거가 사라졌을 수 있는 제한 (`/goal`은 CLI가 헤드리스로 돌린 뒤에도 몇 주간 거절됐다), 도구가 없앤 이름에 걸린 제한. 도구마다 이슈 하나로 남기고 잡은 초록으로 둔다 |
 
 둘 다 이름 검사이고 (Claude의 모양 검사 하나는 예외), 양방향으로 돈다: 벤더는 우리가 쓰는 모든 이름을 여전히 갖고
 있어야 하고, 우리 소스도 목록의 모든 이름을 여전히 써야 한다 (계약이 코드보다
@@ -1794,7 +1795,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | 열 추가 (45: 이 세션을 요청한 세션인 `sessions.asked_by_session_id`, #371. 그 뜻은 #561과 #614에서 옮겨 갔다, 48과 55 참고; 47: 링크된 기기의 앱 패널을 적는 `grid_layout.remote_app_id`와 `app_machine`, #82; 53: 마지막 턴이 끝나지 못한 이유인 `sessions.interruption`, #698; 54: `auto`만으로 통과한 대기 ask를 표시하는 `queued_requests.opened_by_auto`) | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306; 47: 이전 host는 `app_id`가 있는 앱 줄만 읽고, 그 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 앱 패널을 버린다; 53: 이전 host는 `sessions.interruption`을 읽지도 쓰지도 않으므로, 그 host가 맡은 줄은 마지막 값을 그대로 둔다, #698; 54: 이전 host는 `opened_by_auto`를 읽지도 쓰지도 않는다. 그 host가 넣은 줄은 null이고, 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52 | 테이블 추가 (3은 색인도 채운다: 무거움; 44는 한 프로젝트가 다른 프로젝트에 닿도록 받은 "항상"을 적는 `project_consents`를 더한다, #371; 46은 허브의 링크와 각 기기에서 마지막으로 들은 것을 적는 `linked_machines`와 `machine_headers`, 그리고 nullable `grid_layout.remote_session_id`를 더한다, #82; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다; 46: 이전 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 세션 패널을 버린다) |
-| 57 | 열과 테이블 추가 (#550): 링크된 기기의 세션이 이 컴퓨터의 프로젝트에 물어도 되는지 정하는 기기별 스위치 `linked_machines.asks`(기본은 꺼짐), 그리고 사람이 허락한 쌍(그 기기의 세션, 여기의 프로젝트)을 적는 `machine_ask_consents`. 두 끝 모두 CASCADE 외래 키다 | 읽는다 (이전 host의 삽입은 스위치를 끈 채로 두고, 테이블은 읽지 않으며, 기기를 지우면 그 기기의 쌍도 함께 지워진다) |
+| 60 | 열과 테이블 추가 (#550): 링크된 기기의 세션이 이 컴퓨터의 프로젝트에 물어도 되는지 정하는 기기별 스위치 `linked_machines.asks`(기본은 꺼짐), 그리고 사람이 허락한 쌍(그 기기의 세션, 여기의 프로젝트)을 적는 `machine_ask_consents`. 두 끝 모두 CASCADE 외래 키다 | 읽는다 (이전 host의 삽입은 스위치를 끈 채로 두고, 테이블은 읽지 않으며, 기기를 지우면 그 기기의 쌍도 함께 지워진다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48, 55 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561. 55는 다른 프로젝트의 세션을 가리키는 `askedBy`, 곧 #614 이전 ask_project의 뜻을 비운다. #844 전까지는 host가 시작할 때마다 하던 일이다) | 읽는다, 되돌릴 수 없다 (55: beta.20 이하의 빌드는 아직 옛 뜻으로 쓰고, 이 단계 뒤에 그 빌드가 쓴 줄은 그 뜻을 그대로 지닌다. 그 빌드가 보이던 대로다) |
 | **13, 28, 32, 56** | **테이블이나 열 삭제** (56: 아무도 쓴 적 없는 `usage_facts`, #423) | **깨진다: `min_reader_version`을 올린다** (56: 옛 host는 그 테이블을 빈 채로 다시 만들 뿐, 해가 없다) |

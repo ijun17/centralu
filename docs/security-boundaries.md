@@ -130,7 +130,7 @@ from HEAD also gets a `recovered/<session id>-stored-branch` branch, with a nume
 Existing branches are not overwritten. If a retry finds the worktree already present, it leaves the files
 and index alone. A marker written after successful patch application lets the notice report prior success;
 without one, it warns that manual recovery may still be needed. Recreating the worktree clears the marker.
-Gitlinks found only in older merged history remain tracked by [#623](https://github.com/ijun17/centralu/issues/623).
+Gitlinks found only in merged trunk history are scanned too (#623): merging a gitlink does not publish the module commit it names.
 Recovery files remain after restore and through later deletions, until the session is purged through Settings;
 purge/empty trash removes the entire session recovery directory before its row is deleted. The trash has no
 automatic expiry today; any future expiry must use the same purge path. Other programs with the person's

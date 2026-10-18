@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 import { useStore } from '../../../store/store.js'
+import { Button } from '../../../components/Button.jsx'
 
 /**
  * The path back up into older, compacted conversation.
@@ -87,14 +88,16 @@ export function OlderSentinel({
    */
   return (
     <div ref={ref} className="flex justify-center py-2" data-testid="load-older">
-      <button
-        type="button"
+      <Button
+        variant="subtle"
+        size="xs"
+        className="readout"
         onClick={() => void loadOlder(sessionId)}
-        disabled={loading}
-        className="readout rounded-md border border-line px-2 py-0.5 text-2xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+        busy={loading}
+        busyText="Loading earlier messages…"
       >
-        {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
-      </button>
+        Load earlier messages
+      </Button>
     </div>
   )
 }

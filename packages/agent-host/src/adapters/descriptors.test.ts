@@ -47,3 +47,17 @@ describe('tool descriptors', () => {
     }
   })
 })
+
+/*
+ * The drift run's second direction (#270) reads every registered adapter's surface. Optional in the contract, so test
+ * doubles need not carry one; a shipped adapter without it would be watched in one direction only, silently.
+ */
+describe('tool surfaces', () => {
+  it('every shipped adapter says what its tool offers and what it limits', () => {
+    for (const [tool, adapter] of createAdapters()) {
+      expect(adapter.surface, `${tool} declares no surface`).toBeDefined()
+      expect(adapter.surface!.baseline.version, `${tool} has no recorded baseline`).not.toBe('')
+      for (const l of adapter.surface!.limitations) expect(l.measured.trim(), `${tool} ${l.name}`).not.toBe('')
+    }
+  })
+})

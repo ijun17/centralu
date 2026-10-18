@@ -32,6 +32,8 @@ import {
   type RareTier,
 } from './orchestrator-tools.js'
 import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
+import { commandsSentence, namedCall } from './tool-seats.js'
+import { movedChildrenNote } from './handoff-children.js'
 
 const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
 const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const }
@@ -492,6 +494,22 @@ describe('callForm (#850)', () => {
     expect(callForm('reader', 'handoff_session', { waitFor: 'h' })).toBeUndefined()
     expect(callForm('human', 'read_session', {})).toBeUndefined()
     expect(callForm(null, 'read_session', {})).toBeUndefined()
+  })
+
+  // Answers that named start_agent and agent_session bare sent the orchestrator, which reaches them only as commands, to a refusal first
+  it('namedCall falls back to the plain call; commandsSentence names only what the seat runs as a command', () => {
+    expect(namedCall('orchestrator', 'agent_session', { sessionId: FILL, action: 'wait' }, 'commands')).toBe('centralu_run(command="agent_session", args={sessionId: …, action: "wait"})')
+    expect(namedCall('scoped', 'agent_session', { sessionId: FILL, action: 'wait' }, 'commands')).toBe('agent_session(sessionId=…, action="wait")')
+    expect(namedCall(null, 'start_agent', { task: FILL })).toBe('start_agent(task=…)')
+    expect(commandsSentence('orchestrator', ['agent_session', 'ask_project'], 'commands')).toBe(
+      `agent_session is one of this session's commands: centralu_run(command="agent_session", args={…}) runs it.`,
+    )
+    expect(commandsSentence('orchestrator', ['agent_session'], 'resident')).toBe('')
+    expect(commandsSentence('scoped', ['agent_session'], 'commands')).toBe('')
+    expect(commandsSentence(null, ['agent_session'], 'commands')).toBe('')
+    // The handoff note carries it under its opening, for an heir that reaches agent_session as a command
+    const note = movedChildrenNote([{ handle: 'w-1', name: 'Docs', state: 'working', can: 'agent_session works on it.' }], commandsSentence('orchestrator', ['agent_session'], 'commands'))
+    expect(note).toContain(`use the handle with the tool it names.\nagent_session is one of this session's commands: centralu_run(command="agent_session", args={…}) runs it.\n`)
   })
 })
 

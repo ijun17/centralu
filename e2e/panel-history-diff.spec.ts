@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup as firstRun } from './fixtures/control.js'
 import { setup, newSession } from './fixtures/panel.js'
 import { startSession } from './fixtures/new-session.js'
 
@@ -287,10 +288,7 @@ test('a commit also opens from the second click onward — the list stays, so it
 
 /** Since this is a question asked of the repository, it is treated the same as the git tab */
 test('when there is no git repository, the history tab is disabled just like the git tab', async ({ page }) => {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await firstRun(page)
   await page.evaluate(async () => {
     const store = (window as never as { __store: any }).__store
     const m = (window as never as { __mock: any }).__mock

@@ -71,7 +71,7 @@ export class StepsV55 extends MigrationRange {
         },
       },
       {
-        to: 57,
+        to: 60,
         breaksOlderReaders: false,
         /**
          * The reverse direction of linked machines (#550, docs/plans/remote-hub.md §12.7): a linked machine's sessions
@@ -88,6 +88,8 @@ export class StepsV55 extends MigrationRange {
          *
          * **Expand only (#292's rule).** A defaulted column and a new table. An older host's insert does not name the
          * column and gets the switch off; it never reads the table, and its `DELETE FROM linked_machines` cascades.
+         *
+         * Numbered 60: v57 to v59 belong to changes landing before this one (#1121, #418, #1134), whose steps go above it.
          */
         run: () => {
           const cols = this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]

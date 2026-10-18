@@ -1,5 +1,6 @@
 import type { AgentPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
+import { mockError } from './mock-error.js'
 
 /** What the orchestrator proposes (MCP servers, skills) and the skills approved from it (#71, #703) */
 export class ProposalsMock {
@@ -29,7 +30,7 @@ export class ProposalsMock {
     },
     resolveMcpProposal: async (name: string, approve: boolean) => {
       const at = this.mcpProposalList.findIndex((p) => p.name === name)
-      if (at === -1) throw Object.assign(new Error(`No pending proposal named "${name}"`), { code: 'internal' })
+      if (at === -1) throw mockError(`No pending proposal named "${name}"`)
       const [hit] = this.mcpProposalList.splice(at, 1)
       if (approve) this.mcpApproved.push(hit!.name)
       this.emit({ type: 'orchestrator_proposals_changed' })
@@ -40,7 +41,7 @@ export class ProposalsMock {
     },
     resolveSkillProposal: async (name: string, approve: boolean) => {
       const at = this.skillProposalList.findIndex((p) => p.name === name)
-      if (at === -1) throw Object.assign(new Error(`No pending skill proposal named "${name}"`), { code: 'internal' })
+      if (at === -1) throw mockError(`No pending skill proposal named "${name}"`)
       const [hit] = this.skillProposalList.splice(at, 1)
       if (approve) this.skillList.push({ name: hit!.name, content: hit!.content })
       this.emit({ type: 'orchestrator_proposals_changed' })
@@ -48,7 +49,7 @@ export class ProposalsMock {
     orchestratorSkills: async () => ({ skills: [...this.skillList] }),
     deleteOrchestratorSkill: async (name: string) => {
       const at = this.skillList.findIndex((s) => s.name === name)
-      if (at === -1) throw Object.assign(new Error(`No skill named "${name}"`), { code: 'internal' })
+      if (at === -1) throw mockError(`No skill named "${name}"`)
       this.skillList.splice(at, 1)
     },
   }

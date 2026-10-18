@@ -6,6 +6,9 @@ import { TabActions } from './tabActions.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useLoad } from '../../app/useLoad.js'
+import { Button } from '../../components/Button.jsx'
+import { Badge } from '../../components/Badge.jsx'
+import { TextInput } from '../../components/TextField.jsx'
 
 /**
  * Changed files — the most frequently viewed list in this app.
@@ -157,16 +160,20 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
          * along with it — there was no way left in the app to push the commit just made.
          */
         <div className="mt-auto border-t border-line px-3 py-2">
-          <input
-            className="w-full rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          <TextInput
+            size="sm"
+            surface="raised"
+            className="w-full"
             placeholder="Commit message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             data-testid="evidence-commit-message"
           />
           <div className="mt-1.5 flex gap-1.5">
-            <button
-              className="flex-1 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink transition-colors hover:border-line-strong disabled:opacity-50"
+            <Button
+              variant="primary"
+              size="sm"
+              className="flex-1"
               disabled={busy || !message.trim() || staged.length === 0}
               data-testid="evidence-commit"
               onClick={() =>
@@ -178,9 +185,10 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               }
             >
               Commit
-            </button>
-            <button
-              className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+            </Button>
+            <Button
+              variant="quiet"
+              size="sm"
               disabled={busy}
               data-testid="evidence-push"
               onClick={() =>
@@ -191,16 +199,17 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               }
             >
               Push
-            </button>
+            </Button>
             {busy && (
-              <button
-                className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+              <Button
+                variant="quiet"
+                size="sm"
                 disabled={cancelling}
                 data-testid="evidence-git-cancel"
                 onClick={() => void cancel()}
               >
                 Cancel
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -227,7 +236,7 @@ function ChangeGroup({
   return (
     <section data-testid={`evidence-group-${title.toLowerCase()}`}>
       <header className="sticky top-0 flex items-center gap-1.5 bg-surface-side px-3 py-1">
-        <h4 className="text-2xs uppercase text-ink-faint">{title}</h4>
+        <Badge as="h4">{title}</Badge>
         <span className="readout text-2xs text-ink-faint">{files.length}</span>
         <button
           className="ml-auto text-2xs text-ink-faint transition-colors hover:text-ink disabled:opacity-50"

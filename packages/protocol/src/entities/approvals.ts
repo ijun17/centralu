@@ -209,14 +209,15 @@ export const UNKNOWN_CARD_NOTE = 'A newer Centralu may have sent it. Allow it on
 /** The last line of a card of a known kind that did not read: from a newer build, or malformed */
 export const UNREADABLE_CARD_NOTE = 'It may come from a newer Centralu, or be malformed. Allow it only if you know what it asks.'
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
+/** A text with something in it, trimmed; agent-host's `trimmed` (json-value.ts), which protocol cannot import (#850) */
+const trimmed = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
 const quoted = (v: unknown, max = 500): string => {
   const cut = (t: string) => (t.length > max ? `${t.slice(0, max)}…` : t)
   // JSON quoting keeps a text on one line, so it cannot pass itself off as the card's own lines; a value that is not
   // text is written as JSON, also one line
   return typeof v === 'string' ? JSON.stringify(cut(v)) : cut(JSON.stringify(v) ?? String(v))
 }
-const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !== null ? str((v as Record<string, unknown>).name) : undefined)
+const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !== null ? trimmed((v as Record<string, unknown>).name) : undefined)
 
 /**
  * A card this build could not read, as the `other` card that says what it can of it (#844). In this order, so the person
@@ -226,7 +227,7 @@ const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !
  */
 function unknownApprovalCard(raw: unknown): ApprovalDetail {
   const card = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
-  const kind = str(card.kind)?.slice(0, 60)
+  const kind = trimmed(card.kind)?.slice(0, 60)
   const branch = kind ? ApprovalDetailKinds.options.find((o) => o.shape.kind.value === kind) : undefined
   const lines: string[] = []
   let problems = ''
@@ -250,11 +251,11 @@ function unknownApprovalCard(raw: unknown): ApprovalDetail {
   const named = [
     nameOf(card.project) && `project ${quoted(nameOf(card.project), 80)}`,
     nameOf(card.app) && `app ${quoted(nameOf(card.app), 80)}`,
-    str(card.machine) && `machine ${quoted(str(card.machine), 80)}`,
+    trimmed(card.machine) && `machine ${quoted(trimmed(card.machine), 80)}`,
   ].filter(Boolean)
   if (named.length) lines.push(`It names ${named.join(', ')}.`)
   for (const [key, label] of [['text', 'Its text'], ['raw', 'Its text'], ['command', 'The command'], ['path', 'The file']] as const) {
-    const v = str(card[key])
+    const v = trimmed(card[key])
     if (v) lines.push(`${label}, as the request gives it (not checked by Centralu): ${quoted(v)}`)
   }
   lines.push(branch ? UNREADABLE_CARD_NOTE : UNKNOWN_CARD_NOTE)
