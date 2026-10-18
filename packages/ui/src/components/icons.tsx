@@ -59,6 +59,25 @@ export function WindowCloseIcon({ size = 10 }: { size?: number }) {
   )
 }
 
+/** A filled square — stop, as on any player */
+export function StopIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" aria-hidden className="shrink-0">
+      <rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** Two cards, one behind the other — work going on behind the conversation (background tasks) */
+export function BackgroundIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="5" y="2.5" width="9" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.2" opacity="0.55" />
+      <rect x="2" y="6" width="9" height="7.5" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="var(--color-surface-side, transparent)" />
+    </svg>
+  )
+}
+
 /** An envelope — the inbox: what waits for the person */
 export function MailIcon({ size = 15 }: { size?: number }) {
   return (
