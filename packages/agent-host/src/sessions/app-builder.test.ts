@@ -193,6 +193,9 @@ describe('it is found by that app\'s building session', () => {
   it('apps.builder returns that session, and there is one building session per app', async () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     const mine = await create({ projectId: null, id: 'notes', name: 'Notes (mine)' })
+    // A project of its own (#1141), not this project nor the user folder
+    expect(mine.app).toMatchObject({ root: true, dir: join(root, 'Centralu', 'notes') })
+    expect([null, projectId]).not.toContain(mine.app.projectId)
     expect(((await rpc('apps.builder', { appId: 'notes', projectId })) as SessionInfo).id).toBe(builder!.id)
     // The same id as a project of its own is a different app — it has its own building session too
     const ownBuilder = (await rpc('apps.builder', { appId: 'notes', projectId: mine.app.projectId })) as SessionInfo
@@ -252,12 +255,14 @@ describe('a building session tries out its own app (C-3)', () => {
 
   it('an app project\'s building session: only its own project\'s app attaches (another app project is another project)', async () => {
     await create({ projectId: null, id: 'helper', name: 'Helper' })
-    const { builder } = await create({ projectId: null, id: 'timer', name: 'Timer' })
+    const { app, builder } = await create({ projectId: null, id: 'timer', name: 'Timer' })
     expect(servers(claude.last())).toEqual(['app-timer'])
-    // Still the same after a resume
+    // An app inside that project is its project's too, so its builder gets it; the other app project's stays out
+    plantApp(join(app.dir, ...PROJECT_APPS), 'extra', { server: { command: 'node', args: ['server.mjs'] } })
+    rt.refresh()
     claude.seen = []
     expect((await mgr.restartSession(builder!.id)).resumed).toBe(true)
-    expect(servers(claude.last())).toEqual(['app-timer'])
+    expect(servers(claude.last())).toEqual(['app-extra', 'app-timer'])
     expect(claude.last().toolProfile).toBe('builder')
     // Actually calls the attached app's tool — the template's increment
     const out = await claude.last().apps!.call('app-timer', 'increment', { by: 2 })
