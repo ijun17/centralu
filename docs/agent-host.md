@@ -1348,6 +1348,58 @@ a target that is no ssh target or that `ssh -G` cannot read, a name already link
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 
+### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
+
+The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
+host checks; consequential or trust-changing actions raise a card the person answers, reading and reversible ones do not.
+This is the list that principle is applied to: every RPC method of `packages/protocol/src/commands/methods/` (the
+window's channel), grouped, and for each group one of three states.
+
+- **Has it**: reachable by the orchestrator today, as a tool or a rare command behind `centralu_run`.
+- **Should**: the orchestrator should reach it. *Slice 2* is this pull request (preferences and the trash); *next* is a
+  later slice, with the card it needs.
+- **Person**: stays with the person, with the reason. A method here may still be *read* by the orchestrator when the
+  group says so.
+
+| Group (methods) | State | Notes |
+|---|---|---|
+| Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
+| Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
+| Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
+| Deleting a session. `agents.deleteSession` | Has it for its own children (`agent_session delete`); *next* for the rest | It only moves to the trash (reversible), so a card is not what protects it; the children rule (#637) is |
+| Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
+| Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
+| MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
+| Preferences. `prefs.get`, `prefs.set` | **Slice 2** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools`, `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
+| Themes. `themes.list` | **Slice 2** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
+| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **Slice 2** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
+| Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **Slice 2** | |
+| Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
+| Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312) |
+| The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **Slice 2** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
+| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **Slice 2**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`) |
+| Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
+| Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
+| `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
+| Project trust and commands. `projects.setTrusted`, `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Trusting a project lets its agents and apps run; commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
+| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
+| Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
+| App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
+| App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
+| App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
+| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
+| `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.acceptVersions`, `machines.sshHosts`, `machines.activity` | Should: *next* | Disconnect acts at once; rollback, uninstall and accepting differing versions behind a card |
+| What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk`, `machines.need` | **Person** | It widens what code on another computer may do here (#550) |
+| Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
+| Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
+| The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
+
+Slice 1 was the linked machines (#1238). Slice 2 is the preferences above and the trash. *Next*, in the order the owner's
+errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
+app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
+calls stay out of every slice unless the owner says otherwise.
+
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
 ```ts
