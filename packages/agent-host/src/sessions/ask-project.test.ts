@@ -135,6 +135,10 @@ describe('what the caller may read', () => {
     expect(cut.startsWith('a'.repeat(4500))).toBe(true)
     expect(cut.endsWith('/p/out/a.png')).toBe(true)
     expect(cut).toContain('the whole answer is in the session "Asked by consumer"')
+    // Where it is known, the cut names the read that shows what it left out (#1186)
+    expect(clipAnswer(long, 'Asked by consumer', { sessionId: 's-1', seq: 12 })).toContain(
+      '[2312 characters cut here; read them with read_session(sessionId="s-1", around=12, offset=4500)]',
+    )
   })
 })
 
@@ -418,6 +422,30 @@ describe('asking another project', () => {
     const r = await p
     expect(r).toMatchObject({ ok: true, state: 'done', project: w.target.name, sessionId: d.id, readable: [join(w.target.path, 'out', 'a.png')], outside: [] })
     expect(r.ok && r.state === 'done' && r.answer).toContain('Exported 1 sprite')
+  })
+
+  /*
+   * #1186: the cut said "the whole answer is in the session", and read_session cut that answer again at 2,000
+   * characters, so the middle was not readable anywhere. The cut now names the read, and that read shows it.
+   */
+  it('cuts a long answer with the read that shows what it left out, and that read shows it', async () => {
+    const s = await w.callerSession()
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const p = w.mgr.askProject(s, { project: w.target.name, task: 'write the long report' })
+    await w.until(() => !!handleOf(targetSession)?.sent.length)
+    const middle = `MIDDLE-START${'m'.repeat(5000)}MIDDLE-END`
+    handleOf(targetSession)!.answer(`${'h'.repeat(4500)}${middle}${'t'.repeat(1200)}`)
+    const r = await p
+    if (!r.ok || r.state !== 'done') throw new Error(JSON.stringify(r))
+    expect(r.answer).not.toContain('MIDDLE-START')
+    const call = /read_session\(sessionId="([^"]+)", around=(\d+), offset=(\d+)\)/.exec(r.answer)
+    expect(call?.[1]).toBe(targetSession)
+    // The caller's own read_session, through the runner as the model calls it
+    const read = await w.mgr.runOrchestratorTool(s, 'read_session', { sessionId: call![1], around: Number(call![2]), offset: Number(call![3]) })
+    expect(read.isError).not.toBe(true)
+    const line = JSON.parse(read.text.trim().split('\n').at(-1)!) as { text: string; readOn?: string }
+    expect(line.text.startsWith('MIDDLE-START')).toBe(true)
+    expect(line.text).toContain('MIDDLE-END')
   })
 
   it('makes the files the answer names readable to the caller, and only those', async () => {

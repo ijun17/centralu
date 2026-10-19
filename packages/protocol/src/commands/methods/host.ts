@@ -218,6 +218,11 @@ export const hostMethods = {
       around: z.number().int().optional(),
       /** Tool calls in full rather than one line each */
       tools: z.boolean().optional(),
+      /**
+       * With `around`, the one line that starts there, from this character of its text on (#1186): a long line is cut,
+       * and says this offset to read on from. Additive: an older machine ignores it and answers the plain read
+       */
+      offset: z.number().int().min(0).optional(),
     }),
     result: HostReadSessionResult,
   },

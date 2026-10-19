@@ -897,8 +897,8 @@ export function createRpcHandler(
     // What a hub's orchestrator reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
     'host.sessions': async () => mgr.hostReader().sessions(),
     'host.readSession': async (p) => {
-      const { sessionId, limit, around, tools } = RpcMethods['host.readSession'].params.parse(p)
-      return mgr.hostReader().read(sessionId, limit, { around, tools })
+      const { sessionId, limit, around, tools, offset } = RpcMethods['host.readSession'].params.parse(p)
+      return mgr.hostReader().read(sessionId, limit, { around, tools, ...(offset !== undefined ? { offset } : {}) })
     },
     'host.recall': async (p) => {
       const { query, limit } = RpcMethods['host.recall'].params.parse(p)

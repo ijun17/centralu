@@ -166,6 +166,9 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     }
     await linkedSessions(() => [m]).read('m1.w1', 10, { around: 42, tools: true })
     expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true } }])
+    // A long line read on from where it was cut (#1186) is the machine's to read, with the same offset
+    await linkedSessions(() => [m]).read('m1.w1', 40, { around: 42, offset: 2000 })
+    expect(asked[1]).toEqual({ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, around: 42, offset: 2000 } })
   })
 
   it('names a machine whose Centralu predates reading it, wherever it is asked', async () => {

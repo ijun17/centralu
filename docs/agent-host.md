@@ -238,7 +238,16 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    delegation's watcher is never replaced. `AgentRunWait` holds until the delivered input's receipt completes,
    even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
 5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
-   characters. Named files and folders inside the target project, resolved through symlinks, become
+   characters: the first 4,500 and the last 1,200 are kept, and the cut names the read that shows the rest,
+   `read_session(sessionId, around=<the answer's first seq>, offset=4500)` (#1186; `clipAnswer`, `answerAt`). Where
+   that session cannot be read from the caller (a hub's), the cut names the session as before. `read_session` shows
+   at most 2,000 characters of a line's text; a longer line says which characters it shows (`shown`) and the read that
+   goes on (`readOn`: the same call with `around` at the line's first seq and `offset`), and a read with `offset`
+   shows up to 8,000 characters of that one line (`sessions/session-lines.ts`). `offset` is in no tool definition:
+   the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
+   (`host.readSession`'s `offset`, additive: an older machine answers the plain read). The cut used to send the caller
+   to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
+   the middle of a long answer could not be read back at all. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
    A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
    #428), so a short name, another case or a link to the root reads as the place it names.

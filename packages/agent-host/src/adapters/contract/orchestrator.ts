@@ -173,7 +173,7 @@ export type LinkedSessions = {
   read(
     sessionId: string,
     limit?: number,
-    opts?: { around?: number; tools?: boolean },
+    opts?: { around?: number; tools?: boolean; offset?: number },
   ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
   /** Each machine's hits in its own rank order, one list per machine, and the machines that could not be searched, as `<name> (<why>)` */
   recall(query: string, limit: number): Promise<{ hits: RecallHit[][]; notSearched: string[] }>
@@ -414,6 +414,11 @@ export type OrchestratorTools = {
       around?: number
       /** Whether to expand tool-call bodies too. Collapsed by default (a full script's text would bury the conversation) */
       tools?: boolean
+      /**
+       * With `around`, the one line that starts there, read from this character on (#1186): a line past
+       * `LINE_MAX_CHARS` is cut, and its cut names this offset to read on from
+       */
+      offset?: number
     },
   ): Promise<{
     ok: boolean

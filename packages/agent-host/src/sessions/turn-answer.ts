@@ -33,6 +33,25 @@ export function turnAnswer(messages: readonly StoredMessage[], opts: { afterSeq?
 }
 
 /**
+ * The seq of the first message of `turnAnswer`'s answer in the same rows, or null when the turn has no final text
+ * (#1186): read_session finds the answer there (`around`), read from an offset to its end
+ */
+export function turnAnswerSeq(messages: readonly StoredMessage[], opts: { afterSeq?: number } = {}): number | null {
+  let first: number | null = null
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (opts.afterSeq !== undefined && m.seq <= opts.afterSeq) break
+    if (m.role === 'assistant' && m.kind === 'reasoning') continue
+    if (m.role === 'assistant' && m.kind === 'text') {
+      first = m.seq
+      continue
+    }
+    break
+  }
+  return first
+}
+
+/**
  * The session's last response, as a preview reads it: `turnAnswer` at the last text the agent wrote, past whatever came
  * after it (a tool call still running, the person's next message). Not an answer to hand a caller: it can be a plan.
  */

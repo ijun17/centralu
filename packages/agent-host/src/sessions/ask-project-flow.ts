@@ -1,5 +1,5 @@
 import type { Delegation } from './child-ownership.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
@@ -563,7 +563,7 @@ export class AskProjectFlow {
         }
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
-    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName()), readable: granted, outside }
+    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
   }
 
 }

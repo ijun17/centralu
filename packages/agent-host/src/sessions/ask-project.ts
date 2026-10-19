@@ -2,6 +2,8 @@ import { frameField, oneLineText } from '@cc/protocol'
 import { realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
+import type { MessageReader } from './transcript-view.js'
+import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
 
 /**
  * ask_project (#371 part B) — what a session in one project gets back when it asks another project to do something.
@@ -98,14 +100,35 @@ export function matchProjects(wanted: string, projects: readonly AskableProject[
   return []
 }
 
-/** A long answer cut in the middle, with the session that holds the whole of it */
-export function clipAnswer(answer: string, sessionName: string): string {
+/** Where a turn's answer starts in its session (`answerAt`): the read that finds what a cut left out (#1186) */
+export type AnswerAt = { sessionId: string; seq: number }
+
+/**
+ * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it
+ * left out (#1186): read_session from the answer's first message, at the character the cut starts. It used to send
+ * the caller to the session by name only, and read_session cut the same answer again at 2,000 characters, so the
+ * middle could not be read back at all. Without `at` (a session this caller cannot read, such as a hub's), the session
+ * is named as before.
+ */
+export function clipAnswer(answer: string, sessionName: string, at?: AnswerAt): string {
   if (answer.length <= ANSWER_MAX_CHARS) return answer
-  return (
-    answer.slice(0, ANSWER_HEAD_CHARS) +
-    `\n…[${answer.length - ANSWER_HEAD_CHARS - ANSWER_TAIL_CHARS} characters cut; the whole answer is in the session "${sessionName}"]…\n` +
-    answer.slice(-ANSWER_TAIL_CHARS)
-  )
+  const cut = answer.length - ANSWER_HEAD_CHARS - ANSWER_TAIL_CHARS
+  const where = at
+    ? `read them with read_session(sessionId="${at.sessionId}", around=${at.seq}, offset=${ANSWER_HEAD_CHARS})`
+    : `the whole answer is in the session "${sessionName}"`
+  return answer.slice(0, ANSWER_HEAD_CHARS) + `
+…[${cut} characters cut here; ${where}]…
+` + answer.slice(-ANSWER_TAIL_CHARS)
+}
+
+/**
+ * Where `answer` starts in the session's record, when it is that session's last answer (`turnAnswer` over the same
+ * rows); undefined otherwise, as when a later turn has answered since
+ */
+export function answerAt(reader: MessageReader, sessionId: string, answer: string): AnswerAt | undefined {
+  const rows = reader.loadMessages(sessionId, 50)
+  const seq = turnAnswerSeq(rows)
+  return seq !== null && answer && turnAnswer(rows) === answer ? { sessionId, seq } : undefined
 }
 
 /**

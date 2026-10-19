@@ -523,6 +523,7 @@ export function linkedSessions(
           ...(limit !== undefined ? { limit } : {}),
           ...(opts?.around !== undefined ? { around: opts.around } : {}),
           ...(opts?.tools ? { tools: true } : {}),
+          ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
         })
         const r = HostReadSessionResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }

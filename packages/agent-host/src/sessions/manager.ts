@@ -1022,7 +1022,7 @@ export class SessionManager {
 
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
   } {
     const view = this.orchestratorToolsFor('', undefined, undefined, true)

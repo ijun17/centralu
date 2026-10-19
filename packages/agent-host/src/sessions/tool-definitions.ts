@@ -715,8 +715,11 @@ const ORCHESTRATOR_ARGS = schemasOf(ORCHESTRATOR_TOOLS)
  */
 export const TOOL_ARGS = {
   ...ORCHESTRATOR_ARGS,
-  // The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required
-  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional() }),
+  /*
+   * The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required. `offset`
+   * (#1186) is shown to no seat: a line cut, and ask_project's cut, spell out the read that uses it, as recall does `around`
+   */
+  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional(), offset: z.number().int().min(0).optional() }),
   ...schemasOf(AGENT_TOOLS),
   /*
    * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one
