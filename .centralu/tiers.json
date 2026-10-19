@@ -1,5 +1,5 @@
 {
-  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a test (x.test.ts, x.test-helpers.ts, a folder's tests.rs) also takes the tier of the file it tests (x.ts, the folder's mod.rs), so the guard of a deep file is deep. A change takes the highest tier of its files. Without these rules, or when they cannot be read, a change is deep. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either.",
+  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). The auto rules list the harmless extensions they cover, so a file of any other kind falls to light. A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a test (x.test.ts, x.test-helpers.ts, a folder's tests.rs) also takes the tier of the file it tests (x.ts, the folder's mod.rs), so the guard of a deep file is deep. A change takes the highest tier of its files. Without these rules, or when they cannot be read, a change is deep. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either; a rule with ignoreCase matches whatever the case.",
   "tiers": ["auto", "light", "deep", "person"],
   "fallback": "light",
   "rules": [
@@ -7,7 +7,7 @@
       "id": "docs",
       "tier": "auto",
       "paths": [
-        "docs/**",
+        "docs/**/*.{md,txt,png,jpg,jpeg,gif,webp,avif,svg}",
         "README.md",
         "README.ko.md",
         "CODE_OF_CONDUCT.md",
@@ -15,20 +15,26 @@
         "packages/agent-host/scripts/README.md"
       ],
       "except": ["docs/security-boundaries.md"],
-      "why": "documents nothing runs; AGENTS.md, CLAUDE.md and CONTRIBUTING.md are left light, since every agent session follows them"
+      "why": "documents and their images, which nothing runs: only these extensions (.md .txt .png .jpg .jpeg .gif .webp .avif .svg), so anything else under docs (a script, a template, a notebook, a Makefile) is light; AGENTS.md, CLAUDE.md and CONTRIBUTING.md are left light, since every agent session follows them",
+      "ignoreCase": true
     },
     {
       "id": "fixture-data",
       "tier": "auto",
-      "paths": ["**/fixtures/**", "**/*-fixtures/**", "packages/agent-host/src/dev-services/store-migrations*.golden.json"],
-      "except": ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
-      "why": "data only tests read; code in a fixtures folder, and the tests themselves, are light (a weakened test lets a later bug through)"
+      "paths": [
+        "**/fixtures/**/*.{json,jsonl,txt,sql,csv,md,yaml,yml}",
+        "**/*-fixtures/**/*.{json,jsonl,txt,sql,csv,md,yaml,yml}",
+        "packages/agent-host/src/dev-services/store-migrations*.golden.json"
+      ],
+      "why": "data only tests read, in these formats only (.json .jsonl .txt .sql .csv .md .yaml .yml): code in a fixtures folder, a binary or anything else there is light, and so are the tests themselves (a weakened test lets a later bug through)",
+      "ignoreCase": true
     },
     {
       "id": "ui-assets",
       "tier": "auto",
-      "paths": ["packages/ui/src/assets/**"],
-      "why": "icons and fonts, loaded as images and font files, never run; CSS is light, since one rule can hide a consent or permission card"
+      "paths": ["packages/ui/src/assets/**/*.{svg,png,jpg,jpeg,gif,webp,avif,ico,woff,woff2,ttf,otf,md,txt}"],
+      "why": "icons, images and fonts (and their licence notes), loaded as images and font files, never run: only these extensions (.svg .png .jpg .jpeg .gif .webp .avif .ico .woff .woff2 .ttf .otf .md .txt); CSS, code or anything else under it is light, since one CSS rule can hide a consent or permission card",
+      "ignoreCase": true
     },
     {
       "id": "store",

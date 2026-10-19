@@ -42,6 +42,12 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'UI icons and fonts', paths: ['packages/ui/src/assets/file-icons/file_type_text.svg', 'packages/ui/src/assets/fonts/x.woff2'], tier: 'auto', rule: 'ui-assets' },
   { name: 'global CSS, which can hide a card', paths: ['packages/ui/src/styles/index.css'], tier: 'light', rule: null },
   {
+    name: 'code, scripts and styles where auto files sit (a test vitest would run, a script, CSS), which no auto rule lists',
+    paths: ['packages/ui/src/assets/evil.test.ts', 'packages/ui/src/assets/evil.ts', 'packages/ui/src/assets/x.css', 'docs/spikes/x.mjs', 'docs/run.sh', 'docs/run.ps1', 'docs/page.html'],
+    tier: 'light',
+    rule: null,
+  },
+  {
     name: 'tests next to deep files, which guard them',
     paths: ['packages/agent-host/src/sessions/app-access.test.ts', 'packages/agent-host/src/sessions/project-consents.test.ts', 'packages/agent-host/src/dev-services/path-guard.test.ts', 'packages/agent-host/src/apps/external/capabilities.test.ts'],
     tier: 'deep',
@@ -118,6 +124,23 @@ describe('the repository\'s tier rules', () => {
     expect(r.files.every((f) => f.rules.length === 0)).toBe(true)
   })
 
+  it('lets only the harmless kinds an auto rule lists be auto: code, scripts, binaries, build files and anything unknown are light', () => {
+    const auto = RULES.rules.filter((r) => r.tier === 'auto').map((r) => r.id)
+    const exts = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'sh', 'ps1', 'bat', 'cmd', 'vbs', 'py', 'rs', 'exe', 'dll', 'so', 'jar', 'css', 'scss', 'html', 'mdx', 'snap', 'BAT', 'Ps1', 'CSS', 'Exe']
+    // What a denylist kept missing (#1259 review): Windows and macOS executables, notebooks, compiled code, build files
+    const missed = ['com', 'scr', 'cpl', 'vbe', 'jse', 'ws', 'psd1', 'ps1xml', 'reg', 'lnk', 'url', 'inf', 'msix', 'appx', 'command', 'applescript', 'scpt', 'desktop', 'class', 'pyc', 'ipynb', 'gradle', 'toml', 'swift.in', 'unknownkind']
+    const places = ['docs/x', 'docs/spikes/x', 'README', 'packages/ui/src/assets/x', 'packages/ui/src/assets/fonts/x', 'packages/x/fixtures/x', 'packages/x/y-fixtures/x', 'packaging/npm/centralu/x']
+    const files = [
+      ...places.flatMap((p) => [...exts, ...missed].map((e) => `${p}.${e}`)),
+      ...['docs', 'docs/spikes', 'packages/ui/src/assets', 'packages/x/fixtures'].flatMap((d) => ['Makefile', 'Dockerfile', 'run'].map((n) => `${d}/${n}`)),
+    ]
+    expect(tierOf(files).files.filter((f) => f.tier === 'auto').map((f) => f.path)).toEqual([])
+    // The kinds they list stay auto, whatever the case
+    const harmless = ['docs/a.md', 'docs/A.MD', 'docs/img/x.png', 'docs/notes.txt', 'docs/d.svg', 'packages/ui/src/assets/x.svg', 'packages/ui/src/assets/fonts/x.woff2', 'packages/ui/src/assets/fonts/OFL.txt', 'packages/x/fixtures/a.json', 'packages/x/y-fixtures/b.sql', 'packages/x/fixtures/c.YAML']
+    expect(tierOf(harmless).files.filter((f) => f.tier !== 'auto').map((f) => f.path)).toEqual([])
+    expect(auto.length).toBeGreaterThan(0)
+  })
+
   it('gives a test the tier of the file it tests, and says so', () => {
     const r = tierOf(['packages/agent-host/src/sessions/app-access.test.ts'])
     expect(r.files[0]).toEqual({ path: 'packages/agent-host/src/sessions/app-access.test.ts', tier: 'deep', rules: ['trust'], tests: 'packages/agent-host/src/sessions/app-access.ts' })
@@ -142,6 +165,7 @@ describe('the repository\'s tier rules', () => {
     const r = tierOf(['docs/apps.md', 'packages/agent-host/src/rpc.ts', 'packages/protocol/src/brand.ts', 'packages/protocol/src/entities.ts'])
     expect(tierLine(r, RULES)).toBe('Tier: deep, from `packages/protocol/src/brand.ts` (protocol), `packages/protocol/src/entities.ts` (protocol); the other files: 1 auto, 1 light.')
     expect(tierLine(tierOf(['a.ts', 'b.ts', 'c.ts']), RULES, 2)).toBe('Tier: light, from `a.ts` (no rule matches: light), `b.ts` (no rule matches: light) and 1 more.')
+    expect(tierLine(tierOf(['AGENTS.md']), RULES)).toBe('Tier: light, from `AGENTS.md` (no rule matches: light).')
   })
 
   it('matches every glob against at least one file in the repository, so a rename cannot drop a path silently', () => {
@@ -172,6 +196,12 @@ describe('the rules file and its globs', () => {
     const rules = parseRules(file([{ id: 'docs', tier: 'auto', paths: ['docs/**'], except: ['docs/secret.md'], why: 'documents' }]))
     expect(classify(['docs/a.md'], rules).tier).toBe('auto')
     expect(classify(['docs/secret.md'], rules).tier).toBe('light')
+  })
+
+  it('matches a rule with ignoreCase whatever the case, and only that rule', () => {
+    const rules = parseRules(file([{ id: 'code', tier: 'light', paths: ['**/*.{bat,css}'], ignoreCase: true, why: 'code' }, { id: 'docs', tier: 'auto', paths: ['docs/**'], why: 'documents' }]))
+    expect(classify(['docs/a.BAT', 'docs/b.Css', 'docs/c.md', 'DOCS/d.md'], rules).files.map((f: { tier: string }) => f.tier)).toEqual(['light', 'light', 'auto', 'light'])
+    expect(() => parseRules(file([{ id: 'x', tier: 'deep', paths: ['a'], ignoreCase: 'yes', why: 'w' }]))).toThrow('ignoreCase is true or false')
   })
 
   it('refuses a person rule, an unknown tier, a rule without its why, and two rules of one id', () => {

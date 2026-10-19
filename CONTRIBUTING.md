@@ -403,8 +403,8 @@ read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
 |---|---|---|
-| auto | `docs/**` (not `security-boundaries.md`), fixture data (not code), UI icons and fonts | none beyond the checks |
-| light | everything no rule names: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
+| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries.md`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks |
+| light | everything no rule names, and anything in an auto folder of a kind its rule does not list: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
 | deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
 | person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
 

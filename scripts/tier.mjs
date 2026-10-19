@@ -34,7 +34,7 @@ export const LABEL_PREFIX = 'tier:'
 // --- Rules --------------------------------------------------------------------------------------
 
 /** A glob as a regular expression over a whole path: `**` any number of folders, `*` and `?` within one name, `{a,b}` either. */
-export function globToRegExp(glob) {
+export function globToRegExp(glob, flags = '') {
   let re = ''
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
@@ -58,7 +58,7 @@ export function globToRegExp(glob) {
       i = end
     } else re += escape(c)
   }
-  return new RegExp(`^${re}$`)
+  return new RegExp(`^${re}$`, flags)
 }
 
 const escape = (s) => s.replace(/[.+^$()|[\]\\}]/g, '\\$&')
@@ -86,12 +86,15 @@ export function parseRules(text, source = RULES_FILE) {
     if (!TIERS.includes(r.tier)) fail(`${at}: no tier is called ${r.tier}.`)
     if (r.tier === 'person') fail(`${at}: person is set by hand, never by path.`)
     if (typeof r.why !== 'string' || !r.why.trim()) fail(`${at} needs its why.`)
+    if (r.ignoreCase !== undefined && typeof r.ignoreCase !== 'boolean') fail(`${at}: ignoreCase is true or false.`)
+    // ignoreCase: the globs match whatever the case (a script named x.BAT runs on Windows and macOS as x.bat does)
+    const flags = r.ignoreCase ? 'i' : ''
     const globs = (list, key) => {
       if (list === undefined && key === 'except') return []
       if (!Array.isArray(list) || (key === 'paths' && !list.length) || list.some((g) => typeof g !== 'string' || !g)) fail(`${at}: ${key} must be a list of globs.`)
       return list.map((g) => {
         try {
-          return globToRegExp(g)
+          return globToRegExp(g, flags)
         } catch (e) {
           return fail(`${at}: ${e.message}`)
         }
