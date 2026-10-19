@@ -48,6 +48,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
 | `uses.agent`, `uses.apps`, `uses.host` | What the app **declares** it will ask Centralu for (§10) | Optional. A declaration, not a permission. Absent means nothing |
 | `uses.notices` | `true`: the app may post notices into a session that called it (§10, `notify`) | Optional. In `uses`, as above |
+| `uses.sessions` | `["observe"]`: the app may hear of its own project's sessions' state (§10, `watch_sessions`). A name this build does not give is a warning and refused, as in `uses.host` | Optional. In `uses`, so the trust card lists it and a manifest that adds it asks again |
 | `uses.background` | What the app does in the background, in words the person reads (§4, "Busy") | Optional, 1 to 200 characters. Without it the app cannot keep itself running. In `uses`, so an imported app adding it is reviewed again (§12) and the trust card lists it |
 | `secrets` | Names of the secrets the app needs | Optional. Environment-variable names; `CENTRALU_*` and `CC_*` are reserved |
 | `view.origin` | `opaque` (default) or `app` (§6.4) | An unknown value is refused, not read as the default |
@@ -1030,6 +1031,25 @@ gate happens in one place, the broker desk (`desk.ts`).
   record with no parent, its session and text in the arguments, delivered or refused, so the Runs
   panel shows what the app told which session. `centralu.notify(address, text)` resolves true once
   delivered.
+- **`watch_sessions { after?, waitMs? }`, the third request without a run id (task ledger, [plans/task-ledger.md](plans/task-ledger.md)).**
+  An app hears of its own project's sessions while nothing is calling it. With `uses.sessions: ["observe"]`, a
+  long-poll with a cursor: the answer is `{ cursor, full, sessions, gone }`, the sessions that changed after the cursor of
+  the last answer, or every session of the project (`full: true`, newest 500, `truncated`) when the app holds no cursor,
+  one from another host (a swap) or one older than the last 1000 changes. So a missed event costs nothing: the app
+  compares the snapshot with what it remembers. A row is state and counters, never a conversation or a preview:
+  `id`, `name` (what the sidebar shows), `kind`, `tool`, `state`, `live`, `waitingSince`, `lastSeq` (the number of the
+  session's last message, kept by the host, so "a new answer since I looked" holds after a restart), `activeAt` (when
+  the host last saw it do anything), `parentId`, `askedBy`, `pending` (open approvals and questions), `createdAt`,
+  `machine`, `appId`. What wakes a poll is the name, state, kind, liveness, cards, parent and, only while the session is
+  at rest, `lastSeq`; `activeAt` never does. Only for a project app (a user-folder app has no project), only the
+  project's sessions (not the orchestrator, other projects, a linked machine's sessions or the trash). One poll open
+  per app, `waitMs` at most 25 s (20 by default), a burst of changes is one answer, at most 120 polls begun a minute. It is
+  not a run: a poll every twenty seconds would bury the Runs panel, so a refusal is a line in the app's log. There is no
+  per-use card: no run exists to ask on, and trust follows the project (#1173), so what the person sees is the trust
+  card line "Sessions of its project: see their state … (not their conversations)". `centralu.watchSessions({ after })`
+  is one poll; `centralu.observeSessions(onChange)` is the loop (backoff, ends on a refusal that will not go away).
+  The host side is `SessionWatch` (`sessions/session-watch.ts`): a feed of changes that anything in the host can listen to
+  (`onChange`), of which the long-poll is one reader.
 - **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
   default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
   undeclared is refused before anything runs. Declaring is not permission.
@@ -1290,9 +1310,10 @@ from there it is an ordinary import, turned off unless the person enables it.
   is checked against the app-server protocol and a fake adapter only). fd 3 on Windows (spike
   S-5, §10) passes the broker test suites in the Windows CI job with Node apps; a Python app, and
   any app in the packaged Windows app, have not been tried.
-- The broker answers only while the app handles a call, except `busy` and `notify`: an app cannot
+- The broker answers only while the app handles a call, except `busy`, `notify` and `watch_sessions`: an app cannot
   run an agent, call an app or read host data by itself (a timer, a watcher). The host data list has
-  two names.
+  two names. An app still cannot be woken by a schedule, and cannot message a session it was not called by
+  (designed in [plans/task-ledger.md](plans/task-ledger.md), not built).
 - Attaching another project's app (§9.4) is a project session's: the orchestrator, a worktree
   manager and a coordinator cannot. Codex gets an attached app only from its next turn, so the
   person has to send another message for the model to use it.

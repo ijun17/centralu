@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { APP_ID_MAX_LENGTH, GRID_SPAN_MAX, RESERVED_NAME_PREFIX, serverNameProblem, type GridSpan } from '@cc/protocol'
-import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
+import { HOST_CAPABILITIES, SESSION_CAPABILITIES, isHostCapability, isSessionCapability } from './capabilities.js'
 
 /**
  * The manifest of an external app, `centralu.app.json` (M4 A-1).
@@ -139,7 +139,7 @@ export function readViewSpan(raw: unknown): { span?: GridSpan; warning?: string 
   return { span, warning: `view.span: each side is 1 to ${GRID_SPAN_MAX} cells — read as ${span.cols} × ${span.rows}` }
 }
 
-const USES_KEYS = ['agent', 'apps', 'host', 'background', 'notices'] as const
+const USES_KEYS = ['agent', 'apps', 'host', 'background', 'notices', 'sessions'] as const
 const SERVER_KEYS = ['command', 'args'] as const
 
 const ManifestSchema = z.object({
@@ -205,6 +205,18 @@ const ManifestSchema = z.object({
        * (`centralu.notify`), framed as the app's text. Only sessions that called it: the address is signed (`notices.ts`).
        */
       notices: z.boolean().optional(),
+      /**
+       * What the app may do with its own project's sessions: `observe` to hear of their state (`watch_sessions`, state
+       * and counters, never a conversation). A name this build does not know is only a warning and is refused, as in
+       * `uses.host`: an older build reading a newer manifest still runs the app.
+       */
+      sessions: z
+        .array(
+          z.string().superRefine((h, ctx) => {
+            if (!HOST_CAPABILITY.test(h)) ctx.addIssue({ code: 'custom', message: `not the shape of a session capability name: ${h}` })
+          }),
+        )
+        .optional(),
     })
     .default({}),
   /** Only the name is listed here. The value lives only on the user's machine (the runtime's secrets file) */
@@ -264,6 +276,9 @@ export function parseManifest(text: string): ManifestResult {
   }
   for (const h of parsed.data.uses.host ?? []) {
     if (!isHostCapability(h)) warnings.push(`uses.host: Centralu has no capability "${h}" — it can give: ${HOST_CAPABILITIES.join(', ')} (asking for it is refused)`)
+  }
+  for (const h of parsed.data.uses.sessions ?? []) {
+    if (!isSessionCapability(h)) warnings.push(`uses.sessions: Centralu has no capability "${h}" — it can give: ${SESSION_CAPABILITIES.join(', ')} (asking for it is refused)`)
   }
   return { ok: true, manifest: parsed.data, warnings }
 }

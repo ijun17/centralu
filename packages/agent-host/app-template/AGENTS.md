@@ -87,6 +87,16 @@ included. Meanwhile it keeps running, and its row says "Running: <what it is doi
 can stop it. It resolves false (said on stderr) when Centralu did not take it. Hold it only while
 there is work.
 
+**Hearing of the project's sessions.** To react when a session of this project finishes, asks or goes quiet,
+declare `"uses": { "sessions": ["observe"] }` and call `centralu.observeSessions(async ({ full, sessions, gone }) => …)`
+once when the module loads (it also needs `busy` to keep the app running). The first call has `full: true` and
+every session; later ones carry only the sessions that changed and the ids that `gone`. A row is
+`{ id, name, kind, tool, state, live, waitingSince, lastSeq, activeAt, parentId, askedBy, pending: { approvals, questions },
+createdAt, machine, appId }`: state and counters, never a conversation. `lastSeq` is the number of the session's last
+message and survives a restart, so keep the one you last acted on and compare. Nothing is lost by a missed change: a
+`full` answer (after a restart of Centralu, or a long gap) is the whole project, compare it with what you remember. The
+loop retries by itself; `centralu.watchSessions({ after, waitMs })` is one poll if you want your own. Project apps only.
+
 **Telling a session later.** To tell the session that asked for work when that work ends (a job
 finished, something needs it), declare `"uses": { "notices": true }`, keep
 `centralu.noticeAddress()` (inside the tool handler of that session's call) with the work, and when

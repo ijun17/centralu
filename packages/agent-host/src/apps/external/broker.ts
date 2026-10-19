@@ -43,6 +43,39 @@ export type BrokerToolName = (typeof BROKER_TOOLS)[number]
  */
 export const BROKER_KEEPALIVE_MS = 10_000
 
+/**
+ * One session as an app that observes its project sees it (docs/plans/task-ledger.md): state and counters, never a
+ * conversation or a preview. `lastSeq` is the number of the session's last message, kept by the host, so "a new answer
+ * since I looked" holds after a restart; `activeAt` is when the host last saw the session do anything.
+ */
+export type ObservedSession = {
+  id: string
+  name: string
+  kind: string
+  tool: string
+  state: string
+  live: boolean
+  waitingSince: number | null
+  lastSeq: number
+  activeAt: number
+  parentId: string | null
+  askedBy: string | null
+  pending: { approvals: number; questions: number }
+  createdAt: number
+  machine: string | null
+  appId: string | null
+}
+
+/** What a poll for session changes answers: `full` is every session of the project (no cursor the host could follow) */
+export type SessionsAnswer = {
+  cursor: string
+  full: boolean
+  sessions: ObservedSession[]
+  gone: string[]
+  /** More sessions than one answer holds: the newest are here */
+  truncated?: true
+}
+
 /** The run that triggered a broker call — used by the desk to stitch the chain together */
 export type BrokerCall = {
   /** The run id of the host→app call that triggered this broker call */
@@ -74,6 +107,11 @@ export type BrokerAdmission = {
   busy(reason: string | null): string | null
   /** The app posts a notice to `address` (#1161 item 1, `NOTICE_TOOL`). Answers why it is refused, or null once delivered */
   notify(address: string, text: string): Promise<string | null>
+  /**
+   * The app asks to hear of its project's sessions (`WATCH_TOOL`): one long-poll. Answers why it is refused, or the
+   * answer (what changed after the cursor it presented). `signal` ends when the app cancels or its pipe closes.
+   */
+  watch(args: { after?: string; waitMs?: number }, signal: AbortSignal): Promise<{ refused: string } | { answer: SessionsAnswer }>
   /** Also records a request that was never admitted, in the run ledger (D-6) — a denial is a row too. This is where a person reads it, in the app's runs panel */
   refused(tool: BrokerToolName, args: Record<string, unknown>, why: string): void
 }
@@ -116,6 +154,15 @@ export const BUSY_TOOL = 'busy'
  * records it as a run row with no parent.
  */
 export const NOTICE_TOOL = 'notify'
+
+/**
+ * The third request without a run id: the app hears of its own project's sessions (`uses.sessions: ["observe"]`,
+ * docs/plans/task-ledger.md). A long-poll with a cursor: the answer says which sessions changed after the cursor the
+ * app presents, or every session of the project (`full`) when the cursor is not one this host can follow. State and
+ * counters only, never a conversation. Not a run: a poll every twenty seconds would bury the app's Runs panel, so a
+ * refusal is a line in the app's log.
+ */
+export const WATCH_TOOL = 'watch_sessions'
 
 const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) })
 
@@ -166,6 +213,22 @@ export function serveBroker(
             return text(refused, true)
           }
           return text('delivered')
+        },
+      )
+      server.registerTool(
+        WATCH_TOOL,
+        {
+          description:
+            "Hear of this project's sessions (state and counters, never a conversation): the ones that changed after `after` (the cursor of the last answer), or all of them with full: true when there is no usable cursor. Waits up to waitMs (at most 25000) for a change. Needs \"uses\": { \"sessions\": [\"observe\"] } in the manifest; no run id",
+          inputSchema: z.object({ after: z.string().max(100).optional(), waitMs: z.number().int().min(0).max(60_000).optional() }),
+        },
+        async (args, ctx) => {
+          const r = await admission.watch(args, ctx.mcpReq.signal)
+          if ('refused' in r) {
+            admission.note(`broker ${r.refused}`)
+            return text(r.refused, true)
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(r.answer) }], structuredContent: r.answer as unknown as Record<string, unknown> }
         },
       )
       for (const tool of BROKER_TOOLS) {

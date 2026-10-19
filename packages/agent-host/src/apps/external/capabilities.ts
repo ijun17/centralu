@@ -37,6 +37,20 @@ export function isHostCapability(name: string): name is HostCapability {
   return HostCapability.safeParse(name).success
 }
 
+/**
+ * What `uses.sessions` may name: what an app may do with its own project's sessions. Not asked about when used (there
+ * is no run to ask on, and trust follows the project, docs/plans/task-ledger.md); declaring it is what the trust card
+ * shows.
+ *
+ *   observe  hear of the project's sessions' state and counters (`watch_sessions`), never a conversation
+ */
+export const SESSION_CAPABILITIES = ['observe'] as const
+export type SessionCapability = (typeof SESSION_CAPABILITIES)[number]
+
+export function isSessionCapability(name: string): name is SessionCapability {
+  return (SESSION_CAPABILITIES as readonly string[]).includes(name)
+}
+
 /** The wording for a person to read — used by capability approval's (D-4) question and by refusal reasons. The wording differs by scope. */
 export function hostCapabilityText(name: HostCapability, scope: 'project' | 'user'): string {
   switch (name) {

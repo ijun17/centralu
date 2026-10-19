@@ -31,6 +31,11 @@ export const AppUses = z.object({
   background: z.string().optional(),
   /** It may post notices into a session that called it (#1161 item 1). Absent from an older host, and when not declared */
   notices: z.boolean().optional(),
+  /**
+   * What it may do with its own project's sessions (`observe`: hear of their state). Absent from an older host, and when
+   * not declared; a name the reader does not know is shown as it is.
+   */
+  sessions: z.array(z.string()).optional(),
 })
 export type AppUses = z.infer<typeof AppUses>
 

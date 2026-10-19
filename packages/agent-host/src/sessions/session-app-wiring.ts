@@ -13,6 +13,7 @@ import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { RestartHost } from './restart-policy.js'
 import type { RoutedCardsHost } from './routed-cards.js'
 import { APP_NAMES_PREFIX, SessionAppsHub } from './session-apps.js'
+import type { SessionWatch } from './session-watch.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueriesHost } from './tool-queries.js'
 import { isAppAgent } from './tool-profiles.js'
@@ -40,6 +41,8 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     runAppAgent: AppSessions['runAppAgent']
     /** An app's notice into a session that called it (#1161 item 1) — `SessionManager.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
+    /** One poll for the changes of a project's sessions, for an app that observes them — `SessionManager.watchSessions` */
+    watchSessions: (projectId: string, cursor: string | undefined, waitMs: number, signal: AbortSignal) => ReturnType<SessionWatch['watch']>
     agentRunEnded: AppSessions['agentRunEnded']
     askCapability: HostCards['askCapability']
     migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']
@@ -73,6 +76,7 @@ export class SessionAppWiring {
       askCapability: (q, signal) => this.host.askCapability(q, signal),
       agentRunEnded: (run) => this.host.agentRunEnded(run),
       appNotice: (sessionId, text, app) => this.host.appNotice(sessionId, text, app),
+      watchSessions: (projectId, cursor, waitMs, signal) => this.host.watchSessions(projectId, cursor, waitMs, signal),
     }
   }
   useExternalApps(rt: ExternalApps, opts?: Omit<NonNullable<ConstructorParameters<typeof SessionAppsHub>[1]>, 'onDemand'>): void {

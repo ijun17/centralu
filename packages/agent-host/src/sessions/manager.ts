@@ -22,6 +22,7 @@ import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
+import { SessionWatch } from './session-watch.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
@@ -261,6 +262,13 @@ export class SessionManager {
    * comment on `runAppAgent`).
    */
   private agentRuns = new Map<string, AgentRunWait>()
+  /** What an app that observes its project hears of its sessions (`watch_sessions`, docs/plans/task-ledger.md) */
+  private sessionWatch = new SessionWatch({
+    get: (id) => (this.trash.trashing.has(id) ? undefined : this.meta.get(id)),
+    all: () => [...this.meta.values()],
+    live: (id) => this.handles.has(id),
+    leaving: (id) => this.trash.trashing.has(id),
+  })
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
@@ -358,6 +366,7 @@ export class SessionManager {
        * otherwise go to every window and sit in the reconnect log (transport/event-log.ts).
        */
       rawEmit(withoutToolRecord(full))
+      this.sessionWatch.observe(full)
     }
     /*
      * On startup, state is **not simply restored as-is.**
@@ -1114,6 +1123,11 @@ export class SessionManager {
     if (this.handingOver || this.disposing) throw new Error('Centralu is restarting; post it again in a moment')
     if (!this.meta.has(sessionId) || this.trash.trashing.has(sessionId)) throw new Error('that session is gone')
     return this.deliver(sessionId, text, undefined, undefined, false, app, 'notice')
+  }
+
+  /** One poll for the changes of a project's sessions, for an app that observes them (`SessionWatch.watch`) */
+  watchSessions(projectId: string, cursor: string | undefined, waitMs: number, signal: AbortSignal): ReturnType<SessionWatch['watch']> {
+    return this.sessionWatch.watch(projectId, cursor, waitMs, signal)
   }
 
   /** `SessionEvents.deliver` (session-events.ts), kept on the manager for its callers */
@@ -1934,6 +1948,7 @@ export class SessionManager {
       respondApproval: (...a) => self.respondApproval(...a),
       runAppAgent: (...a) => self.runAppAgent(...a),
       appNotice: (...a) => self.appNotice(...a),
+      watchSessions: (...a) => self.watchSessions(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy

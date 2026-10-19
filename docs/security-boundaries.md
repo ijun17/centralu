@@ -1442,6 +1442,16 @@ then who may call it:
   agent in the app-text frame, every line quoted ("Text an app sends"); at most 10 a minute and 4000
   characters each; every notice, delivered or refused, is a run record naming the session
   (`notices.ts`, `desk.ts` `notice`; `notices.test.ts`, `app-notice.test.ts`).
+  The third is `watch_sessions` (task ledger, `plans/task-ledger.md`): an app that declares
+  `uses.sessions: ["observe"]` hears of its own project's sessions from a long-poll, without a run id.
+  It sees state and counters only (the sidebar name, state, liveness, open cards, the number of the
+  last message, when the host last saw the session act), never a conversation or a preview, and only
+  the sessions of the project it belongs to: not the orchestrator, another project, a linked machine
+  or the trash. Nothing is asked per use because no run exists to ask on; the declaration is what the
+  trust card lists, and the app runs only while its project is trusted. At most one poll open and 120
+  begun a minute per app; a poll leaves no run record, a refusal a line in the app's log
+  (`session-watch.ts`, `desk.ts` `watch`; `session-watch.test.ts`, `observe-sessions.test.ts`,
+  `app-observe.test.ts`).
 - What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
   each capability once (an agent tool, another app, a host data name), asked where the chain
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
@@ -1477,6 +1487,10 @@ Limits:
 - A session that called an app with `uses.notices` once can be told by it for as long as the session
   exists: an address does not expire, and nothing but the rate limit bounds how often the app speaks.
   The text is the app's, framed as such, and grants nothing; the person reads it in the conversation.
+- An app that observes its project's sessions (`uses.sessions`) learns, for as long as it runs, that a session
+  exists, what the sidebar calls it (for an unnamed session, the first 40 characters of its first
+  message), and when it works, waits or finishes. A project's trust is what allows it; the conversation
+  is not in it.
 - An app that declares `uses.background` decides when it is busy: one that never releases keeps
   running until the person stops it or Centralu quits. The row shows the hold the whole time; nothing
   limits how long it lasts.
