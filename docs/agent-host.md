@@ -1458,6 +1458,21 @@ preferences) are the Trash screen's calls. `what` is `session` (the default) or 
   stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
   with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
 
+**Trust** (#1219, third slice). The rare commands `list_projects` and `set_project_trust { project, trusted }`
+(`TrustFlow`, `sessions/trust-flow.ts`, through the same window RPC as the preferences) are the project list's and the
+trust switch's calls (`projects.list`, `projects.setTrusted`, with `apps.list` and `machines.list` to name what the
+trust covers and where). `project` is an id, or a name exactly one project has (two that share it are named with their
+ids).
+
+- `list_projects`: each project with its id, folder, machine and whether it is trusted.
+- `set_project_trust` with `trusted: false` acts at once, as the window's switch does: the project's apps stop and its
+  idle sessions restart without the folder's own setting files (a busy one when its turn ends, #663).
+- With `trusted: true` it asks first, in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only): the card names the
+  project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
+  in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
+  project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
+  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is.
+
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
 The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
@@ -1490,8 +1505,10 @@ window's channel), grouped, and for each group one of three states.
 | Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
-| `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
-| Project trust and commands. `projects.setTrusted`, `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Trusting a project lets its agents and apps run; commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
+| `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | Read only |
+| Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: taking trust away acts at once; trusting asks, with a card naming the folder and each app with what it may ask for, checked again after Allow |
+| Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
@@ -1505,10 +1522,11 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
-The linked machines came first (#1238). This change is the preferences above and the trash. *Next*, in the order the owner's
-errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
-app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
-calls stay out of every slice unless the owner says otherwise.
+The linked machines came first (#1238), then the preferences and the trash (#1309) and the notification switches (#1313).
+The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
+then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
+and what widens it waits for the person's card, which names exactly what changes and is checked again after Allow.
+*Next*, after it: deleting a session that is not the caller's child, the machine calls left, and app upkeep.
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 

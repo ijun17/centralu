@@ -261,6 +261,20 @@ export const ORCHESTRATOR_TOOLS = [
     description: 'Deletes everything listed in the trash for good, kept app runs included. The person approves a card naming what goes first.',
     schema: z.object({}),
   },
+  /*
+   * #1219, third slice: trust. Rare commands. Listing and taking trust away act at once; trusting waits for the
+   * person's card naming the project and its apps.
+   */
+  {
+    name: 'list_projects',
+    description: 'Lists the projects with their id, folder, machine and whether each is trusted.',
+    schema: z.object({}),
+  },
+  {
+    name: 'set_project_trust',
+    description: "Trusts a project (its apps run, its settings apply) or takes trust away. Trusting waits for the person's card naming its apps; untrusting acts at once.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), trusted: z.boolean() }).strict(),
+  },
   {
     name: 'create_session',
     description:

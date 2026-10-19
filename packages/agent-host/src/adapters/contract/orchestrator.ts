@@ -54,6 +54,12 @@ export type TrashRequest =
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
 
+/**
+ * One request of the orchestrator's trust commands (#1219, third slice), as the tool runner reads its arguments: what
+ * changes what agents and apps may do. Widening waits for the person's card; narrowing acts at once.
+ */
+export type TrustRequest = { action: 'list_projects' } | { action: 'project_trust'; project: string; trusted: boolean }
+
 export type OrchestratedSession = {
   sessionId: string
   name: string
@@ -656,6 +662,11 @@ export type OrchestratorTools = {
    * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
    */
   trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * Trust (#1219, third slice): list the projects and change a project's trust, through the window's own calls. Trusting
+   * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
+   */
+  trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

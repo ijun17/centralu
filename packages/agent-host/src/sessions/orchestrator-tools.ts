@@ -6,6 +6,7 @@ import { appGuide } from './app-guide.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
 import type { PreferencesRequest } from './preferences-flow.js'
 import type { TrashRequest } from './trash-flow.js'
+import type { TrustRequest } from './trust-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
@@ -320,6 +321,10 @@ const HANDLERS: ToolHandlers = {
   trash_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'trash_steps', sessionId: sessionId.trim() }, call),
   delete_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
   empty_trash: (_args, call) => trashCommand({ action: 'empty' }, call),
+
+  // Trust (#1219): the flow writes each answer; trusting a project waits for the person's card there
+  list_projects: (_args, call) => trustCommand({ action: 'list_projects' }, call),
+  set_project_trust: ({ project, trusted }, call) => trustCommand({ action: 'project_trust', project, trusted }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
   get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
@@ -650,6 +655,13 @@ async function machineCommand(req: MachineRequest, { tools, signal }: ToolCall):
 async function preferencesCommand(req: PreferencesRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
   if (!tools.preferences) return { text: 'This session cannot change preferences.', isError: true }
   const r = await tools.preferences(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One trust command (#1219), through the seat's `trust`; a seat without it is told so */
+async function trustCommand(req: TrustRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.trust) return { text: 'This session cannot change trust.', isError: true }
+  const r = await tools.trust(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
 
