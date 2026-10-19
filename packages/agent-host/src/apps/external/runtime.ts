@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { USER_APP_SCOPE, appKeyOf, appLabel, noSuchAppText, type AppReview, type ExternalAppInfo } from '@cc/protocol'
@@ -8,7 +9,7 @@ import { memoryCapabilityBook } from './capabilities.js'
 import type { AppCheckReport } from './check.js'
 import { AppCalls, type AppCallOptions } from './app-calls.js'
 import { checkApp } from './app-check.js'
-import { createApp, installUserApp, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
+import { createApp, installUserApp, moveToAppTrash, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
@@ -24,7 +25,7 @@ import { BusyBook } from './busy-book.js'
 import { NoticeAddresses } from './notices.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
-import { carryAppFiles, sweepCarryLeftovers } from './carry.js'
+import { carryAppFiles, returnAppFiles, sweepCarryLeftovers } from './carry.js'
 import type { Snapshot } from './versions.js'
 import type { Audience } from './visibility.js'
 
@@ -643,6 +644,26 @@ export class ExternalApps {
     this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
   }
 
+  /**
+   * A deleted project that a user-folder app had become (#1204) gives that app back: its folder goes to `app-trash/` as
+   * a removed user-folder app's does, and what it kept under the project's key returns to the user-folder key, where a
+   * folder put back into the user folder finds it (`returnAppFiles`). The adoption decides when (`UserAppAdoption`):
+   * once nothing in the trash could bring the project back.
+   *
+   * Only the very folder the project was made from moves (`theAdoptedFolder`: it carries the adoption's mark). Any other
+   * folder of that name, or none, is left as it is. Refused while the project is still registered here, and its apps are
+   * waited for first: Windows does not move a folder a process works in (#14). Returns where the folder went, or null
+   */
+  async returnAdoptedApp(projectId: string, appId: string, theAdoptedFolder: (dir: string) => boolean): Promise<string | null> {
+    if (this.scopes.has(projectId)) throw new Error(`project ${projectId} is still registered`)
+    await this.stopping.get(projectId)
+    this.stopping.delete(projectId)
+    const dir = join(this.deps.dataRoot, USER_APPS_REL, appId)
+    const trashed = existsSync(dir) && theAdoptedFolder(dir) ? moveToAppTrash(this.deps.dataRoot, dir, appId) : null
+    returnAppFiles(this.deps.dataRoot, this.startEnv.appKey({ projectId, appId }), this.startEnv.appKey({ projectId: null, appId }))
+    return trashed
+  }
+
   /** Removes the half copies a carry interrupted by a stopped host left beside their places (`carry.ts`) */
   sweepCarryLeftovers(): void {
     sweepCarryLeftovers(this.deps.dataRoot)
@@ -1025,14 +1046,20 @@ export class ExternalApps {
     return adopted ? { ...found, apps: found.apps.filter((a) => !adopted(a.folder, a.dir)) } : found
   }
 
+  /** The apps of projects just removed, still stopping (`dropScope`), by project id */
+  private readonly stopping = new Map<string, Promise<unknown>>()
+
   private dropScope(key: string): void {
     const held = this.scopes.get(key)
     this.watchers.setWatched(key, held?.scope.root ?? join(this.deps.dataRoot, USER_APPS_REL), [])
     this.scopes.delete(key)
+    const halts: Promise<unknown>[] = []
     for (const e of held?.apps.values() ?? []) {
-      void this.lifecycle.halt(e, 'project removed')
+      halts.push(this.lifecycle.halt(e, 'project removed', { awaitTree: true }).catch(() => {}))
       this.forgetErrors(e.ref)
     }
+    // Waited for before its folder moves, when the project gave back a user-folder app (`returnAdoptedApp`)
+    if (halts.length) this.stopping.set(key, Promise.all(halts))
     if (held?.apps.size) this.appsChanged()
   }
 }

@@ -38,6 +38,8 @@ nothing inherited.
 - **Project deleted** (through the trash, as today): its apps' runs and grants go with the project
   (`deleteProject` already does this for every app of the project), and now its apps' **secrets** go
   too (§5). Data, logs and kept versions stay on disk, as they do for an inner app today.
+  A project that was a user-folder app gives its folder back once nothing in the trash can restore the
+  project (#1204): the folder to `<data>/app-trash/`, its data, logs and kept versions back to `_user/<id>`.
 
 ## 3. Creating and importing
 

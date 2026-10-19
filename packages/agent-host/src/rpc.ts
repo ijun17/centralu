@@ -52,6 +52,11 @@ import type {
  * count in `undefined` placeholders.
  */
 export type RpcServices = {
+  /**
+   * A project was deleted or sessions left the trash for good: a deleted project that a user-folder app had become gives
+   * that folder back once nothing in the trash can restore it (#1204, `UserAppAdoption.settle`)
+   */
+  settleDeletedProjects?: () => void
   terminals?: TerminalService
   updates?: UpdateService
   commands?: CommandRunner
@@ -131,7 +136,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
+  { settleDeletedProjects, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -666,6 +671,8 @@ export function createRpcHandler(
         commands?.stopCwd(cwd)
       }
       externalApps?.refresh()
+      // After the refresh, which stops its apps: a folder an app works in does not move on Windows
+      settleDeletedProjects?.()
       return { ok: true as const }
     },
     'projects.setTrusted': async (p) => {
@@ -820,9 +827,14 @@ export function createRpcHandler(
     },
     'trash.purge': async (p) => {
       await mgr.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
+      settleDeletedProjects?.()
       return { ok: true as const }
     },
-    'trash.empty': async () => mgr.emptyTrash(),
+    'trash.empty': async () => {
+      const r = await mgr.emptyTrash()
+      settleDeletedProjects?.()
+      return r
+    },
     // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
     'trash.readRun': async (p) => {
       const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)

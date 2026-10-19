@@ -100,6 +100,15 @@ visibility is not read as the default: the side that is wrong stays closed.
   a swap, a stored name, a script) resolves to the project's root app (`ExternalApps.resolve`, which
   every runtime method taking a key reads first), with that app's trust and rules, while the user
   folder has no app of that id and the project still exists.
+  **A deleted project gives the folder back** (#1204): while a session of the project is in the trash
+  the folder stays where it is, adopted, since restoring one registers the project again at that path.
+  Once none is (the project had none, or the trash lost them for good), its folder goes to
+  `<data folder>/app-trash/` as a removed user-folder app's does, the data, logs and kept versions it
+  kept under `<project id>/<id>` go back to `_user/<id>` (in place of the copy they were carried from),
+  and the record goes. Moving the folder back into the user folder makes it a new project, with its
+  data. Only the folder that carries the adoption's mark moves; another folder of that name is never
+  touched. Checked at each start once the host is ready, after a project is deleted, and after the
+  trash is emptied or loses a session.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes

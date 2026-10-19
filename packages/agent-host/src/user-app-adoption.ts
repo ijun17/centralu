@@ -28,6 +28,15 @@ import type { Store } from './dev-services/store.js'
  * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
  * It stays in the user folder with its reason, and the log says so once.
  *
+ * **A project the person deletes gives its folder back** (#1204), once nothing in the trash could bring it back: no
+ * session of it is left there (restoring one registers the project again, at the same path, under the same id). Until
+ * then the folder stays where it is, adopted, so a restore finds it. After, it goes to `<data>/app-trash/` as a
+ * removed user-folder app's does, what the project kept for it returns to the user-folder key, and the record goes: a
+ * person who moves the folder back into the user folder gets it as a new project, with its data. Left in place, it was
+ * listed nowhere and nothing could remove it. Checked at each run (so once the host is ready: a project deleted
+ * before this build, or a move a stopped host left half done) and whenever a project is deleted or the trash loses
+ * sessions (`settle`).
+ *
  * Trust: the project is trusted, as the user folder was, except for an imported app the person never enabled (or
  * whose command or uses changed since): its project starts untrusted, and trusting it is enabling it. A folder that is
  * already a project keeps whatever trust the person gave it.
@@ -84,11 +93,14 @@ export class UserAppAdoption {
   /** Apps left in the user folder, by their reason — said once, not on every list change */
   private said = new Map<string, string>()
   private swept = false
+  /** Set by the first run, once the host is ready: `settle` does nothing before, as nothing may move while a swap can still hand back */
+  private ready = false
 
   constructor(private readonly deps: AdoptionDeps) {}
 
   /** Adopts every user-folder app the runtime lists now; the number adopted. Runs one at a time; a call meanwhile runs once more after */
   run(): Promise<number> {
+    this.ready = true
     if (this.running) {
       this.again = true
       return this.running
@@ -101,6 +113,14 @@ export class UserAppAdoption {
       }
     })
     return this.running
+  }
+
+  /**
+   * A project was deleted, or sessions left the trash for good (#1204): gives back the folders of deleted projects that
+   * nothing in the trash can restore any more. Only once the host is ready (the first `run`); that run checks too
+   */
+  settle(): void {
+    if (this.ready) void this.run().catch((e: Error) => console.error(`[apps] giving back the folders of deleted projects failed: ${e.message}`))
   }
 
   /** Adopts what appears later (an approved MCP server written to the user folder). Returns the unsubscribe */
@@ -131,6 +151,7 @@ export class UserAppAdoption {
         console.error(`[apps] could not sweep half copies an interrupted move left: ${(e as Error).message}`)
       }
     }
+    await this.giveBack()
     let adopted = 0
     for (const app of this.waiting()) {
       try {
@@ -146,6 +167,22 @@ export class UserAppAdoption {
       this.deps.changed()
     }
     return adopted
+  }
+
+  /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */
+  private async giveBack(): Promise<void> {
+    const projects = new Set(this.deps.store.projects.listProjects().map((p) => p.id))
+    for (const [appId, record] of Object.entries(this.deps.store.adoption.adopted())) {
+      if (projects.has(record.projectId) || this.deps.store.trash.holdsProject(record.projectId)) continue
+      try {
+        const to = await this.deps.rt.returnAdoptedApp(record.projectId, appId, (dir) => adoptionMark(dir) === record.mark)
+        this.deps.store.adoption.forget(appId, record.mark)
+        console.error(`[apps] deleted project ${record.projectId} gave back user-folder app ${appId}${to ? `: its folder is in ${to}` : ''}`)
+      } catch (e) {
+        // Kept, and tried again at the next start or deletion: a folder a process still works in does not move on Windows
+        console.error(`[apps] deleted project ${record.projectId} could not give back user-folder app ${appId} yet: ${(e as Error).message}`)
+      }
+    }
   }
 
   private adopt(app: ExternalAppInfo): void {
