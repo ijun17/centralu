@@ -25,7 +25,8 @@ export const UpdateStatus = z.object({
   /** Whether the host re-checks on its own schedule. Settings turns this on and off */
   auto: z.boolean().default(true),
   /**
-   * "Apply updates automatically when idle" (#352). Off by default. With it on, the host
+   * "Apply updates automatically when idle" (#352), half of Settings' "Automatic updates" (2026-10-20). The host's stored
+   * default is on for a person who never chose (agent-host's update-switches.ts); the wire default below stays off. With it on, the host
    * installs a newer version as soon as a check finds one, and the desktop window applies it
    * (relaunch, then the keeper and host switch) once nothing is busy.
    *

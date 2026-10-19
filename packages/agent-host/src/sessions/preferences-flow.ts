@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -17,14 +17,10 @@ const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029]/u
 /** A theme the person can pick: a preset, or a theme file that reads cleanly */
 type ThemeChoice = { id: string; name: string; base: 'dark' | 'light'; file: boolean }
 
-/** The cards for the update switches (see the comment where they are asked) */
-const APPLY_CARD =
-  'Turn on "Apply updates automatically when idle"? From then on this computer installs a newer Centralu by itself as soon as one is ' +
-  'published, and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
-const CHECK_CARD =
-  'Turn on checking for updates automatically? "Apply updates automatically when idle" is on, so as soon as a newer Centralu is published ' +
-  'this computer installs it by itself and the desktop window relaunches into it when nothing is busy, without asking again. You can turn ' +
-  'either off in Settings, Updates.'
+/** The card for turning automatic updates on (see the comment where it is asked) */
+const UPDATE_CARD =
+  'Turn on "Automatic updates"? From then on this computer checks for a newer Centralu, installs it by itself as soon as one is published, ' +
+  'and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
 
 const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 
@@ -39,8 +35,8 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
  * Reversible means no card, with two exceptions. Turning off the notification for an approval asks first (the one that
  * tells the person a card waits), and so does the sound while it still notifies. The "error" and "every session finished"
  * notifications are gone from the product (owner decision 2026-10-20): the window no longer raises them, so neither command
- * names them, and their stored switches stay readable for older builds. And "apply updates when idle" turned **on** asks first, in every preset. With
- * it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
+ * names them, and their stored switches stay readable for older builds. And "Automatic updates" turned **on** asks first,
+ * in every preset. With it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
  * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
  * (docs/agent-host.md §4.5). Turning it off, and every other switch, acts at once.
  */
@@ -95,7 +91,7 @@ export class PreferencesFlow {
         : '- Idle sleep: not available on this host',
       'Updates',
       updates.status === 'fulfilled'
-        ? `- Check for updates automatically: ${onOff(updates.value.auto)} (checkForUpdates); apply updates automatically when idle: ${onOff(updates.value.autoApply)} (applyUpdatesWhenIdle, asks the person to turn on); running ${updates.value.current}${updates.value.latest ? `, latest known ${updates.value.latest}${updates.value.newer ? ' (newer)' : ''}` : ''}`
+        ? `- Automatic updates (check, install, and apply when idle): ${automatic(updates.value)} (autoUpdate, asks the person to turn on); running ${updates.value.current}${updates.value.latest ? `, latest known ${updates.value.latest}${updates.value.newer ? ' (newer)' : ''}` : ''}`
         : '- Updates: not available on this host',
       versions.status === 'fulfilled'
         ? `- Move idle sessions to a newly installed agent CLI: ${onOff(versions.value.autoApply)} (moveIdleSessionsToNewAgentCli)`
@@ -208,51 +204,56 @@ export class PreferencesFlow {
       })
     }
     /*
-     * The two update switches together. Code arrives unasked once checking and applying are both on, so the card is for the
-     * change that makes it so, whichever of the two completes it: apply turned on, or checking turned on while apply is on.
-     * Turning either off, or leaving them as they are, asks nothing. (docs/agent-host.md §4.5)
+     * "Automatic updates" (owner decision 2026-10-20): one setting over the two stored switches, checking (`updates.setAuto`)
+     * and installing and applying when idle (`updates.setAutoApply`). Code arrives unasked once both are on, so turning it on
+     * asks unless both are on already (unread counts as off, so it asks). Turning it off asks nothing, and turns installing
+     * off first, so a check landing between the two calls installs nothing. Both setters are called either way (each does
+     * nothing when already so): a card may stand for minutes, and what was read before it may have changed. Checking goes on
+     * first, so its check finds the release before installing is on to take it. (docs/agent-host.md §4.5)
      */
-    let checkUpdates = changes.checkForUpdates
-    let applyUpdates = changes.applyUpdatesWhenIdle
-    if (checkUpdates === true || applyUpdates === true) {
-      try {
-        const before = await callWindow(rpc, 'updates.status', { force: false })
-        const turningApplyOn = applyUpdates === true && !before.autoApply
-        const checksComeOn = () => checkUpdates === true && !before.auto && (applyUpdates ?? before.autoApply)
-        if (turningApplyOn || checksComeOn()) {
-          const refused = await this.ask(sessionId, turningApplyOn ? APPLY_CARD : CHECK_CARD, signal)
+    if (changes.autoUpdate !== undefined) {
+      const on = changes.autoUpdate
+      let go = true
+      if (on) {
+        let both = false
+        try {
+          const before = await callWindow(rpc, 'updates.status', { force: false })
+          both = before.auto && before.autoApply
+        } catch {
+          /* unread: asked as if off */
+        }
+        if (both) {
+          done.push('Automatic updates are on.')
+          go = false
+        } else {
+          const refused = await this.ask(sessionId, UPDATE_CARD, signal)
           if (refused) {
-            failed.push(`${turningApplyOn ? 'Applying updates' : 'Update checks'}: ${refused}`)
-            if (turningApplyOn) applyUpdates = undefined
-            // With apply left off, checking coming on is no longer the change that lets code arrive unasked
-            if (checksComeOn()) checkUpdates = undefined
+            failed.push(`Automatic updates: ${refused}`)
+            go = false
           }
         }
-      } catch (e) {
-        failed.push(`Updates: ${(e as Error).message}`)
-        if (checkUpdates === true) checkUpdates = undefined
-        if (applyUpdates === true) applyUpdates = undefined
       }
-    }
-    if (checkUpdates !== undefined) {
-      const enabled = checkUpdates
-      await attempt('Update checks', async () => {
-        const now = await callWindow(rpc, 'updates.setAuto', { enabled })
-        return `Checking for updates automatically is ${onOff(now.auto)}.`
-      })
+      if (go) {
+        const steps: ['updates.setAuto' | 'updates.setAutoApply', boolean][] = on
+          ? [['updates.setAuto', true], ['updates.setAutoApply', true]]
+          : [['updates.setAutoApply', false], ['updates.setAuto', false]]
+        try {
+          let now: UpdateStatus | null = null
+          for (const [method, enabled] of steps) now = await callWindow(rpc, method, { enabled })
+          done.push(`Automatic updates are ${automatic(now!)}.`)
+        } catch (e) {
+          // Halfway is a change too: say which half is on now, when that can be read
+          const now = await callWindow(rpc, 'updates.status', { force: false }).catch(() => null)
+          if (now) done.push(`Automatic updates are now ${automatic(now)}.`)
+          failed.push(`Automatic updates: ${(e as Error).message}`)
+        }
+      }
     }
     if (changes.moveIdleSessionsToNewAgentCli !== undefined) {
       const enabled = changes.moveIdleSessionsToNewAgentCli
       await attempt('Agent CLI versions', async () => {
         const now = await callWindow(rpc, 'agents.setAutoApplyVersions', { enabled })
         return `Moving idle sessions to a newly installed agent CLI is ${onOff(now.autoApply)}.`
-      })
-    }
-    if (applyUpdates !== undefined) {
-      const enabled = applyUpdates
-      await attempt('Applying updates', async () => {
-        const now = await callWindow(rpc, 'updates.setAutoApply', { enabled })
-        return `Applying updates automatically when idle is ${onOff(now.autoApply)}.`
       })
     }
 
@@ -284,6 +285,13 @@ export class PreferencesFlow {
 }
 
 const onOff = (on: boolean) => (on ? 'on' : 'off')
+
+/** "Automatic updates" as Settings shows it: on when checking and applying both are, and which half is on otherwise */
+function automatic(s: Pick<UpdateStatus, 'auto' | 'autoApply'>): string {
+  if (s.auto && s.autoApply) return 'on'
+  if (!s.auto && !s.autoApply) return 'off'
+  return s.auto ? 'off (checking is on, installing is off)' : 'off (installing is on, checking is off)'
+}
 
 /** The presets, then the theme files that read cleanly: what a window's theme list offers */
 function themeChoices(files: readonly { id: string; name: string; base: 'dark' | 'light'; broken: boolean }[]): ThemeChoice[] {

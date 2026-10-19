@@ -139,7 +139,7 @@ describe('get_preferences', () => {
     expect(r.text).toContain("- Body font: the app's own; code font: the app's own")
     expect(r.text).toContain('- Line height: normal (compact, normal, relaxed)')
     expect(r.text).toContain('- Idle sessions sleep after: 15 minutes')
-    expect(r.text).toContain('- Check for updates automatically: on (checkForUpdates); apply updates automatically when idle: off')
+    expect(r.text).toContain('- Automatic updates (check, install, and apply when idle): off (checking is on, installing is off) (autoUpdate, asks the person to turn on)')
     expect(r.text).toContain('running 1.0.0, latest known 1.1.0 (newer)')
     expect(r.text).toContain('- Move idle sessions to a newly installed agent CLI: on')
     // The accent colour is gone from the product (owner decision 2026-10-20): not offered, so not listed
@@ -482,107 +482,125 @@ describe('set_preferences: idle sleep and the update switches', () => {
     expect(sleeper.calls).toEqual([])
   })
 
-  it('turns update checking and moving idle sessions to a new agent CLI on and off at once, with no card', async () => {
+  it('moves idle sessions to a new agent CLI on and off at once, with no card', async () => {
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'set_preferences', { checkForUpdates: false, moveIdleSessionsToNewAgentCli: false })
-    expect(r.text).toContain('Checking for updates automatically is off.')
+    const r = await run(orc.id, 'set_preferences', { moveIdleSessionsToNewAgentCli: false })
     expect(r.text).toContain('Moving idle sessions to a newly installed agent CLI is off.')
-    expect(updates.calls).toEqual(['setAuto:false'])
     expect(versions.calls).toEqual([false])
     expect(card(orc.id)).toBeUndefined()
   })
 
-  it('asks before turning on "apply updates when idle", saying that code then arrives unasked, and turns it on only on Allow', async () => {
-    const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, { applyUpdatesWhenIdle: true }, 'allow')
-    expect(question).toContain('Turn on "Apply updates automatically when idle"?')
-    expect(question).toContain('installs a newer Centralu by itself')
-    expect(question).toContain('without asking again')
-    expect(r.text).toBe('Applying updates automatically when idle is on.')
-    expect(updates.calls).toEqual(['check:false', 'setAutoApply:true'])
-  })
+  /*
+   * Owner decision 2026-10-20: one "Automatic updates" setting, checking plus installing and applying when idle. Turning it
+   * on is still the card #1309 added: with both on, code arrives without a later question
+   */
+  describe('autoUpdate', () => {
+    it('asks before turning it on, saying that code then arrives unasked, and turns both halves on only on Allow', async () => {
+      updates.set({ auto: false, autoApply: false })
+      const orc = await mgr.orchestrator()
+      const { question, r } = await answered(orc.id, { autoUpdate: true }, 'allow')
+      expect(question).toContain('Turn on "Automatic updates"?')
+      expect(question).toContain('installs it by itself')
+      expect(question).toContain('without asking again')
+      expect(r.text).toBe('Automatic updates are on.')
+      expect(updates.calls).toEqual(['check:false', 'setAuto:true', 'setAutoApply:true'])
+    })
 
-  it('leaves it off when the person denies, but still makes the other changes of the same call', async () => {
-    const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, { applyUpdatesWhenIdle: true, textSize: 1.1 }, 'deny')
-    expect(r.isError).toBeFalsy()
-    expect(r.text).toContain('Now: text size 1.1.')
-    expect(r.text).toContain('Not changed: Applying updates: The person did not approve it, so it stays off.')
-    expect(updates.calls.filter((c) => c.startsWith('setAutoApply'))).toEqual([])
-    expect(((await prefs()) as { textSize: number }).textSize).toBe(1.1)
-  })
+    it('asks when only one half is off, and ends with both on', async () => {
+      // Checking on, installing off: what every host had before 2026-10-20 unless the person turned apply on
+      const orc = await mgr.orchestrator()
+      const { question, r } = await answered(orc.id, { autoUpdate: true }, 'allow')
+      expect(question).toContain('Turn on "Automatic updates"?')
+      expect(r.text).toBe('Automatic updates are on.')
+      expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual(['setAuto:true', 'setAutoApply:true'])
+    })
 
-  it('answers nothing changed when the one change asked for is denied', async () => {
-    const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, { applyUpdatesWhenIdle: true }, 'deny')
-    expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/Nothing changed\. Applying updates: The person did not approve it/)
-  })
+    it('asks when the switches cannot be read, as if off', async () => {
+      updates.set({ auto: true, autoApply: true })
+      const orc = await mgr.orchestrator()
+      mgr.useWindowRpc((method, params) => (method === 'updates.status' ? Promise.reject(new Error('unreadable')) : rpc(method, params)))
+      const { question } = await answered(orc.id, { autoUpdate: true }, 'deny')
+      expect(question).toContain('Turn on "Automatic updates"?')
+    })
 
-  it('asks under auto too, and "always" is read as allow, once: the next turn-on asks again', async () => {
-    const orc = await mgr.orchestrator()
-    await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
-    await answered(orc.id, { applyUpdatesWhenIdle: true }, 'always')
-    expect(updates.calls).toContain('setAutoApply:true')
-    await run(orc.id, 'set_preferences', { applyUpdatesWhenIdle: false })
-    const again = await answered(orc.id, { applyUpdatesWhenIdle: true }, 'deny')
-    expect(again.r.isError).toBe(true)
-    expect(updates.calls.filter((c) => c === 'setAutoApply:true').length).toBe(1)
-  })
+    it('turns off without reading the switches first, and says which half is on when it stops halfway', async () => {
+      updates.set({ auto: true, autoApply: true })
+      const orc = await mgr.orchestrator()
+      mgr.useWindowRpc((method, params) =>
+        method === 'updates.setAuto' ? Promise.reject(new Error('the store is busy')) : rpc(method, params),
+      )
+      const r = await run(orc.id, 'set_preferences', { autoUpdate: false })
+      expect(r.isError).toBeFalsy()
+      expect(r.text).toBe('Automatic updates are now off (checking is on, installing is off).\nNot changed: Automatic updates: the store is busy')
+      expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual(['setAutoApply:false'])
+    })
 
-  it('asks before turning checking on while apply is on, since that is the other half: a check installs at once', async () => {
-    updates.set({ auto: false, autoApply: true })
-    const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, { checkForUpdates: true }, 'allow')
-    expect(question).toContain('Turn on checking for updates automatically? "Apply updates automatically when idle" is on')
-    expect(question).toContain('installs it by itself')
-    expect(r.text).toBe('Checking for updates automatically is on.')
-    expect(updates.calls).toEqual(['check:false', 'setAuto:true'])
-  })
+    it('leaves both halves as they were when the person denies, and still makes the other changes of the call', async () => {
+      const orc = await mgr.orchestrator()
+      const { r } = await answered(orc.id, { autoUpdate: true, textSize: 1.1 }, 'deny')
+      expect(r.isError).toBeFalsy()
+      expect(r.text).toContain('Now: text size 1.1.')
+      expect(r.text).toContain('Not changed: Automatic updates: The person did not approve it, so it stays off.')
+      expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual([])
+    })
 
-  it('leaves checking off when that card is denied, and turning checking on while apply is off asks nothing', async () => {
-    updates.set({ auto: false, autoApply: true })
-    const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, { checkForUpdates: true }, 'deny')
-    expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/Update checks: The person did not approve it, so it stays off/)
-    expect(updates.calls.filter((c) => c.startsWith('setAuto'))).toEqual([])
-    // With apply off there is nothing for a check to install unasked
-    updates.set({ auto: false, autoApply: false })
-    const free = await run(orc.id, 'set_preferences', { checkForUpdates: true })
-    expect(free.text).toBe('Checking for updates automatically is on.')
-    expect(card(orc.id)).toBeUndefined()
-  })
+    it('answers nothing changed when the one change asked for is denied', async () => {
+      const orc = await mgr.orchestrator()
+      const { r } = await answered(orc.id, { autoUpdate: true }, 'deny')
+      expect(r.isError).toBe(true)
+      expect(r.text).toMatch(/Nothing changed\. Automatic updates: The person did not approve it/)
+    })
 
-  it('asks once for both switches turned on together, and a denial leaves checking on alone as the person had it', async () => {
-    updates.set({ auto: false, autoApply: false })
-    const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, { checkForUpdates: true, applyUpdatesWhenIdle: true }, 'deny')
-    expect(question).toContain('Turn on "Apply updates automatically when idle"?')
-    // Apply stays off, so checking by itself installs nothing and goes ahead
-    expect(r.text).toContain('Checking for updates automatically is on.')
-    expect(r.text).toContain('Not changed: Applying updates: The person did not approve it')
-    expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual(['setAuto:true'])
-  })
+    it('asks under auto too, and "always" is read as allow, once: the next turn-on asks again', async () => {
+      const orc = await mgr.orchestrator()
+      await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
+      await answered(orc.id, { autoUpdate: true }, 'always')
+      expect(updates.calls).toContain('setAutoApply:true')
+      await run(orc.id, 'set_preferences', { autoUpdate: false })
+      const again = await answered(orc.id, { autoUpdate: true }, 'deny')
+      expect(again.r.isError).toBe(true)
+      expect(updates.calls.filter((c) => c === 'setAutoApply:true').length).toBe(1)
+    })
 
-  it('turning it off, or on when it already is, asks nothing', async () => {
-    const orc = await mgr.orchestrator()
-    const off = await run(orc.id, 'set_preferences', { applyUpdatesWhenIdle: false })
-    expect(off.text).toBe('Applying updates automatically when idle is off.')
-    updates.set({ autoApply: true })
-    const already = await run(orc.id, 'set_preferences', { applyUpdatesWhenIdle: true })
-    expect(already.text).toBe('Applying updates automatically when idle is on.')
-    expect(card(orc.id)).toBeUndefined()
+    it('turns off with no card, installing first, and asks nothing when it is already on', async () => {
+      updates.set({ auto: true, autoApply: true })
+      const orc = await mgr.orchestrator()
+      const already = await run(orc.id, 'set_preferences', { autoUpdate: true })
+      expect(already.text).toBe('Automatic updates are on.')
+      expect(card(orc.id)).toBeUndefined()
+      const off = await run(orc.id, 'set_preferences', { autoUpdate: false })
+      expect(off.text).toBe('Automatic updates are off.')
+      expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual(['setAutoApply:false', 'setAuto:false'])
+      expect(card(orc.id)).toBeUndefined()
+    })
+
+    it('is read as one setting, saying which half is on when they differ', async () => {
+      const orc = await mgr.orchestrator()
+      expect((await run(orc.id, 'get_preferences')).text).toContain('- Automatic updates (check, install, and apply when idle): off (checking is on, installing is off) (autoUpdate')
+      updates.set({ auto: true, autoApply: true })
+      expect((await run(orc.id, 'get_preferences')).text).toContain('- Automatic updates (check, install, and apply when idle): on (autoUpdate, asks the person to turn on)')
+    })
+
+    it('refuses the separate switches it replaced, by name', async () => {
+      const orc = await mgr.orchestrator()
+      for (const args of [{ checkForUpdates: true }, { applyUpdatesWhenIdle: true }, { checkForUpdates: false }]) {
+        const r = await run(orc.id, 'set_preferences', args)
+        expect(r.isError, JSON.stringify(args)).toBe(true)
+        expect(r.text, JSON.stringify(args)).toMatch(/Unrecognized key/)
+      }
+      expect(card(orc.id)).toBeUndefined()
+      expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual([])
+    })
   })
 
   it('reports a part that could not be changed and still makes the rest (no update service on this host)', async () => {
     const agents = new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude') as unknown as AgentAdapter]])
     mgr.useWindowRpc(createRpcHandler(mgr, agents, { sleeper: sleeper.service }))
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'set_preferences', { idleSleepMinutes: 5, checkForUpdates: false })
+    const r = await run(orc.id, 'set_preferences', { idleSleepMinutes: 5, autoUpdate: false })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('Idle sessions sleep after 5 minutes.')
-    expect(r.text).toContain('Not changed: Update checks: Update checks are unavailable')
+    expect(r.text).toContain('Not changed: Automatic updates: Update checks are unavailable')
   })
 })
 

@@ -1396,7 +1396,7 @@ the params with the method's schema and reads the answer with its result schema,
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
   It also lists what no command changes (send key, session tools, agent ceiling and depth).
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
-  `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
+  `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `autoUpdate` ("Automatic updates", below), and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
   merged one by one into the host's record, §1.4; no card, except to turn `approval` off, or `sound` while it would still
   notify, the ones that tell the person a card waits, which ask in every preset and keep them on when denied). The
@@ -1417,13 +1417,24 @@ the params with the method's schema and reads the answer with its result schema,
   is announced with `prefs_changed` (carries nothing; a window reads `prefs.get` again), which also brings the
   orchestrator's other preferences (theme, text size) to an open window. The window keeps writing its snapshot's copy, for a
   build that reads it there; against a host that answers without the field it keeps using the snapshot's.
-- Turning **on** "apply updates when idle" asks first, in every preset, and so does turning **on** checking for updates
-  while apply is on (it is the other half of the same thing: `UpdateService.setAuto(true)` checks at once and installs what it
-  finds when apply is on). With both on, a newer Centralu installs by itself and the desktop window relaunches into it when
-  nothing is busy, so code arrives with no later question. One card covers whichever change completes the pair; it is an
-  `other` card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves the pair
-  as it was and the call's other changes still happen. Turning either off, or leaving them as they are, asks nothing; neither
-  does any other field.
+- **Automatic updates** (owner decision 2026-10-20) is one setting over the two stored switches: checking (`updates.auto`,
+  `updates.setAuto`) and installing and applying when idle (`updates.autoApply`, `updates.setAutoApply`). Both are **on**
+  for a person who never chose (`update-switches.ts`); a person who turned either off has it stored off and keeps it off,
+  and one who turned checking off before keeps installing off too (their Check now only informed, and still does).
+  Installing is on by default only in the person's desktop app (`installsByDefault`): a bundled build the window started
+  itself (`CC_STARTED_BY=app`, Windows and Linux), or one the keeper runs from the installed app (`CC_HOST_SOURCE`'s
+  `bundlePath` is `installedCopyPath()`, macOS). Every other host keeps installing off unless turned on: a `centralu
+  serve` host, since on a linked machine the hub keeps its version (`machines.update`, the managed install under
+  `<data>/remote`) and one installing by itself would race it; a host from source; and one a script or test harness
+  started (no `CC_STARTED_BY`, a keeper running a build output or debug bundle, `CI` set), which must not install the
+  published package globally on the machine running it. The wire default of `UpdateStatus.autoApply`
+  stays false, for older hosts. `set_preferences autoUpdate: true` asks first, in every preset, whenever either half is
+  off: with both on, a newer Centralu installs by itself and the desktop window relaunches into it when nothing is busy, so
+  code arrives with no later question. It is an `other` card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`),
+  allow or deny only; on Allow it turns on the half or halves that are off. A denial leaves both as they were and the
+  call's other changes still happen. `autoUpdate: false` asks nothing and turns installing off before checking. The
+  separate `checkForUpdates` and `applyUpdatesWhenIdle` fields are gone and refused by name; `get_preferences` shows one
+  line, and says which half is on when they differ.
 
 **The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
 `delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
@@ -1470,7 +1481,7 @@ window's channel), grouped, and for each group one of three states.
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
 | Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
 | Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
-| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
+| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "Automatic updates" **on** (`autoUpdate`, both halves) asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
 | Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
 | Notifications. The switches `approval`, `done`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`, which still carries `error` and `allDone` for older builds; the window no longer raises those two, 2026-10-20) | **Has it** (#1306) | `set_preferences notifications`, no card, except to turn `approval` off, or `sound` while it would still notify. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
@@ -2344,7 +2355,7 @@ host is no longer asking, or the window no longer holds the ticket), a linked ma
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows
 none of them, and the agent's call is cut at the drain like any in-process tool call.
 
-The automatic mode ("Apply updates automatically when idle") still waits for the keeper to report nothing busy. The
+The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. The
 relaunch itself loses nothing a keeper holds, but the relaunched window then switches the host by itself, and that
 switch is what a busy host can lose: a Centralu tool call still running after the 10 s drain (a `start_agent` or
 `agent_session` wait, an `ask_project`, an app tool) is cut and has to be tried again, and a host that cannot hand

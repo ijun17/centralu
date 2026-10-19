@@ -33,8 +33,8 @@ export type PreferenceChanges = {
   lineHeight?: LineHeight
   /** Minutes of quiet before an idle session sleeps, or 'never' */
   idleSleepMinutes?: number | 'never'
-  checkForUpdates?: boolean
-  applyUpdatesWhenIdle?: boolean
+  /** "Automatic updates" (2026-10-20): checking, and installing and applying when idle, as one setting */
+  autoUpdate?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
   /**
    * The notification switches (#1306), the ones to change. The "error" and "every session finished" ones are gone from the

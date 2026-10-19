@@ -38,6 +38,8 @@ import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
+import { installsByDefault, updateSwitches } from './update-switches.js'
+import { installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
@@ -406,16 +408,19 @@ if (held) {
  * comparison. Checking here instead runs code shipped alongside the app itself, so it can never be
  * older than the app, and it skips the stale launcher entirely.
  *
- * The check result **only informs** the person. Swapping out the running app is irreversible, so
- * it is never done silently — it happens only when they click it, or when they turned on
- * "Apply updates automatically when idle" (#352), and then only once nothing is running.
+ * Installing happens when the person clicks, or by itself with "Automatic updates" on (#352; on unless the person turned
+ * it off, owner decision 2026-10-20), and then only once nothing is running; relaunching into the new build is the
+ * window's step.
  */
-const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
-const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
-// On by default when nothing has been saved yet: see below
-const autoUpdateCheck = flagSetting(store.settings, AUTO_UPDATE_CHECK_KEY, true)
-// Off unless the person turned it on (#352): installing without a click is asked for, never assumed
-const autoApplyUpdates = flagSetting(store.settings, AUTO_APPLY_UPDATES_KEY, false)
+// Both on for a person who never chose (2026-10-20); installing only in the person's desktop app: update-switches.ts
+const installByDefault = installsByDefault({
+  build: BUILD,
+  startedBy: launch.startedBy,
+  bundlePath: hostBuild(BUILD, launch.keeperSource).bundlePath ?? null,
+  installedCopy: installedCopyPath(),
+  env: process.env,
+})
+const { auto: autoUpdateCheck, autoApply: autoApplyUpdates } = updateSwitches(store.settings, { installByDefault })
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
