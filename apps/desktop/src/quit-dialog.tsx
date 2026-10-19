@@ -1,5 +1,8 @@
 import type { Ref } from 'react'
 import { useOpenLayer } from '@cc/ui'
+// By path, like the switch plan below: @cc/ui exports neither, and this dialog keeps the app's shared parts (#1128)
+import { Button } from '../../../packages/ui/src/components/Button.jsx'
+import { Switch } from '../../../packages/ui/src/components/Switch.jsx'
 // By path, like build-bar.tsx: the browser harness that drives this dialog in e2e has no Tauri
 import { COMPLETELY_STOPS } from '../../../packages/platform/src/tauri/switch-plan.js'
 
@@ -52,6 +55,10 @@ export function QuitDialog({
 }) {
   useOpenLayer()
   const keepsRunning = background === true
+  /*
+   * Drawn in the app's current dialog style (owner, 2026-10-20): a title and one muted line, what is left running as a
+   * card of rows with a switch, and the shared buttons with their keys as keycaps. What each button does is unchanged.
+   */
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin" data-testid="confirm-quit" onClick={onCancel}>
       <div
@@ -60,83 +67,65 @@ export function QuitDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Quit Centralu?"
-        className="w-[360px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal) focus:outline-none"
+        className="w-[400px] rounded-lg border border-line bg-surface-side p-5 shadow-(--shadow-modal) focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-md text-ink">Quit Centralu?</p>
+        <p className="text-lg font-medium tracking-tight text-ink">Quit Centralu?</p>
         {keepsRunning ? (
-          <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-quit-background">
+          <p className="mt-1.5 text-sm leading-body text-ink-muted" data-testid="confirm-quit-background">
             Quit closes the window and agents keep running in the background. Open Centralu again to come back to
             them, waiting approvals included.
           </p>
         ) : (
-          <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-quit-stops">
+          <p className="mt-1.5 text-sm leading-body text-ink-muted" data-testid="confirm-quit-stops">
             {COMPLETELY_STOPS} Conversations are saved and resume when you come back.
           </p>
         )}
-        {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+        {error && <p className="mt-3 text-xs text-danger">{error}</p>}
         {straysError && (
-          <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="quit-strays-unknown">
+          <p className="mt-3 text-xs leading-body text-ink-faint" data-testid="quit-strays-unknown">
             Could not check for processes left running in your project folders: {straysError}
           </p>
         )}
         {strays.length > 0 && (
-          <div className="mt-3 rounded-md border border-line bg-surface-floor p-2" data-testid="quit-strays">
-            <p className="text-xs text-ink-muted">
+          <div className="mt-4 overflow-hidden rounded-lg border border-line bg-surface-raised" data-testid="quit-strays">
+            <p className="px-3 pb-1.5 pt-2.5 text-xs text-ink-muted">
               {strays.length} process{strays.length > 1 ? 'es' : ''} started in your project folders will keep
-              running:
+              running
             </p>
-            <ul className="mt-1 max-h-24 overflow-y-auto">
+            <ul className="max-h-28 overflow-y-auto px-3 pb-2">
               {strays.slice(0, 6).map((s) => (
-                <li key={s.pid} className="readout truncate text-2xs text-ink-faint" title={s.cwd}>
+                <li key={s.pid} className="readout truncate py-0.5 text-2xs text-ink-faint" title={s.cwd}>
                   {s.pid} · {s.command}
                 </li>
               ))}
-              {strays.length > 6 && <li className="text-2xs text-ink-faint">…and {strays.length - 6} more</li>}
+              {strays.length > 6 && <li className="py-0.5 text-2xs text-ink-faint">…and {strays.length - 6} more</li>}
             </ul>
-            <label className="mt-2 flex items-center gap-1.5 text-xs text-ink-muted">
-              <input
-                type="checkbox"
-                className="accent-line-strong"
-                checked={alsoStop}
-                onChange={(e) => onAlsoStop(e.target.checked)}
-                data-testid="quit-stop-strays"
-              />
+            <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-line px-3 py-2.5 text-sm text-ink">
               Stop them too
+              <Switch checked={alsoStop} onChange={(e) => onAlsoStop(e.target.checked)} data-testid="quit-stop-strays" />
             </label>
           </div>
         )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
-            onClick={onCancel}
-            data-testid="confirm-quit-no"
-          >
-            Cancel <span className="text-2xs text-ink-faint">esc</span>
-          </button>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} data-testid="confirm-quit-no" className="flex items-center gap-1.5">
+            Cancel <kbd className="keycap">esc</kbd>
+          </Button>
           {keepsRunning && (
-            <button
-              className="rounded-md border border-line px-2 py-1 text-sm text-ink-muted hover:border-line-strong hover:text-ink"
-              onClick={() => onQuit(true)}
-              title={COMPLETELY_STOPS}
-              data-testid="confirm-quit-stop"
-            >
+            <Button variant="quiet" onClick={() => onQuit(true)} title={COMPLETELY_STOPS} data-testid="confirm-quit-stop">
               Quit completely
-            </button>
+            </Button>
           )}
-          <button
-            className={
-              keepsRunning
-                ? 'rounded-md border border-line bg-surface-raised px-3 py-1 text-sm text-ink hover:border-line-strong'
-                : 'rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70'
-            }
+          <Button
+            variant={keepsRunning ? 'primary' : 'danger'}
             // Off, the plain quit is the complete one: the keeper stops everything when the last window goes
             onClick={() => onQuit(false)}
             title={keepsRunning ? 'Close the window; everything keeps running in the background' : COMPLETELY_STOPS}
             data-testid="confirm-quit-yes"
+            className="flex items-center gap-1.5"
           >
-            {keepsRunning ? 'Quit' : 'Quit completely'} <span className="text-2xs">⏎</span>
-          </button>
+            {keepsRunning ? 'Quit' : 'Quit completely'} <kbd className="keycap">⏎</kbd>
+          </Button>
         </div>
       </div>
     </div>

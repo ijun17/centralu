@@ -3,6 +3,8 @@ import { useStore } from '../../store/store.js'
 import { BODY_FONTS, CODE_FONTS, isUsableFont } from '../../app/typography.js'
 import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
+import { textInputClass } from '../../components/TextField.jsx'
+import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
 
 const LINE_HEIGHTS: { id: LineHeight; label: string }[] = [
   { id: 'compact', label: 'Compact' },
@@ -19,42 +21,47 @@ export function TypographySection() {
   const prefs = useStore((s) => s.prefs)
   const setPrefs = useStore((s) => s.setPrefs)
   return (
-    <section className="mt-6 border-t border-line pt-4" data-testid="settings-typography">
+    <SettingsGroup
+      testId="settings-typography"
+      title="Text"
+      hint={
+        <>
+          The app’s own fonts stay behind the one you pick, so a font that is not installed, or one without Korean, falls
+          back to them.
+          <More>Line height applies to replies and code blocks; the code viewer and diffs keep their fixed rows.</More>
+        </>
+      }
+    >
       <TextSize value={prefs.textSize} onPick={(textSize) => void setPrefs({ textSize })} />
-
-      <div className="mt-5 grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-3 text-sm text-ink-muted">
-        <FontPicker
-          kind="body"
-          label="Body font"
-          options={BODY_FONTS}
-          value={prefs.bodyFont}
-          sample="The quick brown fox · 다람쥐 헌 쳇바퀴에 타고파"
-          onPick={(bodyFont) => void setPrefs({ bodyFont })}
-        />
-        <FontPicker
-          kind="code"
-          label="Code font"
-          options={CODE_FONTS}
-          value={prefs.codeFont}
-          sample="git commit -m 'fix' 0O 1lI {}"
-          onPick={(codeFont) => void setPrefs({ codeFont })}
-        />
-        <span className="py-1">Line height</span>
-        <Segmented
-          label="Line height"
-          value={prefs.lineHeight}
-          onChange={(lineHeight) => void setPrefs({ lineHeight })}
-          size="md"
-          className="gap-2"
-          optionClassName="leading-none"
-          options={LINE_HEIGHTS.map((l) => ({ value: l.id, label: l.label, testId: `settings-line-height-${l.id}` }))}
-        />
-      </div>
-      <p className="mt-2 text-xs leading-body text-ink-faint">
-        The app’s own fonts stay behind the one you pick, so a font that is not installed, or one without Korean, falls
-        back to them. Line height applies to replies and code blocks; the code viewer and diffs keep their fixed rows.
-      </p>
-    </section>
+      <FontPicker
+        kind="body"
+        label="Body font"
+        options={BODY_FONTS}
+        value={prefs.bodyFont}
+        sample="The quick brown fox · 다람쥐 헌 쳇바퀴에 타고파"
+        onPick={(bodyFont) => void setPrefs({ bodyFont })}
+      />
+      <FontPicker
+        kind="code"
+        label="Code font"
+        options={CODE_FONTS}
+        value={prefs.codeFont}
+        sample="git commit -m 'fix' 0O 1lI {}"
+        onPick={(codeFont) => void setPrefs({ codeFont })}
+      />
+      <SettingsRow
+        label="Line height"
+        control={
+          <Segmented
+            label="Line height"
+            value={prefs.lineHeight}
+            onChange={(lineHeight) => void setPrefs({ lineHeight })}
+            size="sm"
+            options={LINE_HEIGHTS.map((l) => ({ value: l.id, label: l.label, testId: `settings-line-height-${l.id}` }))}
+          />
+        }
+      />
+    </SettingsGroup>
   )
 }
 
@@ -69,30 +76,32 @@ export function TypographySection() {
  */
 function TextSize({ value, onPick }: { value: number; onPick: (size: number) => void }) {
   return (
-    <>
-      <p className="text-xs leading-body text-ink-faint">Text size for the whole app.</p>
-      <div className="mt-3 flex items-end gap-2" role="radiogroup" aria-label="Text size">
-        {TEXT_SIZES.map((factor, i) => (
-          <button
-            key={factor}
-            type="button"
-            role="radio"
-            aria-checked={factor === value}
-            data-testid={`settings-scale-${i}`}
-            onClick={() => onPick(factor)}
-            className={`rounded-md border px-2.5 py-1 leading-none transition-colors ${
-              factor === value
-                ? 'border-ink-muted bg-surface-hover/40 text-ink'
-                : 'border-line text-ink-muted hover:bg-surface-hover/25 hover:text-ink'
-            }`}
-            title={factor === 1 ? 'Default' : `${Math.round(factor * 100)}%`}
-          >
-            <span style={{ fontSize: `calc(var(--text-md) * ${factor} / var(--text-zoom))` }}>가Aa</span>
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-ink-faint">Applies immediately and is remembered.</p>
-    </>
+    <SettingsRow
+      label="Text size"
+      hint="For the whole app, applied at once."
+      control={
+        <div className="flex items-end gap-1.5" role="radiogroup" aria-label="Text size">
+          {TEXT_SIZES.map((factor, i) => (
+            <button
+              key={factor}
+              type="button"
+              role="radio"
+              aria-checked={factor === value}
+              data-testid={`settings-scale-${i}`}
+              onClick={() => onPick(factor)}
+              className={`rounded-md border px-2 py-1 leading-none transition-colors ${
+                factor === value
+                  ? 'border-ink-muted bg-surface-hover/40 text-ink'
+                  : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
+              }`}
+              title={factor === 1 ? 'Default' : `${Math.round(factor * 100)}%`}
+            >
+              <span style={{ fontSize: `calc(var(--text-md) * ${factor} / var(--text-zoom))` }}>가Aa</span>
+            </button>
+          ))}
+        </div>
+      }
+    />
   )
 }
 
@@ -127,12 +136,32 @@ function FontPicker({
   }
 
   return (
-    <>
-      <span className="py-1">{label}</span>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
+    <SettingsRow
+      label={label}
+      hint={
+        <span className={`block truncate text-sm text-ink-muted ${kind === 'body' ? 'font-sans' : 'font-mono'}`} data-testid={`settings-font-${kind}-sample`}>
+          {sample}
+        </span>
+      }
+      control={
+        <>
+          {choice.other && (
+            <OtherInput
+              draft={choice.draft}
+              onDraft={choice.setDraft}
+              commit={commit}
+              autoFocus={choice.asked}
+              placeholder={kind === 'body' ? 'Font name, e.g. Inter' : 'Font name, e.g. Iosevka'}
+              aria-label={`${label} name`}
+              aria-invalid={!usable}
+              className={`w-40 ${textInputClass({ size: 'sm', text: 'sm', invalid: !usable })}`}
+              data-testid={`settings-font-${kind}-other`}
+            />
+          )}
           <SettingsSelect
-            tone="raised"
+            tone="compact"
+            className="w-44"
+            aria-label={label}
             value={choice.shown(value)}
             onChange={(e) => choice.onSelect(e, value, onPick)}
             data-testid={`settings-font-${kind}`}
@@ -144,26 +173,8 @@ function FontPicker({
             ))}
             <OtherOption />
           </SettingsSelect>
-          {choice.other && (
-            <OtherInput
-              draft={choice.draft}
-              onDraft={choice.setDraft}
-              commit={commit}
-              autoFocus={choice.asked}
-              placeholder={kind === 'body' ? 'Font name, e.g. Inter' : 'Font name, e.g. Iosevka'}
-              aria-label={`${label} name`}
-              aria-invalid={!usable}
-              className={`w-56 rounded-md border bg-surface-raised px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus:outline-none ${
-                usable ? 'border-line focus:border-line-strong' : 'border-danger'
-              }`}
-              data-testid={`settings-font-${kind}-other`}
-            />
-          )}
-        </div>
-        <p className={`mt-1.5 truncate text-sm text-ink ${kind === 'body' ? 'font-sans' : 'font-mono'}`} data-testid={`settings-font-${kind}-sample`}>
-          {sample}
-        </p>
-      </div>
-    </>
+        </>
+      }
+    />
   )
 }

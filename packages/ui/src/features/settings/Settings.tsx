@@ -6,7 +6,7 @@ import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } f
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useMachineName, useTools } from '../../store/selectors.js'
-import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
+import { useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -14,13 +14,25 @@ import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Modal } from '../../components/Modal.jsx'
-import { Badge } from '../../components/Badge.jsx'
 import { Button } from '../../components/Button.jsx'
 import { TextInput } from '../../components/TextField.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { Switch } from '../../components/Switch.jsx'
+import {
+  AppIcon,
+  BackgroundIcon,
+  BellIcon,
+  ContrastIcon,
+  CrownIcon,
+  MonitorIcon,
+  ShieldIcon,
+  TrashIcon,
+} from '../../components/icons.jsx'
+import { SettingsCard, SettingsDisclosure, SettingsEmpty, SettingsGroup, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 import { TrashSection } from './TrashSection.jsx'
 import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { SettingToggle } from './SettingToggle.jsx'
@@ -70,42 +82,6 @@ function RuleOwner({ rule }: { rule: Rule }) {
 }
 
 /**
- * FR-17 shortcut table — has to be viewable and checkable from Settings.
- *
- * A combination is written **by meaning**: `'mod'` and `'alt'` get named by this machine's own
- * keyboard (`⌘`/`Ctrl`, `⌥`/`Alt`), and the remaining pieces are the key's own name as is
- * (issue #32).
- *
- * The desktop app's shortcut table shows **this machine's own keyboard**, right now. There is
- * no other answer — the keys written here are pressed on this machine, and listing both sets
- * would only cost time finding the one that actually applies.
- */
-const SHORTCUTS: [string[], string][] = [
-  [['mod', 'I'], 'Waiting'],
-  // `⇧` is printed on those keyboards too, so there is no word to translate it into. Attaching
-  // it to the following key reads better than `Ctrl+⇧+A`
-  [['mod', '⇧A'], 'Jump to next waiting'],
-  [['mod', 'K'], 'Command palette'],
-  [['mod', '1~9'], 'Jump to project'],
-  /*
-   * The digits name tab *identities*, not positions (EvidencePanel's handler) — after a
-   * drag-reorder this list stays true, which is the whole reason identity was chosen.
-   * The names listed here were once "chat · files · git · viewer": tabs that predate the
-   * three-lane layout. Nobody noticed because the shortcut itself didn't exist until #20.
-   */
-  [['mod', '⇧1~4'], 'Panel tab (changes · history · files · terminal)'],
-  [['y / n / a'], 'Approve · deny · always allow'],
-  [['alt', 'a'], 'Always allow (project scope)'],
-  // In the composer y/n/a are letters of the message; these answer the card from there (ApprovalCard's APPROVAL_COMBOS)
-  [['mod', '⇧Y'], 'Approve, while typing in the composer'],
-  [['mod', '⇧D'], 'Deny, while typing in the composer'],
-  [['mod', '⇧L'], 'Always allow, while typing in the composer'],
-  [['d'], 'Dismiss from inbox'],
-  [['j / k'], 'Move in inbox'],
-  [['Enter / Esc'], 'Send · close'],
-]
-
-/**
  * The window's categories.
  *
  * Named after the errand someone arrives with, not after the module that implements the
@@ -115,18 +91,12 @@ const SHORTCUTS: [string[], string][] = [
  *
  * A category per setting reads worse than no categories at all, so a new one has to earn its
  * place by having somewhere to belong — quiet hours land in Notifications, a default preset
- * in Permissions, rebinding in Shortcuts.
+ * in Permissions.
  *
- * **Updates is the fourth, and it earned it** (issue #43). The rule above is what admits it:
- * asked which of the other three should hold "check for updates automatically", every answer
- * is wrong. Notifications is about how the app interrupts *you about agents*; putting the
- * registry in there renames the category. Permissions is what agents may do without asking.
- * Shortcuts is a key table. And it has room to grow the way the others do — a release
- * channel, skipping a version, the build this is running — which is the difference between a
- * category and a drawer with one thing in it.
- *
- * It also passes the naming rule: people arrive here asking "am I on the latest?", which is
- * an errand, not a module.
+ * Updates earned a category of its own once (issue #43): people arrive asking "am I on the latest?", which is an
+ * errand, not a module. It shares one with Background since the owner trimmed the window (2026-10-20): both answer
+ * "what does Centralu do while I am not looking", and each had shrunk to a switch or two. The shortcut table left for
+ * the command palette (Keyboard shortcuts) at the same time: it is looked up in passing, not set.
  */
 const CATEGORIES = [
   /*
@@ -142,10 +112,10 @@ const CATEGORIES = [
    * And the intro screen was already pointing here ("You can change this later in Settings") —
    * a promise that had gone unkept until now.
    */
-  { id: 'orchestrator', label: 'Orchestrator' },
+  { id: 'orchestrator', label: 'Orchestrator', Icon: CrownIcon },
   // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
-  { id: 'apps', label: 'Apps' },
-  { id: 'notifications', label: 'Notifications' },
+  { id: 'apps', label: 'Apps', Icon: AppIcon },
+  { id: 'notifications', label: 'Notifications', Icon: BellIcon },
   /*
    * Whether quitting leaves agents running (#280). Its own category because the question people
    * arrive with is "what happens to my agents when I quit?", and the answer is one switch plus
@@ -153,21 +123,25 @@ const CATEGORIES = [
    * the category shows everywhere since #568, for "what happens to my agents when I leave them
    * idle", which every host answers.
    */
-  { id: 'background', label: 'Background' },
+  { id: 'background', label: 'Background & updates', Icon: BackgroundIcon },
   /*
    * Linked machines (#82). Its own category because the errand is its own: "link my server", "why is it away". It
    * holds a list, a form and a prompt, which no other category could take without renaming itself.
    */
-  { id: 'machines', label: 'Machines' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'permissions', label: 'Permissions' },
+  { id: 'machines', label: 'Machines', Icon: MonitorIcon },
+  { id: 'appearance', label: 'Appearance', Icon: ContrastIcon },
+  { id: 'permissions', label: 'Permissions', Icon: ShieldIcon },
   // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
-  { id: 'trash', label: 'Trash' },
-  { id: 'shortcuts', label: 'Shortcuts' },
-  { id: 'updates', label: 'Updates' },
+  { id: 'trash', label: 'Trash', Icon: TrashIcon },
 ] as const
 
 type Category = (typeof CATEGORIES)[number]['id']
+
+/** Categories that were merged into another (2026-10-20): a request for one opens where it went */
+const MOVED: Record<string, Category> = { updates: 'background' }
+
+const categoryOf = (id: string | undefined): Category | null =>
+  CATEGORIES.find((c) => c.id === id)?.id ?? (id ? (MOVED[id] ?? null) : null)
 
 /**
  * Settings (E-3, E-4, E-5).
@@ -186,14 +160,12 @@ export function Settings() {
   const policy = useStore((s) => s.notifyPolicy)
   const setPolicy = useStore((s) => s.setNotifyPolicy)
   const platform = usePlatform()
-  const sc = useShortcut()
-  const nav = useNavShortcut()
   const [category, setCategory] = useState<Category>('notifications')
   // Another screen asked for a category (a machine's badge in the sidebar opens Machines, #82, #734)
   const request = useStore((s) => s.settingsRequest)
   useEffect(() => {
-    const asked = CATEGORIES.find((c) => c.id === request?.category)
-    if (asked) setCategory(asked.id)
+    const asked = categoryOf(request?.category)
+    if (asked) setCategory(asked)
   }, [request])
 
   // Read each time settings open. A failed read says so: it used to be drawn as "No saved rules" (#850 item 8)
@@ -230,15 +202,20 @@ export function Settings() {
       <div
         ref={panelRef}
         {...dialog}
-        className={`flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none ${
+        /*
+          One size for every category (owner, 2026-10-19): the window used to take the height of what it showed, so it
+          jumped as the rail was walked and Notifications shrank to a short box. Now the frame stays and the page
+          scrolls inside it.
+        */
+        className={`flex h-[min(680px,calc(82vh/var(--text-zoom)))] w-[800px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none ${
           leaving ? 'cc-drop-out' : 'cc-drop'
         }`}
         onClick={(e) => e.stopPropagation()}
         data-testid="settings-panel"
       >
-        <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+        <header className="flex items-center gap-2 border-b border-line/60 py-2.5 pl-4 pr-3">
           <h2 className="text-md font-medium text-ink">Settings</h2>
-          <span className="ml-auto text-2xs text-ink-faint">
+          <span className="ml-auto flex items-center gap-1.5 text-2xs text-ink-faint">
             <Kbd>esc</Kbd> Close
           </span>
         </header>
@@ -249,7 +226,7 @@ export function Settings() {
             which a scroll can only do by being short — and it will not stay short.
           */}
           <nav
-            className="w-[132px] shrink-0 space-y-0.5 border-r border-line p-2"
+            className="w-[196px] shrink-0 space-y-px overflow-y-auto border-r border-line/60 p-2"
             data-testid="settings-nav"
             aria-label="Settings categories"
           >
@@ -260,10 +237,13 @@ export function Settings() {
                 data-testid={`settings-tab-${c.id}`}
                 aria-current={c.id === category ? 'page' : undefined}
                 onClick={() => setCategory(c.id)}
-                className={`w-full rounded-md px-2 py-1 text-left text-sm transition-colors ${
-                  c.id === category ? 'bg-surface-selected text-ink' : 'text-ink-muted hover:text-ink'
+                className={`group/tab flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-md transition-colors ${
+                  c.id === category ? 'bg-surface-selected text-ink' : 'text-ink-muted hover:bg-surface-hover/40 hover:text-ink'
                 }`}
               >
+                <span className={c.id === category ? 'text-ink' : 'text-ink-faint group-hover/tab:text-ink-muted'}>
+                  <c.Icon size={14} />
+                </span>
                 {c.label}
               </button>
             ))}
@@ -274,115 +254,93 @@ export function Settings() {
             window's worth of controls in the page — and a control that is present but unseen
             is one a test can pass on and a screen reader can walk into.
           */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="settings-pane">
+          <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-6" data-testid="settings-pane">
             {category === 'orchestrator' && <OrchestratorSettings />}
             {category === 'apps' && <AppsSettings />}
             {/* E-5 notification policy */}
             {category === 'notifications' && (
-              <section>
-                <p className="text-xs leading-body text-ink-faint">
-                  Notifications are the only way to force attention, so use them sparingly.
-                </p>
-                <ul className="mt-2 space-y-1.5">
+              <SettingsPage title="Notifications" lead="Notifications are the only way to force attention, so use them sparingly.">
+                {/*
+                  "Error" and "Once when every session finishes" are gone, and so is "Reset to defaults" (owner,
+                  2026-10-20): the window no longer raises either (store/events/notices.ts), and five switches need
+                  no reset. Their saved values stay in the snapshot, unread.
+                */}
+                <SettingsGroup title="Notify me">
                   {(
                     [
-                      ['approval', 'Awaiting approval — when an agent is blocked'],
-                      ['error', 'Error'],
-                      ['done', 'A session finishes out of sight'],
-                      ['allDone', 'Once when every session finishes'],
-                      ['whenFocused', 'Notify even when the app is focused'],
-                      ['sound', 'Play a sound — the one signal that reaches the next room'],
-                    ] as [keyof NotifyPolicy, string][]
-                  ).map(([key, label]) => (
-                    <li key={key}>
-                      <SettingToggle
-                        checked={policy[key]}
-                        onChange={(on) => setPolicy({ ...policy, [key]: on })}
-                        label={label}
-                        testId={`notify-${key}`}
-                      />
-                    </li>
+                      ['approval', 'Awaiting approval', 'When an agent is blocked'],
+                      ['done', 'A session finishes out of sight', null],
+                      ['whenFocused', 'Notify even when the app is focused', null],
+                      ['sound', 'Play a sound', 'The one signal that reaches the next room'],
+                    ] as [keyof NotifyPolicy, string, string | null][]
+                  ).map(([key, label, hint]) => (
+                    <SettingToggle
+                      key={key}
+                      checked={policy[key]}
+                      onChange={(on) => setPolicy({ ...policy, [key]: on })}
+                      label={label}
+                      hint={hint ?? undefined}
+                      testId={`notify-${key}`}
+                    />
                   ))}
-                </ul>
-                <div className="mt-2 flex items-center gap-3">
-                  <button
-                    className="text-xs text-ink-faint underline-offset-2 hover:text-ink hover:underline"
-                    onClick={() => setPolicy(DEFAULT_NOTIFY_POLICY)}
-                  >
-                    Reset to defaults
-                  </button>
-                </div>
-              </section>
+                </SettingsGroup>
+              </SettingsPage>
             )}
 
+            {/* Background and Updates (issue #43), one page since 2026-10-20 */}
             {category === 'background' && (
-              <>
-                {platform.background && <BackgroundSection port={platform.background} />}
-                <SleepSection first={!platform.background} />
-              </>
+              <SettingsPage
+                title="Background & updates"
+                lead="What happens to your agents when you quit or leave them idle, and which version is running."
+              >
+                <SettingsGroup title="Agents">
+                  {platform.background && <BackgroundSection port={platform.background} />}
+                  <SleepSection first={!platform.background} />
+                </SettingsGroup>
+                <UpdatesSection />
+                <AgentCliUpdates />
+              </SettingsPage>
             )}
 
-            {category === 'machines' && <MachinesSection onOpenCategory={setCategory} />}
+            {category === 'machines' && <MachinesSection onOpenCategory={(c) => setCategory(categoryOf(c) ?? 'background')} />}
 
             {category === 'appearance' && <AppearanceSection />}
 
             {/* E-4 approval rules */}
             {category === 'permissions' && (
-              <section>
-                <p className="text-xs leading-body text-ink-faint">
-                  Pressing <Kbd>a</Kbd> on an approval adds an always-allow rule here. Delete any of them
-                  anytime.
-                </p>
-                <GrantList
-                  load={rules}
-                  keyOf={(r) => String(r.id)}
-                  row={(r) => (
+              <SettingsPage title="Permissions" lead="Answers you gave once and can take back here.">
+                <SettingsGroup
+                  title="Always-allow rules"
+                  hint={
                     <>
-                      <code className="truncate font-mono text-sm text-ink">{r.matcher}</code>
-                      <span className="shrink-0 text-2xs text-ink-faint">
-                        {r.scope === 'project' ? 'Project' : 'Session'}
-                      </span>
-                      <RuleOwner rule={r} />
+                      Pressing <Kbd>a</Kbd> on an approval adds a rule here. Delete any of them anytime.
                     </>
-                  )}
-                  dateOf={(r) => r.createdAt}
-                  action={{ label: 'Delete', failed: 'Could not delete it', testId: (r) => `delete-rule-${r.id}`, run: (r) => platform.rules.remove(r.id) }}
-                  what="the rules"
-                  empty="No saved rules"
-                  testIds={{ list: 'rules-list', empty: 'rules-empty', failed: 'rules-failed', error: 'rules-error' }}
-                />
+                  }
+                >
+                  <GrantList
+                    load={rules}
+                    keyOf={(r) => String(r.id)}
+                    row={(r) => (
+                      <>
+                        <code className="truncate font-mono text-sm text-ink">{r.matcher}</code>
+                        <span className="shrink-0 text-2xs text-ink-faint">
+                          {r.scope === 'project' ? 'Project' : 'Session'}
+                        </span>
+                        <RuleOwner rule={r} />
+                      </>
+                    )}
+                    dateOf={(r) => r.createdAt}
+                    action={{ label: 'Delete', failed: 'Could not delete it', testId: (r) => `delete-rule-${r.id}`, run: (r) => platform.rules.remove(r.id) }}
+                    what="the rules"
+                    empty="No saved rules"
+                    testIds={{ list: 'rules-list', empty: 'rules-empty', failed: 'rules-failed', error: 'rules-error' }}
+                  />
+                </SettingsGroup>
                 <ProjectConsentsSection />
-              </section>
+              </SettingsPage>
             )}
 
             {category === 'trash' && <TrashSection />}
-
-            {/* E-3 shortcuts */}
-            {category === 'shortcuts' && (
-              <section>
-                <ul className="grid grid-cols-2 gap-x-6 gap-y-1" data-testid="shortcut-list">
-                  {SHORTCUTS.map(([keys, label]) => (
-                    <li key={label} className="flex items-baseline gap-2 text-sm text-ink-muted">
-                      <Kbd>{sc(...keys)}</Kbd>
-                      <span className="truncate">{label}</span>
-                    </li>
-                  ))}
-                  {/* Back and forward (#374): this keyboard's browser keys, not a fixed combination (`navShortcut`) */}
-                  <li className="flex items-baseline gap-2 text-sm text-ink-muted">
-                    <Kbd>{`${nav(-1)} / ${nav(1)}`}</Kbd>
-                    <span className="truncate">Back · forward between screens</span>
-                  </li>
-                </ul>
-              </section>
-            )}
-
-            {/* Updates (issue #43) */}
-            {category === 'updates' && (
-              <>
-                <UpdatesSection />
-                <AgentCliUpdates />
-              </>
-            )}
           </div>
         </div>
       </div>
@@ -403,41 +361,36 @@ function AppsSettings() {
   const projects = useStore((s) => s.projects)
   const projectIds = Object.keys(catalog.byProject)
   return (
-    <section data-testid="settings-apps">
-      <p className="text-xs leading-body text-ink-faint">
-        Apps found in your projects and your own apps folder, and how each one is doing.
-      </p>
+    <SettingsPage
+      testId="settings-apps"
+      title="Apps"
+      lead="Apps found in your projects and your own apps folder, and how each one is doing."
+    >
       {catalog.external.length === 0 && (
-        <p className="mt-3 text-xs leading-body text-ink-muted" data-testid="settings-apps-empty">
-          No apps yet.
-        </p>
+        <SettingsCard>
+          <SettingsEmpty testId="settings-apps-empty">No apps yet.</SettingsEmpty>
+        </SettingsCard>
       )}
       {catalog.external.length > 0 && (
-        <div className="mt-3" data-testid="settings-external-apps">
+        <div className="space-y-6" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
-            <div key={pid} className="mb-4">
-              {/* The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up */}
-              <Badge as="p" readout>
-                {projects[pid]?.name ?? 'Project'}
-              </Badge>
-              <ul className="mt-2 space-y-2">
+            // The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up
+            <SettingsGroup key={pid} title={projects[pid]?.name ?? 'Project'}>
+              <ul className="divide-y divide-line/70">
                 {catalog.byProject[pid]!.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
                 ))}
               </ul>
-            </div>
+            </SettingsGroup>
           ))}
           {catalog.user.length > 0 && (
-            <div className="mb-4">
-              <Badge as="p" readout>
-                Other apps
-              </Badge>
-              <ul className="mt-2 space-y-2">
+            <SettingsGroup title="Other apps">
+              <ul className="divide-y divide-line/70">
                 {catalog.user.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
                 ))}
               </ul>
-            </div>
+            </SettingsGroup>
           )}
           {/* Each linked machine's own apps (#82), under its name: what is done to one here is done on that machine */}
           {Object.keys(catalog.byMachine).map((machine) => (
@@ -445,7 +398,7 @@ function AppsSettings() {
           ))}
         </div>
       )}
-    </section>
+    </SettingsPage>
   )
 }
 
@@ -453,16 +406,13 @@ function AppsSettings() {
 function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCatalogApp[] }) {
   const name = useMachineName(machine) ?? machine
   return (
-    <div className="mb-4" data-testid={`settings-machine-apps-${machine}`}>
-      <Badge as="p" readout>
-        {name}’s apps
-      </Badge>
-      <ul className="mt-2 space-y-2">
+    <SettingsGroup testId={`settings-machine-apps-${machine}`} title={`${name}’s apps`}>
+      <ul className="divide-y divide-line/70">
         {apps.map((a) => (
           <ExternalAppRow key={a.key} app={a} />
         ))}
       </ul>
-    </div>
+    </SettingsGroup>
   )
 }
 
@@ -491,7 +441,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   // A linked machine's user-folder app (#82): removed there, so the question names the machine
   const machineName = useMachineName(app.projectId === null ? app.info.machine : null)
   return (
-    <li className="rounded-md border border-line bg-surface-raised px-3 py-2" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
+    <li className="px-4 py-3" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
       <div className="flex items-center gap-2 text-sm text-ink">
         <span className="truncate">{app.title}</span>
         <span className="readout text-2xs text-ink-faint">{app.appId}</span>
@@ -505,14 +455,15 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       {busy && (
         <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted" data-testid="external-app-busy">
           <span className="min-w-0 truncate">Running: {busy}</span>
-          <button
-            type="button"
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
             onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine: app.info.machine ?? null })}
             data-testid="external-app-stop"
           >
             Stop
-          </button>
+          </Button>
         </div>
       )}
       {status.reason && (
@@ -546,8 +497,16 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </Button>
       )}
       <SecretsLine app={app} />
-      <ShareLine app={app} />
-      <GridSpanLine app={app} />
+      {/* What can be set on the app, on one line under what it says about itself */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 empty:hidden">
+        <ShareLine app={app} />
+        <GridSpanLine app={app} />
+        {app.projectId === null && !confirming && (
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setConfirming(true)} data-testid="external-app-remove">
+            Remove…
+          </Button>
+        )}
+      </div>
       {/* Another machine's user-folder app (#82) is removed on that machine: `machine` names it, so this computer's app of the same id is never touched */}
       {app.projectId === null &&
         (confirming ? (
@@ -573,16 +532,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
             yesTestId="external-app-remove-yes"
             noTestId="external-app-remove-cancel"
           />
-        ) : (
-          <button
-            type="button"
-            className="mt-1.5 rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink-signal"
-            onClick={() => setConfirming(true)}
-            data-testid="external-app-remove"
-          >
-            Remove…
-          </button>
-        ))}
+        ) : null)}
     </li>
   )
 }
@@ -606,7 +556,7 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
   const current = explainGridSpan(undefined, setting, app.info.span)
   const fallback = explainGridSpan(undefined, undefined, app.info.span)
   return (
-    <div className="mt-1.5 flex items-center gap-2 px-1 text-xs text-ink-faint">
+    <div className="flex items-center gap-2 text-xs text-ink-faint">
       <span>Size on the grid</span>
       <SpanButton
         value={current.span}
@@ -633,16 +583,11 @@ function ShareLine({ app }: { app: ExternalCatalogApp }) {
   const shared = app.info.shared === true
   return (
     <label
-      className="mt-1.5 flex cursor-pointer items-center gap-2 px-1 text-xs text-ink-faint"
+      className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted"
       title="Sessions in your other projects can attach this app while they need it. Each project asks you once."
       data-testid="external-app-share"
     >
-      <input
-        type="checkbox"
-        className="accent-ink-muted"
-        checked={shared}
-        onChange={(e) => void setShared(app.projectId!, app.appId, e.target.checked)}
-      />
+      <Switch checked={shared} onChange={(e) => void setShared(app.projectId!, app.appId, e.target.checked)} />
       <span>Share with other projects</span>
     </label>
   )
@@ -657,7 +602,7 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
     <div className="mt-1.5">
       <button
         type="button"
-        className={`rounded-md px-1 py-0.5 text-xs transition-colors hover:text-ink ${missing ? 'text-ink' : 'text-ink-faint'}`}
+        className={`-ml-1 rounded-md px-1 py-0.5 text-xs transition-colors hover:text-ink ${missing ? 'text-ink' : 'text-ink-faint'}`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         data-testid="external-app-secrets-toggle"
@@ -690,39 +635,37 @@ export function OrchestratorSkills() {
   // could no longer be found to delete
   if (skills.length === 0 && loaded.error === null) return null
   return (
-    <div className="mt-5 border-t border-line pt-3" data-testid="orchestrator-skills">
-      <Badge as="p" readout>
-        Approved skills
-      </Badge>
+    <SettingsGroup testId="orchestrator-skills" title="Approved skills" hint="Deleting one takes it out of the orchestrator's prompt at once.">
       {loaded.error !== null && (
-        <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} className="mt-2" testId="orchestrator-skills-failed" />
+        <div className="px-4 py-3">
+          <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} testId="orchestrator-skills-failed" />
+        </div>
       )}
-      <ul className="mt-2 space-y-2">
-        {skills.map((s) => (
-          <li key={s.name} className="rounded-md border border-line p-2.5" data-testid={`orchestrator-skill-${s.name}`}>
-            <div className="flex items-center gap-2">
-              <span className="readout text-xs text-ink">{s.name}</span>
-              <button
-                type="button"
-                className="ml-auto rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink-signal"
-                data-testid={`delete-skill-${s.name}`}
-                onClick={() => {
-                  void platform.agents
-                    .deleteOrchestratorSkill(s.name)
-                    .then(load)
-                    .catch((e: Error) => setToast(e.message))
-                }}
-              >
-                Delete
-              </button>
-            </div>
-            <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-body text-ink-muted">
-              {s.content}
-            </pre>
-          </li>
-        ))}
-      </ul>
-    </div>
+      {skills.map((s) => (
+        <div key={s.name} className="px-4 py-3" data-testid={`orchestrator-skill-${s.name}`}>
+          <div className="flex items-center gap-2">
+            <span className="readout min-w-0 truncate text-sm text-ink">{s.name}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto shrink-0"
+              data-testid={`delete-skill-${s.name}`}
+              onClick={() => {
+                void platform.agents
+                  .deleteOrchestratorSkill(s.name)
+                  .then(load)
+                  .catch((e: Error) => setToast(e.message))
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+          <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-body text-ink-muted">
+            {s.content}
+          </pre>
+        </div>
+      ))}
+    </SettingsGroup>
   )
 }
 
@@ -768,38 +711,36 @@ function OrchestratorSettings() {
   }
 
   return (
-    <section data-testid="settings-orchestrator">
-      <p className="text-xs leading-body text-ink-faint">
-        The orchestrator is the one session that belongs to the app rather than a project. Pick
-        which agent it runs on.
-      </p>
+    <SettingsPage
+      testId="settings-orchestrator"
+      title="Orchestrator"
+      lead="The one session that belongs to the app rather than a project."
+    >
       {peek.error && !orchestratorId && (
-        <LoadFailed what="the orchestrator" error={peek.error} onRetry={() => void peek.reload()} className="mt-2" testId="orchestrator-peek-failed" />
+        <LoadFailed what="the orchestrator" error={peek.error} onRetry={() => void peek.reload()} testId="orchestrator-peek-failed" />
       )}
-      <div className="mt-3 space-y-1.5">
-        {tools.map((t) => (
-          <button
-            key={t.name}
-            type="button"
-            role="radio"
-            aria-checked={t.name === current}
-            data-testid={`orchestrator-tool-${t.name}`}
-            onClick={() => t.name !== current && setAsking(t)}
-            className={`flex w-full items-baseline gap-2 rounded-md border px-3 py-2 text-left transition-colors ${
-              t.name === current ? 'border-ink-muted text-ink' : 'border-line text-ink-muted hover:border-line-strong hover:text-ink'
-            }`}
-          >
-            <span className="w-2 shrink-0 text-2xs leading-none" aria-hidden>
-              {t.name === current ? '✓' : ''}
-            </span>
-            <span className="text-sm">{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <SettingsGroup title="Agent">
+        <SettingsRow
+          label="Runs on"
+          hint="Pick which agent it runs on. Switching asks first."
+          control={
+            <Segmented
+              label="Orchestrator agent"
+              value={current}
+              size="sm"
+              onChange={(name) => {
+                const picked = tools.find((t) => t.name === name)
+                if (picked) setAsking(picked)
+              }}
+              options={tools.map((t) => ({ value: t.name, label: t.label, testId: `orchestrator-tool-${t.name}` }))}
+            />
+          }
+        />
+      </SettingsGroup>
 
       <OrchestratorSkills />
 
-      <SessionToolsSwitch />
+      <AgentLimits />
 
       {asking && (
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
@@ -846,84 +787,75 @@ function OrchestratorSettings() {
           </div>
         </Modal>
       )}
-    </section>
+    </SettingsPage>
   )
 }
 
 /**
- * Whether ordinary sessions get Centralu's light, read-only tools (#320). On by default.
+ * How the agents a session starts behave: how many may run per project, how deep they may start agents of their own,
+ * and which model each difficulty runs (#867, #729). Folded under "Advanced" (owner, 2026-10-20): the defaults serve
+ * nearly everyone, and the page should open on the one choice people come here for, the orchestrator's agent.
  *
- * It sits with the orchestrator because it is the other half of the same question — which
- * sessions get Centralu's own tools — and the answer here is the part that does not direct
- * anything: a session looks at its own project, it never sends or creates.
+ * "Let sessions look at other sessions" (#320) used to stand here too. It is always on now and the host holds it so,
+ * so the switch is gone rather than shown fixed.
  */
-function SessionToolsSwitch() {
-  const on = useStore((s) => s.prefs.sessionTools)
+function AgentLimits() {
   const ceiling = useStore((s) => s.prefs.agentCeiling)
   // How deep agents may start agents (#867): nothing saved is 1, and every preset keeps to it
   const depth = useStore((s) => agentDepthOf(s.prefs))
   const setPrefs = useStore((s) => s.setPrefs)
   return (
-    <div className="mt-6 border-t border-line pt-4">
-      <SettingToggle
-        checked={on}
-        onChange={(next) => setPrefs({ sessionTools: next })}
-        label="Let sessions look at other sessions"
-        testId="settings-session-tools"
-        hint={
-          <>
-            Every session can read other sessions and search their past conversations: from a trusted
-            project, any project&apos;s and linked machines&apos; (not the orchestrator&apos;s or an app&apos;s);
-            from an untrusted one, its own project&apos;s. It can also read Centralu&apos;s guide. With your consent it can also ask another
-            project to do a task and attach apps other projects share. It can start agents in its own project under its own permission preset. Auto opens these boundaries without asking. Turning this off stops those tools at once,
-            apps it attached included; turning it on reaches a session the next time it starts.
-          </>
-        }
-      />
-      <label className="mt-4 flex items-center gap-2 text-sm text-ink-muted">
-        Running agents per project
-        <TextInput
-          type="number"
-          min={0}
-          step={1}
-          size="sm"
-          text="sm"
-          className="w-20"
-          data-testid="settings-agent-ceiling"
-          value={ceiling ?? ''}
-          placeholder="Default"
-          onChange={(e) => {
-            const value = e.target.value === '' ? null : Number(e.target.value)
-            if (value === null || (Number.isSafeInteger(value) && value >= 0)) void setPrefs({ agentCeiling: value })
-          }}
+    <SettingsDisclosure title="Advanced" hint="Agent limits and models" testId="settings-orchestrator-advanced">
+      <SettingsGroup title="Agents a session starts">
+        <SettingsRow
+          label={<label htmlFor="settings-agent-ceiling">Running agents per project</label>}
+          hint="Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited."
+          control={
+            <TextInput
+              id="settings-agent-ceiling"
+              type="number"
+              min={0}
+              step={1}
+              size="sm"
+              text="sm"
+              className="w-24"
+              data-testid="settings-agent-ceiling"
+              value={ceiling ?? ''}
+              placeholder="Default"
+              onChange={(e) => {
+                const value = e.target.value === '' ? null : Number(e.target.value)
+                if (value === null || (Number.isSafeInteger(value) && value >= 0)) void setPrefs({ agentCeiling: value })
+              }}
+            />
+          }
         />
-      </label>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited.
-      </p>
-      <label className="mt-4 flex items-center gap-2 text-sm text-ink-muted">
-        How deep agents may start agents
-        <input
-          type="range"
-          min={1}
-          max={MAX_AGENT_DEPTH}
-          step={1}
-          className="w-24 accent-line-strong"
-          data-testid="settings-agent-depth"
-          value={depth}
-          onChange={(e) => void setPrefs({ agentDepth: Number(e.target.value) })}
+        <SettingsRow
+          label={<label htmlFor="settings-agent-depth">How deep agents may start agents</label>}
+          hint="At 1, only the sessions you start can start agents; each step lets the agents below do the same. Auto stays within it."
+          control={
+            <>
+              <input
+                id="settings-agent-depth"
+                type="range"
+                min={1}
+                max={MAX_AGENT_DEPTH}
+                step={1}
+                className="w-24 accent-ink-muted"
+                data-testid="settings-agent-depth"
+                value={depth}
+                onChange={(e) => void setPrefs({ agentDepth: Number(e.target.value) })}
+              />
+              <span className="readout w-3 text-sm text-ink" data-testid="settings-agent-depth-value" aria-hidden>
+                {depth}
+              </span>
+            </>
+          }
         />
-        <span className="readout w-3 text-ink" data-testid="settings-agent-depth-value" aria-hidden>
-          {depth}
-        </span>
-      </label>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        At 1, only the sessions you start can start agents; each step lets the agents below do the same. Auto stays within it.
-      </p>
+      </SettingsGroup>
       <AgentModelsSection />
       <HubAutoSwitch />
       <AutoCompactSetting setPrefs={setPrefs} />
-    </div>
+    </SettingsDisclosure>
   )
 }
 
@@ -936,7 +868,7 @@ function HubAutoSwitch() {
   const on = useStore((s) => hubAutoOf(s.prefs))
   const setPrefs = useStore((s) => s.setPrefs)
   return (
-    <div className="mt-4">
+    <SettingsGroup title="Linked computers">
       <SettingToggle
         checked={on}
         onChange={(next) => setPrefs({ hubAuto: next })}
@@ -950,7 +882,7 @@ function HubAutoSwitch() {
           </>
         }
       />
-    </div>
+    </SettingsGroup>
   )
 }
 
@@ -962,7 +894,7 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
   const { controlled, share } = useStore((s) => autoCompactOf(s.prefs))
   const percent = Math.round(share * 100)
   return (
-    <div className="mt-4">
+    <SettingsGroup title="Compaction">
       <SettingToggle
         checked={controlled}
         onChange={(next) => setPrefs({ autoCompact: { controlled: next } })}
@@ -980,90 +912,65 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
         }
       />
       {controlled && (
-        <label className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
-          Compact at
-          <input
-            type="range"
-            min={Math.round(MIN_AUTO_COMPACT_SHARE * 100)}
-            max={Math.round(MAX_AUTO_COMPACT_SHARE * 100)}
-            step={5}
-            className="w-32 accent-line-strong"
-            data-testid="settings-auto-compact-share"
-            value={percent}
-            onChange={(e) => void setPrefs({ autoCompact: { share: Number(e.target.value) / 100 } })}
-          />
-          <span className="readout w-16 text-ink" data-testid="settings-auto-compact-share-value" aria-hidden>
-            {percent}% of the window
-          </span>
-        </label>
+        <SettingsRow
+          label={<label htmlFor="settings-auto-compact-share">Compact at</label>}
+          control={
+            <>
+              <input
+                id="settings-auto-compact-share"
+                type="range"
+                min={Math.round(MIN_AUTO_COMPACT_SHARE * 100)}
+                max={Math.round(MAX_AUTO_COMPACT_SHARE * 100)}
+                step={5}
+                className="w-32 accent-ink-muted"
+                data-testid="settings-auto-compact-share"
+                value={percent}
+                onChange={(e) => void setPrefs({ autoCompact: { share: Number(e.target.value) / 100 } })}
+              />
+              <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-share-value" aria-hidden>
+                {percent}% of the window
+              </span>
+            </>
+          }
+        />
       )}
-    </div>
+    </SettingsGroup>
   )
 }
 
 /**
- * Appearance: the theme, then text (size, fonts, line height), then how the grid behaves.
+ * Appearance: the theme, then text (size, fonts, line height), then how the message box sends.
  */
 function AppearanceSection() {
-  const fold = useStore((s) => s.foldComposer)
-  const setFold = useStore((s) => s.setFoldComposer)
   const modEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const setPrefs = useStore((s) => s.setPrefs)
   const sc = useShortcut()
   return (
-    <section>
+    <SettingsPage title="Appearance" lead="The theme, the text, and how the message box behaves.">
       <ThemeSection />
       <TypographySection />
 
-      {/*
-        Folding the composer in a grid panel (user request, 2026-09-10). The setting came from
-        the reading space being tight in a two-row grid, so it applies **only to the grid** —
-        the focus view has plenty of room, and folding there would only leave the person having
-        to unfold it again every time.
-        The project screen's panels (#203) are the grid's panels at the grid's sizes, so it applies there too.
-      */}
-      <div className="mt-6 border-t border-line pt-4">
-        <SettingToggle
-          checked={fold}
-          onChange={setFold}
-          label="Fold the message box in the grid and on project screens"
-          hint={
-            <>
-              It rests as a card peeking from the bottom and rises over the conversation when you
-              reach for it. Off keeps it open, as before.
-            </>
-          }
-          hintInside
-          testId="settings-fold-composer"
-        />
-      </div>
+      <SettingsGroup title="Message box">
+        {/*
+          A switch for someone writing multi-line prompts.
 
-      {/*
-        A switch for someone writing multi-line prompts.
+          It sits here because it is about how the **message box** is used, and someone looking for
+          this arrives thinking of the composer. ("Fold the message box" stood beside it until
+          2026-10-20; a short grid or project panel now folds it by itself, SessionPane's foldWhenShort.)
 
-        The reason it sits here is the same as "fold the composer" next to it — both are about
-        how the **message box** is used, and someone looking for this arrives thinking of the
-        composer.
-
-        The reason the default is off is recorded in the protocol's type declaration: Enter as
-        send is the chat-box convention, and silently moving it out from under someone already
-        used to it would be worse than never offering the option at all.
-      */}
-      <div className="mt-6 border-t border-line pt-4">
+          The reason the default is off is recorded in the protocol's type declaration: Enter as
+          send is the chat-box convention, and silently moving it out from under someone already
+          used to it would be worse than never offering the option at all.
+        */}
         <SettingToggle
           checked={modEnter}
           onChange={(on) => setPrefs({ sendWithModifierEnter: on })}
           label={<>Send with {sc('mod', 'Enter')}</>}
-          hint={
-            <>
-              Enter then writes a new line instead of sending, which is what you want when a prompt
-              runs to several paragraphs. Shift+Enter writes a new line either way.
-            </>
-          }
+          hint="Enter then writes a new line instead of sending, for prompts that run to several paragraphs. Shift+Enter writes a new line either way."
           testId="settings-send-with-mod-enter"
         />
-      </div>
-    </section>
+      </SettingsGroup>
+    </SettingsPage>
   )
 }
 
@@ -1095,23 +1002,19 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
             .catch((err: Error) => setError(err.message))
         }}
         label="Keep agents running after Centralu quits"
-        hint={
+        hint="Closing the window leaves the agent host and its running sessions going."
+        more={
           <>
-            Closing the window leaves the agent host and its running sessions going. Opening
-            Centralu again picks them up where they are, waiting approvals included. Off, quitting
-            is always Quit completely and stops them.
+            Opening Centralu again picks them up where they are, waiting approvals included. Off, quitting is always Quit
+            completely and stops them. To stop everything anyway, choose <span className="text-ink-muted">Quit completely</span>{' '}
+            when you quit: it also stops agents, terminals and running commands. With no window open and nothing running
+            for 30 minutes, the background host stops by itself.
           </>
         }
-        hintInside
         testId="settings-background-toggle"
       />
-      <p className="mt-3 text-xs leading-body text-ink-faint">
-        To stop everything anyway, choose <span className="text-ink-muted">Quit completely</span>{' '}
-        when you quit: it also stops agents, terminals and running commands. With no window open and
-        nothing running for 30 minutes, the background host stops by itself.
-      </p>
       {(error ?? read.error) && (
-        <p className="mt-2 text-xs text-danger" data-testid="settings-background-error">
+        <p className="-mt-1 px-4 pb-3 text-xs text-danger" data-testid="settings-background-error">
           {error ?? read.error}
         </p>
       )}

@@ -1,23 +1,30 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
+import { Switch } from '../../components/Switch.jsx'
+import { SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * One switch of Settings (#850 item 12): a checkbox, its label, and a line saying what it does.
+ * One switch of Settings (#850 item 12): a row of a settings card, its label and a short line saying what it does on
+ * the left, the switch on the right.
  *
  * About a dozen rows wrote this by hand, and only some guarded a change still saving: the background switch took a
  * second click while the keeper had not answered the first, so the two changes raced. Here a change that returns a
- * promise disables the box until it settles, for every switch.
+ * promise disables the switch until it settles, for every switch.
  *
- * - `hint` goes under the row, or inside the label beside the box with `hintInside` (a longer explanation that reads
- *   as part of the choice).
- * - `children` follow the label inside it (a control the switch turns on, such as the accent colour).
- * - `className` places the row (its margin); the rest of its look is this component's.
+ * The switch is a checkbox underneath (`Switch`): `testId` is on the input itself, so `checked`, `check()` and a
+ * click reach it as before, and the label names it.
+ *
+ * - `hint` goes under the label; `more` is the rest of a longer explanation, behind "More" (still in the page).
+ *   `hintInside` is kept for its callers and no longer changes the layout: every hint sits under its label now.
+ * - `children` stand beside the switch (a control the switch turns on).
+ * - `className` places the row; the rest of its look is this component's.
  */
 export function SettingToggle({
   checked,
   onChange,
   label,
   hint,
-  hintInside = false,
+  more,
+  hintInside: _hintInside = false,
   disabled = false,
   testId,
   className = '',
@@ -27,12 +34,14 @@ export function SettingToggle({
   onChange: (on: boolean) => void | Promise<unknown>
   label: ReactNode
   hint?: ReactNode
+  more?: ReactNode
   hintInside?: boolean
   disabled?: boolean
   testId?: string
   className?: string
   children?: ReactNode
 }) {
+  const id = useId()
   const [saving, setSaving] = useState(false)
   const change = (on: boolean) => {
     const pending = onChange(on)
@@ -42,36 +51,22 @@ export function SettingToggle({
       .catch(() => {})
       .finally(() => setSaving(false))
   }
-  const box = (
-    <input
-      type="checkbox"
-      className={hintInside ? 'mt-0.5 accent-line-strong' : 'accent-line-strong'}
-      data-testid={testId}
-      checked={checked}
-      disabled={disabled || saving}
-      onChange={(e) => change(e.target.checked)}
-    />
-  )
-  if (hintInside) {
-    return (
-      <label className={`${className} flex items-start gap-2 text-sm text-ink-muted`.trim()}>
-        {box}
-        <span>
-          {label}
-          {hint && <span className="mt-1 block text-xs leading-body text-ink-faint">{hint}</span>}
-        </span>
-        {children}
-      </label>
-    )
-  }
   return (
-    <>
-      <label className={`${className} flex items-center gap-2 text-sm text-ink-muted`.trim()}>
-        {box}
-        {label}
-        {children}
-      </label>
-      {hint && <p className="mt-1 text-xs leading-body text-ink-faint">{hint}</p>}
-    </>
+    <SettingsRow
+      className={className}
+      label={
+        <label htmlFor={id} className="cursor-pointer">
+          {label}
+        </label>
+      }
+      hint={hint}
+      more={more}
+      control={
+        <>
+          {children}
+          <Switch id={id} data-testid={testId} checked={checked} disabled={disabled || saving} onChange={(e) => change(e.target.checked)} />
+        </>
+      }
+    />
   )
 }

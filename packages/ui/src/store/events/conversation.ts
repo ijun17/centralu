@@ -53,7 +53,6 @@ export function subagentStepEvent(e: NormalizedEvent, set: StoreSet, get: StoreG
 export function conversationEvent(
   e: NormalizedEvent,
   sessionId: string,
-  announced: boolean,
   set: StoreSet,
   get: StoreGet,
 ): void {
@@ -211,7 +210,7 @@ export function conversationEvent(
     }))
   }
 
-  notifyStateChange(e, sessionId, cur, withSeq, announced, set, get)
+  notifyStateChange(e, sessionId, cur, withSeq, set, get)
 }
 
 type Stop = { turn: number | undefined; failed?: string }

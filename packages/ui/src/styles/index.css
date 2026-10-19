@@ -375,24 +375,24 @@
  * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
  */
 [data-theme='light'] {
-  --color-surface-floor: #e8e8e8;
+  --color-surface-floor: #f0f0f0;
   --color-surface-side: #e0e0e0;
-  --color-surface-raised: #f4f4f4;
-  --color-surface-selected: #d8d8d8;
-  --color-surface-hover: #d0d0d0;
+  --color-surface-raised: #f9f9f9;
+  --color-surface-selected: #d4d4d4;
+  --color-surface-hover: #d9d9d9;
   /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
      deeper one in light, so the panels still read as cut out of it */
-  --color-surface-deck: #d2d2d2;
-  --color-surface-reading: #e8e8e8;
-  --color-surface-reading-raised: #f4f4f4;
+  --color-surface-deck: #e4e4e4;
+  --color-surface-reading: #f0f0f0;
+  --color-surface-reading-raised: #f9f9f9;
 
-  --color-line: #d4d4d4;
-  --color-line-strong: #bababa;
+  --color-line: #d6d6d6;
+  --color-line-strong: #bdbdbd;
 
-  --color-ink-signal: #000000;
-  --color-ink: #1f1f1f;
-  --color-ink-muted: #555555;
-  --color-ink-faint: #7f7f7f;
+  --color-ink-signal: #111111;
+  --color-ink: #2a2a2a;
+  --color-ink-muted: #5a5a5a;
+  --color-ink-faint: #7a7a7a;
 
   --color-diff-add: #1a7f37;
   --color-diff-add-bg: #dafbe1;
@@ -971,6 +971,43 @@
   }
 }
 
+/* A row's log opening downward in place and closing back up (the commands window, owner 2026-10-19): the row's grid
+   track grows from nothing, so what is under it moves with it rather than jumping */
+@keyframes cc-expand {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+.cc-expand {
+  grid-template-rows: 1fr;
+  animation: cc-expand 180ms ease-out;
+}
+@keyframes cc-collapse {
+  from {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+.cc-collapse {
+  grid-template-rows: 0fr;
+  animation: cc-collapse 150ms ease-in forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-expand,
+  .cc-collapse {
+    animation: none;
+  }
+}
+
 /* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
    the run-command dropdown) */
 /*
@@ -1240,6 +1277,23 @@
  */
 .cc-panel[data-look='answering'] {
   border-color: var(--color-ink-muted);
+  /* A half pixel more of the border's own colour, drawn outside so the content box does not move (owner, 2026-10-19) */
+  box-shadow:
+    0 0 0 0.5px var(--color-ink-muted),
+    0 0 8px 0 color-mix(in srgb, var(--color-ink-muted) 25%, transparent);
+}
+/* Light only: a resting panel's edge a step off the deck and its own floor, not line-strong, which drew every panel as
+   a dark frame there (owner, 2026-10-19). The looks below keep their colours */
+[data-theme='light'] .cc-panel:not([data-look='answering'], [data-look='waiting'], [data-look='stopped']) {
+  border-color: #d4d4d4;
+}
+/* Light only: answering in a lighter grey than ink-muted, which read as a dark frame there (owner, 2026-10-19); still
+   well apart from a resting panel's #d4d4d4 */
+[data-theme='light'] .cc-panel[data-look='answering'] {
+  border-color: #9e9e9e;
+  box-shadow:
+    0 0 0 0.5px #9e9e9e,
+    0 0 8px 0 rgb(158 158 158 / 0.25);
 }
 .cc-panel[data-look='stopped'],
 .cc-panel[data-look='waiting'] {
@@ -1247,6 +1301,29 @@
 }
 .cc-panel[data-look='stopped'] {
   border-style: dashed;
+}
+
+/*
+ * Light only: a bubble's border a step darker than its own fill, not the hairline every raised surface uses, so a
+ * message reads as one soft shape instead of a boxed form (owner, 2026-10-19). Dark keeps the shared line, which
+ * already sits close to its fill there. The agent's answer bubble carries `data-bubble`, mine `data-mine-bubble`
+ * (the person's message, and the same message pinned at the top).
+ */
+[data-theme='light'] [data-bubble] {
+  border-color: #e6e6e6;
+}
+[data-theme='light'] [data-mine-bubble]:not(.border-dashed) {
+  border-color: #cdcdcd;
+}
+/* A tool call's card, the same way: softer than the hairline (owner, 2026-10-19). A failed call keeps its dashed
+   line-strong, and a Centralu call its stronger edge, since those say something */
+[data-theme='light'] [data-testid='tool-card']:not([data-centralu-call], .border-dashed) {
+  border-color: #e2e2e2;
+}
+/* The accent, when the person turns it on, colours a switch that is on, as it does a checked box (components/Switch) */
+html[data-accent] .cc-switch input:checked ~ .cc-switch-track {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 /*

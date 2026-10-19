@@ -73,7 +73,6 @@ export function GridView() {
    * the composer of that panel has to already have focus.
    */
   const focusedSessionId = useStore((s) => s.focusedSessionId)
-  const foldComposer = useStore((s) => s.foldComposer)
   const focusSession = useStore((s) => s.focusSession)
   const setGridPanels = useStore((s) => s.setGridPanels)
   const setGridPanelSpan = useStore((s) => s.setGridPanelSpan)
@@ -416,12 +415,11 @@ export function GridView() {
                   <SessionPane
                     sessionId={id}
                     /*
-                  Folding the composer exists **only in the grid** (user request, 2026-09-10).
-                  The setting came from the reading space being tight in a two-row grid, so
-                  folding it in the focus view too, where there is plenty of room, would only
-                  leave the person having to unfold it again every time.
+                  Folding the composer exists **only in the grid** and on project screens (user request, 2026-09-10),
+                  and since 2026-10-20 only when the panel is short (SessionPane's FOLD_SHARE): the focus view has
+                  plenty of room, and folding there would only leave the person having to unfold it every time.
                 */
-                    fold={foldComposer}
+                    foldWhenShort
                     /*
                   The **only** handle for moving a panel is the header.
                   The whole panel used to be draggable, but with a draggable ancestor the

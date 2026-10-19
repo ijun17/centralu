@@ -4,15 +4,16 @@ import { useStore } from '../../store/store.js'
 import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
 import { SettingToggle } from './SettingToggle.jsx'
 import { Button } from '../../components/Button.jsx'
+import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
 
 /**
  * Updates (issue #43).
  *
  * This screen says three sentences: this is what is currently running, that is what is out
- * there, and whether to upgrade is for the person to decide. **It never upgrades on its own
- * unless asked to in advance** ("Apply updates automatically when idle", #352, off by default) —
- * swapping out the running app is not reversible, and this app does not do irreversible things
- * quietly. Even then it waits until nothing is running and nobody is typing.
+ * there, and whether to upgrade is for the person to decide. **It upgrades on its own only with
+ * "Automatic updates" on** (one switch for checking and applying since the owner's 2026-10-20
+ * decision; #352) — swapping out the running app is not reversible, so even then it waits until
+ * nothing is running and nobody is typing.
  *
  * The check is done by the host. The launcher has the same code too, but what actually runs is
  * a copy already installed on the person's machine, and that copy's comparison logic was wrong
@@ -36,6 +37,16 @@ export function UpdatesSection() {
   const relaunch = useRelaunchCheck()
   const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   const offer = update?.phase === 'restart_required' ? applyOffer(update, APP_VERSION, relaunch) : null
+  /*
+   * One switch for the host's two (owner, 2026-10-20): automatic checking (`auto`) and applying when idle (`autoApply`).
+   * It reads as on only when both are, so a host still holding the old default (checking on, applying off) shows it
+   * off, and turning it on sets both. Saved one after the other; the switch holds until both answers are back.
+   */
+  const automatic = update ? update.auto && update.autoApply === true : false
+  const setAutomatic = async (on: boolean) => {
+    await setUpdateAuto(on)
+    await setUpdateAutoApply(on)
+  }
 
   /*
    * Even before the host has answered, **the current version can already be stated.**
@@ -49,80 +60,63 @@ export function UpdatesSection() {
   const busy = update?.phase === 'checking' || update?.phase === 'updating' || update?.phase === 'waiting_for_npm'
 
   return (
-    <section>
-      <p className="text-xs leading-body text-ink-faint">
-        Centralu updates through npm, the same way it was installed. Checking only asks the
-        registry which version is newest; installing happens when you ask for it. Applying it
-        relaunches the window, and running agents, terminals and commands keep going.
-      </p>
-
-      <p className="mt-3 text-sm text-ink-muted" data-testid="update-current">
-        Running {current}
-      </p>
-      <p className="mt-1 text-sm text-ink-faint" data-testid="update-state">
-        {updateStateText(update, offer)}
-      </p>
-
-      <div className="mt-2 flex items-center gap-3">
-        <Button variant="quiet" size="sm" data-testid="update-check-now" disabled={busy} onClick={() => void checkUpdate(true)}>
-          Check now
-        </Button>
-        {update?.newer && update.latest && update.phase !== 'restart_required' && (
-          <Button variant="secondary" size="sm" data-testid="update-apply" disabled={busy} onClick={() => void applyUpdate()}>
-            Update to {update.latest}
-          </Button>
-        )}
-        {offer?.kind === 'apply' && (
-          <Button variant="secondary" size="sm" data-testid="update-apply-now-settings" onClick={() => void applyUpdateNow()}>
-            Apply now
-          </Button>
-        )}
-      </div>
+    <SettingsGroup
+      title="Centralu"
+      hint={
+        <>
+          Centralu updates through npm, the same way it was installed.
+          <More>
+            Checking only asks the registry which version is newest. With automatic updates off, installing happens when
+            you ask for it. Applying it relaunches the window, and running agents, terminals and commands keep going.
+          </More>
+        </>
+      }
+    >
+      <SettingsRow
+        label={<span data-testid="update-current">Running {current}</span>}
+        hint={<span data-testid="update-state">{updateStateText(update, offer)}</span>}
+        control={
+          <>
+            <Button variant="quiet" size="sm" data-testid="update-check-now" disabled={busy} onClick={() => void checkUpdate(true)}>
+              Check now
+            </Button>
+            {update?.newer && update.latest && update.phase !== 'restart_required' && (
+              <Button variant="secondary" size="sm" data-testid="update-apply" disabled={busy} onClick={() => void applyUpdate()}>
+                Update to {update.latest}
+              </Button>
+            )}
+            {offer?.kind === 'apply' && (
+              <Button variant="secondary" size="sm" data-testid="update-apply-now-settings" onClick={() => void applyUpdateNow()}>
+                Apply now
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/*
-        Why leaving this on is the default is recorded here. Someone turning it off needs to
-        know what they are turning off, and someone leaving it on needs to know what goes out —
-        there is no request that goes out silently.
+        Someone turning it off needs to know what they are turning off, and someone leaving it on needs to know what
+        goes out — there is no request that goes out silently. Applying needs a window that can relaunch without cutting
+        anything (#352: the desktop app with the keeper); elsewhere a newer version is installed and the window says so.
       */}
       <SettingToggle
-        className="mt-3"
-        checked={update?.auto ?? true}
-        onChange={setUpdateAuto}
-        label="Check for updates automatically"
-        hint={
+        checked={automatic}
+        disabled={update === null}
+        onChange={setAutomatic}
+        label="Automatic updates"
+        hint="Checks, installs and applies a newer version once nothing is busy."
+        more={
           <>
-            At startup, every six hours, and on focus if the last check is over an hour old.
-            Opening Updates checks when automatic checking is on. Installing reuses a check
-            from the last minute or checks again. It asks the public npm
-            registry for one version number and nothing else; if it cannot reach it, nothing
+            It asks the public npm registry for one version number and nothing else: at startup, every six hours, and on
+            focus if the last check is over an hour old. A newer version is installed as soon as it is found, and applied
+            once no session is working or waiting for you, no terminal or command is running, and you are not typing.
+            Applying relaunches the window; agents keep running through it. If it cannot reach the registry, nothing
             happens and nothing interrupts you.
           </>
         }
         testId="update-auto"
       />
-
-      {/*
-        Only where the window can apply an update without cutting anything (#352: the desktop app
-        with the keeper). Elsewhere a box that installs and then waits for a restart nobody does
-        would only leave a stale window behind.
-      */}
-      {relaunch !== undefined && (
-        <SettingToggle
-          className="mt-3"
-          checked={update?.autoApply ?? false}
-          onChange={setUpdateAutoApply}
-          label="Apply updates automatically when idle"
-          hint={
-            <>
-              A newer version is installed as soon as it is found, and applied once no session is
-              working or waiting for you, no terminal or command is running, and you are not typing.
-              Applying relaunches the window; agents keep running through it.
-            </>
-          }
-          testId="update-auto-apply"
-        />
-      )}
-    </section>
+    </SettingsGroup>
   )
 }
 
@@ -146,17 +140,21 @@ export function AgentCliUpdates() {
     .filter(([, v]) => v)
     .map(([tool, v]) => `${tools.find((t) => t.name === tool)?.label ?? tool} ${v}`)
   return (
-    <section className="mt-5 border-t border-line pt-4" data-testid="settings-agent-versions">
-      <p className="text-sm text-ink-muted" data-testid="agent-versions-installed">
-        {versions === null ? 'Agent CLIs: not checked yet' : installed.length > 0 ? `Installed: ${installed.join(' · ')}` : 'No agent CLI version found'}
-      </p>
+    <SettingsGroup testId="settings-agent-versions" title="Agent CLIs">
+      <SettingsRow
+        label={
+          <span data-testid="agent-versions-installed">
+            {versions === null ? 'Agent CLIs: not checked yet' : installed.length > 0 ? `Installed: ${installed.join(' · ')}` : 'No agent CLI version found'}
+          </span>
+        }
+      />
       <SettingToggle
-        className="mt-2"
         checked={versions?.autoApply ?? true}
         disabled={versions === null}
         onChange={setAutoApply}
         label="Move idle sessions to a newly installed agent CLI"
-        hint={
+        hint="A session restarts on the newer one once it is idle; its conversation continues."
+        more={
           <>
             Each session runs its own Claude Code or Codex process, which keeps the version it started with. With this on, a
             session restarts on the newer one once it is not working, not waiting for you and not running background tasks.
@@ -165,6 +163,6 @@ export function AgentCliUpdates() {
         }
         testId="agent-versions-auto-apply"
       />
-    </section>
+    </SettingsGroup>
   )
 }
