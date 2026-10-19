@@ -2,7 +2,7 @@ import type { Delegation } from './child-ownership.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
-import { NOT_REACHABLE } from '../adapters/contract.js'
+import { awayPhrase } from '../adapters/contract.js'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
@@ -12,9 +12,6 @@ import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
 /** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
 const ANSWER_READ_MAX_CHARS = 100_000
-
-/** A machine that cannot be asked, as the verb phrase after its name: its plain cause, or the words a model reads for any other */
-const awayPhrase = (why: string): string => (why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`)
 
 /**
  * An ask_project call's task in a session of a linked machine, while its turn runs there (#700). The hub cannot see
