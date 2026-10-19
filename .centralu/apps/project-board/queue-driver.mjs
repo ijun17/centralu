@@ -164,7 +164,7 @@ export async function runGuard(dir, { holder, now = Date.now(), ref = queueRef, 
       now,
       update: (fn) => updateQueue(dir, fn),
       renew: () => takeLease(dir, holder, Date.now()),
-      act: (found) => act(dir, found, { now, ref, update: (fn) => updateQueue(dir, fn) }),
+      act: (found) => act(QUEUE.conflicts.checkout, found, { now, ref, update: (fn) => updateQueue(dir, fn), renew: () => takeLease(dir, holder, Date.now()) }),
       failingLine,
     })
   } finally {

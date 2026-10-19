@@ -173,8 +173,10 @@ keeper on your change before it is on main: run `pnpm verify` locally anyway, al
 push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
 run was quick.) When main's full run fails, the board's main guard finds the commit that broke it
 among those since main was last fully green (the only one, the one touching the failed job's paths,
-or by running the full tier on candidates), files an issue with the failure and tells the session
-that queued it. To run the
+or by running the full tier on candidates), reverts it in a pull request queued at the front of the
+merge queue (never a release bump), files an issue with the failure and tells the session that
+queued it: fix it on a new branch and queue it again. A release still needs a fully green commit of
+main. To run the
 full tier on your branch before queueing it (UI work, a change to the keeper or the bundles):
 
 ```bash

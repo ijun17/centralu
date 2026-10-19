@@ -808,6 +808,13 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.prs[path.split('/')[4]].baseRefName = body.base
   save()
   out({ number: Number(path.split('/')[4]) })
+} else if (path === R + '/pulls' && args.includes('POST')) {
+  // A pull request the queue opens itself (the main guard's revert, #1259): open, and readable as any other
+  const body = JSON.parse(stdin)
+  const number = 600 + Object.keys(st.prs ?? {}).filter((n) => Number(n) >= 600).length
+  st.prs = { ...st.prs, [number]: { number, title: body.title, body: body.body, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: 'revert-' + number, headRefName: body.head, baseRefName: body.base, isCrossRepository: false, url: 'https://github.com/ijun17/centralu/pull/' + number, mergeCommit: null } }
+  write(['pr-create', body.head, body.title])
+  out({ number, html_url: 'https://github.com/ijun17/centralu/pull/' + number })
 } else if (path === R + '/issues' && args.includes('POST')) {
   const body = JSON.parse(stdin)
   st.issues = [...(st.issues ?? []), body]
@@ -2612,7 +2619,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     await new Promise((r) => setTimeout(r, 1_000))
     expect(issues()).toHaveLength(1)
     expect(mainRedNotices()).toHaveLength(1)
-    expect(guardOnDisk().hunt).toMatchObject({ red: repo.shas[0], outcome: 'reported', culprit: { sha: repo.shas[0] } })
+    expect(guardOnDisk().hunt).toMatchObject({ red: repo.shas[0], outcome: 'reverting', culprit: { sha: repo.shas[0] } })
     expect(gh().dispatched ?? []).toEqual([])
   })
 
@@ -2628,7 +2635,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       jobs: { 990: [failedJob(31, 'keeper e2e (linux)')] },
     })
     await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the report')
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: repo.shas[1], how: expect.stringContaining('touches the paths of keeper e2e (linux)') })
     expect(issues()[0]!.title).toBe('Main is red since #82 fix(desktop): change 82')
     expect(gh().dispatched ?? []).toEqual([])
@@ -2648,7 +2655,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
       },
     })
     await call('merge_queue')
-    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the bisect', 60_000)
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect', 60_000)
     expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3, how: expect.stringContaining('bisected') })
     expect(gh().dispatched).toEqual([
       { ref: probe(c2), inputs: { tier: 'full' } },
@@ -2671,3 +2678,64 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     expect(issues()).toEqual([])
   })
 })
+
+describe('the main guard reverts what broke main, at the front of the queue (#1259)', { timeout: 120_000 * SLOW }, () => {
+  const redOn = (repo: ReturnType<typeof mainRepo>, sha: string) => ({
+    branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+    jobs: { 990: [failedJob(31, 'verify')] },
+  })
+
+  it('reverts the culprit in a pull request on main, queued at the front for the session that queued it, and says so', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const culprit = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: culprit, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redOn(repo, culprit))
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    // The revert: on main's tip, undoing exactly the culprit (its file gone again), and nothing in the checkout moved
+    const branch = `revert/${culprit.slice(0, 12)}`
+    const tip = g(repo.origin, 'rev-parse', branch)
+    expect(g(repo.origin, 'rev-parse', `${tip}^`)).toBe(culprit)
+    expect(g(repo.origin, 'rev-parse', `${tip}^{tree}`)).toBe(g(repo.origin, 'rev-parse', `${repo.green}^{tree}`))
+    expect(g(repo.work, 'status', '--porcelain')).toBe('')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([['pr-create', branch, 'revert: feat(ui): change 81']])
+    const item = queueOnDisk().items.find((i: any) => i.pr === 600)
+    expect(item).toMatchObject({ state: 'waiting', owner: 'tester', author: 'writer', title: 'revert: feat(ui): change 81' })
+    expect(item.front).toBeTruthy()
+    expect(mainRedNotices()[0]!.text).toContain('Reverted it in #600, queued at the front of the merge queue; it lands after the fast tier.')
+    expect(issues()[0]!.body).toContain('Reverted it in #600')
+    expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 600, branch })
+  })
+
+  it('never reverts a release bump: it says so, and opens nothing', async () => {
+    const repo = mainRepo([{ subject: 'chore(release): 1.2.3 (#90)', files: ['packages/protocol/src/brand.ts'] }])
+    guardRuntime(repo, redOn(repo, repo.shas[0]!))
+    landedBump(repo.shas[0]!)
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(spawnSync('git', ['rev-parse', '--verify', '--quiet', `revert/${repo.shas[0]!.slice(0, 12)}`], { cwd: repo.origin, env: GIT_ENV }).status).not.toBe(0)
+    expect(issues()[0]!.body).toContain('#90 is a release bump, which the queue never reverts')
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+  })
+
+  it('says to revert by hand when the revert does not apply to main any more, and opens nothing', async () => {
+    const repo = mainRepo([
+      { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
+      { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/a.ts'] },
+    ])
+    // Red on #81; #82 landed on it since, changing the same file, its own run still going
+    guardRuntime(repo, { ...redOn(repo, repo.shas[0]!), branchRuns: { main: [{ ...mainRun(991, repo.shas[1]!, null), status: 'in_progress' }, mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] } })
+    landedBump(repo.shas[0]!, 81)
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()[0]!.body).toContain('The queue could not revert it: its reverse does not apply to main')
+    expect(issues()[0]!.body).toContain('Revert it by hand.')
+  })
+})
+
+/** The queue landed `commit` as #`pr` (the guard watches main once the queue has landed something) */
+function landedBump(commit: string, pr = 90) {
+  seedQueue([{ repo: R, pr, lowers: [], owner: 'other', state: 'merged', commit, title: `change ${pr}`, updatedAt: new Date().toISOString(), reruns: {} }])
+}

@@ -534,10 +534,21 @@ looked into).
   deleted once its run has spoken; a probe cancelled twice ends the bisect without a culprit.
 - **Once acted** on a red, the guard does nothing more about it (or about red runs on older commits)
   until main is green again. Main green during a bisect (a flake) ends it.
-- **Acting**: an issue with the failure (the run, the failed jobs, the first failing line, the
-  candidates and how the culprit was found), and a message to the session that queued the culprit
-  (its merged item, by the commit it landed as, else by the pull request in the subject: posted into
-  that session as its notices are, and seen by its watch command). Kind `main-red`.
+- **Acting** (`actOnRed`): the culprit is **reverted** in a pull request (`revert: <its subject>`,
+  branch `revert/<sha>`): the reverse of its change applied to the default branch's tip in a temporary
+  index from the checkout (nothing in the checkout moves) and pushed. It is **queued at the front**
+  (`front`), for the session that queued the culprit (owner, author and notice address of its merged
+  item), and lands through the fast tier like any change. **A release bump is never reverted** (a
+  subject `chore(release): …`, or a change to project.json `release.source`); nor is anything when
+  the reverse no longer applies (later commits changed the same lines) or there is no checkout: then
+  the issue says to fix or revert it by hand. Either way, an issue with the failure (the run, the
+  failed jobs, the first failing line, the candidates, how the culprit was found and what the queue
+  did), and a message to the session that queued the culprit (its merged item, by the commit it
+  landed as, else by the pull request in the subject: posted into that session as its notices are,
+  and seen by its watch command). Kind `main-red`. The hunt then ends `reverting` or `reported`.
+- **The release** still needs a fully green commit: its CI gate reads main's own push run (always
+  the full tier) on that exact commit, never a batch's quick run on it (`ciForRelease`; test
+  "refuses to tag a commit whose only green run is a batch's quick run …").
 - **Keeping running**: the board holds busy while main's newest run is going or a hunt is under way
   (`queueBusy`), so the guard sees the full run that follows a landing.
 - `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`) and `PROJECT_BOARD_QUEUE_GUARD_MS` are for tests only.

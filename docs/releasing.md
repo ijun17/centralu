@@ -84,7 +84,10 @@ script rehearses by default and why nothing publishes automatically.
   pull request through a batch built on main whose manual run asks for the quick tier (input
   `tier: quick`; a release bump or a commit on main still runs in full), a batch of one included, and
   the full tier runs on main once it has landed. `merge_when_green` still refuses a head whose own run
-  was quick. A release still needs a fully green commit (below). To run the full tier
+  was quick. When main's full run fails, the board's main guard finds the culprit among the commits
+  since the last fully green one, reverts it in a pull request at the front of the queue (never a
+  release bump) and files an issue. A release still needs a fully green commit: the release's CI gate
+  reads main's own push run on that exact commit, never a batch's quick run on it (below). To run the full tier
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
   the pull request.

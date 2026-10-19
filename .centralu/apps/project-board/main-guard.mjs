@@ -133,6 +133,7 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
   const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, at: new Date(now).toISOString() }
   const stop = async (why) => {
     const record = await act({ red: base, culprit: null, why })
+    if (!record) return { did: 'yielded' }
     save({ hunt: { ...base, ...record, endedAt: new Date(now).toISOString() } })
     return { did: 'unknown', why }
   }
@@ -155,6 +156,8 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
 
 async function finish({ hunt, culprit, how, save, now, act }) {
   const record = await act({ red: hunt, culprit, how })
+  // Another driver holds the lease now: it acts
+  if (!record) return { did: 'yielded' }
   save({ hunt: { ...hunt, probe: null, culprit: { sha: culprit.sha, subject: culprit.subject, how }, ...record, endedAt: new Date(now).toISOString() } })
   return { did: 'culprit', culprit: culprit.sha, how }
 }
@@ -193,6 +196,7 @@ async function stepHunt({ hunt, save, now, renew, act, repo }) {
       return { did: 'retry', sha: probe.sha }
     }
     const record = await act({ red: hunt, culprit: null, why: `the full tier's run on ${short(probe.sha)} (a bisect step) was cancelled twice.` })
+    if (!record) return { did: 'yielded' }
     save({ hunt: { ...hunt, probe: null, ...record, endedAt: new Date(now).toISOString() } })
     return { did: 'unknown' }
   }
