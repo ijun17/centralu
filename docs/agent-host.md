@@ -1397,9 +1397,12 @@ the params with the method's schema and reads the answer with its result schema,
   It also lists what no command changes (send key, session tools, agent ceiling and depth).
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
-  `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `error`, `done`, `allDone`,
-  `whenFocused`, `sound`; merged one by one into the host's record, §1.4; no card, except to turn `approval` or `error` off, or `sound` while either would still notify, the ones that
-  tell the person a card waits, which ask in every preset and keep them on when denied). The arguments are strict: a field it does not have (`sessionTools`, always on and named by neither command, `agentCeiling`,
+  `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
+  merged one by one into the host's record, §1.4; no card, except to turn `approval` off, or `sound` while it would still
+  notify, the ones that tell the person a card waits, which ask in every preset and keep them on when denied). The
+  "error" and "every session finished" notifications are gone from the product (owner decision 2026-10-20): the window
+  no longer raises them, `set_preferences` refuses `error` and `allDone` by name, and the stored switches stay readable
+  for older builds. The arguments are strict: a field it does not have (`sessionTools`, always on and named by neither command, `agentCeiling`,
   `themeMode`) is refused by name. A theme names one preset (`THEME_PRESETS`, now in the protocol) or a theme file that
   reads cleanly; it sets the side of the theme's base and the stored mode to that same base, so the mode stays `dark` or
   `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
@@ -1470,7 +1473,7 @@ window's channel), grouped, and for each group one of three states.
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
 | Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
-| Notifications. The switches `approval`, `error`, `done`, `allDone`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`) | **Has it** (#1306) | `set_preferences notifications`, no card, except to turn `approval` or `error` off, or `sound` while either would still notify. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
+| Notifications. The switches `approval`, `done`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`, which still carries `error` and `allDone` for older builds; the window no longer raises those two, 2026-10-20) | **Has it** (#1306) | `set_preferences notifications`, no card, except to turn `approval` off, or `sound` while it would still notify. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
 | The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
 | Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
