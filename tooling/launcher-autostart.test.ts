@@ -231,10 +231,9 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     expect(desktop).toBeGreaterThan(0)
     expect(s).toContain('$_.SessionId -gt 0')
     expect(s).toContain('Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid')
-    expect(s.indexOf('"CENTRALU-AUTOSTART nosession desktops=$($all.Count)"')).toBeGreaterThan(desktop)
+    expect(s.indexOf('"CENTRALU-AUTOSTART nosession desktops=$($all.Count) unreadable=$unread"')).toBeGreaterThan(desktop)
     // Matched by SID, never by the names this logon reports (#1223: USERDOMAIN is `WORKGROUP` in a workgroup's ssh logon)
     expect(s).not.toContain('USERDOMAIN')
-    expect(s).not.toContain('MethodName GetOwner;')
     expect(s.indexOf('Register-ScheduledTask')).toBeGreaterThan(s.indexOf('if (-not $same) {'))
     expect(s.indexOf('Start-ScheduledTask')).toBeGreaterThan(s.indexOf('Register-ScheduledTask'))
     // A trigger only ever comes from the task that was there (`$keep`), never a new one
@@ -355,7 +354,16 @@ describe('the Windows scheduled task (and WSL’s)', () => {
 
       it('finds no sign-in in the Explorer of another account with the same user name, and says how many desktops it saw', () => {
         const other = "@([pscustomobject]@{ SessionId = 2; User = $env:USERNAME; Domain = $env:USERDOMAIN; Sid = 'S-1-5-21-1-2-3-1001' })"
-        expect(run(signin, '$null', undefined, { explorers: other, env: workgroup })).toEqual(['CENTRALU-AUTOSTART nosession desktops=1'])
+        expect(run(signin, '$null', undefined, { explorers: other, env: workgroup })).toEqual(['CENTRALU-AUTOSTART nosession desktops=1 unreadable=0'])
+      })
+
+      it('takes a task of another account that resolves (SYSTEM) as not this user’s: registered again, without its trigger', () => {
+        expect(run(signin, mine('$arg', "@('logon')", "'NT AUTHORITY\\SYSTEM'"), undefined, { explorers: theirs, env: workgroup })).toEqual([
+          'Register Centralu host (me) action=True triggers=0',
+          'CENTRALU-AUTOSTART-NOTE registered',
+          'Start Centralu host (me)',
+          'CENTRALU-AUTOSTART started',
+        ])
       })
 
       it('registers the task at sign-in (autostart on) as the account, not as WORKGROUP\\user', () => {
@@ -571,7 +579,7 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
   })
 
   it('starts the host in the sign-in through this data folder’s task, and says when nobody is signed in or it cannot (#1224)', async () => {
-    const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART nosession desktops=2', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
+    const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART nosession desktops=2 unreadable=1', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
     const w = windows(() => ({ stdout: `${answers.shift()}\r\n` }))
     const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows', CC_DATA_DIR: w.dataDir }, home: w.base.home, platform: 'win32', run: w.r.run, user: 'me' }
     expect(await startInSignIn(ask)).toEqual({ started: true, name: 'Centralu host (me)' })
@@ -582,7 +590,7 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
     expect(texts(action)).toEqual([w.dataDir, join(w.dataDir, 'remote', 'bin', 'centralu.cmd')])
     expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession' })
     // How many desktop Explorers of other accounts there were, for serve.log (#1223)
-    expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession', desktops: 2 })
+    expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession', desktops: 2, unreadable: 1 })
     expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'error', message: 'Access is denied.' })
     expect(w.r.runs).toHaveLength(4)
   })

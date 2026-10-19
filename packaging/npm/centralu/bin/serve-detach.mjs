@@ -3,10 +3,10 @@
  * stopping it in order (docs/plans/remote-hub.md §10.4).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, renameSync, writeFileSync, writeSync } from 'node:fs'
+import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
-import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
+import { answerLine, isAlive, renameRetrying, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
 import { SERVE_LOG_FILE, serveDataDir, ensureServeState } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
@@ -140,12 +140,15 @@ export async function runDetach({
   if (await answered(true)) return 0
 
   const log = join(dataDir, SERVE_LOG_FILE)
-  // One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows
+  /*
+   * One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows. So a log
+   * that cannot be moved aside (a reader holds `serve.log.1`) is removed rather than left to read as a start
+   */
   const freshLog = () => {
     try {
-      renameSync(log, `${log}.1`)
-    } catch {
-      // there was none
+      renameRetrying(log, `${log}.1`)
+    } catch (e) {
+      if (e?.code !== 'ENOENT') rmSync(log, { force: true, maxRetries: 5 })
     }
   }
 
@@ -174,6 +177,8 @@ export async function runDetach({
         await sleep(250)
       }
       notInSignIn = `the host the sign-in task "${s.name}" started did not answer within ${Math.round(signInMs / 1000)} s`
+      // The WMI launcher's first line says so; the task's line goes, so `serve.log.1` keeps the start before this one
+      rmSync(log, { force: true, maxRetries: 5 })
     } else {
       notInSignIn = signInMissed(s)
     }
@@ -219,11 +224,17 @@ export async function runDetach({
 export function signInMissed(s) {
   if (s.reason === 'nosession') {
     const n = s.desktops
+    const unread = s.unreadable ? `, ${s.unreadable} of them with an owner WMI would not tell` : ''
     const seen =
-      typeof n !== 'number' ? 'no Explorer of this account in a desktop session' : n === 0 ? 'no Explorer in any desktop session' : `none of the ${n} Explorer${n === 1 ? '' : 's'} in desktop sessions is this account's`
+      typeof n !== 'number'
+        ? 'no Explorer of this account in a desktop session'
+        : n === 0
+          ? 'no Explorer in any desktop session'
+          : `none of the ${n} Explorer${n === 1 ? '' : 's'} in desktop sessions is this account's${unread}`
     return `no Windows sign-in of this user was found (${seen})`
   }
-  if (s.reason === 'error') return `the sign-in task failed: ${s.message}`
+  // It travels on the launcher's command line: bounded
+  if (s.reason === 'error') return `the sign-in task failed: ${String(s.message).slice(0, 300)}`
   if (s.reason === 'off') return 'the sign-in task is turned off (CENTRALU_SIGNIN_TASK=off)'
   if (s.reason === 'no_launcher') return 'there is no launcher in the data folder for the sign-in task to run'
   return `the sign-in task was not used (${s.reason})`

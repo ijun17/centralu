@@ -249,15 +249,18 @@ export function taskScript(action, { name, run = '', legacy = null }) {
      * logon's processes run). Asked of WMI for the owner's SID, which needs no administrator for the user's own
      * processes, reads the same in every language, and does not depend on what this logon calls its domain (GetOwner's
      * domain is the PC's name for a local account, while an ssh logon's USERDOMAIN may say `WORKGROUP`). When none is
-     * found, how many desktop Explorers there were at all goes into serve.log's line
+     * found, how many desktop Explorers there were at all, and how many of their owners WMI would not tell, goes into
+     * serve.log's line
      */
     return [
       ...head,
       'try {',
       ...mine.map((l) => `  ${l}`),
       "  $all = @(Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Where-Object { $_.SessionId -gt 0 })",
-      '  $desk = @($all | Where-Object { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid; $o.ReturnValue -eq 0 -and $o.Sid -eq $sid })',
-      `  if ($desk.Count -eq 0) { "${TASK_WORD} nosession desktops=$($all.Count)" } else {`,
+      '  $owners = @($all | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid })',
+      '  $desk = @($owners | Where-Object { $_.ReturnValue -eq 0 -and $_.Sid -eq $sid })',
+      '  $unread = @($owners | Where-Object { $_.ReturnValue -ne 0 }).Count',
+      `  if ($desk.Count -eq 0) { "${TASK_WORD} nosession desktops=$($all.Count) unreadable=$unread" } else {`,
       ...[...want, ...old, find, dropOld].map((l) => `    ${l}`),
       '    $acts = @(if ($t) { $t.Actions })',
       '    $same = (Test-Mine $t) -and $acts.Count -eq 1 -and $acts[0].Execute -eq $exe -and $acts[0].Arguments -eq $arg',
@@ -421,7 +424,8 @@ async function taskAutostart(action, { dataDir, env, home, name, run, user, plat
  * opens what it shows in session 0, where nobody sees it.
  *
  * `{ started: true, name }`, or `{ started: false, reason, message?, desktops? }`: `nosession` (this user is not signed
- * in here; `desktops` is how many desktop Explorers, of any account, there were),
+ * in here; `desktops` is how many desktop Explorers, of any account, there were, `unreadable` how many of their owners
+ * WMI would not tell),
  * `off` (`CENTRALU_SIGNIN_TASK=off`, for a person who wants no task, and for tests on a machine with a desktop),
  * `not_windows`, `no_launcher`, `error`. `run` is a parameter so tests never reach the real Task Scheduler.
  */
@@ -434,11 +438,14 @@ export async function startInSignIn({ dataDir, env, home, platform = process.pla
   if (!ps) return { started: false, reason: 'error', message: 'Windows PowerShell is not reachable' }
   const name = autostartName('task', { dataDir, home, env, platform, user })
   const runScript = taskActionScript({ how: 'wmi', launcher, env })
-  const parse = (out) => ({ ...parseTaskAnswer(out), desktops: /nosession desktops=(\d+)/.exec(String(out ?? ''))?.[1] })
+  const parse = (out) => {
+    const m = /nosession desktops=(\d+)(?: unreadable=(\d+))?/.exec(String(out ?? ''))
+    return { ...parseTaskAnswer(out), ...(m ? { desktops: Number(m[1]), unreadable: Number(m[2] ?? 0) } : {}) }
+  }
   const a = await askPowershell(ps, taskScript('signin', { name, run: runScript, legacy: legacyTaskName({ dataDir, home, env, platform }) }), env, parse, run)
   if (!a.ok) return { started: false, reason: 'error', message: a.message }
   if (a.word === 'started') return { started: true, name }
-  if (a.word === 'nosession') return { started: false, reason: 'nosession', ...(a.desktops !== undefined ? { desktops: Number(a.desktops) } : {}) }
+  if (a.word === 'nosession') return { started: false, reason: 'nosession', ...(a.desktops !== undefined ? { desktops: a.desktops, unreadable: a.unreadable } : {}) }
   return { started: false, reason: 'error', message: `Task Scheduler answered ${a.word}` }
 }
 

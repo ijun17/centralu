@@ -821,6 +821,10 @@ describe('starting through WMI', () => {
       )
       expect(r.code).toBe(0)
       expect(r.line).toMatchObject({ hostRunning: true, detach: { ok: true, how: 'task', already: false } })
+      // The task's serve writes no serve.log: --detach leaves the line that says how this host started (#1223)
+      expect(readFileSync(join(r.dataDir, 'serve.log'), 'utf8')).toBe(
+        '[centralu serve] started centralu serve in the Windows sign-in (the scheduled task "Centralu host 1a2b3c4d"); waiting for its host\n',
+      )
       expect(wmi).toBe(0)
     } finally {
       for (const s of servers) await s.close()
@@ -863,6 +867,9 @@ describe('starting through WMI', () => {
       expect((await wmiStart(async () => ({ started: false, reason: 'nosession', desktops: 1 }))).start).toBe(
         "through WMI: no Windows sign-in of this user was found (none of the 1 Explorer in desktop sessions is this account's)",
       )
+      expect((await wmiStart(async () => ({ started: false, reason: 'nosession', desktops: 3, unreadable: 2 }))).start).toBe(
+        "through WMI: no Windows sign-in of this user was found (none of the 3 Explorers in desktop sessions is this account's, 2 of them with an owner WMI would not tell)",
+      )
       expect((await wmiStart(async () => ({ started: false, reason: 'nosession', desktops: 0 }))).start).toBe('through WMI: no Windows sign-in of this user was found (no Explorer in any desktop session)')
       expect((await wmiStart(async () => ({ started: false, reason: 'nosession' }))).start).toBe('through WMI: no Windows sign-in of this user was found (no Explorer of this account in a desktop session)')
     })
@@ -870,15 +877,34 @@ describe('starting through WMI', () => {
     it('says the task failed and why, or that it is turned off', async () => {
       expect((await wmiStart(async () => ({ started: false, reason: 'error', message: 'Access is denied.' }))).start).toBe('through WMI: the sign-in task failed: Access is denied.')
       expect((await wmiStart(async () => ({ started: false, reason: 'off' }))).start).toBe('through WMI: the sign-in task is turned off (CENTRALU_SIGNIN_TASK=off)')
+      // It travels on the launcher's command line, so a long refusal is cut
+      expect((await wmiStart(async () => ({ started: false, reason: 'error', message: 'x'.repeat(5000) }))).start).toBe(`through WMI: the sign-in task failed: ${'x'.repeat(300)}`)
     })
 
-    it('says the task was started; when its host does not answer, the WMI launcher says so and the task’s line is kept', async () => {
-      const r = await wmiStart(async () => ({ started: true, name: 'Centralu host (me)' }))
+    it('when the task’s host does not answer, the WMI launcher says so, and serve.log.1 keeps the start before', async () => {
+      const r = await wmiStart(async (...a: unknown[]) => {
+        writeFileSync(join((a[0] as { dataDir: string }).dataDir, 'serve.log'), 'the previous launcher\n')
+        return { started: true, name: 'Centralu host (me)' }
+      })
       expect(r.start).toBe('through WMI: the host the sign-in task "Centralu host (me)" started did not answer within 1 s')
-      expect(readFileSync(join(r.dataDir, 'serve.log.1'), 'utf8')).toBe(
-        '[centralu serve] started centralu serve in the Windows sign-in (the scheduled task "Centralu host (me)"); waiting for its host\n',
-      )
+      expect(readFileSync(join(r.dataDir, 'serve.log.1'), 'utf8')).toBe('the previous launcher\n')
+      // The task's line went with its host, so a WMI start that never ran still shows as no serve.log (wmi_blocked)
+      expect(existsSync(join(r.dataDir, 'serve.log'))).toBe(false)
     })
+
+    it('removes a serve.log it cannot move aside, so a WMI start that never ran still reads as wmi_blocked', async () => {
+      const r = await detachWith(
+        async () => ({ ok: true, pid: 4242, alive: () => true, stop: async () => {} }),
+        async (...a: unknown[]) => {
+          // What a rename cannot replace: serve.log.1 is a folder
+          const { dataDir } = a[0] as { dataDir: string }
+          writeFileSync(join(dataDir, 'serve.log'), 'an earlier start\n')
+          mkdirSync(join(dataDir, 'serve.log.1', 'x'), { recursive: true })
+          return { started: false, reason: 'nosession' }
+        },
+      )
+      expect(r.line.detach).toMatchObject({ ok: false, reason: 'wmi_blocked' })
+    }, 30_000 * SLOW)
 
     it('carries the line to the launcher in its --detached-child spec', () => {
       const spec = decodeChildSpec(encodeChildSpec({ env: {}, log: '/d/serve.log', start: 'through WMI: why' }))

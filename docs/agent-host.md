@@ -2505,7 +2505,9 @@ the rest, so it stops growing; the previous start's is kept as `serve.log.1`) an
 the sign-in (`started in the background through WMI: no Windows sign-in of this user was found (none of the 2 Explorers
 in desktop sessions is this account's)`, or `the sign-in task failed: <reason>`, or that the task's host did not answer);
 the reason travels in the same internal argument. A start through the task leaves one line of its own, written by
-`--detach`, since the task's `serve` writes no `serve.log` (#1223).
+`--detach`, since the task's `serve` writes no `serve.log` (#1223); when that host does not answer, the line is removed
+before the WMI start, so `serve.log.1` keeps the start before and a WMI start that never ran still shows as no
+`serve.log`. A `serve.log` that cannot be moved aside is removed for the same reason.
 
 `--detach` prints the connection line with `hostRunning: true` and `detach: { ok: true, how, already }`, or
 `{ "v": 1, "detach": { "ok": false, "how", "reason", "message" } }`. `reason` is `wmi_blocked` when WMI refused, or
