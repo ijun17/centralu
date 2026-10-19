@@ -834,7 +834,11 @@ export class ExternalApps {
     return this.info(e)
   }
 
-  async dispose(): Promise<void> {
+  /**
+   * The host is exiting: every app process stops, within the shutdown budget (`stopAll`). `awaitTree` waits until each
+   * process and what it left running have ended, for a caller about to delete the data folder (a test's cleanup).
+   */
+  async dispose({ awaitTree = false }: { awaitTree?: boolean } = {}): Promise<void> {
     this.disposed = true
     if (this.resumeTimer) clearTimeout(this.resumeTimer)
     this.watchers.close()
@@ -843,7 +847,7 @@ export class ExternalApps {
     this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
-    await this.lifecycle.stopAll(all)
+    await this.lifecycle.stopAll(all, { awaitTree })
   }
 
   // ── Reflecting changes (C-4) ─────────────────────────────────────────────────────────────────

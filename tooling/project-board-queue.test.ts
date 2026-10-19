@@ -957,7 +957,8 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
   // Without blocking the event loop while it retries; a folder Windows still holds is left to its temporary-folder cleanup (#1346)
   await removeFakeDir(root)
@@ -1506,7 +1507,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().filter((w) => w[0] === 'merge')[0]![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA]))
     // Nothing rerun: the duplicate's checks are moot, not a reason to spend a run
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     // A failed check that is not the duplicate's (another workflow's) still keeps it waiting
     rmFakeDir(join(root, 'data'))
@@ -1524,7 +1525,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', null, 12)] } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'ci', 'CI')
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     expect(queueOnDisk().items.map((i: any) => [i.pr, i.state])).toEqual([[77, 'ci']])
     patchGh((s) => (s.checks[SHA] = green('2026-10-17T09:00:00Z')))
@@ -2695,7 +2696,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
     const mine = await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'someone else' })
     // The app goes away (Centralu stops an idle one)
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const dir = queueFile().replace(/[\\/]merge-queue\.json$/, '')
     expect(mine.data.watch).toContain(dir.includes(' ') ? `"${dir}"` : dir)
@@ -2714,7 +2715,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
   it('exits 0 with the merge, and 6 when nothing happens before its deadline', async () => {
     runtime(ghState(), IDLE_SERVER)
     const q = await call('queue_merge', { pr: 77, owner: 'tester' })
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const dir = queueFile().replace(/[\\/]merge-queue\.json$/, '')
     const r = await watch(['watch', '--data', dir, '--owner', 'tester', '--after', String(q.data.seq)])
@@ -2728,7 +2729,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
     patchGh((s) => (s.checks[SHA] = [ghCheck('verify', null, 11)]))
     runtime(undefined, IDLE_SERVER)
     const p = await call('queue_merge', { pr: 78, owner: 'tester' })
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const quiet = await watch(['watch', '--data', dir, '--owner', 'tester', '--after', String(p.data.seq), '--minutes', '0.01'])
     expect(quiet.code).toBe(6)
