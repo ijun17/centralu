@@ -1118,7 +1118,8 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   .machine`, `.session`, additive). Approving it is remembered for the pair (that session of that machine, this
   project; `machine_ask_consents`, store v60) until withdrawn in Settings → Machines, the switch going off, or the
   machine or project being removed; a remembered pair passes with no card. Deny is not remembered. The switch and the
-  project are read again once the card is answered.
+  project are read again once the card is answered, and once more when the session is awake to take the task (a wake
+  or a deferred restart takes seconds).
 - **What runs** (`MachineAsks`, sessions/machine-asks.ts). An existing ordinary session of the project, chosen as an ask
   here chooses one (#614); never created, never an app's or a builder's; one busy with a turn gets nothing (no note or
   queue from another machine, as §12.6 the other way). The task is framed as from that session on that machine
