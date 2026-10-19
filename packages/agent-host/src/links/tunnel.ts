@@ -404,7 +404,7 @@ export function serveCommand(spec: RemoteSpec): string {
  * cmd.exe's line (`WINDOWS_INLINE_MAX`); the scheduled task's PowerShell, which is long, is built and
  * run there by `serve`, on a command line of its own
  */
-export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'status'): string {
+export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'remove' | 'status'): string {
   return remoteCommand(spec, `serve --autostart ${action}`)
 }
 
@@ -419,6 +419,7 @@ function remoteCommand(
     | 'serve'
     | 'serve --autostart on'
     | 'serve --autostart off'
+    | 'serve --autostart remove'
     | 'serve --autostart status',
 ): string {
   const custom = spec.command?.trim() || null

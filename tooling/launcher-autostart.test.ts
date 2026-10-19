@@ -77,8 +77,9 @@ describe('--autostart arguments', () => {
   })
 
   it('refuses anything else, a port, and another command beside it', () => {
-    expect(parseServeArgs(['--autostart']).error).toMatch(/--autostart needs on, off or status \(got nothing\)/)
-    expect(parseServeArgs(['--autostart', 'yes']).error).toMatch(/needs on, off or status \(got "yes"\)/)
+    expect(parseServeArgs(['--autostart']).error).toMatch(/--autostart needs on, off, remove or status \(got nothing\)/)
+    expect(parseServeArgs(['--autostart', 'yes']).error).toMatch(/needs on, off, remove or status \(got "yes"\)/)
+    expect(parseServeArgs(['--autostart', 'remove'])).toEqual({ mode: 'autostart', port: null, autostart: 'remove' })
     expect(parseServeArgs(['--autostart', 'on', '--port', '4000']).error).toMatch(/--autostart takes no --port/)
     expect(parseServeArgs(['--stop', '--autostart', 'off']).error).toMatch(/--stop and --autostart are separate commands/)
     expect(parseServeArgs(['--autostart', 'off', '--detach']).error).toMatch(/--autostart and --detach are separate commands/)
@@ -119,6 +120,18 @@ describe('what a machine starts its host at boot with (plan §10.4)', () => {
     expect(win('D:\\centralu')).toMatch(/^Centralu host [0-9a-f]{8}$/)
     // The same other folder in either spelling is one entry, not two
     expect(win('D:\\Centralu')).toBe(win('d:/centralu'))
+  })
+
+  /*
+   * #1224's review: the root folder of Task Scheduler is one list for every account, and an administrator's ssh logon
+   * sees the others' tasks. The user is part of the name, so a second account's --detach never finds the first's
+   */
+  it('names the Windows task for its user too, with what a task name cannot hold replaced', () => {
+    const win = (user: string | null) => autostartName('task', { dataDir: 'C:\\Users\\Me\\.centralu', home: 'C:\\Users\\Me', env: {}, platform: 'win32', user })
+    expect(win('me')).toBe('Centralu host (me)')
+    expect(win('other')).not.toBe(win('me'))
+    expect(win('a/b:c')).toBe('Centralu host (a-b-c)')
+    expect(win(null)).toBe('Centralu host')
   })
 
   it('names the default folder plainly for the data folder serve itself resolves, on the OS running this test', () => {
@@ -201,7 +214,9 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     const encoded = /-WindowStyle Hidden -EncodedCommand ([A-Za-z0-9+/=]+)'/.exec(s)?.[1]
     expect(Buffer.from(encoded!, 'base64').toString('utf16le')).toBe(run)
     expect(texts(s)[0]).toBe('Centralu host')
-    expect(taskScript('off', { name: 'Centralu host' })).toContain("Unregister-ScheduledTask -TaskName $name -TaskPath '\\' -Confirm:$false")
+    expect(taskScript('remove', { name: 'Centralu host' })).toContain("Unregister-ScheduledTask -TaskName $name -TaskPath '\\' -Confirm:$false")
+    // off keeps the task, without its trigger (#1224's design): `--detach` starts the host in the sign-in through it
+    expect(taskScript('off', { name: 'Centralu host' })).not.toContain('Unregister-ScheduledTask -TaskName $name')
     expect(taskScript('status', { name: 'Centralu host' })).toContain("'CENTRALU-AUTOSTART state none'")
   })
 
@@ -217,10 +232,10 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     expect(s).toContain('$_.SessionId -gt 0')
     expect(s).toContain("Invoke-CimMethod -InputObject $_ -MethodName GetOwner")
     expect(s.indexOf("'CENTRALU-AUTOSTART nosession'")).toBeGreaterThan(desktop)
-    expect(s.indexOf('Register-ScheduledTask')).toBeGreaterThan(s.indexOf('if (-not $t) {'))
+    expect(s.indexOf('Register-ScheduledTask')).toBeGreaterThan(s.indexOf('if (-not $same) {'))
     expect(s.indexOf('Start-ScheduledTask')).toBeGreaterThan(s.indexOf('Register-ScheduledTask'))
+    // A trigger only ever comes from the task that was there (`$keep`), never a new one
     expect(s).not.toContain('New-ScheduledTaskTrigger')
-    expect(s).not.toContain('-Trigger')
     expect(s).toContain('-LogonType Interactive -RunLevel Limited')
     const encoded = /-WindowStyle Hidden -EncodedCommand ([A-Za-z0-9+/=]+)'/.exec(s)?.[1]
     expect(Buffer.from(encoded!, 'base64').toString('utf16le')).toBe(run)
@@ -231,12 +246,81 @@ describe('the Windows scheduled task (and WSL’s)', () => {
   // Windows PowerShell's own parser reads every script these build (nothing runs)
   it.runIf(process.platform === 'win32')('builds scripts Windows PowerShell parses without an error', () => {
     const run = taskActionScript({ how: 'wmi', launcher: 'C:\\c.cmd', env: { CC_DATA_DIR: 'C:\\d' } })
-    for (const action of ['on', 'off', 'status', 'signin']) {
-      const script = taskScript(action, { name: 'Centralu host', run })
+    for (const action of ['on', 'off', 'remove', 'status', 'signin']) {
+      const script = taskScript(action, { name: 'Centralu host (me)', run, legacy: 'Centralu host' })
       const check = `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$e); $e.Count`
       const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', check], { input: script, encoding: 'utf8' })
       expect(r.stdout.trim(), action).toBe('0')
     }
+  })
+
+  /*
+   * #1224's review: what the scripts do, run in Windows PowerShell with Task Scheduler and WMI stood in for (functions
+   * of the same names, which PowerShell finds before its cmdlets). Nothing reaches the real Task Scheduler. `task` is
+   * the task Get-ScheduledTask answers with, built after the script has said what it would register
+   */
+  describe.runIf(process.platform === 'win32')('the task scripts, run against a stand-in Task Scheduler', () => {
+    const action = taskActionScript({ how: 'wmi', launcher: 'C:\\Users\\me\\.centralu\\remote\\bin\\centralu.cmd', env: { CC_DATA_DIR: 'C:\\Users\\me\\.centralu' } })
+    const stubs = (task: string, legacyTask = '$null') =>
+      [
+        "function Say($s) { [Console]::Out.WriteLine(\"CALL $s\") }",
+        'function Get-CimInstance { param($ClassName, $Filter) @([pscustomobject]@{ SessionId = 1 }) }',
+        'function Invoke-CimMethod { param($InputObject, $MethodName) [pscustomobject]@{ ReturnValue = 0; User = $env:USERNAME; Domain = $env:USERDOMAIN } }',
+        `function Get-ScheduledTask { param($TaskName, $TaskPath, $ErrorAction) if ($TaskName -eq $name) { ${task} } else { ${legacyTask} } }`,
+        'function New-ScheduledTaskAction { param($Execute, $Argument) [pscustomobject]@{ Execute = $Execute; Arguments = $Argument } }',
+        'function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) [pscustomobject]@{ UserId = $UserId } }',
+        'function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries, [switch]$DontStopIfGoingOnBatteries, $ExecutionTimeLimit, $MultipleInstances) "settings" }',
+        'function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) "logon" }',
+        'function Register-ScheduledTask { param($TaskName, $TaskPath, $Action, $Trigger, $Principal, $Settings, $Description, [switch]$Force) Say "Register $TaskName action=$(@($Action)[0].Arguments -eq $arg) triggers=$(@($Trigger | Where-Object { $_ }).Count)" }',
+        'function Start-ScheduledTask { param($TaskName, $TaskPath) Say "Start $TaskName" }',
+        'function Unregister-ScheduledTask { param($TaskName, $TaskPath, $Confirm) Say "Unregister $TaskName" }',
+      ].join('\n')
+    const mine = (args: string, triggers = '@()', user = '$env:USERNAME') =>
+      `[pscustomobject]@{ Actions = @([pscustomobject]@{ Execute = (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'); Arguments = ${args} }); Principal = [pscustomobject]@{ UserId = ${user}; LogonType = 'Interactive'; RunLevel = 'Limited' }; Triggers = ${triggers}; Settings = 's'; Description = 'd' }`
+    const run = (script: string, task: string, legacyTask?: string) => {
+      const all = `${stubs(task, legacyTask)}\n${script}`
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(all, 'utf16le').toString('base64')], { encoding: 'utf8' })
+      return r.stdout.split(/\r?\n/).filter((l) => l.startsWith('CALL ') || l.startsWith('CENTRALU-AUTOSTART')).map((l) => l.replace(/^CALL /, ''))
+    }
+    const signin = taskScript('signin', { name: 'Centralu host (me)', run: action, legacy: 'Centralu host' })
+
+    it('registers a missing task without a trigger, then starts it', () => {
+      expect(run(signin, '$null')).toEqual(['Register Centralu host (me) action=True triggers=0', 'CENTRALU-AUTOSTART-NOTE registered', 'Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+    })
+
+    it('starts a task that runs what this serve would, as this user, without touching it', () => {
+      expect(run(signin, mine('$arg'))).toEqual(['Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+    })
+
+    it('registers a task again whose action is stale (a launcher that moved), keeping this user’s trigger', () => {
+      expect(run(signin, mine("'-EncodedCommand old'", "@('logon')"))).toEqual([
+        'Register Centralu host (me) action=True triggers=1',
+        'CENTRALU-AUTOSTART-NOTE registered',
+        'Start Centralu host (me)',
+        'CENTRALU-AUTOSTART started',
+      ])
+    })
+
+    it('registers a task of another account under this name as this user’s, with no trigger of theirs', () => {
+      expect(run(signin, mine('$arg', "@('logon')", "'OTHERPC\\someone'"))).toEqual([
+        'Register Centralu host (me) action=True triggers=0',
+        'CENTRALU-AUTOSTART-NOTE registered',
+        'Start Centralu host (me)',
+        'CENTRALU-AUTOSTART started',
+      ])
+    })
+
+    it('removes this user’s task of the old name, and leaves another account’s', () => {
+      expect(run(signin, mine('$arg'), mine("'x'"))).toEqual(['Unregister Centralu host', 'Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+      expect(run(signin, mine('$arg'), mine("'x'", '@()', "'OTHERPC\\someone'"))).toEqual(['Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+    })
+
+    it('off keeps the task and takes only its trigger; remove removes it', () => {
+      const off = taskScript('off', { name: 'Centralu host (me)', legacy: 'Centralu host' })
+      expect(run(off, mine("'x'", "@('logon')"))).toEqual(['Register Centralu host (me) action=False triggers=0', 'CENTRALU-AUTOSTART off'])
+      expect(run(off, mine("'x'"))).toEqual(['CENTRALU-AUTOSTART off'])
+      expect(run(taskScript('remove', { name: 'Centralu host (me)', legacy: 'Centralu host' }), mine("'x'"))).toEqual(['Unregister Centralu host (me)', 'CENTRALU-AUTOSTART off'])
+    })
   })
 
   it('reads what the task script printed', () => {
@@ -425,7 +509,8 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
     const v = windows(() => ({ stdout: 'not a task line\r\n', stderr }))
     expect((await autostart({ ...v.base, action: 'status' })).line).toMatchObject({ ok: false, message: 'Task Scheduler did not answer: PowerShell did not answer' })
     const silent = windows(() => ({ code: 1 }))
-    expect((await autostart({ ...silent.base, action: 'off' })).line).toMatchObject({ ok: false, on: true, message: 'Task Scheduler did not remove the task "Centralu host": PowerShell did not answer' })
+    expect((await autostart({ ...silent.base, action: 'off' })).line).toMatchObject({ ok: false, on: true, message: 'Task Scheduler did not change the task "Centralu host (me)": PowerShell did not answer' })
+    expect((await autostart({ ...silent.base, action: 'remove' })).line).toMatchObject({ ok: false, on: true, message: 'Task Scheduler did not remove the task "Centralu host (me)": PowerShell did not answer' })
   })
 
   it('a task with no trigger, the one --detach starts in the sign-in, counts as autostart off (#1224)', async () => {
@@ -437,8 +522,8 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
   it('starts the host in the sign-in through this data folder’s task, and says when nobody is signed in or it cannot (#1224)', async () => {
     const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
     const w = windows(() => ({ stdout: `${answers.shift()}\r\n` }))
-    const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows', CC_DATA_DIR: w.dataDir }, home: w.base.home, platform: 'win32', run: w.r.run }
-    expect(await startInSignIn(ask)).toEqual({ started: true, name: 'Centralu host' })
+    const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows', CC_DATA_DIR: w.dataDir }, home: w.base.home, platform: 'win32', run: w.r.run, user: 'me' }
+    expect(await startInSignIn(ask)).toEqual({ started: true, name: 'Centralu host (me)' })
     const script = ps(w.r.runs[0]!.args)
     expect(script).toContain('Start-ScheduledTask')
     // The task it registers runs this data folder's managed launcher, with the folder set
