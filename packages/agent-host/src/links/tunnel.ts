@@ -339,10 +339,11 @@ export function wslKeepAlive(spec: RemoteSpec | undefined): string | null {
 }
 
 /**
- * `$m`, the managed launcher's path (plan §10.1), in each shell: under `CC_DATA_DIR` when the ssh
- * session has it, else under `~/.centralu`, as `serve` and the installer resolve the data folder
+ * `$d`, the data folder, and `$m`, the managed launcher's path in it (plan §10.1), in each shell: `CC_DATA_DIR` when
+ * the ssh session has it, else `~/.centralu`, as `serve` and the installer resolve the data folder. The launcher
+ * `serve` keeps is looked for in the same `$d` (`<data>/bin/`, serve-install.mjs), not at a path of its own
  */
-export const MANAGED_SH = 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"'
+export const MANAGED_SH = 'd="${CC_DATA_DIR:-$HOME/.centralu}"; m="$d/remote/bin/centralu"'
 export const MANAGED_PS =
   "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $m = Join-Path $d 'remote\\bin\\centralu.cmd'"
 
@@ -361,7 +362,7 @@ export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
  * The remote command that prints the connection line (docs/agent-host.md §4.7), in the remote
  * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
  * `centralu.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu` on the PATH an ssh
- * command gets, else the launcher `serve` keeps (`~/.centralu/bin/centralu`), else `NOT_FOUND` on
+ * command gets, else the launcher `serve` keeps (`<data>/bin/centralu`), else `NOT_FOUND` on
  * stdout. The managed launcher comes first, so a machine with both an npm install and one the hub
  * made runs the version the hub installed. `<data>` is `CC_DATA_DIR` there, else `~/.centralu`:
  * the rule `serve` and the installer (install.ts) use.
@@ -442,14 +443,14 @@ function remoteCommand(
     return powershell(
       `${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
-        "else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'; " +
+        "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
     `${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
-    `elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" ${args}; ` +
+    `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
   if (spec.shell === 'posix') return custom ? `${custom} ${args}` : `sh -c '${lookup}'`
   const distro = distroOf(spec)
@@ -510,7 +511,7 @@ export type SshTunnelOptions = {
  *
  * - `BatchMode=yes` everywhere: a password or host-key prompt nobody can answer would hang the hub
  *   forever. The person's keys, agent and `~/.ssh/config` are used as they are.
- * - The first command falls back to `~/.centralu/bin/centralu` on exit 127: an SSH shell is not
+ * - The first command falls back to `<data>/bin/centralu`, decided on the remote: an SSH shell is not
  *   interactive, and nvm, fnm, volta and `~/.npm-global` put npm's global folder on PATH only in
  *   interactive shells (§4.7 of agent-host.md, which is why `serve` keeps that launcher).
  * - The forward binds 127.0.0.1 on both ends, explicitly: never 0.0.0.0 and never `GatewayPorts`,

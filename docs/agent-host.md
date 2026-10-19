@@ -2638,8 +2638,8 @@ command to whatever login shell the remote account has:
 
 | Shell | The connection command | Measured on |
 |---|---|---|
-| `posix` | `sh -c 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts`; the order by a real `sh` there |
-| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu.cmd` (the `.cmd` shim, never the bare name: PowerShell would pick the `.ps1`, which the default `Restricted` execution policy blocks, #688), then `%USERPROFILE%\.centralu\bin\centralu.cmd`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
+| `posix` | `sh -c 'd="${CC_DATA_DIR:-$HOME/.centralu}"; m="$d/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$d/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts`; the order by a real `sh` there |
+| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu.cmd` (the `.cmd` shim, never the bare name: PowerShell would pick the `.ps1`, which the default `Restricted` execution policy blocks, #688), then `<data>\bin\centralu.cmd`, the launcher `serve` keeps; `<data>` is `CC_DATA_DIR` there, else `%USERPROFILE%\.centralu`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
 | `wsl` | The same PowerShell wrapper around `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`, the script being the POSIX lookup with `/mnt/*` taken off PATH | Ubuntu 24.04 in WSL2 on that laptop |
 
 The managed launcher the installer writes (below) comes first, so a machine with both an npm install and one the hub
