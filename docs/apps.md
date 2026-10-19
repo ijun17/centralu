@@ -94,6 +94,10 @@ visibility is not read as the default: the side that is wrong stays closed.
   listed with its reason, as today. Copies leave the old key's state for a previous
   build during a swap (`user-app-adoption.ts`, [plans/root-apps.md](plans/root-apps.md) §4). One that
   appears later, such as an approved MCP server, is registered the same way while the host runs.
+  **The old key still reaches it:** a call or any other request by `user/<id>` (an older window during
+  a swap, a stored name, a script) resolves to the project's root app (`ExternalApps.resolve`, which
+  every runtime method taking a key reads first), with that app's trust and rules, while the user
+  folder has no app of that id and the project still exists.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes
