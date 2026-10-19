@@ -105,7 +105,7 @@ describe('the secrets store reads a damaged file as empty without losing it', ()
     expect(store.forApp('p1/keys', ['API_KEY'])).toEqual({})
     expect(store.names('p1/keys').size).toBe(0)
     const logged = vi.mocked(console.error).mock.calls.flat().join('\n')
-    expect(logged).toMatch(/app-secrets\.json is unreadable; moved to app-secrets\.json\.unreadable-\d+/)
+    expect(logged).toMatch(/app-secrets\.json is unreadable \(it is not valid JSON\); moved to app-secrets\.json\.unreadable-\d+/)
     expect(logged).not.toContain('sk-old')
     // Said once: the second read finds no file, which is the empty document
     store.names('p1/keys')
@@ -123,12 +123,13 @@ describe('the secrets store says when its file could not be used', () => {
     expect(existsSync(join(dataRoot, trouble!.movedTo!))).toBe(true)
     // Further reads find no file, which is no news: it stays said
     expect(store.trouble('p1/keys')).toEqual(trouble)
-    // One file holds every app's values (#993 review): app A's value entered again says nothing of app B's
+    // One file holds every app's values (#993 review): app A's value entered again says nothing of app B's, nor of why
     store.set('p1/keys', 'API_KEY', 'sk-new-value')
     expect(store.trouble('p1/keys')).toBeNull()
     expect(store.trouble('p2/other')).toEqual(trouble)
-    // And a restart finds it again, from the copy in the data folder
-    expect(new SecretStore(dataRoot).trouble('p2/other')).toEqual(trouble)
+    expect(trouble?.reason).toBe('it is not valid JSON')
+    // And a restart finds it again, from the copy in the data folder; why it was moved, only the host that moved it knows
+    expect(new SecretStore(dataRoot).trouble('p2/other')).toEqual({ movedTo: trouble!.movedTo, at: trouble!.at })
     expect(new SecretStore(dataRoot).trouble('p1/keys')).toBeNull()
   })
 
@@ -144,13 +145,83 @@ describe('the secrets store says when its file could not be used', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
     mkdirSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`, 'held'), { recursive: true })
     const store = new SecretStore(dataRoot)
-    expect(store.trouble('p1/keys')).toEqual({ movedTo: null, at: 1_700_000_000_000 })
+    const stuck = { movedTo: null, at: 1_700_000_000_000, reason: expect.stringMatching(/^it is not valid JSON, and it could not be moved aside \(\w+\)$/) }
+    expect(store.trouble('p1/keys')).toEqual(stuck)
     // Stuck is the file's, so every app says it
-    expect(store.trouble('p2/other')).toEqual({ movedTo: null, at: 1_700_000_000_000 })
+    expect(store.trouble('p2/other')).toEqual(stuck)
     writeFileSync(path, '{}')
     // Readable again: the folder held for the move is no copy of the file, so nothing is said
     rmSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`), { recursive: true })
     expect(store.trouble('p1/keys')).toBeNull()
+  })
+})
+
+/*
+ * #944: the screen names the file and why it could not be used, and never anything of what the file holds. A parse
+ * error's own message quotes the text it choked on, so the reason is a fixed phrase, or an OS error code
+ */
+describe('why a file could not be used, without its contents', () => {
+  it('a damaged secrets file: not valid JSON, or JSON of another shape, in the trouble and the log line', () => {
+    writeFileSync(join(dataRoot, SECRETS_FILE), DAMAGED)
+    const store = new SecretStore(dataRoot)
+    expect(store.trouble('p1/keys')).toEqual({ movedTo: expect.stringMatching(/^app-secrets\.json\.unreadable-\d+$/), at: expect.any(Number), reason: 'it is not valid JSON' })
+    const logged = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(logged).toMatch(/app-secrets\.json is unreadable \(it is not valid JSON\); moved to app-secrets\.json\.unreadable-\d+/)
+    expect(JSON.stringify(store.trouble('p1/keys')) + logged).not.toContain('sk-')
+
+    // A copy found after a restart has no reason to give, and says none
+    expect(new SecretStore(dataRoot).trouble('p1/keys')).toEqual({ movedTo: expect.stringMatching(/^app-secrets\.json\.unreadable-\d+$/), at: expect.any(Number) })
+
+    writeFileSync(join(dataRoot, SECRETS_FILE), '["sk-in-a-list"]')
+    expect(new SecretStore(dataRoot).trouble('p1/keys')).toMatchObject({ reason: 'it is not the JSON object Centralu writes' })
+  })
+
+  it('a secrets file that cannot be read at all: the OS error, in words and as its code', () => {
+    // A folder where the file belongs reads as EISDIR on every OS
+    mkdirSync(join(dataRoot, SECRETS_FILE))
+    expect(new SecretStore(dataRoot).trouble('p1/keys')).toEqual({ movedTo: null, at: expect.any(Number), reason: 'it is a folder (EISDIR)' })
+  })
+
+  it('a file that stays stuck for another reason says the current one', () => {
+    const path = join(dataRoot, SECRETS_FILE)
+    mkdirSync(path)
+    const store = new SecretStore(dataRoot)
+    const first = store.trouble('p1/keys')
+    expect(first).toMatchObject({ movedTo: null, reason: 'it is a folder (EISDIR)' })
+    // Now a damaged file whose copy name is taken by a folder: still stuck, for another reason
+    rmSync(path, { recursive: true })
+    writeFileSync(path, DAMAGED)
+    vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
+    mkdirSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`, 'held'), { recursive: true })
+    expect(store.trouble('p1/keys')).toEqual({ movedTo: null, at: first!.at, reason: expect.stringMatching(/^it is not valid JSON, and it could not be moved aside/) })
+  })
+
+  it('a damaged file that cannot be moved aside says both', () => {
+    writeFileSync(join(dataRoot, SECRETS_FILE), DAMAGED)
+    vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
+    mkdirSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`, 'held'), { recursive: true })
+    const reason = new SecretStore(dataRoot).trouble('p1/keys')?.reason
+    expect(reason).toMatch(/^it is not valid JSON, and it could not be moved aside \((EPERM|EEXIST|ENOTEMPTY|EISDIR|EACCES)\)$/)
+  })
+
+  it('the import marks: an app held because the file cannot be read says why', () => {
+    mkdirSync(join(dataRoot, IMPORTS_FILE))
+    expect(new ImportBook(dataRoot).doubt()).toBe(
+      `${join(dataRoot, IMPORTS_FILE)} could not be read: it is a folder (EISDIR). Whether this app was imported is not known, so it stays off until that file can be read again`,
+    )
+  })
+
+  it('the import marks: an app held because a damaged file was moved aside says what was wrong with it', () => {
+    mkdirSync(join(dataRoot, 'apps', 'notes'), { recursive: true })
+    writeFileSync(join(dataRoot, IMPORTS_FILE), '{"notes": {"source": "https://example.com/?token=sk-')
+    const book = new ImportBook(dataRoot)
+    const copy = book.get('notes', join(dataRoot, 'apps', 'notes'))?.lost
+    expect(copy).toMatch(/^app-imports\.json\.unreadable-\d+$/)
+    const reason = book.lostReason(copy!)
+    expect(reason).toBe(
+      `Centralu could not read ${join(dataRoot, IMPORTS_FILE)} (it is not valid JSON) and moved it to ${join(dataRoot, copy!)}, so it cannot tell whether this app was imported. Review what it runs, then enable it`,
+    )
+    expect(reason).not.toContain('sk-')
   })
 })
 

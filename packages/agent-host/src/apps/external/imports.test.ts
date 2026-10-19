@@ -454,13 +454,14 @@ describe('a marks file that cannot be read holds the apps instead of running the
     expect(copies()).toHaveLength(1)
     const copy = join(dataRoot, copies()[0]!)
     for (const id of ['gift', 'tool', 'mine']) {
-      expect(info(id)).toMatchObject({ status: 'unconfirmed', error: expect.stringContaining(`could not read ${marksPath()} and moved it to ${copy}`) })
+      // Why, in words that quote nothing of the file (#944)
+      expect(info(id)).toMatchObject({ status: 'unconfirmed', error: expect.stringContaining(`could not read ${marksPath()} (it is not valid JSON) and moved it to ${copy}`) })
     }
     const refused = await rt.call(userRef('tool'), 'env', {}, { kind: 'view' })
     expect(refused).toMatchObject({ status: 'rejected', error: expect.stringContaining('cannot tell whether this app was imported') })
     expect(existsSync(join(dataRoot, 'app-logs', '_user', 'tool.log'))).toBe(false)
     // Said on the host's log, and the damaged bytes survive in the copy beside it
-    expect(logged()).toContain(`${IMPORTS_FILE} is unreadable; moved to ${IMPORTS_FILE}.unreadable-`)
+    expect(logged()).toContain(`${IMPORTS_FILE} is unreadable (it is not valid JSON); moved to ${IMPORTS_FILE}.unreadable-`)
     expect(logged()).toContain('3 user-folder app(s) are held until each is reviewed and enabled: gift, mine, tool')
     expect(readFileSync(copy, 'utf8')).toBe(damaged)
 

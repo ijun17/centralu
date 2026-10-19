@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isObj } from '../../json-value.js'
-import { PrivateJsonFile } from './private-json-file.js'
+import { PrivateJsonFile, type FileTrouble } from './private-json-file.js'
 
 /**
  * The values behind app secrets (M4 A-3, from the plan "data and secrets live outside the
@@ -31,6 +31,11 @@ export class SecretStore {
    * actually reach. `set()` is refused only while the file could not be moved and is still in place.
    */
   private file: PrivateJsonFile<SecretsDoc>
+  /**
+   * Why each copy this host moved aside could not be read (#944). The file forgets at its next write, and one app's value
+   * entered again says nothing of the others', whose lines keep saying why while this host runs
+   */
+  private whyMoved = new Map<string, string>()
 
   constructor(private readonly dataRoot: string) {
     this.file = new PrivateJsonFile(join(dataRoot, SECRETS_FILE), {
@@ -45,14 +50,25 @@ export class SecretStore {
    * Whether the saved secrets could not be read, as it concerns this app (#944): the file is stuck in place (null for
    * where it went, until it reads again), or a copy moved aside is in the data folder and this app has no value in the
    * current file. One file holds every app's values (#993 review): re-entering app A's value says nothing of app B's,
-   * so each app's line goes when that app has a value again. Read from the folder, not kept, so a restart finds it.
+   * so each app's line goes when that app has a value again. Read from the folder, not kept, so a restart finds it; why
+   * the copy was moved is known only to the host that moved it, and said while that host runs.
    */
-  trouble(appKey: string): { movedTo: string | null; at: number } | null {
-    const doc = this.file.read()
-    const stuck = this.file.trouble
-    if (stuck && stuck.movedTo === null) return stuck
+  trouble(appKey: string): FileTrouble | null {
+    const doc = this.read()
+    const met = this.file.trouble
+    if (met && met.movedTo === null) return met
     if (Object.keys(doc[appKey] ?? {}).length > 0) return null
-    return this.newestCopy()
+    const copy = this.newestCopy()
+    const why = copy && this.whyMoved.get(copy.movedTo)
+    return copy && why ? { ...copy, reason: why } : copy
+  }
+
+  /** The document, noting why a copy it moved aside could not be read (`whyMoved`) */
+  private read(): SecretsDoc {
+    const doc = this.file.read()
+    const met = this.file.trouble
+    if (met?.movedTo && met.reason) this.whyMoved.set(met.movedTo, met.reason)
+    return doc
   }
 
   /** The newest `app-secrets.json.unreadable-<ms>` in the data folder, or null */
@@ -73,7 +89,7 @@ export class SecretStore {
 
   /** All values stored for this app (regardless of declaration) */
   all(appKey: string): Record<string, string> {
-    return { ...(this.file.read()[appKey] ?? {}) }
+    return { ...(this.read()[appKey] ?? {}) }
   }
 
   /**
@@ -83,12 +99,12 @@ export class SecretStore {
    * reaching the list side.
    */
   names(appKey: string): Set<string> {
-    return new Set(Object.keys(this.file.read()[appKey] ?? {}))
+    return new Set(Object.keys(this.read()[appKey] ?? {}))
   }
 
   /** The values to hand to the app — only the names its manifest declares */
   forApp(appKey: string, declared: readonly string[]): Record<string, string> {
-    const stored = this.file.read()[appKey] ?? {}
+    const stored = this.read()[appKey] ?? {}
     const out: Record<string, string> = {}
     for (const name of declared) {
       const v = stored[name]
@@ -102,7 +118,7 @@ export class SecretStore {
    * nothing when there is none, so a project without app secrets never touches the file
    */
   forgetScope(scope: string): void {
-    const doc = this.file.read()
+    const doc = this.read()
     const gone = Object.keys(doc).filter((key) => key.startsWith(`${scope}/`))
     if (gone.length === 0) return
     for (const key of gone) delete doc[key]
@@ -115,7 +131,7 @@ export class SecretStore {
    * still read them). Writes nothing when there is nothing to copy.
    */
   carry(from: string, to: string): void {
-    const doc = this.file.read()
+    const doc = this.read()
     const have = doc[to] ?? {}
     const add = Object.entries(doc[from] ?? {}).filter(([name]) => !(name in have))
     if (add.length === 0) return
@@ -125,7 +141,7 @@ export class SecretStore {
 
   /** Writes a value (`value`) or clears it (`null`) */
   set(appKey: string, name: string, value: string | null): void {
-    const doc = this.file.read()
+    const doc = this.read()
     const cur = { ...(doc[appKey] ?? {}) }
     if (value === null) delete cur[name]
     else cur[name] = value

@@ -25,6 +25,7 @@ type AppInfo = {
   error: string | null
   warnings: string[]
   secrets?: { name: string; set: boolean }[]
+  secretsUnreadable?: { movedTo: string | null; at: number; reason?: string }
   imported?: { source: string; at: number; confirmedAt: number | null }
 }
 
@@ -135,6 +136,25 @@ test.describe('secret fields (E)', () => {
     await slot.getByTestId('secret-save').click()
     await expect(toggle).toHaveText('Secrets · 1 set')
     expect(await everythingOnScreen(page)).not.toContain(VALUE)
+  })
+
+  // #944: the saved secrets file cannot be read, and the panel says which file and why, with Save held and saying why
+  test('a saved secrets file that cannot be read is named in the panel with the reason, and Save stays off saying why', async ({ page }) => {
+    await page.goto('/?mock=1')
+    const reason = 'Centralu may not read it (EACCES)'
+    await setApps(page, [app('keys', null, { name: 'Keys', secrets: [{ name: 'API_KEY', set: false }], secretsUnreadable: { movedTo: null, at: 1, reason } })])
+    const pinned = page.getByTestId('pinned-app-_user/keys')
+    await page.getByTestId('app-row-_user/keys').click()
+    await pinned.getByTestId('pinned-secrets-toggle').click()
+    const panel = pinned.getByTestId('secrets-panel')
+    await expect(panel.getByTestId('secrets-unreadable')).toHaveText(
+      `The saved secrets file (app-secrets.json in Centralu’s data folder) cannot be read: ${reason}. Nothing can be saved until it is fixed or removed.`,
+    )
+    const slot = panel.getByTestId('secret-API_KEY')
+    await slot.getByTestId('secret-input').fill(VALUE)
+    await expect(slot.getByTestId('secret-save')).toBeDisabled()
+    await expect(slot.getByTestId('secret-save')).toHaveAttribute('title', `The saved secrets file cannot be read: ${reason}. Nothing is saved until it is fixed or removed`)
+    expect(await secretWrites(page)).toEqual([])
   })
 })
 
