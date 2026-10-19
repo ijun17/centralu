@@ -14,6 +14,19 @@ export type LinkedMachineRow = {
   acceptedVersions: string | null
   /** When the hub opens its link (#1134, v59); absent or null in the column: at start */
   connect?: 'at_start' | 'when_needed'
+  /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
+  asks?: boolean
+}
+
+/** A pair the person approved for the reverse direction (#550, v60): a session of a linked machine, a project here */
+export type MachineAskConsentRow = {
+  machineId: string
+  /** The session's own id on that machine (not qualified) */
+  sessionId: string
+  /** Its name when the pair was approved, for Settings */
+  sessionName: string
+  projectId: string
+  decidedAt: number
 }
 
 /** The highest slot ever handed to a linked machine (#82) */
@@ -34,7 +47,7 @@ export class LinkedMachineRecords {
   listLinkedMachines(): LinkedMachineRow[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect
+        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect, asks
            FROM linked_machines ORDER BY added_at, id`,
       )
       .all() as {
@@ -48,6 +61,7 @@ export class LinkedMachineRecords {
       added_at: number
       accepted_versions: string | null
       connect: string | null
+      asks: number
     }[]
     return rows.map((r) => ({
       id: r.id,
@@ -59,6 +73,7 @@ export class LinkedMachineRecords {
       acceptedVersions: r.accepted_versions,
       // Anything but the one other value is the default, as a window reads an unknown one (`MachineConnect`)
       connect: r.connect === 'when_needed' ? 'when_needed' : 'at_start',
+      asks: r.asks === 1,
     }))
   }
 
@@ -100,6 +115,7 @@ export class LinkedMachineRecords {
   removeLinkedMachine(id: string): void {
     this.db.transaction(() => {
       this.db.prepare(`DELETE FROM machine_headers WHERE machine_id = ?`).run(id)
+      this.db.prepare(`DELETE FROM machine_ask_consents WHERE machine_id = ?`).run(id)
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_session_id IS NOT NULL AND substr(remote_session_id, 1, ?) = ?`).run(id.length + 1, `${id}.`)
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
@@ -115,6 +131,68 @@ export class LinkedMachineRecords {
   /** When the hub opens the machine's link (#1134) */
   setLinkedMachineConnect(id: string, connect: 'at_start' | 'when_needed'): void {
     this.db.prepare(`UPDATE linked_machines SET connect = ? WHERE id = ?`).run(connectColumn(connect), id)
+  }
+
+  // ── The reverse direction (#550, v60) ───────────────────────────────────────────────────────
+
+  /**
+   * Turns a machine's switch on or off. Off also forgets every pair approved for it: turning the switch on again is a
+   * new consent, and must not bring back pairs the person approved before they turned it off
+   */
+  setLinkedMachineAsks(id: string, on: boolean): void {
+    this.db.transaction(() => {
+      this.db.prepare(`UPDATE linked_machines SET asks = ? WHERE id = ?`).run(on ? 1 : 0, id)
+      if (!on) this.db.prepare(`DELETE FROM machine_ask_consents WHERE machine_id = ?`).run(id)
+    })()
+  }
+
+  /** Whether a machine's switch is on, read from the row each time; false for a machine no longer linked */
+  linkedMachineAsks(id: string): boolean {
+    const row = this.db.prepare(`SELECT asks FROM linked_machines WHERE id = ?`).get(id) as { asks: number } | undefined
+    return row?.asks === 1
+  }
+
+  machineAskConsent(machineId: string, sessionId: string, projectId: string): MachineAskConsentRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT machine_id as machineId, session_id as sessionId, session_name as sessionName, project_id as projectId, decided_at as decidedAt
+           FROM machine_ask_consents WHERE machine_id = ? AND session_id = ? AND project_id = ?`,
+      )
+      .get(machineId, sessionId, projectId) as MachineAskConsentRow | undefined
+    return row ?? null
+  }
+
+  /** Records an approved pair; false when the machine is no longer linked, its switch is off, or the project is gone */
+  setMachineAskConsent(c: Omit<MachineAskConsentRow, 'decidedAt'>): boolean {
+    return this.db.transaction(() => {
+      if (!this.linkedMachineAsks(c.machineId)) return false
+      if (!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?`).get(c.projectId)) return false
+      this.db
+        .prepare(
+          `INSERT INTO machine_ask_consents (machine_id, session_id, session_name, project_id, decided_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (machine_id, session_id, project_id) DO UPDATE SET session_name = excluded.session_name, decided_at = excluded.decided_at`,
+        )
+        .run(c.machineId, c.sessionId, c.sessionName, c.projectId, Date.now())
+      return true
+    })()
+  }
+
+  /** The approved pairs, newest first; one machine's when `machineId` is given */
+  listMachineAskConsents(machineId?: string): MachineAskConsentRow[] {
+    const cols = `machine_id as machineId, session_id as sessionId, session_name as sessionName, project_id as projectId, decided_at as decidedAt`
+    return (
+      machineId === undefined
+        ? this.db.prepare(`SELECT ${cols} FROM machine_ask_consents ORDER BY decided_at DESC`).all()
+        : this.db.prepare(`SELECT ${cols} FROM machine_ask_consents WHERE machine_id = ? ORDER BY decided_at DESC`).all(machineId)
+    ) as MachineAskConsentRow[]
+  }
+
+  /** Withdraws one pair; true when there was one */
+  forgetMachineAskConsent(machineId: string, sessionId: string, projectId: string): boolean {
+    return (
+      this.db.prepare(`DELETE FROM machine_ask_consents WHERE machine_id = ? AND session_id = ? AND project_id = ?`).run(machineId, sessionId, projectId)
+        .changes > 0
+    )
   }
 
   /**

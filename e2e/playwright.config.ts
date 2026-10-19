@@ -76,7 +76,13 @@ export default defineConfig({
   fullyParallel: true,
   // Stops CI from being fooled into "all passed" if a `test.only` was left in and pushed locally
   forbidOnly: !!process.env.CI,
-  reporter: [['list']],
+  // In CI a failed test runs once more, and passing then makes it flaky, not green: flaky-report.ts names it on the
+  // run (an annotation, the job summary, the `e2e report` artifact) so it gets fixed. Before this, a failed shard ran
+  // whole a second time inside its job, about 6 minutes each time; 11 of 100 WebKit shards of the last 20 green full
+  // runs did (2026-10-18). Locally a failure stays a failure.
+  retries: process.env.CI ? 1 : 0,
+  // build.yml names its reporters on the command line, flaky-report.ts among them
+  reporter: [['list'], ['./flaky-report.ts']],
   // The engine's first page on a machine is slow (WebKit builds its caches): opened here, not in a test (warm-engine.ts)
   globalSetup: './warm-engine.ts',
   // A dev server that died and was started again is said as a warning, even in a green run (#651)

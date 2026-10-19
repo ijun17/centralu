@@ -249,6 +249,8 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
             ? 'App permission'
             : d.kind === 'project_create'
               ? 'New project'
+              : d.kind === 'project_add'
+                ? 'Add project'
               : d.kind === 'centralu_update'
                 ? 'Update'
                 : 'Approve'

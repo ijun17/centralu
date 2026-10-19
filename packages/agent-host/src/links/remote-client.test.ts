@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer } from '../transport/server.js'
-import { RemoteClient, type RemoteHello } from './remote-client.js'
+import { MAX_INCOMING_CALLS, RemoteClient, type RemoteHello } from './remote-client.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /** The hub's connection to a linked machine's host (#82), against the real server */
@@ -167,7 +167,7 @@ describe('the link client (#82)', () => {
     expect(wrong.c.connected || other.c.connected).toBe(false)
   })
 
-  it('never answers a request from the remote: the reverse direction is off (plan §3.2)', async () => {
+  it('without a handler, never answers a request from the remote: the reverse direction is off (plan §3.2)', async () => {
     // A "remote host" that, once greeted, tries to call the hub
     const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
     cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
@@ -215,6 +215,77 @@ describe('the link client (#82)', () => {
  * The hub's ssh forward listens on a loopback port that another account on the hub can take first (#838). The hello
  * carries the remote's token, so a host that can prove it holds the token is asked to before the hello goes out.
  */
+describe('calls from the remote host: the reverse direction (#550)', () => {
+  /** A real host with the hub connected, and the client number the host knows the hub's socket by */
+  async function linked(handler: (method: string, params: unknown, signal: AbortSignal) => Promise<unknown>) {
+    let hubClient = 0
+    const server = new HostServer({
+      port: 0,
+      token: TOKEN,
+      onRpc: async (_m, _p, ctx) => {
+        hubClient = ctx!.client
+        return {}
+      },
+    })
+    const port = await server.listen()
+    cleanups.push(() => server.close())
+    const c = new RemoteClient({ url: `ws://127.0.0.1:${port}`, token: TOKEN, maxBackoffMs: 100 }, { call: handler })
+    cleanups.push(() => c.close())
+    c.connect()
+    await eventually(() => c.connected)
+    await c.call('anything', {})
+    return { server, c, client: hubClient }
+  }
+
+  it('answers through the handler the link gave, a result and a refusal with its code', async () => {
+    const seen: unknown[] = []
+    const { server, client } = await linked(async (method, params) => {
+      seen.push({ method, params })
+      if (method === 'hub.projects') return { projects: [{ id: 'p1', name: 'cc' }] }
+      throw Object.assign(new Error('Unknown method: fs.readFile'), { code: 'not_supported' })
+    })
+    await expect(server.call(client, 'hub.projects', { a: 1 })).resolves.toEqual({ projects: [{ id: 'p1', name: 'cc' }] })
+    await expect(server.call(client, 'fs.readFile', {})).rejects.toThrow('Unknown method: fs.readFile')
+    expect(seen).toEqual([{ method: 'hub.projects', params: { a: 1 } }, { method: 'fs.readFile', params: {} }])
+  })
+
+  it('aborts the handler when the host withdraws the call, and when the link closes', async () => {
+    const aborted: string[] = []
+    const started: string[] = []
+    const { server, c, client } = await linked(
+      (method, _p, signal) =>
+        new Promise((_resolve, reject) => {
+          started.push(method)
+          signal.addEventListener('abort', () => {
+            aborted.push(method)
+            reject(new Error('aborted'))
+          })
+        }),
+    )
+    const ctl = new AbortController()
+    const first = server.call(client, 'one', {}, { signal: ctl.signal })
+    const second = server.call(client, 'two', {})
+    await eventually(() => started.length === 2)
+    ctl.abort()
+    await expect(first).rejects.toThrow('cancelled')
+    await eventually(() => aborted.includes('one'))
+    expect(aborted).toEqual(['one'])
+    c.close()
+    await eventually(() => aborted.includes('two'))
+    await expect(second).rejects.toThrow()
+  })
+
+  it(`refuses a call past ${MAX_INCOMING_CALLS} running at once instead of queueing it`, async () => {
+    const release: (() => void)[] = []
+    const { server, client } = await linked(() => new Promise((resolve) => release.push(() => resolve('done'))))
+    const running = Array.from({ length: MAX_INCOMING_CALLS }, (_, i) => server.call(client, `m${i}`, {}))
+    await eventually(() => release.length === MAX_INCOMING_CALLS)
+    await expect(server.call(client, 'one-too-many', {})).rejects.toThrow('Too many calls at once')
+    for (const r of release) r()
+    await expect(Promise.all(running)).resolves.toHaveLength(MAX_INCOMING_CALLS)
+  })
+})
+
 describe('a host asked to prove it holds the token (#838)', () => {
   /** What holds the forward's port instead of the host: it records what it is sent and answers as told */
   async function squatter(answer: (frame: Record<string, unknown>) => unknown) {
