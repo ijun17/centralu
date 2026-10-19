@@ -22,6 +22,7 @@ import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
+import { ApprovalRules } from './approval-rules.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -152,6 +153,8 @@ export class SessionManager {
   private readonly files: ProjectFiles
   /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
   private readonly toolRegistry: ToolRegistry
+  /** The remembered "always allow" answers: written, read for a launch, listed in Settings (approval-rules.ts) */
+  private readonly approvalRules: ApprovalRules
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -303,6 +306,7 @@ export class SessionManager {
       emit: (e) => this.emit(e),
     })
     this.toolRegistry = new ToolRegistry(this.parts())
+    this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
@@ -1657,20 +1661,9 @@ export class SessionManager {
       throw rpcError('That approval request is already gone (the agent restarted). The command was not run.', 'approval_gone')
     }
 
-    // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
-    // restart (C-2)
+    // Persisting the rule (approval-rules.ts)
     // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
-    // A session with no project (#994) has no project to remember for: its project answer is kept for the session
-    if (decision === 'always' && m && remembered) {
-      const projectId = scope === 'project' ? m.projectId : null
-      this.store.permissions.addApprovalRule({
-        scope: projectId !== null ? 'project' : 'session',
-        sessionId: projectId !== null ? undefined : sessionId,
-        projectId: projectId ?? undefined,
-        matcher: remembered,
-        decision: 'allow',
-      })
-    }
+    if (decision === 'always' && m && remembered) this.approvalRules.rememberAlways(sessionId, m.projectId, scope, remembered)
   }
 
   /**
@@ -1916,33 +1909,14 @@ export class SessionManager {
     return this.prefs.setUiPreferences(...a)
   }
 
-  /** The settings screen must be able to see and delete rules (FR-3: make the outcome visible) */
-  listApprovalRules(): {
-    id: number
-    scope: 'session' | 'project'
-    matcher: string
-    decision: string
-    createdAt: number
-    projectId: string | null
-    sessionId: string | null
-  }[] {
-    return this.store
-      .permissions.listApprovalRules()
-      .filter((r) => r.matcher)
-      .map((r) => ({
-        id: r.id,
-        scope: r.scope as 'session' | 'project',
-        matcher: r.matcher,
-        decision: r.decision,
-        createdAt: r.createdAt,
-        // Included so the settings screen can say which project or session this rule belongs to (#183)
-        projectId: r.projectId,
-        sessionId: r.sessionId,
-      }))
+  /** `ApprovalRules.listApprovalRules` (approval-rules.ts), kept on the manager for its callers */
+  listApprovalRules(...a: Parameters<ApprovalRules['listApprovalRules']>): ReturnType<ApprovalRules['listApprovalRules']> {
+    return this.approvalRules.listApprovalRules(...a)
   }
 
-  deleteApprovalRule(id: number): void {
-    this.store.permissions.deleteApprovalRule(id)
+  /** `ApprovalRules.deleteApprovalRule` (approval-rules.ts), kept on the manager for its callers */
+  deleteApprovalRule(...a: Parameters<ApprovalRules['deleteApprovalRule']>): ReturnType<ApprovalRules['deleteApprovalRule']> {
+    return this.approvalRules.deleteApprovalRule(...a)
   }
 
   /**
@@ -1954,21 +1928,6 @@ export class SessionManager {
     return this.store
       .messages.searchMessages(query, limit)
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
-  }
-
-  /**
-   * Saved rules that apply to this session (session-scoped plus project-scoped). Only an `allow` of a scope this build
-   * knows: a newer build may store another decision or scope (#384), and a rule that cannot be read allows nothing.
-   * A project rule with no project (an earlier build stored one from a session with no project) belongs to no
-   * project, so it applies to no session.
-   */
-  private rulesFor(sessionId: string, projectId: string | null): string[] {
-    return this.store
-      .permissions.listApprovalRules()
-      .filter((r) => r.decision === 'allow' && (r.scope === 'session' || r.scope === 'project'))
-      .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId !== null && r.projectId === projectId))
-      .map((r) => r.matcher)
-      .filter(Boolean)
   }
 
   /**
@@ -2373,7 +2332,7 @@ export class SessionManager {
         return self.resuming
       },
       routedCards: (...a) => self.cards.routedCards(...a),
-      rulesFor: (...a) => self.rulesFor(...a),
+      rulesFor: (...a) => self.approvalRules.rulesFor(...a),
       get running() {
         return self.running
       },
