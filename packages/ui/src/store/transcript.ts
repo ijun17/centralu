@@ -330,6 +330,8 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
                     ? projectAccessQuestion(e.detail)
                     : e.detail.kind === 'project_create'
                       ? projectCreateQuestion(e.detail)
+                      : e.detail.kind === 'project_add'
+                        ? e.detail.text
                       : e.detail.kind === 'agent_start'
                         ? agentStartQuestion(e.detail)
                         : e.detail.kind === 'centralu_update'

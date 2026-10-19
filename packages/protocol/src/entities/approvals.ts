@@ -89,7 +89,18 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('project_access'),
     access: ProjectConsentKind,
-    from: z.object({ id: z.string(), name: z.string() }),
+    from: z.object({
+      id: z.string(),
+      name: z.string(),
+      /**
+       * The linked machine the asking project is on (#550, the reverse direction): a session there asks a project of
+       * this computer. The card is this computer's and names the machine; approving it is remembered for the pair (that
+       * session, this project) until withdrawn in Settings → Machines. Absent: a project on this computer
+       */
+      machine: z.string().optional(),
+      /** The asking session there (#550), by its id on that machine and its name; absent otherwise */
+      session: z.object({ id: z.string(), name: z.string() }).optional(),
+    }),
     to: z.object({
       id: z.string(),
       name: z.string(),
@@ -167,6 +178,29 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
      * this computer. The card and its question name it, since `path` alone does not say whose disk it is
      */
     machine: z.string().optional(),
+  }),
+  /**
+   * The orchestrator asks to add a folder that already exists as a project (#1220, its add_project command), raised
+   * by **the host** in the orchestrator's session. The facts are read on the folder's machine before the card: a path
+   * that is missing, a file or already a project is refused without one, so `exists` and `folder` say what was found.
+   * On Allow the folder is registered as the sidebar's Add project registers it (untrusted when new). Allow or deny
+   * only; there is no "always". `text` is the whole question, which a window that does not know this kind shows (#844).
+   */
+  z.object({
+    kind: z.literal('project_add'),
+    /** The project's name: the folder's */
+    name: z.string(),
+    /** The folder's full path, in its machine's own terms */
+    path: z.string(),
+    /** The linked machine the folder is on, by the name the person gave it: absent for this computer */
+    machine: z.string().optional(),
+    exists: z.boolean(),
+    folder: z.boolean(),
+    /** The folder is in a git repository */
+    git: z.boolean(),
+    /** That repository's `origin` remote, as its config has it; null when it has none or is no repository */
+    origin: z.string().nullable(),
+    text: z.string(),
   }),
 ])
 
@@ -303,3 +337,14 @@ export const ProjectConsent = z.object({
   machine: z.string().nullable().optional(),
 })
 export type ProjectConsent = z.infer<typeof ProjectConsent>
+
+/**
+ * The question the orchestrator's add-folder card asks (#1220), carried whole as the card's `text`, which is what a
+ * window that does not know the kind shows (#844). Here rather than with the other questions in core: the host raises
+ * this card, and the host does not import core. It names every fact the card shows.
+ */
+export function projectAddQuestion(d: { name: string; path: string; machine?: string; git: boolean; origin: string | null }): string {
+  const where = d.machine ? `${d.path} on ${d.machine}` : d.path
+  const repo = d.git ? (d.origin ? `a git repository (origin ${d.origin})` : 'a git repository with no origin') : 'not a git repository'
+  return `Add the existing folder ${where} as the project ${d.name}? It is ${repo}.`
+}

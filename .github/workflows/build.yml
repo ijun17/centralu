@@ -64,6 +64,7 @@ jobs:
       host: ${{ steps.classify.outputs.host }}
       host_tests: ${{ steps.classify.outputs.host_tests }}
       code: ${{ steps.classify.outputs.code }}
+      fail_fast: ${{ steps.classify.outputs.fail_fast }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,6 +96,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.bundle == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     # A broken Linux build must not hide a working macOS one — that is exactly the
     # comparison this workflow exists to give us.
     strategy:
@@ -313,6 +315,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -353,6 +356,35 @@ jobs:
           # The runs after this one read main's newest record; a long quiet spell on main must not expire it
           retention-days: 90
 
+  # Fail fast (2026-10-19, the owner's decision): on a manual run, the merge queue's batches, a failed `verify`
+  # cancels the rest of the run at once. Nothing lands from a run whose `verify` failed, and its e2e shards kept the
+  # batch, and the runners every other run waits for, another 10 minutes before the queue heard. Which runs:
+  # `changes` says (`fail_fast`, .github/scripts/ci-changes.mjs): a manual run, never a pull request's (quick tier
+  # keeps every job to its end), never main's, never one that changes the version (a release bump's run is never cut
+  # short, docs/releasing.md).
+  #
+  # Its own job, after `verify` has ended, not a step inside it: `verify`'s check stays `failure`, which is how the
+  # queue tells this run, `cancelled` as a whole, from one cancelled for nothing (no rerun for a test failure). This
+  # job then reports `cancelled` itself, with the run. It cancels this run by its id and nothing else, so the
+  # concurrency group above is untouched.
+  fail-fast:
+    name: fail fast
+    needs: [changes, verify]
+    if: ${{ !cancelled() && needs.verify.result == 'failure' && needs.changes.outputs.fail_fast == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel the rest of this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          echo "::error title=verify failed: the rest of this run is cancelled::verify failed in a manual run (the merge queue's batches), so nothing can land from it: the jobs still running are cancelled (fail fast). Read verify's log; the cancelled jobs are not failures of their own."
+          gh run cancel "$RUN_ID"
+
   # The content verifier (docs/plans/thin-shell.md §4): the signature check and the copy the shell
   # and the keeper will run before starting anything from a content folder. A small crate with no
   # Tauri, so it builds in seconds. Both Unix platforms, because the copy is `openat` and an
@@ -362,6 +394,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -408,6 +441,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: windows-2022
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -434,6 +468,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: windows-2022
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -475,15 +510,29 @@ jobs:
   # and installing WebKit). Playwright's default of 2 workers on these 4-CPU runners: 3 workers
   # were no faster. Each shard runs a slice of the tests with its own dev servers and hosts; every
   # shard keeps a blob report, and when one fails the `e2e report` job below merges them into one
-  # HTML report with traces. A failed shard runs once more inside its job, with a warning, and
-  # Playwright itself never retries: a test that needs either is still a test to fix.
+  # HTML report with traces. A failed test runs once more (Playwright's `retries`, CI only), and one
+  # that passes then is flaky, not green: e2e/flaky-report.ts names it on the run and has `e2e
+  # report` merge the shards too, so it gets fixed (2026-10-19, the owner's decision; until then a
+  # failed shard ran whole a second time, 11 of 100 WebKit shards in the 20 green full runs before).
+  #
+  # Time limits (2026-10-19): one shard hung 35 minutes and held a merge batch. A job's limit is its
+  # slowest green run of the last 20 full runs with about half again on top, so a hang ends as a
+  # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
+  # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
+  # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10. Jobs that build Rust with a cache get more, for
+  # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux
+  # 4.4/20). Raise a limit when its job grows, not when one run hangs.
   e2e:
     name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
-    # A first run that fails and the retry below must both fit (#1035): a shard takes 4 to 6 minutes
-    timeout-minutes: 30
+    # See the time limits above
+    timeout-minutes: 15
+    outputs:
+      # `true` when a test of a shard passed only on retry (e2e/flaky-report.ts); a shard without one leaves it unset
+      flaky: ${{ steps.e2e.outputs.flaky }}
     strategy:
       fail-fast: false
       matrix:
@@ -517,27 +566,9 @@ jobs:
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
           # One name per shard, so the merge below does not overwrite one shard's report with another's
           PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
-        # Once more on failure, inside the job (#1035): a flaky shard otherwise cost a rerun of the
-        # whole job, 5 to 7 minutes with its setup and the queue. The warning keeps a pass on the
-        # second run visible: that test is still a test to fix.
-        run: |
-          e2e() { pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure; }
-          if e2e; then exit 0; fi
-          # The first attempt's report and traces, kept apart: the second run starts both afresh
-          mkdir -p e2e-first-attempt
-          for d in blob-report e2e/test-results; do if [ -d "$d" ]; then mv "$d" "e2e-first-attempt/${d//\//-}"; fi; done
-          echo "retried=true" >> "$GITHUB_OUTPUT"
-          echo "::warning title=e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }}) ran twice::The shard failed and runs once more. Whatever passes now still failed once: read the first run above and fix the test."
-          e2e
-
-      # Only after a retry, and not under e2e-blob-*: `e2e report` merges the attempts that count
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.e2e.outputs.retried == 'true' }}
-        with:
-          name: e2e-first-attempt-webkit-${{ matrix.shard }}
-          path: e2e-first-attempt
-          retention-days: 7
-          if-no-files-found: warn
+        # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
+        # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
+        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -556,8 +587,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    # A first run that fails and the retry below must both fit (#1035): a shard takes 4 to 6 minutes
-    timeout-minutes: 30
+    # See the time limits above the WebKit job
+    timeout-minutes: 15
+    outputs:
+      flaky: ${{ steps.e2e.outputs.flaky }}
     strategy:
       fail-fast: false
       matrix:
@@ -590,27 +623,9 @@ jobs:
           E2E_BROWSER: chromium
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
           PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
-        # Once more on failure, inside the job (#1035): a flaky shard otherwise cost a rerun of the
-        # whole job, 5 to 7 minutes with its setup and the queue. The warning keeps a pass on the
-        # second run visible: that test is still a test to fix.
-        run: |
-          e2e() { pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure; }
-          if e2e; then exit 0; fi
-          # The first attempt's report and traces, kept apart: the second run starts both afresh
-          mkdir -p e2e-first-attempt
-          for d in blob-report e2e/test-results; do if [ -d "$d" ]; then mv "$d" "e2e-first-attempt/${d//\//-}"; fi; done
-          echo "retried=true" >> "$GITHUB_OUTPUT"
-          echo "::warning title=e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }}) ran twice::The shard failed and runs once more. Whatever passes now still failed once: read the first run above and fix the test."
-          e2e
-
-      # Only after a retry, and not under e2e-blob-*: `e2e report` merges the attempts that count
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.e2e.outputs.retried == 'true' }}
-        with:
-          name: e2e-first-attempt-chromium-${{ matrix.shard }}
-          path: e2e-first-attempt
-          retention-days: 7
-          if-no-files-found: warn
+        # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
+        # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
+        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -635,15 +650,18 @@ jobs:
 
   # One HTML report per engine out of its shards' blob reports, with the traces of the tests that
   # failed. Per engine, because both runs have the same projects and test ids: merged together, one
-  # engine's result for a test would stand in for the other's. Only when a shard failed: a green run
-  # has nothing in it worth downloading. One job with a step per engine, not a matrix: a skipped
+  # engine's result for a test would stand in for the other's. Only when a shard failed or a test
+  # passed only on retry (the shards' `flaky` output): the report's Flaky filter shows the failed
+  # attempt with its trace, and the job's summary lists every flaky test per engine. A green run with
+  # neither has nothing in it worth downloading. One job with a step per engine, not a matrix: a skipped
   # matrix job reports its name unexpanded (`e2e report (${{ matrix.engine }})`), which is not the
   # name a required check would wait for.
   e2e-report:
     name: e2e report
     needs: [e2e, e2e-chromium]
-    if: ${{ !cancelled() && (needs.e2e.result == 'failure' || needs.e2e-chromium.result == 'failure') }}
+    if: ${{ !cancelled() && (needs.e2e.result == 'failure' || needs.e2e-chromium.result == 'failure' || needs.e2e.outputs.flaky == 'true' || needs.e2e-chromium.outputs.flaky == 'true') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -671,7 +689,8 @@ jobs:
               if [ -d "$dir" ]; then cp "$dir"/*.zip "merge/$engine/"; fi
             done
             if ls "merge/$engine"/*.zip >/dev/null 2>&1; then
-              PLAYWRIGHT_HTML_OUTPUT_DIR="e2e-report/$engine" pnpm exec playwright merge-reports --reporter html "./merge/$engine"
+              # The flaky tests' table goes to this job's summary under the engine's name; their annotations came from the shards
+              E2E_FLAKY_LABEL="$engine" PLAYWRIGHT_HTML_OUTPUT_DIR="e2e-report/$engine" pnpm exec playwright merge-reports --reporter html,./e2e/flaky-report.ts "./merge/$engine"
             fi
           done
 
@@ -745,6 +764,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host_tests == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -807,7 +827,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host == 'true'
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       # The scripts build into a folder under /tmp by default. rust-cache keeps only folders under
       # the workspace, so CI builds into the crate's own target folder and the scripts look there.
@@ -897,7 +917,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 20
     env:
       KEEPER_TARGET_DIR: ${{ github.workspace }}/apps/desktop/src-tauri/target
     steps:

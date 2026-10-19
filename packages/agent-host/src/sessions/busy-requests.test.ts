@@ -354,6 +354,24 @@ describe('requests to a busy session (#677)', () => {
     expect(handleOf(worker).sent).toEqual(["the person's own work", 'also this'])
   })
 
+  // #1233: a note with reportBack into a turn whose end another session is owed does not take that report
+  it("a note from send_to_session with reportBack leaves the report another session is owed in place", async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const b = await session()
+    const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
+    if (!started.ok) throw new Error(started.error)
+    const a = started.sessionId
+    const orch = await w.mgr.orchestrator()
+    await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' })
+    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
+    const noted = await runOrchestratorTool(tools, 'send_to_session', { sessionId: a, text: 'also this', reportBack: true, ifBusy: 'note' }, { sessionId: orch.id, profile: 'orchestrator' })
+    expect(noted.text).toContain('Another session is owed')
+    expect(handleOf(a).sent.at(-1)).toBe('also this')
+    handleOf(a).answer('first job done')
+    await w.until(() => reportsTo(b, a).length === 1)
+    expect(reportsTo(orch.id, a)).toEqual([])
+  })
+
   describe('a fork', () => {
     /** The fake CLI copies a conversation the way Claude's forkSession and Codex's thread/fork do: a new id, the same history */
     const forks: { from: string; cwd: string; to: string }[] = []

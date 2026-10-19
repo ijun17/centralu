@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { HostBuild, PROTOCOL_VERSION, ProtocolError, parseServerFrame } from '@cc/protocol'
+import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame } from '@cc/protocol'
 import { proofNonce, provesToken } from '../transport/host-proof.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -28,9 +28,11 @@ import { rpcError } from '../rpc-error.js'
  *     gets the same answer every time. The link (links.ts) asks the remote for its connection line
  *     again, or reports the versions for the person to align (§4).
  *   - **`hello_ok` is reported with the remote's build**, for the version check (§4).
- *   - **It never answers a request.** The protocol has no frame for a host to call its client, and
- *     a frame shaped like one is dropped, never dispatched: the reverse direction is off in phase 1
- *     (§3.2), and a compromised remote must not reach the hub through the link the hub opened.
+ *   - **It answers a request only through `RemoteClientEvents.call`** (#550, plan §12.7). A host's call to its
+ *     client (the reverse direction) is dropped, never dispatched, unless the link gave that handler; the link
+ *     gives one that serves an allowlist and refuses everything else, and a compromised remote must not reach the
+ *     hub through the link the hub opened any other way. At most `MAX_INCOMING_CALLS` run at once; a call is
+ *     aborted when the host withdraws it (`call.cancel`) or the socket goes.
  */
 
 export type RemoteHello = {
@@ -72,7 +74,15 @@ export type RemoteClientEvents = {
   terminal?: (frame: { terminalId: string; data?: string; exitCode?: number | null }) => void
   down?: (reason: string) => void
   refused?: (r: RemoteRefusal) => void
+  /**
+   * Answers a call the remote host makes to the hub (#550, the reverse direction). Absent: every such call is dropped,
+   * as before the reverse direction existed. `signal` fires when the host withdraws the call or the socket goes
+   */
+  call?: (method: string, params: unknown, signal: AbortSignal) => Promise<unknown>
 }
+
+/** How many calls from the remote may run on the hub at once (#550): one past it is refused, not queued */
+export const MAX_INCOMING_CALLS = 16
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 
@@ -162,6 +172,9 @@ export class RemoteClient {
 
   /** The nonce of the `prove` this socket sent, until the host's proof arrives (#838) */
   private proving: string | null = null
+
+  /** The remote's calls the hub is running (#550), by the remote's id, each with what aborts it */
+  private incoming = new Map<string, AbortController>()
 
   /** The host's answer to `prove`: the token goes out only once it is proven; anything else drops the socket */
   private onProof(ws: WebSocket, raw: string): void {
@@ -260,10 +273,14 @@ export class RemoteClient {
         const p = this.take(f.id)
         p?.reject(linkError(typeof f.error?.message === 'string' ? f.error.message : 'Malformed answer from the machine', false))
       }
-      // Anything else, a request from the remote included, is dropped (the reverse direction is off)
+      // Anything else is dropped
       return
     }
     const frame = parsed.data
+    if (frame.kind === 'rpc') {
+      if (this.ready) this.onCall(frame.id, frame.method, frame.params)
+      return
+    }
     if (frame.kind === 'hello_ok') {
       if (this.ready) return
       clearTimeout(this.handshakeTimer)
@@ -308,6 +325,47 @@ export class RemoteClient {
     if (frame.kind === 'term_exit') this.on.terminal?.({ terminalId: frame.terminalId, exitCode: frame.exitCode })
   }
 
+  /**
+   * A call from the remote host (#550): answered only through the handler the link gave, on the socket it came in on.
+   * Without a handler it is dropped, as every build before the reverse direction did.
+   */
+  private onCall(id: string, method: string, params: unknown): void {
+    const handle = this.on.call
+    if (!handle) return
+    const ws = this.ws
+    if (method === CANCEL_CALL_METHOD) {
+      const target = (params as { id?: unknown } | null)?.id
+      if (typeof target === 'string') this.incoming.get(target)?.abort()
+      return
+    }
+    const answer = (frame: Record<string, unknown>) => {
+      if (ws && this.ws === ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ kind: 'res', id, ...frame }))
+    }
+    const refuse = (message: string, code: string = 'internal', retryable = false) =>
+      answer({ ok: false, error: { code: ProtocolErrorCode.safeParse(code).success ? code : 'internal', message, retryable } })
+    if (this.incoming.has(id)) return refuse('A call with this id is already running')
+    if (this.incoming.size >= MAX_INCOMING_CALLS) return refuse('Too many calls at once; try again shortly', 'internal', true)
+    const ctl = new AbortController()
+    this.incoming.set(id, ctl)
+    void handle(method, params, ctl.signal)
+      .then(
+        (result) => answer({ ok: true, result: result ?? null }),
+        (err: unknown) => {
+          const e = err as { message?: unknown; code?: unknown; retryable?: unknown }
+          refuse(typeof e?.message === 'string' ? e.message : 'The hub could not answer', typeof e?.code === 'string' ? e.code : 'internal', e?.retryable === true)
+        },
+      )
+      .finally(() => {
+        if (this.incoming.get(id) === ctl) this.incoming.delete(id)
+      })
+  }
+
+  /** The remote's calls still running are withdrawn: their socket is gone, and no answer can reach them */
+  private abortIncoming(): void {
+    for (const ctl of this.incoming.values()) ctl.abort()
+    this.incoming.clear()
+  }
+
   private take(id: string): Pending | undefined {
     const p = this.pending.get(id)
     if (!p) return undefined
@@ -340,6 +398,7 @@ export class RemoteClient {
 
   private detach(ws: WebSocket | null): void {
     if (!ws) return
+    this.abortIncoming()
     ws.removeAllListeners()
     // A late error after the listeners are gone must not become an unhandled 'error' event
     ws.on('error', () => {})

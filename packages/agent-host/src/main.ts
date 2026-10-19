@@ -54,7 +54,9 @@ import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
-import { storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
+import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
+import { LinkedHubs } from './links/linked-hubs.js'
+import { reverseCalls } from './links/reverse-calls.js'
 import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
@@ -549,14 +551,34 @@ const links = new Links({
   log: (line) => console.error(line),
   // A child start_agent started on a machine hangs under the session here that started it (#1038)
   ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
+  /*
+   * The reverse direction (#550, docs/plans/remote-hub.md §12.7): who this hub is, offered to a machine whose switch is
+   * on, and the allowlist a machine's call is answered from (ask_project into this computer's projects, nothing else)
+   */
+  hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
+  reverse: reverseCalls({
+    allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
+    projects: () => mgr.projectsForMachines(),
+    ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
+    selfName: hubName,
+  }),
   // A machine that connects when needed stays up while a session here waits on a child there (#1134)
   workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
 })
+/*
+ * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back
+ * on the connection it offered on (`HostServer.call`)
+ */
+const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts) })
+mgr.useLinkedHubs(hubs)
+mgr.useHubName(hubName)
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
 mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 // The orchestrator reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
+// The orchestrator's list_machines reads the list Settings shows (#1220)
+mgr.useMachineList(() => links.list())
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity
@@ -585,6 +607,7 @@ const router: Router = new Router({
     stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
     activity: () => activityCounts(activity()),
     updateApply,
+    hubs,
   }),
   machines: () => links.all(),
   order: storeProjectOrder(store),
@@ -612,6 +635,8 @@ const server = new HostServer({
     mgr.forgetWatchHolder(client)
     // A window told to relaunch closing is its relaunch; one that had not answered is one less to wait for (#665)
     updateApply.clientGone(client)
+    // A hub that offered on that connection is not reachable until it offers again (#550)
+    hubs.gone(client)
   },
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },

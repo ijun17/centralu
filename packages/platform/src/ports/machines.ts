@@ -1,4 +1,5 @@
 import type {
+  MachineAskConsent,
   MachineAutostartResult,
   MachineConnect,
   MachineInfo,
@@ -57,4 +58,13 @@ export interface MachinesPort {
   autostart(machineId: string, on?: boolean): Promise<MachineAutostartResult>
   /** What would stop there if its host stopped now; null when the machine cannot say */
   activity(machineId: string): Promise<HostActivity | null>
+  /**
+   * Lets the machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7): off by
+   * default; each pair (a session there, a project here) asks on this computer's card once. Off forgets the pairs
+   */
+  setAsks(machineId: string, on: boolean): Promise<MachineInfo>
+  /** The pairs approved on that card, every machine's (#550) */
+  askConsents(): Promise<MachineAskConsent[]>
+  /** Withdraws one pair: that session's next ask into that project raises the card again (#550) */
+  withdrawAsk(machineId: string, sessionId: string, projectId: string): Promise<void>
 }

@@ -18,6 +18,8 @@ export type MachineRecord = {
   addedAt: number
   /** The version pair the person chose to connect without aligning, if any (versions.ts) */
   acceptedVersions: string | null
+  /** Whether this machine's sessions may ask this computer's projects (#550); off when absent */
+  asks?: boolean
   /** When the hub opens the link (#1134); absent: at start */
   connect?: MachineConnect
 }
@@ -27,8 +29,16 @@ export interface MachineRegistry {
   add(record: Omit<MachineRecord, 'slot'>): MachineRecord
   remove(id: string): void
   setAcceptedVersions(id: string, key: string | null): void
+  /** The reverse direction's switch (#550); off also forgets the machine's approved pairs */
+  setAsks?(id: string, on: boolean): void
   setConnect(id: string, connect: MachineConnect): void
 }
+
+/**
+ * What answers a linked machine's call to this hub (#550, the reverse direction): the machine is the link's own, never
+ * what the call says; `signal` fires when the machine withdraws the call or its link goes
+ */
+export type ReverseCalls = (machine: { id: string; name: string }, method: string, params: unknown, signal: AbortSignal) => Promise<unknown>
 
 /**
  * What the hub last heard from a machine, for when it cannot ask (mirror.ts): the session and
@@ -58,6 +68,13 @@ export type LinkDeps = {
    * hub-side id; none for a session no session here started. Its rows reach the windows with that parent as `askedBy`
    */
   ownerOf?: (sessionId: string) => string | undefined
+  /**
+   * The reverse direction (#550): this hub's own id and name, which it offers a machine whose switch is on
+   * (`host.hubOffer`), and what answers that machine's calls. Without them no machine is offered anything, and a call
+   * from one is dropped, as before the reverse direction existed
+   */
+  hubSelf?: () => { id: string; name: string }
+  reverse?: ReverseCalls
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */

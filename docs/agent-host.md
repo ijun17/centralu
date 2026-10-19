@@ -318,6 +318,16 @@ words, read there. It runs on that machine with its own logins, folder and prese
 | Cancelling the call stops the wait, not the machine's turn | This host asks the machine to run a task but has no interrupt of its own turn there |
 | The machine's own cards are answered by the person in the hub's window | `asking` (the caller answering them) is not built across machines; the call says it waits on the person |
 
+**The other way round** (#550, [plans/remote-hub.md](plans/remote-hub.md) §12.7). A session on a linked machine asks a
+project of a hub that turned the machine's switch on (Settings → Machines there, off by default): the machine's
+`ask_project` lists each such hub's projects under the hub's name (`LinkedHubs`, links/linked-hubs.ts; asked with
+`hub.projects` on the connection the hub offered on, 4 s each), and hands the whole ask to the hub (`askHubProject` →
+`hub.askProject`), which runs it as an ask here would (`MachineAsks`, sessions/machine-asks.ts): this computer's card for
+the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
+ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
+answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
+machine (`reverseCalls`).
+
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 
 An ordinary session can start another agent, Claude or Codex, in its own project and work with it: a Claude session
@@ -928,11 +938,12 @@ writes nothing but the ready line.
 When a session works on a turn another session gave it, the cards it raises in that turn go to that session as
 well as to the person (owner decision 2026-10-14, the child-question rule of #561 option B, scoped tightly). The turn
 is **delegated** when another session's work starts it: `ask_project` into a session at rest, `start_agent`, an
-`agent_session` send that starts a turn, and `send_to_session` to a session at rest. A task or note that joins a turn
-already running (the person's, or someone else's) gives no one that turn.
+`agent_session` send that starts a turn, `send_to_session` to a session at rest, and `create_session`'s first
+message (#1233). A task or note that joins a turn already running (the person's, or someone else's) gives no one that
+turn, and never clears a report mark someone is owed of it (#1233, `domain-model.md` Report mark).
 
 - **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
-  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session`. A card from a later turn the
+  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session` and `create_session`. A card from a later turn the
   person starts there never goes to the caller. Written to `delegated_turns` (store v51) as well as kept in memory:
   the leaving host's `detachAll` keeps the rows (`handingOver`), and the next host restores the links of sessions the
   keeper kept that are still in their turn, ending each with that turn; any other row is dropped. The kept CLI sends
@@ -1257,6 +1268,30 @@ hub's orchestrator does not see the linked machines; their projects are made fro
 clone also says "Cloning … into …" in the orchestrator's conversation once Create is chosen, while the call runs. The
 swap left the orchestrator's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and
 11,770 with the clone's arguments; docs/tool-cost.md).
+
+**Adding a folder that already exists** (`add_project { path, machine? }` and `list_machines`, #1220, the first slice of
+#1219). The person linked a laptop and asked for two folders on its desktop as projects; `create_project` never reuses
+a folder, and nothing named the machines. Both are rare commands of the orchestrator (`RARE_COMMANDS`, reached through
+`centralu_run`, #1205), the central orchestrator's alone:
+
+1. The folder's machine reads it, changing nothing: `projects.inspect { path, machine? }` (additive, routed by `machine`)
+   answers the absolute path in that machine's terms (a leading `~` is its home; any other relative path is refused),
+   whether something is there and is a folder, whether it is in a git repository and that repository's `origin` (git's
+   config only, with the untrusted-project settings), and the project already kept for it (`ProjectCreation.inspectFolder`).
+2. A missing path, a file or a folder already a project is refused with that reason, before any card.
+3. The card (`project_add`, raised by `askHost` with `alwaysAsk`, so `auto` asks too) shows the machine, the path, that it
+   exists and is a folder, and the git facts; `text` carries the whole question for a window that does not know the kind
+   (#844). Allow or deny; "always" is read as allow and nothing is remembered.
+4. On Allow the folder is registered as the sidebar's Add project registers it: on this computer the facts are read again
+   (a folder gone or added meanwhile is refused) and `addProject` registers it, then the apps list is read again
+   (`ProjectCreation.registerFolder`, the steps of `projects.add`); on a linked machine, that machine's `projects.add`
+   through the router, which checks again there. New, it is untrusted. The host then sends `projects_changed` with
+   `added` (additive), and a window asks about the project's trust as it does for a folder the person added.
+
+A machine on a Centralu from before `projects.inspect` is named as too old, before any card. `list_machines` answers one
+line per machine from what `machines.list` answers (`SessionManager.useMachineList`, wired to `links.list()` in
+`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it connects at start or
+when needed (`MachineInfo.connect`, #1134).
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
@@ -2750,7 +2785,8 @@ session's own background work running included (§1.2.1 step 7, #723). The watch
 is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
-refused with the ids. `create_project { machine }` raises the same card, naming the machine (`project_create`'s
+refused with the ids. `create_session`'s first message goes as `send_to_session`'s instruction, its turn's end
+reported the same way unless `reportBack` is false (#1233). `create_project { machine }` raises the same card, naming the machine (`project_create`'s
 `machine`, additive), with the path that machine's `projects.createPreview` gives, and has that machine make it.
 
 **Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same
@@ -2859,6 +2895,7 @@ step against:
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | add a column (45: `sessions.asked_by_session_id`, the session that asked for this one, #371, whose meaning moved with #561 and #614, see 48 and 55; 47: `grid_layout.remote_app_id` and `app_machine`, a panel of a linked machine's app, #82; 53: `sessions.interruption`, why the last turn did not finish, #698; 54: `queued_requests.opened_by_auto`, a queued ask only `auto` let through) | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 47: an older host reads app rows only where `app_id` is set, and its `setGridView` drops a linked machine's app panel when it rewrites the layout; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698; 54: an older host neither reads nor writes `opened_by_auto`; a row it queues is null, read as marked when the pair has no remembered consent) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677; 57 adds `app_run_records`, `app_run_messages` and `app_run_subagent_messages`, the record of a deleted app-agent session, and the nullable `app_runs.request`, `answer` and `output`, #378) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
+| 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
 | **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |

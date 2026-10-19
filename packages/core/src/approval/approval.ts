@@ -89,8 +89,12 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
   // An untrusted target is named as such wherever the question stands (#382): what runs there follows that trust
   const named = d.to.machine ? `${quoted(d.to.name)} on ${quoted(d.to.machine)}` : quoted(d.to.name)
   const to = d.to.trusted === false ? `${named} (not trusted)` : named
-  if (d.access === 'apps') return `Let ${quoted(d.from.name)} use ${d.app ? `the app ${quoted(d.app.name)} from ` : 'apps from '}${to}?`
-  return `Let ${quoted(d.from.name)} ask ${to}${d.session ? ` / ${quoted(d.session.name)}` : ''} to ${d.text}?`
+  // A session on a linked machine asking a project here (#550): the card names that session and the machine first
+  const from = d.from.machine
+    ? `${d.from.session ? `${quoted(d.from.session.name)} in ` : ''}${quoted(d.from.name)} on ${quoted(d.from.machine)}`
+    : quoted(d.from.name)
+  if (d.access === 'apps') return `Let ${from} use ${d.app ? `the app ${quoted(d.app.name)} from ` : 'apps from '}${to}?`
+  return `Let ${from} ask ${to}${d.session ? ` / ${quoted(d.session.name)}` : ''} to ${d.text}?`
 }
 
 /**

@@ -784,8 +784,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * setting of a project was saved: trust, saved commands, worktree setup, worktree trunk, the default tool, or the
    * model and effort last chosen for a tool. Carries nothing; the list is re-read, new projects join it and a listed
    * project takes the host's value of those settings. Sent when the saved value changed, not on every write.
+   *
+   * `added` (#1220, additive): a folder the person just allowed the orchestrator to add as a project (add_project). A
+   * window asks about its trust once, as when the person adds a folder from the sidebar; an older window re-reads the
+   * list only.
    */
-  z.object({ ...appScoped, type: z.literal('projects_changed') }),
+  z.object({ ...appScoped, type: z.literal('projects_changed'), added: z.string().optional() }),
   /**
    * A linked machine's link changed state (#82, docs/plans/remote-hub.md): connecting, connected,
    * unreachable, waiting on a version decision. Carries the whole record, the same shape

@@ -1,7 +1,7 @@
 import type { Delegation } from './child-ownership.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
-import type { SessionState } from '@cc/protocol'
+import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
@@ -39,6 +39,18 @@ type LinkedAsk = {
 }
 
 /**
+ * The hubs that let this host's sessions ask their projects (#550, the reverse direction; `LinkedHubs` in
+ * links/linked-hubs.ts): each hub's projects, their ids qualified by the hub's, and one ask into one of them
+ */
+export type HubsReader = {
+  projects(): Promise<{
+    projects: { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string }[]
+    away: { hubId: string; hub: string; why: string }[]
+  }>
+  ask(hubId: string, params: HubAskParams, signal?: AbortSignal): Promise<HubAskResult>
+}
+
+/**
  * What the ask_project flow reaches (#428): the session manager's members it reads, as `DelegationHost` types them,
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
@@ -55,6 +67,9 @@ export class AskProjectFlow {
 
   /** ask_project's tasks in a linked machine's sessions (#700), by the session's qualified id */
   readonly linkedAsks = new Map<string, LinkedAsk>()
+
+  /** The hubs linked to this host that let its sessions ask their projects (#550); none until main.ts gives them */
+  hubs: HubsReader | null = null
 
   /**
    * A machine's link that is no longer connected ends the tasks asked of its sessions: their events stop reaching the
@@ -153,11 +168,22 @@ export class AskProjectFlow {
      */
     const reader = this.host.linkedReader
     const exactHere = projects.some((p) => p.id === wanted)
-    const there = reader && !exactHere ? await reader.projects() : { projects: [], away: [] }
+    /*
+     * And the projects of the hubs that let this host's sessions ask them (#550), each under the hub's own name, the same
+     * rules as a linked machine's: `<hub>/<name>`, a qualified id, or a unique bare name
+     */
+    const hubs = this.hubs
+    const none = { projects: [], away: [] }
+    // Nothing is awaited when neither is asked: a call naming a project of this computer by id goes on in the same tick
+    const [there, fromHubs] =
+      (reader || hubs) && !exactHere ? await Promise.all([reader ? reader.projects() : none, hubs ? hubs.projects() : none]) : [none, none]
     const askable: AskableProject[] = [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
+      ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.hubId })),
     ]
+    const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]
+    const elsewhere = !!reader || fromHubs.projects.length > 0 || fromHubs.away.length > 0
     const found = matchProjects(wanted, askable)
     if (found.length > 1) {
       return {
@@ -168,19 +194,25 @@ export class AskProjectFlow {
     if (!found[0]) {
       const slash = wanted.indexOf('/')
       const prefix = slash > 0 ? wanted.slice(0, slash).trim().toLowerCase() : null
-      const down = there.away.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
+      const down = awayAll.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
       if (down) return { ok: false, error: `${down.machine} ${awayPhrase(down.why)}, so "${wanted}" cannot be asked there. Try again once its link is back.` }
       const others = [
-        ...projects.filter((p) => p.id !== caller.projectId).map((p) => (reader ? `${p.name} (this computer)` : p.name)),
+        ...projects.filter((p) => p.id !== caller.projectId).map((p) => (elsewhere ? `${p.name} (this computer)` : p.name)),
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
+        ...fromHubs.projects.map((p) => `${p.name} (on ${p.hub}${p.away ? `, ${p.away}` : ''})`),
       ]
-      const unasked = there.away.length ? ` Not asked, and its projects may be missing: ${there.away.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
+      const unasked = awayAll.length ? ` Not asked, and its projects may be missing: ${awayAll.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
       return {
         ok: false,
         error: others.length
           ? `No project named "${wanted}". The other projects are: ${others.join(', ')}.${unasked}`
           : `No project named "${wanted}" — this is the only project in Centralu.${unasked}`,
       }
+    }
+    const hubTarget = fromHubs.projects.find((p) => p.id === found[0]!.id)
+    if (hubs && hubTarget) {
+      const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
+      return this.askHubProject(callerId, callerProject, hubTarget, hubs, opts, signal)
     }
     const remoteTarget = there.projects.find((p) => p.id === found[0]!.id)
     if (reader && remoteTarget) {
@@ -423,6 +455,47 @@ export class AskProjectFlow {
       return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }
     }
     return this.awaitLinkedAsk(ask, reader, signal)
+  }
+
+  /**
+   * ask_project into a project of a hub linked to this host (#550, the reverse direction; docs/plans/remote-hub.md
+   * §12.7). The hub does the rest, as an ask there would: its card for the pair (that hub's windows answer it; once
+   * approved, the pair passes until the person withdraws it), the existing ordinary session, the delivery and the wait.
+   * This side sends who asks and at which depth, and reads the answer: someone else's words, cut to size, and paths
+   * that name the hub's files, listed and none opened. A call cancelled here is withdrawn there (`call.cancel`), which
+   * withdraws a card still standing.
+   */
+  private async askHubProject(
+    callerId: string,
+    callerProject: string,
+    target: { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string },
+    hubs: HubsReader,
+    opts: { session?: string; task?: string },
+    signal?: AbortSignal,
+  ): Promise<AskProjectResult> {
+    const label = `${target.name} on ${target.hub}`
+    const project = `${target.hubId}/${target.name}`
+    if (target.away) return { ok: false, error: `${target.hub} ${awayPhrase(target.away)}, so ${label} cannot be asked. Try again once its link is back.` }
+    const prefix = `${target.hubId}.`
+    const session = opts.session?.trim()
+    const r = await hubs.ask(
+      target.hubId,
+      {
+        caller: { sessionId: callerId, name: labelOf(this.host.store.messages, this.host.meta.get(callerId)!), project: callerProject },
+        project: target.projectId,
+        ...(session ? { session: session.startsWith(prefix) ? session.slice(prefix.length) : session } : {}),
+        ...(opts.task ? { task: opts.task } : {}),
+        // The hub counts its session one level below this caller while it works on the task (#867, #838)
+        depth: depthOf(this.host, callerId) + 1,
+      },
+      signal,
+    )
+    if (!r.ok) return { ok: false, error: r.error }
+    const base = { project, sessionId: `${prefix}${r.sessionId}`, sessionName: r.sessionName }
+    if (r.state === 'working') return { ok: true, state: 'working', ...base, ...(r.notice ? { notice: r.notice } : {}) }
+    const answer = r.answer ?? ''
+    // Paths in the answer are the hub's files: listed, not opened to the caller
+    return { ok: true, state: 'done', ...base, answer: clipAnswer(answer, r.sessionName), readable: [], outside: pathsIn(answer) }
   }
 
   /** Waits for a linked machine's turn up to the bound, as `awaitDelegation` does, and reads its answer there */
