@@ -165,11 +165,13 @@ pnpm e2e         # Playwright scenarios
 CI runs in two tiers ([docs/releasing.md](docs/releasing.md#what-ci-does)). A pull request runs
 the **quick tier**: `pnpm verify` on Linux and the unit tests on Windows. Everything else (the UI
 scenarios in both engines, the bundles, the keeper, the host's tests on the remotes' Node) is the
-**full tier**, which runs on main, in the merge queue's batches and on a release bump. Nothing lands
-without a full run on what lands: the merge queue (`queue_merge`) lands a pull request through a
-batch built on main and run in full, a batch of one included, and `merge_when_green` refuses one
-whose own run was quick. So a green pull request has passed only the quick tier: run `pnpm verify`
-locally anyway, all of it, before you push, and `pnpm e2e` for anything the UI shows. To run the
+**full tier**, which runs on main and on a release bump. A change lands after the **fast tier**
+(#1259, the owner's decision of 2026-10-19): the merge queue (`queue_merge`) lands a pull request
+through a batch built on main that runs the quick tier on what lands, a batch of one included; the
+full tier then runs on main, after it landed. So nothing has run the UI scenarios, the bundles or the
+keeper on your change before it is on main: run `pnpm verify` locally anyway, all of it, before you
+push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
+run was quick.) To run the
 full tier on your branch before queueing it (UI work, a change to the keeper or the bundles):
 
 ```bash

@@ -32,6 +32,11 @@ export const CI = {
   // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
   // PROJECT_BOARD_CI_FULL_TIER: for the tests only, which run the queue without tiers too (empty: none)
   fullTier: fullTierOf(process.env.PROJECT_BOARD_CI_FULL_TIER ?? config.ci?.fullTier),
+  // What a change lands after, with two tiers (#1259, the owner's decision of 2026-10-19): `quick`, its own quick
+  // run and its batch's run of the quick tier (the full tier runs on main after it lands, and the main guard reverts
+  // what breaks it); `full` (the default), nothing lands without a full run on what lands.
+  // PROJECT_BOARD_CI_LAND_TIER: for the tests only
+  landTier: (process.env.PROJECT_BOARD_CI_LAND_TIER ?? config.ci?.landTier) === 'quick' ? 'quick' : 'full',
 }
 
 // The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items

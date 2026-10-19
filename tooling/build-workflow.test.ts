@@ -191,6 +191,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect([...new Set(script.match(/GITHUB_(EVENT|REF|HEAD_REF|BASE_REF)\w*|github\.event/g))]).toEqual(['GITHUB_EVENT_PATH'])
     expect(script).toContain('?.pull_request?.draft === true')
     expect(changes).toContain('EVERYTHING: ${{ inputs.everything }}')
+    expect(changes).toContain('DISPATCH_TIER: ${{ inputs.tier }}')
     expect(workflow).toMatch(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}everything:\n/m)
   })
 })
@@ -249,6 +250,11 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     // A build or CI change is still the quick tier: the full one runs in the merge queue's batch
     expect(tierOf({ files: ['.github/workflows/build.yml'] }).tier).toBe('quick')
     expect(tierOf({ files: null, onMain: true }).tier).toBe('full')
+    // The merge queue's batch asks for the quick tier (#1259); a release bump or a commit on main still runs in full
+    expect(tierOf({ files: ['packages/ui/src/a.ts'], dispatch: true, dispatchTier: 'quick' }).tier).toBe('quick')
+    expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE], dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
+    expect(tierOf({ files: null, onMain: true, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
+    expect(tierOf({ files: null, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
     expect(tierOf({ files: ['docs/a.md'], dispatch: true }).tier).toBe('full')
     expect(tierOf({ files: null }).tier).toBe('full')
     expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE] })).toMatchObject({ tier: 'full', why: expect.stringContaining('release bump') })

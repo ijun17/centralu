@@ -468,10 +468,18 @@ at once, and every push of every pull request started one. The owner chose two t
 request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests); the **full
 tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
 bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
-alone is green on what it reports. **Invariant: nothing lands that has not passed the full tier on
-what lands.** On while `project.json` has `ci.fullTier`, the name of the check that passes on a full
-run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it passed, `quick` when it
-finished otherwise, null while not reported).
+alone is green on what it reports. On while `project.json` has `ci.fullTier`, the name of the check
+that passes on a full run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it
+passed, `quick` when it finished otherwise, null while not reported).
+
+**What lands on what (`ci.landTier`, #1259).** With `full` (the default, and this repository's until
+2026-10-19), nothing lands that has not passed the full tier on what lands. With `quick` (this
+repository's since the owner's decision of 2026-10-19), a change lands after the **fast tier**: its
+own quick run, then its batch's run of the quick tier on what lands (the batch's dispatch asks for
+`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
+No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
+rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
+run and the full tier's check is not asked for.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
@@ -499,7 +507,7 @@ finished otherwise, null while not reported).
 - **The release** takes a bump PR's run as evidence only when the full tier's check passed on it,
   when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
 - `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
-  without them); the queue's app tests run both ways. Tests: `tooling/project-board-queue.test.ts`,
+  without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue.test.ts`,
   `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
 
 ## Which tool for which task (#957)

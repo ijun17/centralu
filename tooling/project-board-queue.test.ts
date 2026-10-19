@@ -756,6 +756,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
   const body = JSON.parse(stdin)
   if (st.dispatchError) fail(st.dispatchError)
+  st.dispatched = [...(st.dispatched ?? []), { ref: body.ref, inputs: body.inputs ?? null }]
   write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
@@ -887,7 +888,10 @@ const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
  * green run a full one. The tiers this repository has (project.json ci.fullTier) have tests of their own below.
  */
 const NO_TIERS = { PROJECT_BOARD_CI_FULL_TIER: '' }
-const TIERS = { PROJECT_BOARD_CI_FULL_TIER: 'full tier' }
+/** Two tiers, landing only from a full run (`ci.landTier: full`), as before #1259 */
+const TIERS = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'full' }
+/** Two tiers, landing after the fast tier (#1259, this repository's project.json) */
+const FAST_LAND = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'quick' }
 /**
  * No checkout to merge a conflicting pull request in unless a test gives one (#1182): the queue would otherwise
  * merge in the checkout this app is committed in, whose remote is the real GitHub.
@@ -2197,7 +2201,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
 
 /*
  * Two tiers of CI (this repository's project.json): what lands, lands from a full run. A pull request's own run is the
- * quick tier; the queue lands it through a batch built on main and run in full, a batch of one included.
+ * quick tier; the queue lands it through a batch built on main and run in full (`ci.landTier: full`), or run on the quick
+ * tier (`quick`, #1259), a batch of one included.
  */
 describe('the merge queue lands only from a full run, with two tiers of CI', { timeout: 240_000 * SLOW }, () => {
   /** A pull request's own quick run: finished and green on what it ran, the full tier's check skipped. */
@@ -2349,6 +2354,21 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       expect(q.queue[0].reason.kind).toBe('lower-failed')
       expect(writes().map(short2)).not.toContain('merge 77')
     }
+  })
+
+  it('lands after the fast tier (#1259): the batch asks for the quick tier and lands from it, its full tier skipped', async () => {
+    runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000, 'success', 'skipped') } } } }), FAST_LAND)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
+    expect(writes().map(short2)).toContain('merge 77')
+  })
+
+  it('still lands nothing from a red batch on the fast tier', async () => {
+    runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure', 'skipped') } } } }), FAST_LAND)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    expect(writes().map(short2)).not.toContain('merge 77')
   })
 
   it('lands nothing from a batch whose run did not run the full tier', async () => {
