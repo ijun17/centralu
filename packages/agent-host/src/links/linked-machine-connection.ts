@@ -20,7 +20,7 @@ import { nodeFloor } from './install.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import { shimNames, type ConnectionLine, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { shimNames, StartedNotServing, type ConnectionLine, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
 
@@ -121,6 +121,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * kept stopping would be started three more times every ten minutes for good
    */
   private restartsSpent = false
+  /**
+   * Why the link last declined to start a host there (`startRefusal`), until a host is found running, says hello, or a
+   * start goes through (#1143 re-review). Kept across the openings that read the line again and across a machine that
+   * cannot be reached meanwhile: the row stays `stopped` through them, and the orchestrator's `reconnect_machine` asks
+   * with a card whenever this is set, not only when the status happens to say `stopped`
+   */
+  private heldBack: string | null = null
+  /** What the last counted start said when its host never answered; null when it answered */
+  private lastStartFailure: string | null = null
+  /** Counts the retries set (`retryLater`), so `reconnect` can tell whether an opening under way set its own */
+  private retriesSet = 0
   /**
    * The person's Start (`connect`, the row's Connect/Start/Reconnect, or the orchestrator's card): the next start
    * there goes ahead even when the person stopped it there or the link stopped starting them. Spent once a start went
@@ -367,14 +378,18 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /**
    * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link.
-   * It stays up until they disconnect it, as a machine that connects at start does
+   * It stays up until they disconnect it, as a machine that connects at start does. It is also the person's Start
+   * (#1143): a host is started there even where they stopped it or the link stopped starting them. `start: false` is
+   * the orchestrator's reconnect without its card, which opens the link and starts nothing the link would not
    */
-  connect(): void {
+  connect(opts: { start?: boolean } = {}): void {
     this.pinned = true
     this.downByPerson = false
-    this.startAsked = true
-    this.autoStarts = []
-    this.restartsSpent = false
+    if (opts.start !== false) {
+      this.startAsked = true
+      this.autoStarts = []
+      this.restartsSpent = false
+    }
     if (this.parked) return this.start()
     this.reconnect()
   }
@@ -506,6 +521,20 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   reconnect(): void {
     clearTimeout(this.retryTimer)
     this.attempt = 0
+    /*
+     * An opening already under way answers this one (`open`). Its retry, if it set one, was just cleared: once it ends
+     * without a client of its own it opens again now, or the link would wait for nothing (#1293 re-review)
+     */
+    const under = this.opening
+    if (under) {
+      const set = this.retriesSet
+      void under.finally(() => {
+        // It set a retry of its own after this (a start that failed, a refusal): that backoff stands
+        if (this.stopped || this.held || this.opening || this.retriesSet !== set) return
+        if (this.client === null || this.client === this.gaveUp) this.retryLater(0)
+      })
+      return
+    }
     void this.open()
   }
 
@@ -546,7 +575,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.client?.close()
       this.client = null
     }
-    this.setStatus('connecting', null)
+    // Held back (#1143): the row stays `stopped` while the line is read again, rather than flicker to `connecting`
+    if (this.heldBack && !this.startAsked) this.setStatus('stopped', this.heldBack)
+    else this.setStatus('connecting', null)
     let endpoint = await this.openTunnel()
     if (!endpoint) return
     /*
@@ -556,12 +587,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
      */
     this.installed = installOf(endpoint.line.install)
     this.bootStart = autostartOf(endpoint.line.autostart)
-    // Found running: a Start has nothing left to start
-    if (endpoint.line.hostRunning) this.startAsked = false
+    // Found running: a Start has nothing left to start, and nothing is held back
+    if (endpoint.line.hostRunning) {
+      this.startAsked = false
+      this.heldBack = null
+    }
     // Only where the link can start one; elsewhere a host that is not running is `not_running`, as before
     const notStarted = endpoint.line.hostRunning || !this.tunnel.startHost ? null : this.startRefusal(endpoint.line)
     if (notStarted) {
       if (this.held) return
+      this.heldBack = notStarted
       this.setStatus('stopped', notStarted)
       // Asked again on the backoff: a host the person starts there themselves is connected to
       return this.retryLater()
@@ -597,6 +632,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         started = await this.tunnel.startHost()
       } catch (err) {
         if (this.stopped) return
+        // A host that was started and never answered, one that crashes at boot (#1143 re-review): counted as one that
+        // answered and then stopped, and the Start it answered is spent. A crash the Node there may explain too
+        if (err instanceof StartedNotServing || (err instanceof NodeTooOld && err.kind === 'crashed')) this.countStart((err as Error).message)
         if (err instanceof NodeTooOld) {
           if (await this.switchNode(err, this.floor(), endpoint.line.install?.node ?? null)) return this.doOpen()
           return
@@ -610,8 +648,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
        * starts that stops again before its hello is not started at every step for good. A start that failed does not
        * count: it is `not_running` with its reason, on the backoff, as before
        */
-      this.startAsked = false
-      this.autoStarts.push(Date.now())
+      this.countStart()
       const note = [started.note, this.switched?.note].filter(Boolean).join(' ') || null
       this.hostStarted = { ...started, note, at: Date.now() }
       this.deps.log?.(
@@ -645,6 +682,25 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
+   * A start there went through, or started a host that never answered: it counts, and it spends the person's Start.
+   * `failed`: what the start said when its host never answered, kept for the row should the link stop starting them
+   */
+  private countStart(failed: string | null = null): void {
+    this.startAsked = false
+    this.heldBack = null
+    this.autoStarts.push(Date.now())
+    this.lastStartFailure = failed
+  }
+
+  /**
+   * Why the link starts no host there just now, or null (#1143): the person stopped it there, or the link reached its
+   * limit of starts. Kept while the machine cannot be reached, and while the line is read again
+   */
+  get startHeldBack(): string | null {
+    return this.heldBack
+  }
+
+  /**
    * Why no host is started there now, or null (#1143): the person stopped it there (the line's `stopped`), or the link
    * already started `RESTARTS.max` within its window. The person's Start overrides both. An older remote says no
    * `stopped`, and is started as before
@@ -661,8 +717,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.autoStarts.length >= max) this.restartsSpent = true
     if (!this.restartsSpent) return null
     return (
-      `The Centralu host this computer started on ${this.name} stopped again ${max} times within ${Math.round(windowMs / 60_000)} minutes, ` +
-      'so it is not started again by itself; serve.log and host.log in its data folder there say why. Start tries again'
+      `The Centralu hosts this computer started on ${this.name} did not stay up (${max} starts within ${Math.round(windowMs / 60_000)} minutes), ` +
+      'so it starts no more by itself; serve.log and host.log in its data folder there say why' +
+      (this.lastStartFailure ? ` (the last start: ${this.lastStartFailure})` : '') +
+      '. Start tries again'
     )
   }
 
@@ -697,6 +755,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       endpoint = await this.tunnel.open()
     } catch (err) {
       if (this.stopped) return null
+      /*
+       * The machine could not be reached: a Start pressed now is spent, not kept for whenever it comes back (#1143),
+       * when the person may have stopped Centralu there since. They press Start again once it answers
+       */
+      this.startAsked = false
       this.setStatus('unreachable', (err as Error).message)
       this.retryLater()
       return null
@@ -835,6 +898,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }, this.deps.stableMs ?? STABLE_MS)
     this.stableTimer.unref?.()
     this.startAsked = false
+    this.heldBack = null
     this.refusedOnce = false
     // Said by every hello: a host restarted unelevated (through a standard account) clears it. Logged when it changes
     const elevated = h.elevated ?? null
@@ -919,6 +983,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     clearTimeout(this.retryTimer)
     const [first, max] = this.deps.retryMs ?? RETRY_MS
     const delay = fixedMs ?? Math.min(max, first * 2 ** this.attempt++)
+    this.retriesSet++
     this.retryTimer = setTimeout(() => void this.open(), delay)
     this.retryTimer.unref?.()
   }

@@ -2635,14 +2635,21 @@ host that crashed or is missing, not one the person stopped:
   with `CENTRALU_STOP_BY=hub` and leaves no mark.
 - **The link starts at most three hosts there within 10 minutes** (`RESTARTS`), and then none until the person's Start,
   however long it waits: the limit is kept, not read off the starts again as they age out. A start at the person's
-  Start counts too, so a Start whose hosts stop before they answer is not repeated for good. A start that fails is
-  not counted: it is `not_running` with its reason, on the backoff, as before. A host that answered its hello and
+  Start counts too, so a Start whose hosts stop before they answer is not repeated for good, and so does a host that
+  was started and never answered (`serve --detach` says `exited` or `timeout`: one that crashes at boot). A start
+  where nothing could be started (ssh, no Centralu there, WMI refusing) is not counted: it is `not_running` with its
+  reason, on the backoff, as before. A host that answered its hello and
   then stopped again at once used to reset the backoff at every hello and was started again about every 10 s for
   good. Now the backoff, and the limit, start over only once a host has stayed up 60 s (`STABLE_MS`).
 - **Either way the row is `stopped`**, with `error` saying which, and the link starts nothing until the person's Start
-  (the row's button, `machines.reconnect`) or the orchestrator's `reconnect_machine`, which asks with a card for a
-  stopped machine. It still reads the line on its backoff, so a host the person starts there is connected to. A
-  machine whose Centralu predates the mark says no `stopped`, and is started as before, within the same limit.
+  (the row's button, `machines.reconnect`) or the orchestrator's `reconnect_machine` with the person's card. It still
+  reads the line on its backoff, so a host the person starts there is connected to; the row stays `stopped` while it
+  does, and the reason is kept while the machine cannot be reached (`startHeldBack`, until a host runs there or a
+  start goes through). The card is asked on that reason, not on the row's status of the moment, and without it the
+  orchestrator's reconnect only opens the link (`reconnect { start: false }`). A Start pressed while the machine cannot
+  be reached is spent, not kept for whenever it comes back. The `stopped` sentence after the limit ends with what the
+  last start said when its host never answered. A machine whose Centralu predates the
+  mark says no `stopped`, and is started as before, within the same limit.
 
 **A machine whose Node is below the floor is switched to the hub's own** (#699). Before it starts a host, the link
 reads `install.node` from the connection line; a machine that is not on a managed install and runs a Node below the

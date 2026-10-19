@@ -58,6 +58,8 @@ function fakeOps() {
   /** What `ssh -G` resolves a target to; a target not set here resolves to itself */
   const resolved = new Map<string, Awaited<ReturnType<MachineOps['resolve']>>>()
   let refusal: string | null = null
+  /** Why the hub starts no host on the first machine just now (#1143), or null */
+  let heldBack: string | null = null
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
@@ -79,10 +81,11 @@ function fakeOps() {
       calls.push(['remove', id])
       machines.splice(machines.indexOf(find(id)), 1)
     },
-    reconnect: (id) => {
-      calls.push(['reconnect', id])
+    reconnect: (id, opts) => {
+      calls.push(opts ? ['reconnect', id, opts] : ['reconnect', id])
       return { ...find(id), status: 'connecting' }
     },
+    startHeldBack: () => heldBack,
     setConnect: (id, connect: MachineConnect) => {
       calls.push(['setConnect', id, connect])
       find(id).connect = connect
@@ -115,6 +118,9 @@ function fakeOps() {
     },
     /** The first machine as the hub has it now */
     patch: (over: Partial<MachineInfo>) => void Object.assign(machines[0]!, over),
+    holdBack: (why: string | null) => {
+      heldBack = why
+    },
     /** The calls that changed something, leaving out the reads and the pre-checks */
     changes: () => calls.filter((c) => !['resolve', 'probe', 'installRefusal'].includes(c[0] as string)),
   }
@@ -338,21 +344,32 @@ describe('reconnect_machine and set_machine_connect', () => {
     const mode = await run(orc.id, 'set_machine_connect', { machine: 'laptop', connect: 'when_needed' })
     expect(mode.text).toBe('Laptop now connects only when something needs it.\nNow:\n- "Laptop" [laptop]: connected; Windows, PowerShell; connects when needed')
     expect(card(orc.id)).toBeUndefined()
+    // Without a card the link is only opened: the orchestrator's reconnect is no Start (#1143)
     expect(ops.changes()).toEqual([
-      ['reconnect', 'laptop'],
+      ['reconnect', 'laptop', { start: false }],
       ['setConnect', 'laptop', 'when_needed'],
     ])
   })
 })
 
-// #1143: a machine where Centralu is stopped is started only by the person; reconnecting it starts it, so it asks
+/*
+ * #1143: a machine where Centralu is stopped is started only by the person; reconnecting it starts it, so it asks. Asked
+ * on what the hub holds back, not on the row's status of the moment: the row reads `connecting` while the line is read
+ * again, and `unreachable` while the machine sleeps (#1293 re-review)
+ */
 describe('reconnect_machine where Centralu is stopped', () => {
   it('asks before it starts Centralu there, saying why it is stopped, and starts nothing on Deny', async () => {
     const orc = await mgr.orchestrator()
-    ops.patch({ status: 'stopped', error: 'Centralu was stopped on Laptop with `centralu serve --stop`, so this computer does not start it by itself. Start starts it there' })
+    const why = 'Centralu was stopped on Laptop with `centralu serve --stop`, so this computer does not start it by itself. Start starts it there'
+    ops.holdBack(why)
+    ops.patch({ status: 'connecting', error: null })
     const denied = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
     expect(denied.question).toContain('Start Centralu on Laptop (me@laptop)? Centralu was stopped on Laptop with `centralu serve --stop`')
     expect(denied.r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out' })
+    const asleep = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
+    expect(asleep.question).toContain(why)
     expect(ops.changes()).toEqual([])
     const allowed = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'allow')
     expect(allowed.r.text).toContain('Starting Centralu on Laptop.')

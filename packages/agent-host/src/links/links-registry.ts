@@ -117,10 +117,15 @@ export class Links {
   }
 
   /** The row's Reconnect, and Connect for a disconnected machine (#1134), which then stays up until disconnected */
-  reconnect(id: string): MachineInfo {
+  reconnect(id: string, opts: { start?: boolean } = {}): MachineInfo {
     const m = this.need(id)
-    m.connect()
+    m.connect(opts)
     return m.info()
+  }
+
+  /** Why no host is started on the machine just now, or null (#1143): what the orchestrator's card is gated on */
+  startHeldBack(id: string): string | null {
+    return this.need(id).startHeldBack
   }
 
   /** The row's Disconnect (#1134): the link closes and none is tried; the machine and its lists stay */

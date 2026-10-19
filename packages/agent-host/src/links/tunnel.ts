@@ -212,6 +212,18 @@ export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
   | { ok: false; reason: string; message: string; node?: string }
 
+/**
+ * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
+ * (#1143 review). The link counts it against its limit of starts, as one that answered and then stopped; a start where
+ * nothing could be started (ssh, no Centralu there, WMI refusing) is not this
+ */
+export class StartedNotServing extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StartedNotServing'
+  }
+}
+
 /** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
 export function parseDetachLine(stdout: string): DetachAnswer {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
@@ -665,6 +677,7 @@ export class SshTunnel implements Tunnel {
     // The launcher refused a Node below the floor, or its host crashed the way one crashes (#699)
     if (answer.reason === 'node_too_old') throw new NodeTooOld(answer.message, 'refused', answer.node ?? null)
     if (answer.reason === 'exited' && isHostCrash(answer.message)) throw new NodeTooOld(answer.message, 'crashed', null)
+    if (answer.reason === 'exited' || answer.reason === 'timeout') throw new StartedNotServing(answer.message)
     throw new Error(answer.message)
   }
 
