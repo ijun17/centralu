@@ -5,8 +5,8 @@ import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
-import { AGENT_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type AgentToolName, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
-import { FILL, callForm, commandsFor, guideSeats, notAToolText, profileAllows } from './tool-seats.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
+import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
 /*
  * The orchestrator tools, in four modules (#850): the definitions (tool-definitions.ts), which seat is shown and
@@ -42,10 +42,10 @@ function issuesText(error: z.ZodError): string {
 
 /**
  * Tools only some seats have (profileAllows), checked here too since this runner is shared by every seat: ask_project a
- * reader's, start_agent's pair a reader's and the orchestrator's (#853), which reaches them as commands in the
- * `commands` tier (a direct call then is refused, naming centralu_run)
+ * reader's, start_agent's pair and the app-access three a reader's and the orchestrator's (#853, #1205), which reaches
+ * them as commands in the `commands` tier (a direct call then is refused, naming centralu_run)
  */
-const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session'])
+const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
 
 /**
  * Runs one tool and turns the result into **text for the model to read**.
@@ -401,17 +401,20 @@ const HANDLERS: ToolHandlers = {
    * The app-access tools' texts (#371 part A). Each result names what to do next, because the tools
    * are deferred: the model that found find_apps learns attach_app from its answer, and detach_app from
    * attach_app's. Names an app or a project chose are JSON-quoted, like a worker's text (#121): a
-   * description is the app author's words, not ours.
+   * description is the app author's words, not ours. The orchestrator runs them as commands (#1205), so each call they
+   * name is written in the form its seat makes it (`namedCall`).
    */
-  async find_apps(args, { tools }) {
+  async find_apps(args, { tools, caller }) {
     const query = args.query?.trim() ?? ''
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.apps.length === 0) {
       return {
         text: query
-          ? `No app matches ${trustedJsonText(query)}. Try find_apps with no query to see every app you can attach.`
-          : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
+          ? `No app matches ${trustedJsonText(query)}. Try ${namedCall(caller.profile, 'find_apps', {})} with no query to see every app you can attach.`
+          : caller.profile === 'orchestrator'
+            ? "No app can be attached: no trusted project is an app, and the person's own apps are attached already."
+            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
       }
     }
     return {
@@ -423,11 +426,11 @@ const HANDLERS: ToolHandlers = {
               `\n    ${trustedJsonText(a.name)}${a.description ? `: ${trustedJsonText(a.description)}` : ''}` +
               `\n    tools: ${a.tools ? a.tools.join(', ') || '(none)' : '(listed once attached)'}`,
           )
-          .join('\n') + '\nAttach one with attach_app(app="<the name before ·>").',
+          .join('\n') + `\nAttach one with ${namedCall(caller.profile, 'attach_app', { app: '<the name before ·>' })}.`,
     }
   },
 
-  async attach_app(args, { tools }) {
+  async attach_app(args, { tools, caller }) {
     const app = args.app.trim()
     if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
     const r = await tools.attachApp(app)
@@ -440,7 +443,7 @@ const HANDLERS: ToolHandlers = {
     return {
       text:
         `${r.already ? 'Already attached' : 'Attached'}: ${app} as the ${r.server} server. Tools: ${names}. ${when}\n` +
-        `When you no longer need it, call detach_app(app=${trustedJsonText(app)}) so its tools stop taking up context.`,
+        `When you no longer need it, call ${namedCall(caller.profile, 'detach_app', { app })} so its tools stop taking up context.`,
     }
   },
 
@@ -534,10 +537,10 @@ function commandLine(description: string): string {
 }
 
 function commandDef(name: string) {
-  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].find((t) => t.name === name)
+  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].find((t) => t.name === name)
 }
 
-function commandSchemaText(name: OrchestratorToolName | AgentToolName): string {
+function commandSchemaText(name: CommandName): string {
   return JSON.stringify(z.toJSONSchema(TOOL_ARGS[name].strict()))
 }
 
@@ -569,7 +572,7 @@ async function runCommandTool(c: { [N in CommandToolName]: { name: N; args: Orch
   }
 
   const command = c.args.command.trim()
-  const def = commands.includes(command as OrchestratorToolName) ? commandDef(command) : undefined
+  const def = commands.includes(command as CommandName) ? commandDef(command) : undefined
   if (!def) {
     if (name === 'centralu_run') logRun(caller, command, 'no such command')
     return { text: `No command ${trustedJsonText(command)} for this session. ${known}`, isError: true }

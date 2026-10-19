@@ -364,9 +364,9 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `ask_project` | — | — | — | yes | — |
 | `start_agent` | yes | — | — | yes | — |
 | `agent_session` | yes | — | — | yes | — |
-| `find_apps` | — | — | — | yes | — |
-| `attach_app` | — | — | — | yes | — |
-| `detach_app` | — | — | — | yes | — |
+| `find_apps` | yes | — | — | yes | — |
+| `attach_app` | yes | — | — | yes | — |
+| `detach_app` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
@@ -454,9 +454,10 @@ defers them behind Claude's tool search, which changes nothing here. The measure
 [tool-cost.md](tool-cost.md) §9.
 
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
-user-folder apps and the root apps of trusted projects (#1141: a project whose folder holds the manifest
-is an app, and its trust is the project's), a project's sessions that project's apps, and a builder its
-own app (`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An
+user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
+`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the orchestrator adds the
+root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and
+its trust is the project's; #1205: as commands behind `centralu_run`, and never a project's inner app). An
 agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,
 #1141): its root app and the apps inside it, to no session, its own project's included, under every
 preset, `auto` too; #603's opening no longer applies to apps, and the runtime refuses them for every
@@ -523,6 +524,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
+| `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
 | Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |

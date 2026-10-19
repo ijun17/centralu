@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ORCHESTRATOR_MCP_NAME, type ToolProfile } from '../apps/contract.js'
 import type { GuideSeats, GuideTool } from './app-guide.js'
+import { trustedJsonText } from './tool-answers.js'
 import {
   AGENT_TOOLS,
   APP_ACCESS_TOOLS,
@@ -17,8 +18,12 @@ import {
   SCOPED_INSTRUCTIONS,
   SCOPED_TOOL_NAMES,
   type AgentToolName,
+  type AppAccessToolName,
   type OrchestratorToolName,
 } from './tool-definitions.js'
+
+/** A command a seat may reach through centralu_run */
+export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName
 
 let readerInstructions = true
 
@@ -82,18 +87,40 @@ export function currentRareTier(): RareTier {
  * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
  * the instructions; the first of the orchestrator's window functions to come as commands (#1219). In since #1219's
  * second slice: the six machine commands, which the instructions name in one line.
+ * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
+ * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
+ * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
  * Out: app_guide. It answers the person's own questions about the app, which come often and
  * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
  * too: everything the instructions tell the orchestrator to reach for first (list, read, recall, send, create
  * a session or a project).
  */
-export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly (OrchestratorToolName | AgentToolName)[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session', 'start_agent', 'agent_session', 'add_project', 'list_machines',
-    'add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_connect', 'set_machine_autostart'],
+export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>> = {
+  orchestrator: [
+    'create_app',
+    'propose_skill',
+    'propose_mcp_server',
+    'update_centralu',
+    'answer_question',
+    'handoff_session',
+    'start_agent',
+    'agent_session',
+    'add_project',
+    'list_machines',
+    'add_machine',
+    'install_machine',
+    'remove_machine',
+    'reconnect_machine',
+    'set_machine_connect',
+    'set_machine_autostart',
+    'find_apps',
+    'attach_app',
+    'detach_app',
+  ],
 }
 
 /** The commands this seat reaches through centralu_run in this tier: never one its profile does not allow */
-export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): (OrchestratorToolName | AgentToolName)[] {
+export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): CommandName[] {
   if (tier !== 'commands' || profile === 'human') return []
   return (RARE_COMMANDS[profile] ?? []).filter((n) => baseAllows(profile, n))
 }
@@ -114,7 +141,7 @@ export function callForm(
   tier: RareTier = rareTier,
 ): string | undefined {
   if (profile === null || profile === 'human') return undefined
-  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : JSON.stringify(v))
+  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : typeof v === 'string' ? trustedJsonText(v) : JSON.stringify(v))
   const entries = Object.entries(args)
   if ((commandsFor(profile, tier) as string[]).includes(tool)) {
     return `centralu_run(command="${tool}", args={${entries.map(([k, v]) => `${k}: ${value(v)}`).join(', ')}})`
@@ -134,7 +161,7 @@ export function namedCall(
   args: Record<string, string | number | boolean | typeof FILL>,
   tier: RareTier = rareTier,
 ): string {
-  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : JSON.stringify(v))
+  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : typeof v === 'string' ? trustedJsonText(v) : JSON.stringify(v))
   return callForm(profile, tool, args, tier) ?? `${tool}(${Object.entries(args).map(([k, v]) => `${k}=${value(v)}`).join(', ')})`
 }
 
@@ -189,10 +216,11 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       APP_ACCESS_TOOLS.some((t) => t.name === name)
     )
   }
-  // ask_project and the app-access tools (#371) are a reader's alone: every directing seat already works inside its own
-  // view. start_agent's pair (#561) is the orchestrator's too (#853), for children outside any project
-  if (AGENT_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
-  if (DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
+  // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
+  // the orchestrator's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
+  // root apps it attaches when it needs one
+  if (AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  if (DELEGATE_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'orchestrator') return !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
   return (BUILDER_TOOL_NAMES as readonly string[]).includes(name)
@@ -210,7 +238,7 @@ export function toolDefsFor(
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
-    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }
