@@ -1737,7 +1737,21 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
     const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
     const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
-    return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf }
+    /*
+     * The clock for "no report comes" (#845): another child is given a task, and its report awaited. It travels the same
+     * link after the events already there, so by the time it has come, a report owed for an earlier event would have too.
+     * Adds one to `reports()`. `mgr`: the hub's manager when the test has made a new one
+     */
+    const control = async (mgr: SessionManager = hub.mgr) => {
+      const call = mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', wait: false })
+      await eventually(() => !!mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+      await mgr.respondApproval('h1', mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      // Its own report, not any: a wrongful one coming in meanwhile must not end the wait
+      await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work') && t.includes(`id: ${r.sessionId}`)))
+    }
+    return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf, control }
   }
 
   it("starts it in the machine's checkout of the same repository, behind a card that names the machine, and waits for its answer", async () => {
@@ -2006,7 +2020,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
   })
 
   it('reports the end of a turn it was not waited on to the session that started it, and takes sends, a stop and a delete', async () => {
-    const { remote, answer, start, agent, told, reports } = await rig()
+    const { remote, answer, start, agent, told, reports, control } = await rig()
     const call = start({ wait: false })
     await answer('allow')
     const r = await call
@@ -2026,12 +2040,14 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining("Remote box's trash") })
     expect(remote.mgr.listSessions().some((s) => s.id === id)).toBe(false)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: false, error: expect.stringContaining('is not a session this session started') })
-    expect(reports()).toBe(before)
+    // The stopped turn's report, if one were owed, would have come before the next child's
+    await control()
+    expect(reports()).toBe(before + 1)
   })
 
   // #1038 review: the turn a delete stops ends before the machine answers the stop; it is owed to nobody
   it('reports nothing of the turn a delete stops', async () => {
-    const { remote, answer, start, agent, reports } = await rig()
+    const { remote, answer, start, agent, reports, control } = await rig()
     const call = start({ task: 'please approve the command', wait: false })
     await answer('allow')
     const r = await call
@@ -2039,9 +2055,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const id = r.sessionId.slice('m1.'.length)
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted' })
-    // Room for a report to arrive, if one were sent
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(reports()).toBe(0)
+    // A report of the turn the delete stopped would have come before this one
+    await control()
+    expect(reports()).toBe(1)
   })
 
   // #1038 review: a delete whose stop failed left the child running and owed nothing
@@ -2290,7 +2306,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
 
   // #1038: the report was owed in the hub's memory only, so a hub restart kept the child but never reported its end
   it('still reports a child after the hub restarts: a turn that ended while the hub was down, and one that ends after', async () => {
-    const { remote, hub, answer, start, reports } = await rig()
+    const { remote, hub, answer, start, reports, control } = await rig()
     const begin = async (task: string) => {
       const call = start({ task, wait: false })
       await answer('allow')
@@ -2315,14 +2331,14 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await eventually(() => reports() === 1)
     await allow(endsAfter)
     await eventually(() => reports() === 2)
-    // Each once
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(reports()).toBe(2)
+    // Each once: a report sent twice would have come before the next child's
+    await control(again.mgr)
+    expect(reports()).toBe(3)
   })
 
   // #1038 review: after a missed end, a turn the person started there was taken for the caller's, and reported as its answer
   it("does not take a turn the person started there while the link was down for the caller's, nor report its end", async () => {
-    const { remote, remoteStore, hub, answer, start, told, reports } = await rig()
+    const { remote, remoteStore, hub, answer, start, told, reports, control } = await rig()
     // When the hub has read the child once the link is back: its last message, or (without that read) its state a while ago
     const reader = (hub.mgr as unknown as { linkedReader: Record<string, (...a: unknown[]) => Promise<unknown>> }).linkedReader
     let readAt = 0
@@ -2361,8 +2377,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const q = back.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
     back.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
     await eventually(() => ['idle', 'waiting_input'].includes(back.mgr.listSessions().find((s) => s.id === id)?.state ?? ''))
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    expect(reports()).toBe(0)
+    // A report of the person's turn would have come before the next child's
+    await control()
+    expect(reports()).toBe(1)
     expect(told().some((t) => t.includes('that you did not give it while the hub could not see it'))).toBe(true)
   })
 
