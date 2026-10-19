@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
-import type { GitSource, ProjectInfo } from '@cc/protocol'
-import { gitSourceError, repoNameOf } from '@cc/protocol'
+import { homedir } from 'node:os'
+import { basename, isAbsolute, join, resolve } from 'node:path'
+import type { GitSource, ProjectInfo, RpcResult } from '@cc/protocol'
+import { gitSourceError, projectAddQuestion, repoNameOf } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
+import { gitOriginUrl, isRepo } from '../dev-services/git.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { canonicalPath } from '../dev-services/path-guard.js'
@@ -17,7 +19,13 @@ import type { SessionTrashHost } from './session-trash.js'
  * What making a project reaches of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ProjectCreationHost = Pick<DelegationHost, 'askHost' | 'emit' | 'onEvent' | 'store'> & Pick<SessionTrashHost, 'projectInfo'>
+export type ProjectCreationHost = Pick<DelegationHost, 'askHost' | 'emit' | 'onEvent' | 'store'> & Pick<SessionTrashHost, 'appsHub' | 'projectInfo'>
+
+/** What a folder is, as `projects.inspect` answers (#1220) */
+export type FolderFacts = RpcResult<'projects.inspect'>
+
+/** add_project's answer (#1220): the project registered, or why not, in words for the model */
+export type FolderAdded = { ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }
 
 /**
  * A project registered or made on this machine (#515, #655): an existing folder added, a new folder made empty or
@@ -45,6 +53,99 @@ export class ProjectCreation {
     const id = existing?.id ?? randomUUID()
     this.host.store.projects.addProject({ id, path: at, name: basename(at), ...(opts.trusted ? { trusted: true } : {}) })
     return this.host.projectInfo(id, at)
+  }
+
+  /**
+   * The orchestrator's add_project once the person allowed it (#1220), as the sidebar's Add project (`projects.add`)
+   * registers a folder: the same checks and registration (`addProject`, untrusted when new), then the apps list read
+   * again, since the folder may hold apps. The RPC handler refreshes the runtime it was given rather than this one, which
+   * is the same runtime in a running host (main.ts).
+   */
+  async registerFolder(path: string): Promise<ProjectInfo> {
+    const info = await this.addProject(path)
+    this.host.appsHub?.rt.refresh()
+    return info
+  }
+
+  /**
+   * What a folder on this machine is (#1220, `projects.inspect`), nothing changed: whether it is there and a folder,
+   * whether it is in a git repository and that repository's `origin` (read from its config, as an untrusted project's
+   * git reads are: none of its programs runs), and the project already kept for it. A leading `~` is this machine's
+   * home; any other path that is not absolute is refused.
+   */
+  async inspectFolder(given: string): Promise<FolderFacts> {
+    const typed = given.trim()
+    const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed
+    if (!expanded || !isAbsolute(expanded)) throw rpcError(`Give the folder's full path: ${JSON.stringify(given)} is not one`)
+    // Spelled as addProject keeps a new one: no trailing separator, a capital drive letter
+    const path = resolve(expanded).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
+    let found: ReturnType<typeof statSync> | null
+    try {
+      found = statSync(path)
+    } catch {
+      found = null
+    }
+    const folder = found?.isDirectory() === true
+    const git = folder ? await isRepo(path).catch(() => false) : false
+    const origin = git ? await gitOriginUrl(path, { trusted: false }) : null
+    const kept = folder ? this.projectAt(path) : undefined
+    const project = kept ? { id: kept.id, name: this.host.store.projects.listProjects().find((p) => p.id === kept.id)?.name ?? basename(kept.path) } : null
+    return { path, exists: found !== null, folder, git, origin, project }
+  }
+
+  /**
+   * add_project on this computer (#1220): the folder's facts read first, a refusal before any card for a path that is
+   * missing, a file or already a project, then the person's card with those facts on it. On Allow they are read again
+   * (the folder may have gone, or been added, while the card stood) and it is registered through `registerFolder`, as the
+   * sidebar's own path; the windows hear which project it is, to ask about its trust as Add project does.
+   */
+  async addFolderAsked(sessionId: string, path: string, signal?: AbortSignal): Promise<FolderAdded> {
+    try {
+      const facts = await this.inspectFolder(path)
+      const refused = folderRefusal(facts) ?? (await this.askFolderAdd(sessionId, facts, undefined, signal))
+      if (refused) return { ok: false, error: refused }
+      const changed = folderRefusal(await this.inspectFolder(facts.path))
+      if (changed) return { ok: false, error: `${changed} It changed while the card stood, so nothing was added.` }
+      const info = await this.registerFolder(facts.path)
+      this.host.emit({ type: 'projects_changed', added: info.id })
+      return { ok: true, projectId: info.id, name: info.name, path: info.path }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  }
+
+  /**
+   * add_project on a linked machine (#1220): the same, with the facts that machine's host reads (`projects.inspect`
+   * there) and, on Allow, read again and that machine's `projects.add`, the call the sidebar's Add project on its group
+   * makes. That host makes the same checks again when it registers the folder.
+   */
+  async addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded> {
+    const read = await reader.inspectFolder(machine.id, path)
+    if (!read.ok) return read
+    const refused = folderRefusal(read.facts, machine.name) ?? (await this.askFolderAdd(sessionId, read.facts, machine.name, signal))
+    if (refused) return { ok: false, error: refused }
+    // Read again, as here: a folder gone or added while the card stood is not added
+    const again = await reader.inspectFolder(machine.id, read.facts.path)
+    if (!again.ok) return again
+    const changed = folderRefusal(again.facts, machine.name)
+    if (changed) return { ok: false, error: `${changed} It changed while the card stood, so nothing was added.` }
+    const added = await reader.addProject(machine.id, read.facts.path)
+    if (!added.ok) return added
+    this.host.emit({ type: 'projects_changed', added: added.projectId })
+    return { ...added, machine: machine.name }
+  }
+
+  /**
+   * add_project's card (#1220): the person's refusal or a withdrawn card as the error the orchestrator reads, or null
+   * once allowed. Asked under every preset (`alwaysAsk`), auto included: an existing folder can be anything on that
+   * disk, and once it is a project the orchestrator can start sessions in it.
+   */
+  private async askFolderAdd(sessionId: string, facts: FolderFacts, machine: string | undefined, signal?: AbortSignal): Promise<string | null> {
+    const card = { name: folderName(facts.path), path: facts.path, ...(machine ? { machine } : {}), exists: facts.exists, folder: facts.folder, git: facts.git, origin: facts.origin }
+    const decision = await this.host.askHost(sessionId, { kind: 'project_add', ...card, text: projectAddQuestion(card) }, signal, { alwaysAsk: true })
+    if (decision === 'deny') return 'The person did not approve it. Do not ask again unless they tell you to.'
+    if (decision === null) return 'The card was withdrawn before the person answered, so nothing was added.'
+    return null
   }
 
   /**
@@ -213,4 +314,18 @@ export class ProjectCreation {
     if (source) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${source.git} into ${where}…` })
     return null
   }
+}
+
+/** A folder's name, from a path in either machine's terms */
+function folderName(path: string): string {
+  return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
+}
+
+/** Why add_project stops before the card (#1220), in words for the model; null when the person can be asked */
+function folderRefusal(facts: FolderFacts, machine?: string): string | null {
+  const where = machine ? `${facts.path} on ${machine}` : facts.path
+  if (!facts.exists) return `Nothing is at ${where}.`
+  if (!facts.folder) return `${where} is a file, not a folder.`
+  if (facts.project) return `${where} is already the project ${JSON.stringify(facts.project.name)} [${facts.project.id}].`
+  return null
 }

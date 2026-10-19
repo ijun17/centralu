@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames, workflowEventJobs } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
-import { changedFiles, classify, draftOf, outputs, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
+import { changedFiles, classify, draftOf, failFastOf, outputs, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
 
 // Like release-workflow.test.ts, inspect the workflow without adding a YAML dependency.
 const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')
@@ -74,9 +74,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     })
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
-    // Every job but `changes` and the report (which waits on the e2e jobs) has a gate: nothing else runs on a draft
+    // Every job but `changes`, the report (which waits on the e2e jobs) and the fail fast (which waits on `verify`) has
+    // a gate: nothing else runs on a draft
     const ungated = jobs.filter((j) => !gate(j.body)).map((j) => j.id)
-    expect(ungated.sort()).toEqual(['changes', 'e2e-report'])
+    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'fail-fast'])
     expect(job('changes').body).toMatch(/^ {6}quick: \$\{\{ steps\.classify\.outputs\.quick \}\}$/m)
     expect(job('e2e-report').body).toMatch(/^ {4}needs: \[e2e, e2e-chromium\]$/m)
     expect(job('changes').body).toMatch(/^ {6}full: \$\{\{ steps\.classify\.outputs\.full \}\}$/m)
@@ -107,26 +108,57 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
 
-  // #1035: a flaky shard cost a rerun of its whole job, 5 to 7 minutes with the queue
-  it('runs a failed e2e shard once more inside its job, saying so, with time for both and the first report kept', () => {
+  // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
+  it('runs each e2e shard once, retrying a failed test inside Playwright, and names every test that passed only on retry', () => {
+    const config = readFileSync(new URL('../e2e/playwright.config.ts', import.meta.url), 'utf8')
+    expect(config).toContain('retries: process.env.CI ? 1 : 0,')
+    expect(config).toContain("['./flaky-report.ts']")
     for (const id of ['e2e', 'e2e-chromium']) {
       const body = job(id).body
       const step = body.slice(body.indexOf('- name: pnpm e2e'))
       expect(step, id).toMatch(/^ {8}id: e2e$/m)
-      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(step)?.[1] ?? ''
-      const lines = run.split('\n').map((l) => l.trim()).filter(Boolean)
-      expect(lines[0], id).toMatch(/^e2e\(\) \{ pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} .*; \}$/)
-      expect(lines[1], id).toBe('if e2e; then exit 0; fi')
-      expect(lines.at(-1), id).toBe('e2e')
-      const rest = lines.slice(2, -1)
-      expect(rest.some((l) => l.startsWith('echo "::warning title=e2e (')), id).toBe(true)
-      expect(rest.some((l) => l.includes('mv "$d" "e2e-first-attempt/')), id).toBe(true)
-      expect(rest, id).toContain('echo "retried=true" >> "$GITHUB_OUTPUT"')
-      // The first run's report, uploaded apart from the blobs `e2e report` merges
-      expect(body, id).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.e2e\.outputs\.retried == 'true' \}\}\n {8}with:\n {10}name: e2e-first-attempt-/)
-      expect(Number(/^ {4}timeout-minutes: (\d+)$/m.exec(body)?.[1]), id).toBeGreaterThanOrEqual(30)
+      // One run of the shard: the whole-shard retry (#1035) is gone with its first-attempt artifact
+      expect(step, id).toMatch(/^ {8}run: pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} --reporter=list,blob,\.\/e2e\/flaky-report\.ts --trace=retain-on-failure$/m)
+      expect(body, id).not.toContain('e2e-first-attempt')
+      expect(body, id).toMatch(/^ {4}outputs:\n {6}(?:#.*\n {6})?flaky: \$\{\{ steps\.e2e\.outputs\.flaky \}\}$/m)
     }
+    const report = job('e2e-report').body
+    for (const id of ['e2e', 'e2e-chromium']) {
+      expect(report).toContain(`needs.${id}.result == 'failure'`)
+      expect(report).toContain(`needs.${id}.outputs.flaky == 'true'`)
+    }
+    expect(report).toMatch(/E2E_FLAKY_LABEL="\$engine" .*merge-reports --reporter html,\.\/e2e\/flaky-report\.ts /)
     expect(workflow).toContain('pattern: e2e-blob-*')
+  })
+
+  // 2026-10-19 (owner): one e2e shard hung 35 minutes and held a merge batch; GitHub's default limit is 6 hours
+  it('gives every job that does real work a time limit near its slowest green run, the e2e shards 15 minutes', () => {
+    const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
+    // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
+    const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
+    for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
+    expect(limit('e2e')).toBe(15)
+    expect(limit('e2e-chromium')).toBe(15)
+    for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
+  })
+
+  // 2026-10-19 (owner): a failed verify was heard only after every e2e shard had finished, about 10 minutes later
+  it('cancels the rest of a manual run once verify has failed, from a job of its own, as `changes` says', () => {
+    const ff = job('fail-fast').body
+    expect(names(ff)).toEqual(['fail fast'])
+    expect(ff).toMatch(/^ {4}needs: \[changes, verify\]$/m)
+    expect(ff).toContain("if: ${{ !cancelled() && needs.verify.result == 'failure' && needs.changes.outputs.fail_fast == 'true' }}")
+    expect(ff).toMatch(/^ {4}permissions:\n {6}actions: write\n {4}steps:/m)
+    // This run, by its id: never another run of the concurrency group
+    expect(ff).toContain('RUN_ID: ${{ github.run_id }}')
+    expect(ff).toContain('gh run cancel "$RUN_ID"')
+    expect(ff).not.toContain('continue-on-error')
+    // No event context: a release bump's run stays evidence for the release (docs/releasing.md, event audit)
+    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n${ff}`)[0]!.reason).toBeNull()
+    // `verify` itself cancels nothing, so its check stays `failure`: how the queue tells this run from one cancelled for nothing
+    expect(job('verify').body).not.toMatch(/run cancel|\/cancel/)
+    expect(job('changes').body).toMatch(/^ {6}fail_fast: \$\{\{ steps\.classify\.outputs\.fail_fast \}\}$/m)
   })
 
   it('gives each matrix job the files gate a stand-in with the same checks, run on the other answer only', () => {
@@ -222,6 +254,19 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE] })).toMatchObject({ tier: 'full', why: expect.stringContaining('release bump') })
   })
 
+  it('fails fast on a manual run alone, never on a release bump, on main or when the files are not known', () => {
+    expect(failFastOf({ files: ['packages/ui/src/a.ts'], dispatch: true })).toBe(true)
+    expect(failFastOf({ files: [], dispatch: true })).toBe(true)
+    // A pull request's run, a release bump's included, and main's: every job to its end
+    expect(failFastOf({ files: ['packages/ui/src/a.ts'] })).toBe(false)
+    expect(failFastOf({ files: [VERSION_SOURCE] })).toBe(false)
+    expect(failFastOf({ files: null, onMain: true })).toBe(false)
+    // A manual run that is a release bump (a batch holding the bump PR), on main, or whose files are not known
+    expect(failFastOf({ files: ['docs/a.md', VERSION_SOURCE], dispatch: true })).toBe(false)
+    expect(failFastOf({ files: null, onMain: true, dispatch: true })).toBe(false)
+    expect(failFastOf({ files: null, dispatch: true })).toBe(false)
+  })
+
   // #1066: a stack's lower PRs are drafts, and the top's run (and the merge queue's batch) proves the stack
   it('runs nothing but changes for a draft pull request, except a release bump, and asks the event last', () => {
     expect(tierOf({ files: ['packages/agent-host/src/rpc.ts'], draft: true }).tier).toBe('none')
@@ -252,9 +297,9 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     expect(outputs('quick', host)).toEqual({ quick: 'true', full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off' })
     expect(outputs('full', host)).toEqual({ quick: 'true', full: 'true', bundle: 'true', host: 'true', host_tests: 'true', code: 'true' })
     expect(outputs('full', classify(['docs/a.md']))).toEqual({ quick: 'true', full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false' })
-    // Every answer a job's gate reads is one `changes` gives
+    // Every answer a job's gate reads is one `changes` gives (`fail_fast` is written beside the groups, see failFastOf)
     const gates = new Set([...workflow.matchAll(/needs\.changes\.outputs\.(\w+) == '(true|false)'/g)].map((m) => m[1]))
-    expect([...gates].sort()).toEqual(Object.keys(outputs('full', host)).sort())
+    expect([...gates].sort()).toEqual([...Object.keys(outputs('full', host)), 'fail_fast'].sort())
   })
 
   it('runs everything when the changed files are not known', () => {
@@ -338,8 +383,8 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
       execFileSync(process.execPath, [script], { cwd: f.dir, env: { ...process.env, GITHUB_OUTPUT: out, GITHUB_EVENT_PATH: event, EVERYTHING: everything }, stdio: 'pipe' })
       return Object.fromEntries(readFileSync(out, 'utf8').trim().split('\n').map((l) => l.split('=')))
     }
-    const off = { quick: 'true', full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off' }
-    const all = { quick: 'true', full: 'true', bundle: 'true', host: 'true', host_tests: 'true', code: 'true' }
+    const off = { quick: 'true', full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off', fail_fast: 'false' }
+    const all = { quick: 'true', full: 'true', bundle: 'true', host: 'true', host_tests: 'true', code: 'true', fail_fast: 'false' }
     try {
       f.git('update-ref', 'refs/remotes/origin/main', 'main')
       f.git('checkout', '-q', '-b', 'docs')
@@ -350,14 +395,17 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
       // A draft's (a stack's lower, #1066): `changes` alone
       expect(answer('', true)).toEqual({ ...off, quick: 'off' })
       // A manual run on the same commit: everything, or what the files need when `everything` is unticked
-      expect(answer('true')).toEqual(all)
-      expect(answer('false')).toEqual({ quick: 'true', full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false' })
+      // (the only runs where a failed verify cancels the rest)
+      expect(answer('true')).toEqual({ ...all, fail_fast: 'true' })
+      expect(answer('false')).toEqual({ quick: 'true', full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false', fail_fast: 'true' })
       // A release bump's pull request
       f.git('checkout', '-q', '-b', 'bump', 'main')
       f.commit({ [VERSION_SOURCE]: "export const APP_VERSION = '9.9.9'\n" }, 'chore(release): 9.9.9')
       f.merge('bump', 'main')
       expect(answer()).toEqual(all)
       expect(answer('', true)).toEqual(all)
+      // Even run by hand, a release bump's run is never cut short
+      expect(answer('true')).toEqual(all)
       // A commit on main
       f.git('checkout', '-q', 'main')
       f.commit({ 'docs/b.md': 'docs' }, 'docs on main')

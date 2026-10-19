@@ -1,4 +1,4 @@
-import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -6,6 +6,7 @@ import { inTurn } from '../idle.js'
 import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
+import type { FolderAdded } from './project-creation.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
@@ -66,6 +67,12 @@ export type OrchestratorSeatHost = {
     spec: { name: string; parent?: string; source?: GitSource },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }>
+  /** add_project (#1220): `ProjectCreation.addFolderAsked`, a folder on this computer */
+  addFolderAsked(sessionId: string, path: string, signal?: AbortSignal): Promise<FolderAdded>
+  /** add_project on a linked machine (#1220): `ProjectCreation.addFolderOnMachine` */
+  addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded>
+  /** The linked machines as `machines.list` answers them (#1220), once wired (`useMachineList`); empty without links */
+  machineList(): MachineInfo[]
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -184,6 +191,50 @@ export function orchestratorToolsFor(
     : hubView ? `Not a session this machine shares: ${id}`
     : `Not a session this app manages: ${id}`
 
+  /**
+   * An instruction to a linked machine's session (#82 phase 4), send_to_session's and create_session's first message
+   * (#1233): delivered there as an instruction from this orchestrator, under that session's own approval settings. The report is watched for before the send, since the machine's first
+   * events can reach this hub before its answer does. The new wait reads nothing until the machine's record of this
+   * instruction is relayed (`instruction`, #1082): a turn end before it is an earlier turn's. An earlier report
+   * paused over its own work (#723) is replaced by it, as a new task ends a pause here; if the send fails it is
+   * put back, and its settle wait starts again from the work as the hub knows it now. A turn end of the old work
+   * that came in that moment is not the new wait's, and is not told again.
+   */
+  const sendLinked = async (reader: LinkedSessions, sessionId: string, text: string, reportBack: boolean | undefined): Promise<{ ok: boolean; error?: string }> => {
+    const earlier = host.children.linkedReports.get(sessionId)
+    const mine: LinkedReport | undefined = reportBack ? { orchestratorId, busy: false, instruction: text } : undefined
+    if (mine) host.children.setLinkedReport(sessionId, mine)
+    const r = await reader.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+    // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
+    const current = host.children.linkedReports.get(sessionId)
+    if (mine) replacedBy.set(mine, earlier)
+    if (!r.ok) {
+      if (mine && current === mine) {
+        // What was there before: past any request of an overlapping send that failed while this one was out (#839)
+        let back = earlier
+        while (back && failedSends.has(back)) back = replacedBy.get(back)
+        if (back) {
+          host.children.setLinkedReport(sessionId, back)
+          host.linkedReportRestored(sessionId)
+        } else host.children.dropLinkedReport(sessionId)
+      } else if (mine) failedSends.add(mine)
+      return r
+    }
+    /*
+     * The machine records the instruction before it answers, and its events and answers come in order on one link,
+     * read as they come: by now its record has been heard, unless it was lost (the machine's host swapped or restarted
+     * before it went out, past what a reconnect replays). Then nothing would ever start the wait, so it reads turn
+     * ends from here on, as before #1082: anything older came before this answer, and was not taken for its end
+     */
+    if (mine?.instruction !== undefined) {
+      console.error(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`)
+      delete mine.instruction
+    }
+    // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
+    if (!reportBack && earlier?.orchestratorId === orchestratorId && current === earlier) host.children.dropLinkedReport(sessionId)
+    return { ok: true }
+  }
+
   return {
     updateCentralu: async (action, signal) => host.updateCentraluAsked(orchestratorId, action, signal),
     listSessions: async (opts) => {
@@ -283,11 +334,17 @@ export function orchestratorToolsFor(
       const seatPreset = seat?.permissionPreset ?? 'safe'
       const preset: PermissionPreset = presetWithin('normal', seatPreset) ? 'normal' : seatPreset
       const sender = { sessionId: orchestratorId, name: seat?.name ?? 'Orchestrator' }
+      /*
+       * The first message is work this seat hands out (#1233): it is told when that turn ends unless it said not to, as
+       * start_agent's caller is. It used to be a plain send, owed to nobody, and the orchestrator heard nothing.
+       */
+      const reportBack = opts.reportBack !== false
       if (reader && remote[0]) {
         const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset })
         if (!r.ok) return r
         if (opts.firstMessage) {
-          const sent = await reader.send(r.sessionId, opts.firstMessage, sender.name)
+          // On a linked machine as send_to_session's instruction there: the report is watched for before it goes
+          const sent = await sendLinked(reader, r.sessionId, opts.firstMessage, reportBack)
           if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
         }
         return { ok: true, sessionId: r.sessionId, name: r.name }
@@ -307,7 +364,17 @@ export function orchestratorToolsFor(
           permissionPreset: preset,
         })
         if (opts.name) host.rename(info.id, opts.name)
-        if (opts.firstMessage) await host.send(info.id, opts.firstMessage, undefined, sender)
+        if (opts.firstMessage) {
+          // This seat's turn, as a send to a session at rest is (#676): its cards come here, and more words are notes
+          host.children.ownTurn(info.id, orchestratorId, true)
+          try {
+            await host.send(info.id, opts.firstMessage, undefined, sender)
+          } catch (e) {
+            host.children.releaseTurn(info.id, orchestratorId)
+            throw e
+          }
+          if (reportBack) host.children.markReport(info.id, orchestratorId)
+        }
         return { ok: true, sessionId: info.id, name: host.meta.get(info.id)?.name ?? info.name }
       } catch (e) {
         return { ok: false, error: (e as Error).message }
@@ -509,55 +576,14 @@ export function orchestratorToolsFor(
         return { ok: false, error: 'Cannot send to itself' }
       }
       const remote = remoteOf(sessionId)
-      if (remote) {
-        /*
-         * A linked machine's session (#82 phase 4): delivered there as an instruction from this orchestrator, under
-         * that session's own approval settings. The report is watched for before the send, since the machine's first
-         * events can reach this hub before its answer does. The new wait reads nothing until the machine's record of this
-         * instruction is relayed (`instruction`, #1082): a turn end before it is an earlier turn's. An earlier report
-         * paused over its own work (#723) is replaced by it, as a new task ends a pause here; if the send fails it is
-         * put back, and its settle wait starts again from the work as the hub knows it now. A turn end of the old work
-         * that came in that moment is not the new wait's, and is not told again.
-         */
-        const earlier = host.children.linkedReports.get(sessionId)
-        const mine: LinkedReport | undefined = reportBack ? { orchestratorId, busy: false, instruction: text } : undefined
-        if (mine) host.children.setLinkedReport(sessionId, mine)
-        const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
-        // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
-        const current = host.children.linkedReports.get(sessionId)
-        if (mine) replacedBy.set(mine, earlier)
-        if (!r.ok) {
-          if (mine && current === mine) {
-            // What was there before: past any request of an overlapping send that failed while this one was out (#839)
-            let back = earlier
-            while (back && failedSends.has(back)) back = replacedBy.get(back)
-            if (back) {
-              host.children.setLinkedReport(sessionId, back)
-              host.linkedReportRestored(sessionId)
-            } else host.children.dropLinkedReport(sessionId)
-          } else if (mine) failedSends.add(mine)
-          return r
-        }
-        /*
-         * The machine records the instruction before it answers, and its events and answers come in order on one link,
-         * read as they come: by now its record has been heard, unless it was lost (the machine's host swapped or restarted
-         * before it went out, past what a reconnect replays). Then nothing would ever start the wait, so it reads turn
-         * ends from here on, as before #1082: anything older came before this answer, and was not taken for its end
-         */
-        if (mine?.instruction !== undefined) {
-          console.error(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`)
-          delete mine.instruction
-        }
-        // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
-        if (!reportBack && earlier?.orchestratorId === orchestratorId && current === earlier) host.children.dropLinkedReport(sessionId)
-        return { ok: true }
-      }
+      if (remote) return sendLinked(remote, sessionId, text, reportBack)
       const target = host.meta.get(sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
       /*
        * Busy with a turn that is not this seat's (#677): this seat chooses. A note goes in as before (auto only,
        * #606); a queue holds it for a new turn when the running one ends; a fork copies the session's conversation
-       * into a sub-session. Each tells this seat when its turn ends. Without `ifBusy`, nothing is sent.
+       * into a sub-session. A queued or forked turn is this seat's and tells it when it ends; a note joins a turn that
+       * stays its owner's, and tells this seat only as the note rule below says (#1233). Without `ifBusy`, nothing is sent.
        */
       if (host.busyForCaller(orchestratorId, sessionId)) {
         if (!ifBusy) return { ok: true, busy: host.busyAnswer(orchestratorId, target, 'send_to_session') }
@@ -590,12 +616,24 @@ export function orchestratorToolsFor(
           if (atRest) host.children.releaseTurn(sessionId, orchestratorId)
           throw e
         }
-        // Only comes back when asked for — silent by default
-        if (reportBack) host.children.markReport(sessionId, orchestratorId)
-        // Instructing again without asking for a report clears this orchestrator's earlier request — the
-        // new instruction replaces it (#166)
-        else if (host.children.awaitingReport.get(sessionId) === orchestratorId) host.children.clearReport(sessionId)
-        return { ok: true, ...(atRest ? {} : { busy: { state: 'noted' as const, sessionId, sessionName: target.name } }) }
+        const held = host.children.awaitingReport.get(sessionId)
+        if (atRest) {
+          // Only comes back when asked for — silent by default
+          if (reportBack) host.children.markReport(sessionId, orchestratorId)
+          // Instructing again without asking for a report clears this orchestrator's earlier request — the
+          // new instruction replaces it (#166)
+          else if (held === orchestratorId) host.children.clearReport(sessionId)
+          return { ok: true }
+        }
+        /*
+         * A note (#1233): words into a turn already running, which is still the same work. It never drops a report
+         * someone is owed of that turn, this seat's own included: a bare note after a reportBack (or after
+         * create_session's first message) used to clear it, and the end went unheard. With `reportBack` it adds this
+         * seat's mark only where nobody's stands: one mark per session, and taking another's would leave them untold.
+         */
+        if (reportBack && held === undefined) host.children.markReport(sessionId, orchestratorId)
+        const reportTaken = !!reportBack && held !== undefined && held !== orchestratorId
+        return { ok: true, busy: { state: 'noted' as const, sessionId, sessionName: target.name, ...(reportTaken ? { reportTaken: true as const } : {}) } }
       } catch (e) {
         return { ok: false, error: (e as Error).message }
       }
@@ -626,6 +664,27 @@ export function orchestratorToolsFor(
       }
       return host.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
     },
+
+    /*
+     * An existing folder as a project (#1220), made only once the person allows the card this raises in the
+     * orchestrator's own slot. The central orchestrator's alone, as the linked machines are; `machine` is resolved as
+     * create_project resolves it.
+     */
+    addProject: async (spec, signal) => {
+      if (!central) return { ok: false, error: 'Only the orchestrator adds projects' }
+      const reader = linked()
+      if (spec.machine && reader) {
+        const machine = reader.machineNamed(spec.machine)
+        if (machine) return host.addFolderOnMachine(orchestratorId, reader, machine, spec.path, signal)
+        if (!/^this computer$/i.test(spec.machine.trim())) return { ok: false, error: `No linked machine is called ${spec.machine}; list_machines names them, and leaving machine out means this computer` }
+      } else if (spec.machine && !/^this computer$/i.test(spec.machine.trim())) {
+        return { ok: false, error: 'No machine is linked to this computer; leave machine out' }
+      }
+      return host.addFolderAsked(orchestratorId, spec.path, signal)
+    },
+
+    // The linked machines (#1220): the list Settings shows, read only; the central orchestrator's alone
+    listMachines: () => (central ? host.machineList() : []),
 
     /*
      * A handoff (#694): the central orchestrator's alone (the profile gives it no other seat; checked here too, as this

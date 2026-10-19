@@ -14,7 +14,15 @@ export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
 
   // The host made a project (#515): the orchestrator's, once approved, or another window's
   if (e.type === 'projects_changed') {
-    void get().refreshProjects()
+    const refreshed = get().refreshProjects()
+    // A folder the person allowed the orchestrator to add (#1220): asked about its trust once, as Add project asks
+    const added = e.added
+    if (added) {
+      void refreshed.then(() => {
+        const p = get().projects[added]
+        if (p && !p.trusted) set({ trustAsk: added })
+      })
+    }
     return true
   }
 
