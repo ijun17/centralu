@@ -251,8 +251,8 @@ machine as the less trusted side: a compromised server must not reach the person
   app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
   call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
-  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review,
-  as start_agent's on another computer, #1038). It names the machine and the asking session there, quoted on one line;
+  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).
+  It names the machine and the asking session there, quoted on one line;
   turning the switch off closes it. Approving it is remembered for the
   pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
 - **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
@@ -360,6 +360,13 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `reconnect_machine` | yes | — | — | — | — |
 | `set_machine_connect` | yes | — | — | — | — |
 | `set_machine_autostart` | yes | — | — | — | — |
+| `get_preferences` | yes | — | — | — | — |
+| `set_preferences` | yes | — | — | — | — |
+| `list_trash` | yes | — | — | — | — |
+| `restore_trashed` | yes | — | — | — | — |
+| `trash_subagent_steps` | yes | — | — | — | — |
+| `delete_trashed` | yes | — | — | — | — |
+| `empty_trash` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -406,10 +413,40 @@ stored and shown as the orchestrator's (`from`), not the person's. It was `norma
 under, with the instruction recorded as the person's, so a `safe` orchestrator that read a planted instruction could
 start a `normal` session carrying it without a card.
 
-**`start_agent` on a linked machine** (#1038) follows the same rule: the child there runs under the caller's preset,
-`normal` at most (`auto` gets `normal`; Codex's `auto` would be `danger-full-access` on that computer), and the card
-naming the machine is raised every time, for an `auto` caller too (`askHost`'s `alwaysAsk`), with no "always": nothing
-is remembered for another machine's project. The machine keeps the child one level below the caller in the agent
+**`start_agent` on a linked machine** (#1038) runs the child there under the caller's preset. A `normal` or `safe`
+caller's is carried as it is, behind the card naming the machine, raised every time (`askHost`'s `alwaysAsk`) with no
+"always": nothing is remembered for another machine's project.
+
+An `auto` caller's child runs under `auto` there too (#1273, owner decision 2026-10-19), and then no card is raised: the
+person let that session act without asking, and the orchestrator's own remote work otherwise went back to a
+hand-written script that made `auto` sessions there directly. What is carried is the caller's preset only, as
+`agents.createSession`'s `fromHub: { callerPreset }`; the machine decides. It takes `auto` that way only while its own
+Settings → "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`, on by default, so a person can
+refuse it on a machine they share; a record that cannot be read, or a value that is not true or false, reads as off,
+#1273 review); it reads the switch at each start (`presetFromHub`), and anything else sent with
+`fromHub` runs `normal` at most there. The machine does not tell the hub's call from any other holder of its token:
+whoever holds the token could already ask for `auto` outright (`permissionPreset`), so `fromHub` gives no one more. The hub asks the
+machine first (`host.hubAuto`): a machine whose switch is off keeps the card, which says the child runs under `normal`
+and why (`autoWithheld: "machine_off"`), and so does a machine from before #1273 (`"older"`), which drops `fromHub`
+and keeps `normal`; the start's answer to the caller says the same, never silently. A switch turned off between the
+hub's question and the start starts nothing there: the child made without a card is given no task and goes to that
+machine's trash. The child is never above its caller (#1273 review): the preset is decided from the caller as it is once
+the machine has answered, so the card states the preset the child will get; the caller is read again after the card
+(a caller lowered while it stood starts nothing) and once the machine has made the child (one made above the caller as
+it is then is given no task and goes to that machine's trash); and `agent_session send` refuses work to a child whose
+preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's row and header show its preset on both machines (`SessionInfo.startedFromHub`).
+**Residual:** the hub holds the machine's token, so the switch is the person's say over what Centralu's own
+start_agent carries, not a wall against a hub that is not Centralu. An `auto` child there runs as `auto` runs on that
+computer (Codex's `auto` is `danger-full-access` there), with that computer's logins, and an `auto` caller's starts
+there are bounded only as its local ones are (the project's ceiling, unlimited under `auto` unless the person set one,
+and the agent depth), no longer by a card each. A missing switch reads as on (the default); a damaged one as off. The hub's Settings → Machines sets the switch of
+each linked machine over the link (`host.setHubAuto`), so a machine with no window of its own (`centralu serve`) can be
+set too, and so the hub can also turn back on a switch a person turned off at that machine; the machine still reads it at each start, and setting it from the hub is no boundary against the hub (any
+holder of the token could ask for `auto` outright). A start interrupted between the machine making the child and its
+task (a hub restart, a link drop) leaves an idle session there under the child's preset, with no task, which nothing
+on the hub follows; nothing runs in it until a person types into it.
+
+The machine keeps the child one level below the caller in the agent
 depth (`agentDepth`); a machine whose build would drop it (it has no `projects.origin`) is refused, so two machines
 linked both ways cannot start each other's sessions past the setting. The checkout is matched by its origin's
 repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
@@ -505,6 +542,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `start_agent`, first time for a session, trusted project | asks (consent card: once, always for this session, always for this project) | allowed (the project's trust is the consent, #673) | allowed | open | asks | allowed | allowed | open | `ensureAgentConsent` (`trustIsAgentConsent`) in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`); a card past the setup bound stays, and the call answers `pending` (#673) |
 | `start_agent` (or a fork) from a session at the agent depth (default 1: one that was itself started or asked) | refused | refused | refused | refused | refused | refused | refused | refused | `setUpAgent`, `agentStartGateError`, `forkTrustError` through `agentDepthRefusal` (`prefs.agentDepth`, 1–3, #867; `askProject` refuses the same sessions) |
 | `start_agent` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (the project's trust, #382) |
+| `start_agent` with `machine` (a child on a linked machine, #1038, #1273) | asks every time, no "always"; the child runs under `safe` | asks every time; the child runs under `normal` | asks every time; `normal` | open: no card, the child runs under `auto` there while that machine's "Allow auto from a linked computer" is on; otherwise asks, the child under `normal`, the card saying why | asks; `safe` | asks; `normal` | asks; `normal` | open, as Claude `auto` (Codex's `auto` there is `danger-full-access`) | `RemoteAgents.startAgent` (`askHost` with `alwaysAsk`, the caller read again after the machine answered, after the card and after the child is made) and, on the machine, `presetFromHub` at each start; `agent_session send` refuses a child above its caller |
 | `start_agent` past 4 running children in the project, default setting | refused | refused | refused | open | refused | refused | refused | open | `agentCeilingError` (`prefs.agentCeiling`; empty: auto unlimited, otherwise `AGENT_CEILING`; 0: unlimited) |
 | `agent_session` on a session the caller did not start (except delete without a worktree) | refused | refused | refused | open | refused | refused | refused | open | `agentSession` (same project in every preset; ownership opens under auto) |
 | `agent_session` delete without a worktree, a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (#637): requires `askedBy` or `parentSessionId` equal to the caller in the same project. An owned child is moved to the sidebar trash; mid-turn deletion requires the caller's own unsettled delegation and otherwise protects the person's turn/cards. |
@@ -522,6 +560,11 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and connect mode; the central orchestrator only |
 | `add_machine`, `install_machine` (install or update), `remove_machine`, `set_machine_autostart` (the orchestrator changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The central orchestrator only, as rare commands behind `centralu_run` |
 | `reconnect_machine`, `set_machine_connect` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setConnect`: what the Machines row's Reconnect and connect setting do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
+| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, idle sleep, update checking and moving idle sessions to a new agent CLI (the orchestrator changes a setting the window offers, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field; `sessionTools`, the agent ceiling, depth and models, trust, approval rules and app grants have none, and an unknown field is refused by name. The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
+| `set_preferences` `applyUpdatesWhenIdle: true` when it is off, or `checkForUpdates: true` when it is off and apply is on (#1219) | asks (a card saying that a newer Centralu then installs by itself and the desktop window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAutoApply`. Turning either off asks nothing. A denial leaves the pair as it was and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
+| `list_trash`, `restore_trashed`, `trash_subagent_steps` (the orchestrator reads the trash, brings a session or its subagent steps back, or moves a session's subagent steps there, #1219) | allowed (a restore that brings back a deleted project's folder asks, below) | allowed | allowed | open | allowed | allowed | allowed | open | `TrashFlow.run` (`sessions/trash-flow.ts`) → the window's own calls through the router (`trash.list`, `subagents.usage`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`), so a linked machine's trash is reached as the window reaches it and the host's checks decide (a session not in the trash is refused, a restore whose project folder is gone is refused by the host). Nothing is lost: all three are reversible. The central orchestrator only, as rare commands behind `centralu_run` |
+| `restore_trashed` of a session whose project was deleted (#1219) | asks (a card naming the session, the project and the folder that will be registered again, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `trash.restore`, which registers the folder as a project again (untrusted), what `add_project` asks about. A session not in the trash is refused before any call |
+| `delete_trashed` (one trashed session, or its trashed subagent steps, for good) and `empty_trash` (everything listed: sessions, kept app runs, trashed steps) (#1219) | asks (a card naming the session or the counts, the size, up to ten names, the tool conversation files and worktrees that go with them, and that it cannot be undone, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then the window's `trash.purge`, `trash.purgeSubagentSteps` and `trash.purgeRuns`, one per item the card named (`trash.empty` is not called: it takes everything there is). Refused before the card: a session that is not in the trash (a live session is never deleted from here), steps not in the trash. After Allow the trash is read again: a session restored (or deleted) while the card stood is left alone, one that reached the trash meanwhile is not deleted, and steps moved there after the card are kept (`upTo`). The trash on a linked machine that could not be reached is left alone and named. The central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -623,6 +666,21 @@ first). The probe comes after Allow, and a target that does not answer is linked
 what it can tell without connecting: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read,
 a target, name or distro with a control or format character (a bidi override would make the card read otherwise than
 what runs), a name already linked, and an install this computer cannot make.
+
+**Settings and the trash from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
+window's Settings changes, through the window's own calls, so the same schemas and handlers decide. The reversible
+settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
+at once. What widens what agents may do or cost (`sessionTools`, the agent ceiling, depth and models), trust, approval
+rules and app grants have no field: an unknown field is refused by name. "Apply updates when idle" turned on (or checking turned on while it is) is the one
+setting that asks: with both on, code arrives and the window relaunches without a later question, which is what
+`update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
+is read as allow, once).
+
+The trash is the person's safety net, so deleting from it for good is the one thing there that asks (`delete_trashed`, `empty_trash`):
+the card names what goes (the sessions by name, how many, how large, the tool's conversation files and worktrees that
+go with them), and the host deletes exactly what the card named and is still in the trash as the card named it (a session restored and trashed again is not), never more. Listing, restoring
+and moving a session's subagent steps to the trash lose nothing and ask nothing. A live session cannot be deleted
+through these commands: it has to be in the trash first, which `agents.deleteSession` and the sidebar do.
 
 ### Turning things off
 

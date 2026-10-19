@@ -23,6 +23,8 @@ export class MachinesMock {
    * raises no card of a machine's session
    */
   askPairs: MachineAskConsent[] = []
+  /** Each mock machine's "Allow auto from a linked computer" (#1273): on unless a test turned it off */
+  hubAutoOff = new Set<string>()
   /** Every `machines.need` the window sent (#1134), in order; a repeat is marked `(again)` */
   needed: string[] = []
   /** Machines the person disconnected, which the window's repeat does not bring back */
@@ -146,6 +148,14 @@ export class MachinesMock {
       return { machine: this.machineRow(machineId, { autostart }), autostart }
     },
     activity: async () => ({ working: 1, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 0 }),
+    hubAuto: async (machineId: string, allowed?: boolean) => {
+      if (this.machinesList.find((m) => m.id === machineId)?.status !== 'connected') return 'unreachable' as const
+      if (allowed !== undefined) {
+        if (allowed) this.hubAutoOff.delete(machineId)
+        else this.hubAutoOff.add(machineId)
+      }
+      return this.hubAutoOff.has(machineId) ? ('off' as const) : ('on' as const)
+    },
     /** The switch takes at once; off forgets the machine's pairs, as the host does */
     setAsks: async (machineId: string, on: boolean) => {
       if (!on && this.askPairs.some((c) => c.machineId === machineId)) {

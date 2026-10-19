@@ -11,7 +11,7 @@ import {
 } from '../../entities.js'
 import { ATTACHMENT_MAX_BASE64, FsEntry, FsFile, FsResolvePurpose } from '../files.js'
 import { machineParam } from '../machine-fields.js'
-import { ProjectInfo, SavedCommand } from '../projects.js'
+import { AGENT_INSTRUCTIONS_MAX, ProjectInfo, SavedCommand } from '../projects.js'
 import { SessionInfo } from '../sessions.js'
 
 export const projectMethods = {
@@ -266,6 +266,14 @@ export const projectMethods = {
       projectId: ProjectId,
       setup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable(),
     }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * Saves the instructions for agents started in this project (#1161 item 2, `ProjectInfo.agentInstructions`). The
+   * whole text, as the project's settings show it; an empty text clears it. Bounded, as it travels in every task.
+   */
+  'projects.setAgentInstructions': {
+    params: z.object({ projectId: ProjectId, text: z.string().max(AGENT_INSTRUCTIONS_MAX) }),
     result: z.object({ ok: z.literal(true) }),
   },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },

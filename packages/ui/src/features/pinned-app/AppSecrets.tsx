@@ -24,10 +24,15 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   const trouble = app.info.secretsUnreadable
   if (slots.length === 0) return null
   // Still in place and unreadable: nothing can be saved over it, and the Save button says why instead of failing
-  const stuck = trouble?.movedTo === null ? 'The saved secrets file cannot be read, so nothing is saved until it is fixed or removed' : null
+  const stuck =
+    trouble?.movedTo !== null
+      ? null
+      : trouble.reason
+        ? `The saved secrets file cannot be read: ${trouble.reason}. Nothing is saved until it is fixed or removed`
+        : 'The saved secrets file cannot be read, so nothing is saved until it is fixed or removed'
   return (
     <div data-testid="app-secrets">
-      {trouble && <SecretsUnreadable movedTo={trouble.movedTo} />}
+      {trouble && <SecretsUnreadable movedTo={trouble.movedTo} reason={trouble.reason} />}
       <ul className="space-y-2">
         {slots.map((s) => (
           <SecretRow key={s.name} app={app} name={s.name} set={s.set} stuck={stuck} />
@@ -43,20 +48,21 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
 /**
  * The saved secrets could not be read (#944): said once above the fields. On screen nothing said it before, and a
  * section showing every value missing read as values never entered. Moved aside, the values are in that copy; the line
- * goes once a value is saved again. Still in place, the file has to be fixed or removed first.
+ * goes once a value is saved again. Still in place, the file has to be fixed or removed first. Why, when the host knows
+ * (`reason`, words that never quote the file)
  */
-function SecretsUnreadable({ movedTo }: { movedTo: string | null }) {
+function SecretsUnreadable({ movedTo, reason }: { movedTo: string | null; reason?: string }) {
   return (
     <p className="mb-2 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" role="alert" data-testid="secrets-unreadable">
       {movedTo ? (
         <>
-          The saved secrets could not be read and were moved to <span className="font-mono">{movedTo}</span> in
+          The saved secrets could not be read{reason ? ` (${reason})` : ''} and were moved to <span className="font-mono">{movedTo}</span> in
           Centralu’s data folder. Enter them again, or restore the file.
         </>
       ) : (
         <>
           The saved secrets file (<span className="font-mono">app-secrets.json</span> in Centralu’s data folder) cannot
-          be read. Nothing can be saved until it is fixed or removed.
+          be read{reason ? `: ${reason}` : ''}. Nothing can be saved until it is fixed or removed.
         </>
       )}
     </p>
