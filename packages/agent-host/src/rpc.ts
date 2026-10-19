@@ -1,6 +1,6 @@
 import { relative } from 'node:path'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, noSuchAppText, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, hubAutoOf, noSuchAppText, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -910,6 +910,10 @@ export function createRpcHandler(
       const { query, limit } = RpcMethods['host.recall'].params.parse(p)
       return mgr.hostReader().recall(query, limit)
     },
+    // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
+    'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
+    // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
+    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: RpcMethods['host.setHubAuto'].params.parse(p).allowed })) }),
     'host.send': async (p) => {
       const { sessionId, text, from, ask } = RpcMethods['host.send'].params.parse(p)
       await mgr.sendFromHub(sessionId, text, from.name, ask)

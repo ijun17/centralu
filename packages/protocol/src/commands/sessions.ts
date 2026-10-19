@@ -98,6 +98,15 @@ export const CreateSessionParams = z.object({
    * gains nothing. Absent: a session the person started.
    */
   agentDepth: z.number().int().min(1).max(100).optional(),
+  /**
+   * A session on another computer, linked to this one as its hub, starts this one (#1273: start_agent with a machine):
+   * the preset the hub carries from that session. The new session runs under `auto` only when `callerPreset` is `auto`
+   * and this host's "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`); otherwise under
+   * `permissionPreset`, `normal` at most. The session is marked as started from a linked computer
+   * (`SessionInfo.startedFromHub`). A host from before this field drops it, and the session runs under
+   * `permissionPreset`, which a hub sends as `normal` at most.
+   */
+  fromHub: z.object({ callerPreset: PermissionPreset }).optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 
@@ -307,6 +316,11 @@ export const SessionInfo = z.object({
    * the requester is `askedBy`. Absent from a host that predates it.
    */
   forkedFrom: z.string().nullable().optional(),
+  /**
+   * A session on a linked computer (this host's hub) started this one (#1273, `CreateSessionParams.fromHub`): the
+   * sidebar row and the header show its preset, here and on that computer. Absent from a host that predates it.
+   */
+  startedFromHub: z.boolean().optional(),
   ...machineField,
   /**
    * The hub could not reach this session's machine, and answered from what it last heard (#82): the

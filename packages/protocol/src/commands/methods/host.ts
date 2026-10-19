@@ -224,6 +224,20 @@ export const hostMethods = {
   },
   'host.recall': { params: z.object({ query: z.string(), limit: z.number().int().positive().optional() }), result: z.array(HostRecallHit) },
   /**
+   * Whether this host takes `auto` for a session a hub's `auto` session starts here (#1273, start_agent with a
+   * machine): its own "Allow auto from a linked computer" switch (`UiPreferences.hubAuto`, on by default). The hub reads
+   * it before it decides whether to raise its card; `agents.createSession`'s `fromHub` reads the switch again. Asked by
+   * the hub directly, never routed. A host from before it answers "Unknown method", and the hub keeps `normal`.
+   */
+  'host.hubAuto': { params: z.object({}), result: z.object({ allowed: z.boolean() }) },
+  /**
+   * Sets that switch from the hub (#1273 review, owner decision 2026-10-19): the hub's Settings → Machines shows it for
+   * each machine, so a machine with no window of its own (`centralu serve`) can be set too. It restricts what the
+   * person allows and is no boundary against the hub, which holds this host's token and could ask for `auto` outright.
+   * Answers the switch as it now reads. Asked by the hub directly, never routed; an older host answers "Unknown method".
+   */
+  'host.setHubAuto': { params: z.object({ allowed: z.boolean() }), result: z.object({ allowed: z.boolean() }) },
+  /**
    * An instruction from a hub's orchestrator to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
    * step 2): delivered as the orchestrator's `send_to_session` is here, recorded as sent by `from.name`. Only a session
    * a hub is shown (not this host's orchestrator or coordinators). Asked by the hub directly, never routed
