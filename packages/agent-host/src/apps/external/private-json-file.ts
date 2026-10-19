@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 /**
@@ -106,6 +106,33 @@ export class PrivateJsonFile<T> {
     // What the person re-entered is the file now: the line about the one moved aside has done its job
     this.lastTrouble = null
     chmodSync(this.path, 0o600)
+  }
+
+  /**
+   * Writes `doc` as the file **only while there is none**, and says whether it did. A check for the file and then
+   * `write` leaves a window in which a file the other host of a swap wrote, or a person put back, is replaced by the
+   * rename (#1172 review). A hard link to the finished temp file never replaces anything: EEXIST means another file
+   * won, and it is left as it is. Throws, writing nothing, while the last read was a stand-in, as `write` does
+   */
+  create(doc: T): boolean {
+    if (this.standIn) {
+      throw new Error(`${this.opts.label} could not be read, so it was not overwritten. Fix or remove ${this.path}`)
+    }
+    const tmp = `${this.path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+    try {
+      writeFileSync(tmp, JSON.stringify(doc, null, this.opts.indent), { mode: 0o600, flag: 'wx' })
+      try {
+        linkSync(tmp, this.path)
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false
+        throw e
+      }
+    } finally {
+      rmSync(tmp, { force: true })
+    }
+    this.lastTrouble = null
+    chmodSync(this.path, 0o600)
+    return true
   }
 
   private settled(doc: T): T {

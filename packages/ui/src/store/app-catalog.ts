@@ -88,10 +88,12 @@ export function appStatus(info: ExternalAppInfo): AppStatusView {
        * An imported app is waiting on the person's review (M4 E-3) — either it just arrived and
        * has not been enabled yet, or after being enabled, what it runs (server) or what it claims
        * to use (uses) changed. Both are resolved only once the person looks and enables it. The
-       * reason is the host's own wording.
+       * reason is the host's own wording. An app held without an import mark (#1172: the record of
+       * imports could not be read) may have been enabled before and changed since; whether it was
+       * is in the reason, not in a mark, so it reads as needing review rather than as never enabled.
        */
       return {
-        label: info.imported?.confirmedAt ? 'Needs review' : 'Not enabled',
+        label: !info.imported || info.imported.confirmedAt ? 'Needs review' : 'Not enabled',
         reason: info.error ?? 'This app was imported and is not enabled yet.',
         runnable: false,
         tone: 'alert',
