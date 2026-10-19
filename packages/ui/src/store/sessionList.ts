@@ -22,7 +22,7 @@ export function liveFactsOf(
   s: SessionInfo,
 ): Pick<
   SessionSummary,
-  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion' | 'machine' | 'unreachable' | 'interruption'
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion' | 'machine' | 'unreachable' | 'interruption' | 'startedFromHub'
 > {
   return {
     pendingApproval: s.pendingApproval,
@@ -43,6 +43,8 @@ export function liveFactsOf(
     unreachable: s.unreachable === true,
     // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
     interruption: s.interruption ?? null,
+    // Started from a linked computer (#1273): its row and header show its preset. Taken with every row, as `machine` is
+    startedFromHub: s.startedFromHub === true,
   }
 }
 

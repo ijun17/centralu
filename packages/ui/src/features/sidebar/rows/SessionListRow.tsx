@@ -14,6 +14,7 @@ import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
 import { MachineTag } from '../../machines/MachineTag.jsx'
+import { PresetTag } from '../../session/PresetTag.jsx'
 import type { TreeRow } from '../tree.js'
 
 /**
@@ -133,6 +134,8 @@ export function SessionListRow({
             <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
             {s.machine && s.machine !== projectMachine && <MachineTag machine={s.machine} testId={`session-machine-${s.id}`} />}
+            {/* Started from a linked computer (#1273): its preset, which an auto caller carries there */}
+            <PresetTag preset={s.permissionPreset} startedFromHub={s.startedFromHub} testId={`session-preset-${s.id}`} />
             {childrenFolded && (
               <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
             )}
