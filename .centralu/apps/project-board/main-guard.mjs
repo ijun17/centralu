@@ -17,13 +17,17 @@ import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
 
 export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 60_000
+/** A bisect probe whose run has not finished after this long ends the hunt (no runner, a stuck run): an issue says so */
+export const PROBE_MAX_MS = Number(process.env.PROJECT_BOARD_QUEUE_PROBE_MS) || 2 * 3600_000
 const WORKFLOW = 'build.yml'
 const REF_SPACE = 'refs/centralu-guard'
 
 /**
  * Main's state from its push runs (newest first): `green`, the newest commit whose run passed; `red`, the
- * newest completed run that failed, when it is newer than that green one. A cancelled run (a newer push
- * superseded it) says nothing; nor does one still running.
+ * newest completed run that failed, when it is newer than that green one; `unfinished`, how many are still
+ * going (the queue holds landing while too many are, `QUEUE.guard.maxMainRuns`). Runs on main are never
+ * cancelled by a newer push (build.yml's concurrency, #1259), so every commit's run is seen; one cancelled by
+ * hand says nothing, nor does one still running.
  */
 export function mainVerdict(runs) {
   const done = runs.filter((r) => r.status === 'completed' && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped')
@@ -31,7 +35,7 @@ export function mainVerdict(runs) {
   const redAt = done.findIndex((r) => r.conclusion !== 'success')
   const green = greenAt >= 0 ? done[greenAt].headSha : null
   const red = redAt >= 0 && (greenAt < 0 || redAt < greenAt) ? done[redAt] : null
-  return { green, red }
+  return { green, red, unfinished: runs.filter((r) => r.status !== 'completed').length }
 }
 
 /** Whether a failed job's name falls under a jobPaths key: the key is the name, or its start (a matrix job's shards) */
@@ -39,7 +43,9 @@ const jobMatches = (key, name) => name === key || name.startsWith(`${key} `) || 
 
 /**
  * The culprit by the failed jobs' paths, or null when that is not unambiguous: every failed job must have
- * paths, and exactly one candidate (`{ sha, files }`) touches any of them.
+ * paths, exactly one candidate (`{ sha, files }`) touches any of them, and that one touches nothing outside
+ * them (a change elsewhere may be what broke it). Only a suspect: the guard confirms it with the full tier on
+ * the commit before it (green) and on it (red) before it acts (`nextStep`).
  */
 export function attributeByPaths(candidates, failedJobs, jobPaths = {}) {
   if (!failedJobs.length) return null
@@ -49,8 +55,10 @@ export function attributeByPaths(candidates, failedJobs, jobPaths = {}) {
     if (!key) return null
     paths.push(...jobPaths[key])
   }
-  const touching = candidates.filter((c) => c.files.some((f) => paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p))))
-  return touching.length === 1 ? touching[0].sha : null
+  const within = (f) => paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p))
+  const touching = candidates.filter((c) => c.files.some(within))
+  if (touching.length !== 1 || !touching[0].files.every(within)) return null
+  return touching[0].sha
 }
 
 /**
@@ -61,6 +69,24 @@ export function attributeByPaths(candidates, failedJobs, jobPaths = {}) {
 export function bisectStep(commits, good, bad) {
   if (bad - good <= 1) return { culprit: commits[bad] }
   return { probe: commits[Math.floor((good + bad) / 2)], index: Math.floor((good + bad) / 2) }
+}
+
+/**
+ * What the hunt does next: `{ culprit, how }`, or `{ probe, index }` (the full tier on that commit), or
+ * `{ refuted }` when a suspect by paths (`hunt.confirm`) turned out not to be the first red commit; the hunt
+ * then bisects what is left. A suspect is the culprit only once the commit before it passed and it failed.
+ */
+export function nextStep(hunt) {
+  const { commits, good, bad, confirm } = hunt
+  if (confirm) {
+    const k = confirm.index
+    if (good === k - 1 && bad === k) return { culprit: commits[k], how: `${confirm.how}, confirmed: the full tier passed on the commit before it and failed on it` }
+    if (good >= k || bad < k) return { refuted: true }
+    const index = good < k - 1 ? k - 1 : k
+    return { probe: commits[index], index }
+  }
+  const s = bisectStep(commits, good, bad)
+  return s.culprit ? { culprit: s.culprit, how: 'bisected: the full tier passed on the commit before it and failed on it' } : s
 }
 
 /** The branch a probe runs on: one per commit, deleted once its run has spoken */
@@ -105,10 +131,10 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
   const repo = config.repository
   const { defaultBranch } = await readRepo(repo)
   const runs = await workflowRuns(repo, WORKFLOW, { event: 'push', branch: defaultBranch })
-  const { green, red } = mainVerdict(runs)
+  const { green, red, unfinished } = mainVerdict(runs)
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
-  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
+  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
   const hunt = g.hunt ?? null
 
   // Green: remembered as the last fully green commit. A hunt is over: the red was not main's for long (a flake), or what it did fixed it
@@ -148,9 +174,10 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
   if (!commits.length) return stop(`no commit is on main between the last green one, ${short(greenSha)}, and ${short(red.headSha)}.`)
   const fresh = { ...base, green: greenSha, commits, good: -1, bad: commits.length - 1, probe: null }
   if (commits.length === 1) return finish({ hunt: fresh, culprit: commits[0], how: 'the only commit since the last green one', save, now, act })
+  // A suspect by the failed jobs' paths is confirmed with the full tier around it before anything is done about it
   const byPaths = attributeByPaths(commits, jobs.names, QUEUE.guard.jobPaths)
-  if (byPaths) return finish({ hunt: fresh, culprit: commits.find((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${jobs.names.join(', ')}`, save, now, act })
-  return await stepHunt({ hunt: fresh, save, now, renew, act, repo })
+  const confirm = byPaths ? { index: commits.findIndex((c) => c.sha === byPaths), how: `the only commit since the last green one that touches the paths of ${jobs.names.join(', ')}` } : null
+  return await stepHunt({ hunt: { ...fresh, confirm }, save, now, renew, act, repo })
 }
 
 async function finish({ hunt, culprit, how, save, now, act }) {
@@ -161,8 +188,10 @@ async function finish({ hunt, culprit, how, save, now, act }) {
 
 /** One bisect step: start the probe's run, or read it and halve the range */
 async function stepHunt({ hunt, save, now, renew, act, repo }) {
-  const step = bisectStep(hunt.commits, hunt.good, hunt.bad)
-  if (step.culprit) return finish({ hunt, culprit: step.culprit, how: `bisected: the full tier passed on the commit before it and failed on it`, save, now, act })
+  const step = nextStep(hunt)
+  // The suspect by paths was not the first red commit: bisect what is left, its probes' answers kept
+  if (step.refuted) return await stepHunt({ hunt: { ...hunt, confirm: null, refuted: hunt.confirm.how }, save, now, renew, act, repo })
+  if (step.culprit) return finish({ hunt, culprit: step.culprit, how: step.how, save, now, act })
   const probe = hunt.probe
   if (!probe || probe.sha !== step.probe.sha || probe.again) {
     if (renew && !renew()) return { did: 'yielded' }
@@ -182,6 +211,14 @@ async function stepHunt({ hunt, save, now, renew, act, repo }) {
   // Started after this probe was: a run of an earlier try on the same commit does not answer it
   const run = runs.find((r) => !r.createdAt || Date.parse(r.createdAt) >= Date.parse(probe.at) - 60_000)
   if (!run || run.status !== 'completed') {
+    // No runner, or a run that never ends: the hunt gives up rather than wait for good
+    if (now - Date.parse(probe.at) > PROBE_MAX_MS) {
+      await deleteBranch(repo, probe.branch).catch(() => {})
+      const why = `the full tier's run on ${short(probe.sha)} (a bisect step) had not finished after ${Math.round(PROBE_MAX_MS / 60_000)} minutes.`
+      const record = await act({ red: hunt, culprit: null, why })
+      save({ hunt: { ...hunt, probe: null, ...record, endedAt: new Date(now).toISOString() } })
+      return { did: 'unknown', why }
+    }
     save({ hunt })
     return { did: 'waiting', sha: probe.sha }
   }

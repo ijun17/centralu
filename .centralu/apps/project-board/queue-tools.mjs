@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
 import { itemOf, itemRef, REF_HELP } from './board.mjs'
 import { canMerge, NO_PERMISSION } from './ci.mjs'
-import { APP_DIR } from './config.mjs'
+import { APP_DIR, QUEUE } from './config.mjs'
 import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
@@ -103,9 +103,10 @@ function driverLine(q, now = Date.now()) {
   const lease = readLease(dataDir())
   const active = q.items.some((i) => ACTIVE.has(i.state))
   const pause = q.pause && Date.parse(q.pause.until) > now ? ` Paused until ${q.pause.until.slice(11, 19)} UTC: ${q.pause.reason}` : ''
-  if (!active) return `Nothing queued.${pause}`
-  if (lease && Date.parse(lease.until) > now) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}`
-  return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}`
+  const held = QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns ? ` Landing held: ${q.guard.unfinished} of main's full runs unfinished (at most ${QUEUE.guard.maxMainRuns}, #1259).` : ''
+  if (!active) return `Nothing queued.${pause}${held}`
+  if (lease && Date.parse(lease.until) > now) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}${held}`
+  return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}${held}`
 }
 
 const COUNTS = [
