@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   alwaysAllowKey,
   isCentraluApply,
+  isMachineChange,
   isUnknownCard,
   SESSION_HANDOFF,
   sessionOnlyAlways,
@@ -661,10 +662,11 @@ function ActionKey({
  * a command with no key either (#838): an empty one, one the card flags (outside the sandbox, the network, input to a
  * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
  * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
- * question the person never saw in full.
+ * question the person never saw in full. Nor for the orchestrator's change to a linked machine (#1219): each one is
+ * asked on its own, and the host remembers nothing for it.
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
-  if (isUnknownCard(detail)) return false
+  if (isUnknownCard(detail) || isMachineChange(detail)) return false
   return (detail.kind !== 'file_edit' && detail.kind !== 'command') || alwaysAllowKey(detail) !== ''
 }
 

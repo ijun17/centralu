@@ -3,6 +3,7 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import {
   AGENT_TOOLS,
+  APP_ACCESS_TOOLS,
   COMMANDS_INSTRUCTION,
   DEFAULT_RARE_TIER,
   ORCHESTRATOR_INSTRUCTIONS,
@@ -101,7 +102,7 @@ describe('the commands tier', () => {
   it('refuses a command outside the profile: not listed, not described, not run', async () => {
     const tools = fakeTools()
     const listed = await runOrchestratorTool(tools, 'centralu_commands', {}, orchestrator)
-    for (const outside of ['check', 'ask_project', 'find_apps', 'send_to_session']) {
+    for (const outside of ['check', 'ask_project', 'send_to_session']) {
       expect(listed.text).not.toContain(`- ${outside}:`)
       const help = await runOrchestratorTool(tools, 'centralu_help', { command: outside }, orchestrator)
       expect(help.isError).toBe(true)
@@ -137,6 +138,33 @@ describe('the commands tier', () => {
       expect(await runOrchestratorTool(tools, 'centralu_run', { command: 'start_agent', args: { task: 'x' } }, { sessionId: 'm', profile })).toMatchObject({ isError: true })
     }
     expect(tools.startAgent).toHaveBeenCalledTimes(2)
+  })
+
+  // #1205: the orchestrator attaches a root app when it needs one; each answer names the next call in its own form
+  it('runs find_apps, attach_app and detach_app for the orchestrator, whose answers name centralu_run', async () => {
+    const tools = {
+      ...fakeTools(),
+      findApps: vi.fn(async () => ({ ok: true as const, apps: [{ ref: 'Board/board', name: 'Board', project: 'Board', description: 'Issues', tools: ['list'] }] })),
+      attachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', tools: ['list'], when: 'now' as const })),
+      detachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', when: 'now' as const })),
+    } as unknown as OrchestratorTools
+    // The instructions name it as a command, as they name the other rare ones: a bare call would be refused first
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('the find_apps command lists them')
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/: find_apps lists/)
+    const found = await runOrchestratorTool(tools, 'centralu_run', { command: 'find_apps', args: {} }, orchestrator)
+    expect(found.text).toContain('Attach one with centralu_run(command="attach_app", args={app: "<the name before ·>"})')
+    const attached = await runOrchestratorTool(tools, 'centralu_run', { command: 'attach_app', args: { app: 'Board/board' } }, orchestrator)
+    expect(attached.text).toContain('as the app-board server. Tools: mcp__app-board__list.')
+    expect(attached.text).toContain('call centralu_run(command="detach_app", args={app: "Board/board"})')
+    expect(await runOrchestratorTool(tools, 'centralu_run', { command: 'detach_app', args: { app: 'Board/board' } }, orchestrator)).toMatchObject({ text: 'Detached Board/board: the app-board tools are gone.' })
+    // Not as bare tools, and a reader still calls them by name
+    expect(await runOrchestratorTool(tools, 'attach_app', { app: 'Board/board' }, orchestrator)).toMatchObject({ isError: true, text: expect.stringContaining('centralu_run(command="attach_app"') })
+    const reader = await runOrchestratorTool(tools, 'find_apps', {}, { sessionId: 'r', profile: 'reader' })
+    expect(reader.text).toContain('Attach one with attach_app(app="<the name before ·>")')
+    // A coordinator and a builder have none of them
+    for (const profile of ['scoped', 'builder'] as const) {
+      expect(await runOrchestratorTool(tools, 'find_apps', {}, { sessionId: 'm', profile })).toMatchObject({ isError: true })
+    }
   })
 
   it('lists each command in one line, and narrows the list by a query', async () => {
@@ -195,7 +223,7 @@ describe('the deferred tier', () => {
   it("defers the orchestrator's rare tools on Claude and nothing else changes", () => {
     setRareTier('deferred')
     const defs = toolDefsFor('orchestrator')
-    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
+    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
     expect(defs.map((t) => t.name)).toEqual(toolDefsFor('orchestrator', 'resident').map((t) => t.name))
     const cost = residentCost('orchestrator', DEFERRED_SERVER)
     expect(cost.deferredChars).toBeGreaterThan(3_500)

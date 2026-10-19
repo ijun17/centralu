@@ -192,6 +192,11 @@ if (args[0] === 'api' && args[1] === '-X') {
   if (method === 'POST' && path === 'repos/' + REPO + '/issues') json({ number: 901, html_url: 'https://github.com/' + REPO + '/issues/901' })
   const comment = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path)
   if (method === 'POST' && comment) json({ id: 1, node_id: 'IC_1', html_url: 'https://github.com/' + REPO + '/issues/' + comment[1] + '#issuecomment-1', body: body.body, created_at: '2026-10-12T10:00:00Z', user: { login: 'owner' } })
+  const labels = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels$/.exec(path)
+  if (method === 'POST' && labels) {
+    if (st.labelsRefused) fail('gh: Resource not accessible by integration (HTTP 403)\n', 1, '{"message":"Resource not accessible by integration"}')
+    json(body.labels.map((name) => ({ name })))
+  }
   const pull = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path)
   if (method === 'PATCH' && pull) {
     st.prs[pull[1]].baseRefName = body.base
@@ -219,7 +224,7 @@ let rt: ExternalApps | null = null
 let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string }
-type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean }
+type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean }
 
 const pr = (number: number, extra: Partial<Pr>): Pr => ({
   number,
@@ -393,7 +398,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     runtime()
     const r = await call('open_pr', PR)
     expect(r.isError).toBe(false)
-    expect(r.text).toBe('Opened #900 "feat(apps): add contribution tools to the board" from feat/tools into main: https://github.com/ijun17/centralu/pull/900')
+    expect(r.text).toBe('Opened #900 "feat(apps): add contribution tools to the board" from feat/tools into main: https://github.com/ijun17/centralu/pull/900 Labelled tier:deep.')
     const [post] = writes()
     expect(post!.args).toEqual(['api', '-X', 'POST', 'repos/ijun17/centralu/pulls', '--input', '-'])
     expect(JSON.parse(post!.stdin!)).toEqual({
@@ -401,7 +406,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
@@ -819,6 +824,30 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
   })
 
+  it('writes the tier pre-pr answers into Verified and labels the pull request with it (#1259)', async () => {
+    const c = prePrCheckout()
+    const line = 'Tier: deep, from `packages/protocol/src/a.ts` (protocol); the other files: 1 auto.'
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'deep', line, because: ['packages/protocol/src/a.ts'] } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain('Labelled tier:deep.')
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`no new test passes without the change.\n${line}`)
+    const label = writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!
+    expect(JSON.parse(label.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  it('opens the pull request when GitHub refuses the tier label, and says how to add it', async () => {
+    const c = prePrCheckout()
+    patchState((s) => (s.labelsRefused = true))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'light', line: 'Tier: light, from `a.ts` (no rule matches: light).', because: ['a.ts'] } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toMatch(/^Opened #900 /)
+    expect(r.text).toContain('Add the label yourself: gh pr edit 900 --add-label tier:light.')
+  })
+
   it('opens without it only with a stated reason, which goes into Verified', async () => {
     const c = prePrCheckout()
     prePrAnswers({ ok: false, findings: [{ check: 'tsc', message: 'x' }], notes: [], heads: [], head: c.tools })
@@ -829,6 +858,19 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(r.isError, r.text).toBe(false)
     expect(prePrCalls()).toEqual([])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain('Tests.\n\n`pnpm pre-pr` was not run: The new test guards a Windows path that this branch only documents.')
+    // Not judged, so deep: skipping pre-pr never lowers the review (#1259)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain('only documents.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).')
+    expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  it('labels deep when pre-pr answers no tier (#1259)', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain('Tier: deep (pnpm pre-pr answered no tier, so the paths were not judged).')
+    expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
   })
 
   it('refuses a bad title before spending minutes on pre-pr, and says when pre-pr could not run', async () => {

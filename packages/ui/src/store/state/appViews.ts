@@ -141,9 +141,10 @@ export type AppViewsSlice = {
    *
    * `builder: true` opens its builder's conversation beside it too (`builderPaneFor`). That is how a view laid over a
    * panel — on the grid or the project screen — shows the builder: the panel has no room for the pane, so "Show the
-   * conversation" goes to the app view through this same door the panel's Open uses.
+   * conversation" goes to the app view through this same door the panel's Open uses. `runs: true` does the same for its
+   * Runs panel (`runsPanelFor`), which a panel cannot draw either.
    */
-  openApp(projectId: string | null, appId: string, opts?: { builder?: boolean; machine?: string | null }): void
+  openApp(projectId: string | null, appId: string, opts?: { builder?: boolean; runs?: boolean; machine?: string | null }): void
   /**
    * The pinned view key whose builder pane should open the next time that view is the one on screen (`openApp` with
    * `builder`) — the view opens it and clears this. Only this screen session's: not saved with the workspace.
@@ -151,6 +152,10 @@ export type AppViewsSlice = {
   builderPaneFor: string | null
   /** Clears `builderPaneFor` once the view it names has opened its builder pane */
   takeBuilderPaneFor(key: string): void
+  /** Like `builderPaneFor`, for the Runs panel (`openApp` with `runs`) */
+  runsPanelFor: string | null
+  /** Clears `runsPanelFor` once the view it names has opened its Runs panel */
+  takeRunsPanelFor(key: string): void
   /**
    * Gives the app a pinned view without going to it (#203). The project screen shows its apps' pinned views in its
    * panels, and this is the same entry `openApp` makes — so an app on the project screen and the same app opened from

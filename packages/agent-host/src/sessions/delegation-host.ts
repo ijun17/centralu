@@ -46,7 +46,7 @@ export type DelegationHost = {
   tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean) => Promise<void>
   /** The seat a session's tools are, which decides the form an answer names a call in (`namedCall`, tool-seats.ts) */
   toolProfileOf: (sessionId: string) => ToolProfile | null
-  deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>
+  deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string) => void, stillAllowed?: () => string | null) => Promise<void>
   readonly disposing: boolean
   readonly emit: (e: NormalizedEvent) => void
   enqueue: (callerId: string, target: SessionInfo, via: QueuedRequest["via"], text: string) => Extract<BusyAnswer, { state: "queued"; }>

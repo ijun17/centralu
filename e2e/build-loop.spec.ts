@@ -26,6 +26,8 @@ type AppInfo = {
   error: string | null
   warnings: string[]
   codeStamp?: string
+  /** A linked machine's user-folder app (#82) */
+  machine?: string
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -562,6 +564,64 @@ test.describe('C-6: errors reach the builder', () => {
     await tail.getByTestId('error-tail-open-runs').click()
     await expect(pinned.getByTestId('runs-panel')).toBeVisible()
     expect(await errorSends(page)).toEqual([])
+  })
+
+  /*
+   * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (#82), so every call
+   * about it names its machine. The tail read its bundles without one: the remote app's crashes were never shown, or this
+   * computer's app of that id was shown in their place.
+   */
+  test("a linked machine's user-folder app shows the errors of its machine, not those of this computer's app with the same id (#82)", async ({ page }) => {
+    await setErrors(page, '_user/notes', [bundle({ message: 'this computer: exited (code 1)' })])
+    await setErrors(page, 'm1:_user/notes', [bundle({ message: 'm1: exited (code 7)' })])
+    await setApps(page, [app('notes', null, { name: 'Team notes', machine: 'm1', status: 'crashed', error: 'exited (code 7)' })])
+    await page.getByTestId('app-row-m1:_user/notes').click()
+    const pinned = page.getByTestId('pinned-app-m1:_user/notes')
+    await expect(pinned.getByTestId('error-tail-message')).toHaveText('m1: exited (code 7)')
+  })
+
+  /*
+   * "Show the conversation" and "Open Runs" from a view laid over a panel (the grid's or the project screen's) go to the app
+   * view, the one place that draws the builder's pane and the Runs panel. The first dropped the app's machine, so a linked
+   * machine's app opened this computer's app of the same id; the second only set a flag on the panel's view, which draws nothing.
+   */
+  test("from a grid panel, Show opens the app view of the machine's app, not this computer's, with its builder beside it", async ({ page }) => {
+    // No app is made in the user folder any more: the machine's app has a builder session standing in for the one on its machine
+    await addProject(page, '/tmp/alpha')
+    await startSession(page, 'alpha')
+    const builderId = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
+    await page.evaluate((id) => (window as any).__mock.appBuilders.set('_user/notes', id), builderId)
+    await setApps(page, [app('notes', null, { name: 'Team notes', machine: 'm1', status: 'crashed', error: 'exited (code 7)' })])
+    const crash = bundle()
+    await setErrors(page, 'm1:_user/notes', [crash])
+    await page.evaluate(() => (window as any).__store.getState().setGridPanels([{ kind: 'app', projectId: null, appId: 'notes', machine: 'm1' }]))
+    await page.getByTestId('grid-button').click()
+    // The panel's view is laid over it from the pinned layer (PinnedApps), not drawn inside the grid's own box
+    const panel = page.getByTestId('pinned-app-grid:m1:_user/notes').getByTestId('error-tail')
+    await panel.getByTestId('error-tail-send').click()
+    await expect(panel.getByTestId('error-tail-sent')).toBeVisible()
+    expect(await errorSends(page)).toEqual([{ appId: 'notes', projectId: null, at: crash.at, machine: 'm1' }])
+
+    await panel.getByTestId('error-tail-show-builder').click()
+    const focused = () => page.evaluate(() => (window as any).__store.getState().focusedApp)
+    await expect.poll(focused).toEqual({ projectId: null, appId: 'notes', machine: 'm1' })
+    const pinned = page.getByTestId('pinned-app-m1:_user/notes')
+    await expect(pinned.getByTestId('builder-pane')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__store.getState().builderPaneSessionId)).toBe(builderId)
+  })
+
+  test('from a grid panel, Open Runs opens the app view with its Runs panel — the panel cannot draw it', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/alpha')
+    await madeApp(page, pid, 'notes', 'Team notes')
+    // Stopped, so a bundle is shown whenever it happened
+    await setApps(page, [app('notes', pid, { name: 'Team notes', status: 'crashed', error: 'exited (code 7)' })])
+    const denied = { appId: 'notes', projectId: pid, name: 'Team notes', capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' }
+    await setErrors(page, `${pid}/notes`, [bundle({ kind: 'tool', tool: 'summarize', denied, message: 'refused', stderr: [] })])
+    await page.evaluate((p) => (window as any).__store.getState().setGridPanels([{ kind: 'app', projectId: p, appId: 'notes' }]), pid)
+    await page.getByTestId('grid-button').click()
+    await page.getByTestId(`pinned-app-grid:${pid}/notes`).getByTestId('error-tail-open-runs').click()
+    expect(await page.evaluate(() => (window as any).__store.getState().view)).toBe('app')
+    await expect(page.getByTestId(`pinned-app-${pid}/notes`).getByTestId('runs-panel')).toBeVisible()
   })
 })
 

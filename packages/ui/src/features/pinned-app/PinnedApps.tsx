@@ -164,10 +164,17 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
    * apart from the grid's (#288). Setting only this view's flag in a slot did nothing a person could see.
    */
   const openApp = useStore((s) => s.openApp)
-  const showBuilder = () => {
-    if (visible) setBuilderOpen(true)
-    else openApp(pv.projectId, pv.appId, { builder: true })
+  /*
+   * Both ask for a panel of the app view, so both go through here: in the app view the panel opens in place, and from a
+   * panel the app view is opened with the panel asked for. A linked machine's user-folder app is named by its machine
+   * as well (#82), or the app view would be this computer's app of the same id.
+   */
+  const showPanel = (panel: 'builder' | 'runs') => {
+    if (visible) (panel === 'builder' ? setBuilderOpen : setRunsOpen)(true)
+    else openApp(pv.projectId, pv.appId, { builder: panel === 'builder', runs: panel === 'runs', machine: pv.machine })
   }
+  const showBuilder = () => showPanel('builder')
+  const showRuns = () => showPanel('runs')
   const paneAsked = useStore((s) => s.builderPaneFor === pv.key)
   const takePaneAsk = useStore((s) => s.takeBuilderPaneFor)
   useEffect(() => {
@@ -175,6 +182,13 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     setBuilderOpen(true)
     takePaneAsk(pv.key)
   }, [paneAsked, visible, pv.key, takePaneAsk])
+  const runsAsked = useStore((s) => s.runsPanelFor === pv.key)
+  const takeRunsAsk = useStore((s) => s.takeRunsPanelFor)
+  useEffect(() => {
+    if (!runsAsked || !visible) return
+    setRunsOpen(true)
+    takeRunsAsk(pv.key)
+  }, [runsAsked, visible, pv.key, takeRunsAsk])
   /*
    * A capability question from a chain started by this app's view (M4 D-4) — one at a time, oldest
    * first. The whole list is selected and filtered here: if the selector itself returned a new
@@ -443,7 +457,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
-          <ErrorTail app={app} builder={builder} onShowBuilder={showBuilder} onShowRuns={() => setRunsOpen(true)} />
+          <ErrorTail app={app} builder={builder} onShowBuilder={showBuilder} onShowRuns={showRuns} />
           <FixBar app={app} pv={pv} builder={builder} onShowBuilder={showBuilder} />
           {ask && <MessageAsk appTitle={app?.title ?? pv.appId} projectId={pv.projectId} ask={ask} onAnswer={(id) => void answer(id)} />}
           {asking && <CapabilityAsk question={asking} visible={mode !== 'hidden'} />}

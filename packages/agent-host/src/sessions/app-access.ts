@@ -26,6 +26,10 @@ import { listSetting } from '../dev-services/store/settings.js'
  *   from an untrusted project          nothing: its repository's text could be the one asking, and an
  *                                      untrusted project runs none of its own apps either
  *
+ * The orchestrator (#1205) belongs to no project. It is given the user-folder apps (decision 4), and attaches the root
+ * apps of trusted projects here, the one it needs when it needs it, so its tool list does not grow with every project
+ * the person trusts. Nothing else: a project's inner apps, shared or not, are that project's.
+ *
  * The attachment is kept per session in the store's settings table (a JSON list under one key), so
  * it survives a host restart and the session's resume, and lasts until `detach_app` or the session
  * is deleted. Nothing about the app changes: it runs where it lives (its own folder, its own data),
@@ -132,6 +136,8 @@ export class AppAccess implements OnDemandApps {
   }
 
   allowed(session: AppSessionKey, app: ExternalAppInfo): boolean {
+    // The orchestrator (#1205): a user-folder app, or a root app of a trusted project, and no other
+    if (session.kind === 'orchestrator') return app.projectId === null || (app.root === true && app.status !== 'untrusted')
     const from = session.projectId
     if (from === null || (!this.projectTrusted(from) && !this.deps.boundaryOpen?.(session.id))) return false
     // A user-folder app, or another project's root app (#1141, which took the user-folder app's place): no switch, no card
@@ -243,6 +249,14 @@ export class AppAccess implements OnDemandApps {
     return this.records(sessionId).map((r) => this.refOf(r))
   }
 
+  /**
+   * The records changed behind this module (#1141: an app moved into a project carries its attachments to its new key,
+   * and the orchestrator's to an attachment of its own, #1205): read them again.
+   */
+  reload(): void {
+    this.cache.clear()
+  }
+
   dispose(): void {
     this.stopGone()
   }
@@ -252,6 +266,8 @@ export class AppAccess implements OnDemandApps {
   private gate(sessionId: string): { ok: true; session: AppSessionKey } | { ok: false; error: string } {
     const session = this.deps.session(sessionId)
     if (!session) return { ok: false, error: 'This session cannot attach apps.' }
+    // The orchestrator attaches the root apps (#1205): it has no project whose trust would gate it
+    if (session.kind === 'orchestrator') return { ok: true, session }
     if (session.projectId === null) return { ok: false, error: 'Only a session in a project can attach apps from other projects.' }
     if (!this.projectTrusted(session.projectId) && !this.deps.boundaryOpen?.(sessionId, 'attach from an untrusted project')) {
       return { ok: false, error: "This session's project is not trusted, so it cannot attach apps — the person can trust it from the project menu." }
@@ -259,14 +275,18 @@ export class AppAccess implements OnDemandApps {
     return { ok: true, session }
   }
 
-  /** What this session could attach now: shared apps and root apps (#1141) of other trusted projects, and user-folder apps, minus what it has */
+  /**
+   * What this session could attach now: shared apps and root apps (#1141) of other trusted projects, and user-folder apps,
+   * minus what it has. The orchestrator's (#1205): the root apps and user-folder apps, never a project's inner app.
+   */
   private candidates(session: AppSessionKey): ExternalAppInfo[] {
     const have = this.deps.hub.refsFor(session)
+    const orchestrator = session.kind === 'orchestrator'
     return this.deps.hub.rt
       .list()
       // An untrusted project's apps attach nowhere, auto included (owner, #1141)
       .filter((a) => !UNUSABLE.has(a.status))
-      .filter((a) => a.projectId === null || (a.projectId !== session.projectId && (a.shared === true || a.root === true)))
+      .filter((a) => a.projectId === null || (orchestrator ? a.root === true : a.projectId !== session.projectId && (a.shared === true || a.root === true)))
       .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
   }
@@ -275,6 +295,7 @@ export class AppAccess implements OnDemandApps {
     if (app.projectId !== null && app.projectId === session.projectId) return `${this.refOf(app)} is this project's own app; it is attached already when the project is trusted.`
     if (app.status === 'untrusted') return `${this.refOf(app)} is in a project the person has not trusted, so it does not run.`
     if (UNUSABLE.has(app.status)) return `${this.refOf(app)} cannot run now (${app.status}${app.error ? `: ${app.error.split('\n')[0]}` : ''}).`
+    if (session.kind === 'orchestrator' && app.projectId !== null && app.root !== true) return `${this.refOf(app)} is an app inside its project, which only that project's sessions use: hand the work to one of them with send_to_session.`
     if (app.projectId !== null && app.shared !== true && app.root !== true) return `${this.refOf(app)} is not shared with other projects. Only the person can share it (Settings → Apps).`
     return `${this.refOf(app)} cannot be attached to this session.`
   }

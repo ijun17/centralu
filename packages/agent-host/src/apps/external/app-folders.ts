@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, newAppIdProblem, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import type { AppLifecycle } from './app-lifecycle.js'
 import type { AppEntry } from './app-entry.js'
-import { PROJECT_APPS_PARTS, USER_APPS_PARTS } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest } from './manifest.js'
-import { placeAppFolder } from './placement.js'
+import { AppFolderTaken, nameTaken, placeAppFolder } from './placement.js'
 import type { AppRef } from './ref.js'
 import type { ExternalAppsDeps } from './runtime-types.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
@@ -107,22 +106,25 @@ export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAp
 
   host.rescanUser()
   const ref: AppRef = { projectId: null, appId: spec.id }
-  const dir = join(host.deps.dataRoot, ...USER_APPS_PARTS, spec.id)
+  const alreadyThere = () => new AppUnavailableError(`Your user folder already has an app "${spec.id}" — use another name, or remove that app first`)
   const held = host.find(ref)
-  if (held || existsSync(dir)) {
+  if (held) {
     const same =
-      held?.manifest?.server.command === spec.server.command &&
+      held.manifest?.server.command === spec.server.command &&
       JSON.stringify(held.manifest.server.args) === JSON.stringify(spec.server.args)
-    if (held && same) return host.info(held)
-    throw new AppUnavailableError(`Your user folder already has an app "${spec.id}" — use another name, or remove that app first`)
+    if (same) return host.info(held)
+    throw alreadyThere()
   }
 
+  let dir: string
   try {
-    placeAppFolder(host.deps.dataRoot, null, spec.id, (staging) => {
+    dir = placeAppFolder(host.deps.dataRoot, null, spec.id, (staging) => {
       mkdirSync(staging)
       writeFileSync(join(staging, MANIFEST_FILE), text + '\n')
     })
   } catch (err) {
+    // A folder of that id the scan did not take for an app (a broken manifest) belongs to someone too
+    if (err instanceof AppFolderTaken) throw alreadyThere()
     throw new AppUnavailableError(`Could not write the app folder: ${(err as Error).message}`)
   }
   mkdirSync(host.dataDirOf(ref), { recursive: true })
@@ -178,17 +180,18 @@ export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo 
   else host.refresh()
 
   const ref: AppRef = { projectId: spec.projectId, appId: spec.id }
-  const parts = spec.projectId === null ? USER_APPS_PARTS : PROJECT_APPS_PARTS
-  const dir = join(root, ...parts, spec.id)
-  if (host.find(ref) || existsSync(dir)) {
-    throw new AppUnavailableError(`An app "${spec.id}" already exists (${dir}) — use another id`)
-  }
+  const exists = (dir: string) => new AppUnavailableError(`An app "${spec.id}" already exists (${dir}) — use another id`)
+  const held = host.find(ref)
+  if (held) throw exists(held.dir)
 
+  let dir: string
   try {
-    placeAppFolder(root, spec.projectId, spec.id, (staging) => {
+    dir = placeAppFolder(root, spec.projectId, spec.id, (staging) => {
       scaffoldApp(host.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
     })
   } catch (err) {
+    // Even a folder with an invalid manifest belongs to a person or an agent: never overwritten
+    if (err instanceof AppFolderTaken) throw exists(err.dir)
     throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
   }
   mkdirSync(host.dataDirOf(ref), { recursive: true })
@@ -219,25 +222,15 @@ export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, ta
   const { name, description } = newAppText(host, spec)
   const parent = dirname(target.path)
   if (target.isDefault) mkdirSync(parent, { recursive: true })
-  if (taken(target.path)) throw new AppUnavailableError(`Something is already at ${target.path} — choose another id or folder`)
+  if (nameTaken(target.path)) throw new AppUnavailableError(`Something is already at ${target.path} — choose another id or folder`)
   const staging = join(parent, `.${spec.id}.${randomUUID()}`)
   try {
     scaffoldApp(host.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
-    if (taken(target.path)) throw new Error(`something appeared at ${target.path} meanwhile`)
+    if (nameTaken(target.path)) throw new Error(`something appeared at ${target.path} meanwhile`)
     renameSync(staging, target.path)
   } catch (err) {
     removeDataQuietly(staging, '[apps]')
     throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
-  }
-}
-
-/** lstat, not exists: a broken link of that name is still a name taken */
-function taken(path: string): boolean {
-  try {
-    lstatSync(path)
-    return true
-  } catch {
-    return false
   }
 }
 

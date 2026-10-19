@@ -14,6 +14,7 @@
     "depcruise": "depcruise packages apps --config tooling/dependency-cruiser.cjs",
     "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
     "pre-pr": "node scripts/pre-pr.mjs",
+    "tier": "node scripts/tier.mjs",
     "dev": "pnpm --filter @cc/web dev",
     "dev:live": "tsx scripts/dev-live.mts",
     "e2e": "playwright test --config e2e/playwright.config.ts",

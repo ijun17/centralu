@@ -200,6 +200,10 @@ test('Collapsing the panel leaves a rail, and it re-expands from there', async (
   await expect(rail.locator('button')).toHaveCount(1)
   await expect(rail.getByTestId('evidence-rail-count')).toHaveCount(0)
   await expect(rail.getByTestId('evidence-rail-running')).toHaveCount(0)
+  // No label of its own. The pointer is still where the collapse button was, which is where the expand button now
+  // stands, so its tooltip ("Expand panel (⌘B)") may be up: move away and wait for it to go before reading the text
+  await page.mouse.move(0, 0)
+  await expect(rail.getByRole('tooltip')).toHaveCount(0)
   await expect(rail).toHaveText('')
   // It stands at the height of the collapse button and is the same size
   const expand = (await page.getByTestId('evidence-open').boundingBox())!

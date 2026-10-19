@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -43,6 +43,7 @@ import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSettin
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
+import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
@@ -63,7 +64,7 @@ import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
 import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
-import { detectElevation } from './elevation.js'
+import { detectToken } from './elevation.js'
 
 /**
  * Agent Host entry point.
@@ -245,14 +246,18 @@ if (swapping) {
 start.at('lock')
 let lock: ReturnType<typeof acquireInstanceLock>
 try {
-  lock = acquireInstanceLock(dbPath)
+  // Who started it, for the message a second host on this folder prints (#1223)
+  lock = acquireInstanceLock(dbPath, undefined, {
+    ...(launch.startedBy ? { by: launch.startedBy } : {}),
+    ...(launch.serveFrom ? { from: launch.serveFrom } : {}),
+  })
 } catch (err) {
   // Ownership could not be checked at all (an unreadable ownership file): not starting is the safe answer (#82)
   refuse(`[agent-host] ${(err as Error).message}`)
   throw err
 }
 if (!lock.ok) {
-  refuse(lockConflictMessage(lock.heldByPid, lock.lockPath))
+  refuse(lockConflictMessage(lock.holder ?? lock.heldByPid, lock.lockPath))
   process.exit(1)
 }
 /*
@@ -579,6 +584,8 @@ mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => li
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
 // The orchestrator's list_machines reads the list Settings shows (#1220)
 mgr.useMachineList(() => links.list())
+// And changes them, behind the person's card where it matters (#1219)
+mgr.useMachineOps(links)
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity
@@ -605,6 +612,13 @@ const router: Router = new Router({
     heldPids: held?.heldPids,
     machines: links,
     stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
+    // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
+    stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
+    // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
+    handover: (h) => {
+      handover = h
+      server.broadcast({ type: 'host_handover', handover: h })
+    },
     activity: () => activityCounts(activity()),
     updateApply,
     hubs,
@@ -618,9 +632,19 @@ const router: Router = new Router({
  * a hub gets already says it. A hello carries nothing only if `whoami` did not answer within the bound
  */
 let elevated: boolean | null = null
-const elevation = detectElevation().then((e) => {
-  elevated = e
-  if (e) console.error('[agent-host] this host runs with administrator rights (an elevated token, or root): so does every agent it starts')
+// And on Windows which logon it runs in (#1224): one `whoami` answers both
+let logon: HostLogon | null = null
+/** What a serve in the person's Windows sign-in last said about taking over from this host (#1224, `host.handover`) */
+let handover: HostHandover | null = null
+const elevation = detectToken().then((t) => {
+  elevated = t.elevated
+  logon = t.logon
+  if (t.elevated) console.error('[agent-host] this host runs with administrator rights (an elevated token, or root): so does every agent it starts')
+  if (t.logon === 'network') {
+    console.error(
+      '[agent-host] this host runs in a network logon (started over ssh), not in the Windows sign-in: Git here cannot use a sign-in saved in Windows Credential Manager',
+    )
+  }
 })
 const server = new HostServer({
   port: Number(values.port),
@@ -644,6 +668,9 @@ const server = new HostServer({
   build: hostBuild(BUILD, launch.keeperSource),
   // Whether it runs with administrator rights, for a hub linked to it (#702); asked once below
   elevated: () => elevated,
+  // Which Windows logon it runs in, for a hub linked to it (#1224); asked with the elevation
+  logon: () => logon,
+  handover: () => handover,
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })
