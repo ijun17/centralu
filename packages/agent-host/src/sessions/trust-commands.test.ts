@@ -167,6 +167,91 @@ describe('set_project_trust', () => {
     expect((await run(orc.id, 'list_projects')).text).toContain('(its machine is not reachable: as last known)')
   })
 
+  describe("a linked machine's project, through the window's answers as the hub merges them", () => {
+    /** The answers as a hub gives them for a project on the linked machine m1, changed by `tweak` (set while the card stands) */
+    let tweak: { path?: string; unreachable?: boolean } = {}
+    function onMachine(p: ProjectInfo, apps: (a: Record<string, unknown>) => Record<string, unknown> = (a) => a, status = 'connected') {
+      tweak = {}
+      mgr.useWindowRpc(async (method, params) => {
+        if (method === 'machines.list') return [{ id: 'm1', name: 'Laptop', sshTarget: 'me@laptop', status }]
+        const r = await rpc(method, params)
+        if (method === 'projects.list') return (r as ProjectInfo[]).map((x) => (x.id === p.id ? { ...x, machine: 'm1', ...(tweak.path ? { path: tweak.path } : {}), ...(tweak.unreachable ? { unreachable: true } : {}) } : x))
+        if (method === 'apps.list') return (r as Record<string, unknown>[]).map((a) => (a.projectId === p.id ? apps({ ...a, machine: 'm1' }) : a))
+        return r
+      })
+    }
+
+    it('says its apps are as that machine listed them, and what an app asks for is not known when the machine did not say', async () => {
+      const p = await project('Remote', { app: { uses: { agent: true } } })
+      manifest(join(p.path, '.centralu', 'apps', 'quiet'), 'quiet')
+      rt.refresh()
+      onMachine(p, (a) => (a.appId === 'remote' ? (({ uses: _u, ...rest }) => rest)(a) : a))
+      const orc = await mgr.orchestrator()
+      const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+      expect(question).toContain('on the linked machine "Laptop"')
+      expect(question).toContain('Its 2 apps, as its machine listed them just now:')
+      expect(question).toContain('What it may ask for is not known: its machine did not say (it runs an older Centralu).')
+      // One the machine said asks for nothing (an empty declaration) is said so
+      expect(question).toContain('Asks for nothing beyond its own tools.')
+    })
+
+    it('says the machine listed no app rather than that the project has none', async () => {
+      const p = await project('Empty')
+      onMachine(p)
+      const orc = await mgr.orchestrator()
+      const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+      expect(question).toContain('Its machine listed no app for it just now (an app it could not list would not be shown).')
+      expect(question).not.toContain('It has no app.')
+    })
+
+    it('trusts nothing when its folder changed, or its machine could not be reached, while the card stood', async () => {
+      const p = await project('Moving')
+      onMachine(p)
+      const orc = await mgr.orchestrator()
+      const moved = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'allow', async () => {
+        tweak.path = join(root, 'elsewhere')
+      })
+      expect(moved.r.isError).toBe(true)
+      expect(moved.r.text).toContain('is not in the folder the card named any more, so nothing was trusted.')
+      onMachine(p)
+      const away = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'allow', async () => {
+        tweak.unreachable = true
+      })
+      expect(away.r.isError).toBe(true)
+      expect(away.r.text).toContain('could not be reached after the card was answered, so nothing was trusted.')
+      expect(await trusted(p.id)).toBe(false)
+    })
+
+    it('the lists say which machines are not connected, so they do not read as complete', async () => {
+      const p = await project('Seen')
+      onMachine(p, (a) => a, 'unreachable')
+      const orc = await mgr.orchestrator()
+      const rules = await run(orc.id, 'list_approval_rules')
+      expect(rules.text).toContain('No approval rule was listed.')
+      expect(rules.text).toContain('Not listed: the rules kept on "Laptop", which is not connected just now.')
+      expect((await run(orc.id, 'list_app_grants')).text).toContain('Not listed: the apps and answers kept on "Laptop", which is not connected just now.')
+      expect((await run(orc.id, 'list_projects')).text).toContain('Not listed: the projects on "Laptop", which is not connected just now.')
+    })
+
+    it('a list says when the linked machines could not be read at all, rather than reading as complete', async () => {
+      mgr.useWindowRpc(async (method, params) => {
+        if (method === 'machines.list') throw new Error('links are down')
+        return rpc(method, params)
+      })
+      const orc = await mgr.orchestrator()
+      expect((await run(orc.id, 'list_approval_rules')).text).toContain('The linked machines could not be read just now, so the rules kept on them may be missing.')
+    })
+  })
+
+  it("the share card says when the app's project is untrusted: it attaches nowhere until then", async () => {
+    const p = await project('Closed')
+    manifest(join(p.path, '.centralu', 'apps', 'helper'), 'helper')
+    rt.refresh()
+    const orc = await mgr.orchestrator()
+    const { question } = await answered(orc.id, 'share_app' as Command, { app: 'helper', shared: true }, 'deny')
+    expect(question).toContain('Its project is untrusted, so it attaches nowhere until you trust "Closed".')
+  })
+
   it('trusts nothing when the person denies it', async () => {
     const p = await project('Denied')
     const orc = await mgr.orchestrator()

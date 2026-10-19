@@ -36,7 +36,7 @@ function rows<T>(items: readonly T[], line: (t: T) => string): string[] {
 type ApprovalRuleRow = RpcResult<'approvals.rules'>[number]
 
 /** The projects and machines as the window reads them, for naming and finding a project */
-type Projects = { projects: ProjectInfo[]; machines: Map<string, string>; away: string[] }
+type Projects = { projects: ProjectInfo[]; machines: Map<string, string>; away: string[] | null }
 
 /**
  * What an app may ask for, as card lines (`usesLines`, the window's words). Said only when the host said it: an app whose
@@ -45,8 +45,8 @@ type Projects = { projects: ProjectInfo[]; machines: Map<string, string>; away: 
  */
 function asksLines(a: ExternalAppInfo, indent: string, lead: string): string[] {
   if (!a.uses) {
-    if (a.error || a.status === 'invalid') return [`${indent}What it may ask for is not known: its manifest could not be read (${manifestText(a.error ?? 'invalid', 300)}).`]
-    if (a.machine) return [`${indent}What it may ask for is not known: its machine did not say (it may run an older Centralu).`]
+    if (a.status === 'invalid') return [`${indent}What it may ask for is not known: its manifest could not be read (${manifestText(a.error ?? 'invalid', 300)}).`]
+    if (a.machine) return [`${indent}What it may ask for is not known: its machine did not say (it runs an older Centralu).`]
   }
   const asks = a.uses ? usesLines(a.uses) : []
   if (!asks.length) return [`${indent}Asks for nothing beyond its own tools.`]
@@ -158,12 +158,18 @@ export class TrustFlow {
   // ── Projects ──
 
   private async projects(rpc: WindowRpc): Promise<Projects> {
-    const [projects, machines] = await Promise.all([callWindow(rpc, 'projects.list', {}), callWindow(rpc, 'machines.list', {}).catch(() => [] as MachineInfo[])])
-    return { projects, machines: new Map(machines.map((m) => [m.id, m.name])), away: machines.filter((m) => m.status !== 'connected').map((m) => m.name) }
+    const [projects, machines] = await Promise.all([callWindow(rpc, 'projects.list', {}), callWindow(rpc, 'machines.list', {}).catch(() => null)])
+    return {
+      projects,
+      machines: new Map((machines ?? []).map((m: MachineInfo) => [m.id, m.name])),
+      // null: the linked machines could not be read, so whether a list is complete is not known either
+      away: machines ? machines.filter((m) => m.status !== 'connected').map((m) => m.name) : null,
+    }
   }
 
   /** A list's closing line when a linked machine is not connected: what it keeps is not in the list, and the list must not read as complete */
   private awayLine(all: Projects, what: string): string[] {
+    if (all.away === null) return [`The linked machines could not be read just now, so ${what} on them may be missing.`]
     return all.away.length ? [`Not listed: ${what} on ${all.away.map(shown).join(', ')}, which ${all.away.length === 1 ? 'is' : 'are'} not connected just now.`] : []
   }
 
@@ -188,10 +194,11 @@ export class TrustFlow {
 
   private async listProjects(rpc: WindowRpc): Promise<TrustAnswer> {
     const all = await this.projects(rpc)
-    if (!all.projects.length) return { ok: true, text: 'No project is registered. add_project and create_project make one.' }
+    const away = this.awayLine(all, 'the projects')
+    if (!all.projects.length) return { ok: true, text: ['No project is registered. add_project and create_project make one.', ...away].join('\n') }
     const line = (p: ProjectInfo) =>
       `- ${shown(p.name)} [${p.id}]${this.where(p, all.machines)}: ${shownPath(p.path)}; ${p.trusted ? 'trusted' : 'untrusted'}${p.unreachable ? ' (its machine is not reachable: as last known)' : ''}`
-    return { ok: true, text: [`${all.projects.length} ${all.projects.length === 1 ? 'project' : 'projects'} (set_project_trust changes trust):`, ...rows(all.projects, line)].join('\n') }
+    return { ok: true, text: [`${all.projects.length} ${all.projects.length === 1 ? 'project' : 'projects'} (set_project_trust changes trust):`, ...rows(all.projects, line), ...away].join('\n') }
   }
 
   /** The apps of one project, as the window's catalog groups them */

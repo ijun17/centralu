@@ -1477,8 +1477,8 @@ ids). The orchestrator's instructions point to these and the machine commands in
   `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
   reachable (its row is the hub's last copy) is refused before the card; a linked machine's project's card says its apps are
   as that machine listed them just now, and after Allow its folder and machine are checked too.
-- The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, so a
-  list without them does not read as complete.
+- The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, or
+  that the machines could not be read at all, so a list without them does not read as complete.
 - `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
   folded): each rule's id, what it allows, the project or session it belongs to, and since when.
   `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only

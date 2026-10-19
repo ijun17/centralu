@@ -117,9 +117,10 @@ export const ExternalAppInfo = z.object({
   root: z.boolean().optional(),
   /**
    * What the manifest declares it will ask Centralu for (`uses`: agents it may run, apps it may call, host data it may
-   * read), absent when it declares nothing or the manifest is invalid (#1141). A declaration, not a permission: the
-   * project's trust card lists it per app, so the person sees what trusting lets its apps ask for. Absent from an older
-   * host.
+   * read) (#1141). Present, empty when it declares nothing, whenever the manifest was read (#1219: a host before it left
+   * an empty one out too); absent when the manifest is invalid, or from an older host, which a trust card reads as
+   * "not known", never as asking for nothing. A declaration, not a permission: the project's trust card lists it per
+   * app, so the person sees what trusting lets its apps ask for.
    */
   uses: AppUses.optional(),
   /**
