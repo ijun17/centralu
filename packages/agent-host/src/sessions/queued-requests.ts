@@ -11,7 +11,7 @@ import type { HostAsk } from './host-cards.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionTrashHost } from './session-trash.js'
 import { agentFrame, presetWithin } from './start-agent.js'
-import { labelOf } from './transcript-view.js'
+import { labelOf, progressOf } from './transcript-view.js'
 
 /**
  * What the request queue reaches of the session manager (#428), typed as the manager declares each member. The manager
@@ -89,7 +89,16 @@ export class QueuedRequests {
   }
 
   busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }> {
-    return { state: 'busy', sessionId: target.id, sessionName: target.name, sessionState: this.host.children.queued.get(target.id)?.length && !inTurn(target.state) ? 'queued requests' : blockedOnQuestion(target) ? 'waiting on a question' : target.state, choices: this.busyChoices(callerId, target, from) }
+    // How many requests a queued one would wait behind, and where the running turn is (#1186)
+    const ahead = this.host.children.queued.get(target.id)?.length ?? 0
+    const progress = progressOf(this.host.store.messages, target.id)
+    return {
+      state: 'busy', sessionId: target.id, sessionName: target.name,
+      sessionState: ahead && !inTurn(target.state) ? 'queued requests' : blockedOnQuestion(target) ? 'waiting on a question' : target.state,
+      choices: this.busyChoices(callerId, target, from),
+      ...(ahead ? { ahead } : {}),
+      ...(progress ? { progress } : {}),
+    }
   }
 
   /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
@@ -168,7 +177,7 @@ export class QueuedRequests {
       } else {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'
-        await this.host.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn)
+        await this.host.deliver(sessionId, askFrame(callerProject, r.text, { name: from.name, sessionId: caller.id }), undefined, from, false, undefined, 'inline', handIn)
       }
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) this.host.children.queuedTurnStarted(sessionId)

@@ -211,12 +211,20 @@ export type RoutedCard = {
 export type IfBusy = 'note' | 'queue' | 'fork' | 'fork_read'
 export type BusyChoice = { choice: 'note' | 'queue' | 'fork'; available: boolean; why?: string }
 export type BusyAnswer =
-  | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[] }
+  /** `ahead` and `progress` (#1186): how many requests are queued there before one would be, and where its turn is */
+  | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[]; ahead?: number; progress?: TurnProgress }
   /** `lowMemory` (#686): queued instead of the fork asked for, since memory was low; what was read */
   | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number; lowMemory?: string }
   /** `reportTaken` (#1233): a report was asked for, but another session is owed that turn's end, so it stays theirs */
   | { state: 'noted'; sessionId: string; sessionName: string; reportTaken?: true }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
+
+/**
+ * Where a running turn is, as a wait past its bound and a busy answer tell the caller (#1186): how long the session has
+ * recorded nothing (`quietFor`, "40 s", "3 min"), and its last step. "Still working" used to say nothing of it, so a
+ * session at work and one stuck read the same
+ */
+export type TurnProgress = { quietFor: string; lastStep?: string }
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
 export type AskProjectResult =
@@ -241,6 +249,8 @@ export type AskProjectResult =
       sessionName: string
       /** What the delegated session waits on, when it waits on the person (an approval, a question) */
       notice?: string
+      /** Where its turn is (#1186), when this host records it */
+      progress?: TurnProgress
     }
   | {
       ok: true
@@ -286,7 +296,7 @@ export type ChildRunResult =
        * only observes or reads under `auto`, a turn cut short, or a report still owed over its background work
        */
       | { state: 'done'; answer: string; readable: string[]; outside: string[]; cleanUp?: boolean }
-      | { state: 'working'; reported: boolean }
+      | { state: 'working'; reported: boolean; progress?: TurnProgress }
       | { state: 'at_rest'; answer: string; sessionState: string; interruption?: Interruption; cleanUp?: boolean }
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }

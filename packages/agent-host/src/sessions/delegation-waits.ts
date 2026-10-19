@@ -5,6 +5,7 @@ import { taskList } from './background-stops.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import { cleanUpDue } from './own-agents.js'
+import { progressOf } from './transcript-view.js'
 import { turnAnswer } from './turn-answer.js'
 import { namedCall } from './tool-seats.js'
 import { raceBound } from './with-timeout.js'
@@ -38,6 +39,7 @@ export class DelegationWaits {
   agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {
     if (arm && !observing) this.host.children.markReport(d.sessionId, d.callerId)
     const notice = d.notice()
+    const progress = progressOf(this.host.store.messages, d.sessionId)
     return {
       ok: true,
       state: 'working',
@@ -46,6 +48,7 @@ export class DelegationWaits {
       tool: this.host.meta.get(d.sessionId)?.tool ?? '',
       reported: !observing && this.host.children.awaitingReport.get(d.sessionId) === d.callerId,
       ...(notice ? { notice } : {}),
+      ...(progress ? { progress } : {}),
     }
   }
 

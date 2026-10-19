@@ -229,7 +229,9 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    the target project being removed, withdraws a card still standing (`withdrawReaches`).
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
    back (the caller's project name a one-line field, `frameField`, as the parent's name in `agentFrame` and
-   `agentNoteFrame` is, #428), and appears in the target conversation with `from` identifying the asking session. An idle
+   `agentNoteFrame` is, #428), and names the asking session by its name (one quoted line) and id (#1186: the model
+   read the project only; `from`, which identifies the session, is in the store and on screen, not in the input). It
+   appears in the target conversation with `from` identifying the asking session. An idle
    session resumes as needed. A session busy with a turn that is not the caller's (the person's,
    another delegation, or requests queued ahead) returns the choices instead (§1.2.3, #677): the
    caller passes `ifBusy` `note` (an `auto` caller only, through the adapter's tracked mid-turn input
@@ -256,7 +258,9 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
 
 **Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
 bridge wait of 280 s. It then answers still working, naming the session and how to call again with
-`project`, `session` and no task. Without `session`, one outstanding call in that project is enough
+`project`, `session` and no task, and where the turn is (`progress`, #1186): how long the session has recorded
+nothing and its last step (a tool call's title on one line, quoted as JSON), as start_agent's and agent_session's
+`working` do; a session at work and one stuck read the same before. Without `session`, one outstanding call in that project is enough
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
@@ -1001,7 +1005,9 @@ When session B asks session A for work (`agent_session` send, `ask_project` to a
 while A runs a turn that is not B's (the person's, another session's delegation, an app's), or while requests are
 queued ahead, Centralu does not decide for B (owner decision 2026-10-14). The request tool returns `busy` with the
 choices, each marked available or not and why (`busyChoices`), and sends nothing; B calls again with `ifBusy`, or
-passes it up front. B's own running turn there is not busy for B: a note into its own work goes on as before. Messages
+passes it up front. The answer also says where A's turn is and how many requests are queued there already (`progress`,
+`ahead`, #1186), so B can choose knowing what it waits behind. Queueing by default, as #1186 proposed, is not done:
+the owner's decision above leaves the choice to B. B's own running turn there is not busy for B: a note into its own work goes on as before. Messages
 the person sends are unchanged. The answer says which choice ran and its handle.
 
 | `ifBusy` | What happens |

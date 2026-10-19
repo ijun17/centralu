@@ -229,7 +229,7 @@ export class MachineAsks {
     this.host.store.settings.setAppSetting(depthKey, String(p.depth))
     const from = { sessionId: MACHINE_ASKER, name: `${oneLineText(p.caller.name, 120) || 'A session'} on ${machine.name}` }
     try {
-      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task), undefined, from, false)
+      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task, { name: from.name }), undefined, from, false)
     } catch (e) {
       given.wait.fail(e as Error)
       this.given.delete(key)

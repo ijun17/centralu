@@ -45,10 +45,15 @@ export function taskLine(task: string, max = 160): string {
  * The message the delegated session receives. It says who asks and how the answer travels back, because the
  * delegated session cannot see the caller: its final text is all the caller will read, and a file it does not name
  * by its absolute path is a file the caller cannot find.
+ *
+ * `asker` (#1186): which session asks, by its name and id, so the receiver can tell two asks from one project apart and
+ * name the asker to the person. It said the project only, though the store and the screen had the session all along.
+ * A name is one quoted line (`frameField`), as the project's is.
  */
-export function askFrame(callerProject: string, task: string): string {
+export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string }): string {
+  const who = asker ? ` It is the session "${frameField(asker.name)}"${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
   return [
-    `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project. ` +
+    `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
       'Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path.]',
     '',
     task,

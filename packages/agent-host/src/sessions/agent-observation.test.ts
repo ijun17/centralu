@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { agentRunText } from './tool-answers.js'
 
 describe("auto observes another caller's delegation without consuming it", () => {
   let w: CrossWorld
@@ -38,6 +39,15 @@ describe("auto observes another caller's delegation without consuming it", () =>
     await w.until(() => reports(owner, child).length === 1)
     expect(reports(owner, child)).toHaveLength(1)
   }
+
+  // #1186: "working" said nothing of where the turn was, so a child at work and one stuck read the same
+  it("status on a working child says how long it has been quiet and its last step", async () => {
+    const { owner, child } = await start()
+    handle(child).event({ type: 'tool_call', sessionId: child, callId: 'c1', summary: { tool: 'Bash', title: 'pnpm build', paths: [] } })
+    const r = await w.mgr.agentSession(owner, { sessionId: child, action: 'status' })
+    expect(r).toMatchObject({ ok: true, state: 'working', progress: { quietFor: expect.stringMatching(/^\d+ s$/), lastStep: 'Bash: pnpm build' } })
+    expect(agentRunText(r).text).toMatch(/is working on it\. It last recorded something \d+ s ago; its last step, as JSON: "Bash: pnpm build"\./)
+  })
 
   it.each(['status', 'send', 'wait'] as const)(
     "%s leaves the normal owner's report and answer available once, and grants neither caller files",
