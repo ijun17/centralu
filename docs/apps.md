@@ -120,6 +120,10 @@ visibility is not read as the default: the side that is wrong stays closed.
   Checked at each start once the host is ready, after a project is deleted, and after the trash is
   emptied or loses a session; a move that fails (a folder in use on Windows) is tried again a few
   times, then at the next start.
+  The host marks such a project, and one added again at its folder by its spelling alone (`ProjectInfo.fromUserFolder`, only
+  ever `true`, absent from a host before #1301), and the Delete project dialog says what will happen to its folder: when it
+  moves, where to, that nothing is deleted and what putting it back is; a project without the mark (one reached through a
+  link or a `subst` drive is not marked) keeps "The folder on disk is left alone." (`features/project/deleteNote.ts`).
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes

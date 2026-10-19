@@ -144,6 +144,26 @@ describe('a user-folder app becomes a project in place', () => {
     expect(changed).toBe(1)
   })
 
+  // The Delete project dialog tells such a project from an ordinary one by this (#1301): its folder moves to app-trash/ once nothing can restore it
+  it('marks the projects it registered as folders of the user folder, and no other project', async () => {
+    const ordinary = join(root, 'ordinary')
+    mkdirSync(ordinary, { recursive: true })
+    const door = createRpcHandler(mgr, new Map(), { externalApps: rt })
+    await door('projects.add', { path: ordinary })
+    const listed = (await door('projects.list', {})) as ProjectInfo[]
+    expect(listed.find((x) => x.path === appDir())).toMatchObject({ name: 'notes', fromUserFolder: true })
+    expect(listed.find((x) => x.name === 'helper')).toMatchObject({ fromUserFolder: true })
+    expect(listed.find((x) => x.path === ordinary)).not.toHaveProperty('fromUserFolder')
+    // A project added again at the folder, in another spelling, is marked too: deleting it moves the folder (#1204)
+    const first = project()!.id
+    await door('projects.delete', { projectId: first })
+    store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
+    expect(((await door('projects.list', {})) as ProjectInfo[]).find((x) => x.id === 'again')).toMatchObject({ fromUserFolder: true })
+    // Deleted and given back, nothing of it is left to mark
+    await door('projects.delete', { projectId: 'again' })
+    expect(((await door('projects.list', {})) as ProjectInfo[]).find((x) => x.id === 'again')).toBeUndefined()
+  })
+
   it('carries its data folder, and leaves the old one for a previous build', () => {
     expect(readFileSync(join(dataRoot, 'app-data', newKey(), 'state.json'), 'utf8')).toBe('{"count":7}')
     expect(existsSync(join(dataRoot, 'app-data', OLD, 'state.json'))).toBe(true)

@@ -792,6 +792,37 @@ test('Deleting a project: leaving the file checkbox off keeps the folder untouch
 })
 
 /**
+ * A folder of the user folder registered in place as a project (#1141) is moved to app-trash/ by the host once nothing can
+ * restore it (#1204), so "The folder on disk is left alone." would be wrong for it (#1301). The host marks such a project
+ * (`ProjectInfo.fromUserFolder`); an ordinary one, and one from a host without the mark, keep today's sentence.
+ */
+test('Deleting a project that is an app folder: the dialog says where the folder goes, an ordinary one keeps its sentence', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  const open = async (name: string) => {
+    await page.getByTestId(`project-header-${name}`).hover()
+    await page.getByTestId(`project-menu-${name}`).click()
+    await page.getByTestId(`delete-project-${name}`).click()
+  }
+  await page.evaluate(() => {
+    const store = (window as any).__store
+    const alpha = Object.values<any>(store.getState().projects).find((p) => p.name === 'alpha')
+    store.setState((s: any) => ({ projects: { ...s.projects, [alpha.id]: { ...alpha, fromUserFolder: true } } }))
+  })
+
+  await open('alpha')
+  const note = page.getByTestId('delete-project-folder-note')
+  await expect(note).toContainText('app-trash/')
+  await expect(note).toContainText('Nothing is deleted')
+  await expect(note).toContainText('no other project at the folder')
+  await expect(page.getByTestId('delete-project-note')).not.toContainText('left alone')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('delete-project-dialog')).toBeHidden()
+
+  await open('beta')
+  await expect(page.getByTestId('delete-project-folder-note')).toHaveText('The folder on disk is left alone.')
+})
+
+/**
  * "Connected" is never written; it speaks up **only when disconnected** (requested by the
  * person, 2026-09-09).
  *

@@ -4,6 +4,7 @@ import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
 import { TextInput } from '../../components/TextField.jsx'
+import { folderNote } from './deleteNote.js'
 
 /**
  * Deleting a project (a dogfooding request).
@@ -84,7 +85,9 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="delete-project-note">
             The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s
             trash — Settings → Trash restores them or deletes them for good.{' '}
-            <span className="text-ink">The folder on disk is left alone.</span>
+            <span className="text-ink" data-testid="delete-project-folder-note">
+              {folderNote(project)}
+            </span>
           </p>
         )}
 

@@ -4,6 +4,7 @@ import { gitSummary } from '../dev-services/git.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import type { Store } from '../dev-services/store.js'
 import { rpcError } from '../rpc-error.js'
+import { atAdoptedFolder } from '../user-app-adoption.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { orchestratorHome } from './orchestrator-home.js'
 
@@ -16,6 +17,8 @@ export type ProjectRegistryHost = Pick<DelegationHost, 'store' | 'emit' | 'first
   readonly worktreeRoot: string
   /** Merge detection (#69, merge-checks.ts), started without waiting for it */
   checkMergedInBackground: (projectId: string) => void
+  /** The folders of the user folder that were registered as projects in place (#1141), for the mark on `ProjectInfo` (#1301); none without the app runtime */
+  userAppFolders: () => readonly string[]
 }
 
 /**
@@ -72,7 +75,7 @@ export class ProjectRegistry {
     return { trusted: this.projectTrusted(projectId) }
   }
 
-  async projectInfo(id: string, path: string): Promise<ProjectInfo> {
+  async projectInfo(id: string, path: string, adopted = this.adoptedNow()): Promise<ProjectInfo> {
     /*
      * **Reads the stored value.** 'claude' used to be hardcoded here, which meant the DB's
      * default_tool column was never read anywhere — and since nothing wrote to it either, nobody
@@ -97,6 +100,9 @@ export class ProjectRegistry {
       worktreeSetup: this.host.store.projects.worktreeSetup(id),
       // Instructions for the agents started here (#1161 item 2): the project's settings show them
       agentInstructions: this.host.store.projects.agentInstructions(id),
+      // A folder of the user folder registered in place (#1141), or a project added again at one: deleting the project moves the
+      // folder to app-trash/ (#1204, #1301)
+      ...(adopted.projects.has(id) || atAdoptedFolder(path, adopted.folders) ? { fromUserFolder: true } : {}),
       // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
       // is archived — so the screen never navigates to a ghost slot, this side (which knows about
       // sessions) does the check
@@ -179,7 +185,13 @@ export class ProjectRegistry {
   }
 
   async listProjects(): Promise<ProjectInfo[]> {
-    return Promise.all(this.host.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path)))
+    const adopted = this.adoptedNow()
+    return Promise.all(this.host.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path, adopted)))
+  }
+
+  /** The projects the user folder's apps became, and their folders, read once for a list (#1301) */
+  private adoptedNow(): { projects: Set<string>; folders: readonly string[] } {
+    return { projects: new Set(Object.values(this.host.store.adoption.adopted()).map((r) => r.projectId)), folders: this.host.userAppFolders() }
   }
 
   /**

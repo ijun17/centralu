@@ -94,6 +94,21 @@ export function adoptedProjectOf(store: Pick<Store, 'adoption'>, appId: string):
 const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
 
 /**
+ * Whether a path is, or lies inside, one of these folders by its spelling alone (#1301): resolved, ASCII case folded, no
+ * file system read. For the Delete project dialog, which asks on every project list: a project added again at an adopted
+ * folder (another spelling of the path) is found, one reached through a link or a `subst` drive is not, and keeps the
+ * dialog's ordinary sentence. `folderMatcher` (below) is the exact test the give-back uses.
+ */
+export function atAdoptedFolder(path: string, dirs: readonly string[]): boolean {
+  const fold = (p: string) => resolve(p).replace(/[A-Z]/g, (c) => c.toLowerCase())
+  const here = fold(path)
+  return dirs.some((dir) => {
+    const d = fold(dir)
+    return here === d || here.startsWith(d.endsWith(sep) ? d : d + sep)
+  })
+}
+
+/**
  * Whether a kept path (a project's, a trashed session's) could name this folder (#1204), or null when the folder's own
  * real path cannot be told. It errs toward yes: a folder wrongly kept is only kept, while one wrongly moved is a live
  * project's. Both sides are compared by their real paths (`realFolder`), so a project added through a symbolic link, a

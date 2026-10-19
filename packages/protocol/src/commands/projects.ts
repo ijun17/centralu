@@ -103,6 +103,14 @@ export const ProjectInfo = z.object({
    * silent grant of permission.
    */
   trusted: z.boolean().default(false),
+  /**
+   * Whether this project is an app folder of the user folder registered in place (#1141): `<data folder>/apps/<id>/`,
+   * now the project's root app. Set by the host, only ever `true` (absent for every other project, and from a host
+   * before #1301, which a window reads as an ordinary project). Deleting such a project moves its folder to
+   * `<data folder>/app-trash/` once nothing in Centralu's trash can restore it (#1204), which the Delete project dialog
+   * says; for any other project the folder stays where it is.
+   */
+  fromUserFolder: z.boolean().optional(),
   git: z
     .object({
       branch: z.string(),

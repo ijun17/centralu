@@ -95,6 +95,17 @@ describe('project trust (M4)', () => {
     await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('untrusted'))
   })
 
+  it('a project the host later registers in place from the user folder takes the mark on the next read, so the Delete dialog says what happens (#1301)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/was-ordinary')
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().projects[p.id]?.fromUserFolder).toBeUndefined()
+    const real = mock.projects.list.bind(mock.projects)
+    vi.spyOn(mock.projects, 'list').mockImplementation(async () => (await real()).map((x) => ({ ...x, fromUserFolder: true })))
+    await useStore.getState().refreshProjects()
+    expect(useStore.getState().projects[p.id]?.fromUserFolder).toBe(true)
+  })
+
   it('a folder the person let the orchestrator add is asked about once, as one added from the sidebar (#1220)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

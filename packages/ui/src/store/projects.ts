@@ -11,7 +11,7 @@ import { inOrder, omitKey, stillInOrder } from './patch.js'
  */
 
 /** What a project carries that any client may change through the host (#719); `git` and the identity stay as the window has them */
-const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'agentInstructions', 'worktreeManager', 'defaultTool', 'defaultModels'] as const satisfies readonly (keyof ProjectInfo)[]
+const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'agentInstructions', 'worktreeManager', 'defaultTool', 'defaultModels', 'fromUserFolder'] as const satisfies readonly (keyof ProjectInfo)[]
 
 /*
  * The writes this window has made to a project and not seen settle (#719). A list read that began before a write
@@ -40,7 +40,7 @@ export async function writingProject<T>(projectId: string, refresh: () => void, 
 /**
  * One read of the project list, taken over the rows already listed. New projects join at the end; a listed row keeps
  * its place and takes the host's value of the settings another client can change (trust, commands, worktree setup,
- * defaults: #719) and keeps its object when none of them differs. `git` is left alone: it has its own refresh, and a
+ * defaults: #719, and whether it is a folder of the user folder: #1301) and keeps its object when none of them differs. `git` is left alone: it has its own refresh, and a
  * list read does not carry the freshest count. A project this window is writing is left as it is (`projectWrites`).
  * @returns whether a project had to be skipped after its write was already done, so one more read is due
  */
