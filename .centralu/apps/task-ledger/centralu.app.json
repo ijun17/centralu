@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "task-ledger",
+  "name": "Task ledger",
+  "version": "0.1.0",
+  "description": "Keeps this project's work moving. A list of tasks (ready, running, review, queued, blocked, done) with the session doing each, what blocks it and the next step, edited here or by the project's sessions. It watches the project's sessions and, optionally, its GitHub issues (read only, through your own gh), and tells the one responsible session, once per change, when a ready task has no assignee, an assignee finished or stopped to ask, what blocked a task is resolved, or an assignee has been quiet too long. Tasks are kept on this computer, not in the repository.",
+  "server": { "command": "node", "args": ["--enable-source-maps", "server.mjs"] },
+  "home": "show",
+  "uses": { "background": "watches the project's sessions and tasks while any task is open", "notices": true, "sessions": ["observe"] },
+  "view": { "span": { "cols": 2, "rows": 2 } }
+}

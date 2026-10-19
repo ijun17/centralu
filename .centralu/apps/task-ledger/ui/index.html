@@ -1,0 +1,410 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Task ledger</title>
+    <style>
+      /* Colours, type and shape come from Centralu's theme (applyTheme below); these are its dark fallbacks, for the moment before the theme arrives */
+      :root {
+        --bg: var(--color-background-secondary, #242424);
+        --bg-hover: var(--color-background-tertiary, #424242);
+        --ink: var(--color-text-primary, #ededed);
+        --ink-2: var(--color-text-secondary, #b4b4b4);
+        --ink-3: var(--color-text-tertiary, #8a8a8a);
+        --danger: var(--color-text-danger, #ff9b91);
+        --signal: var(--color-text-warning, #e5b567);
+        --edge: var(--color-border-secondary, #4d4d4d);
+        --ring: var(--color-ring-primary, #b4b4b4);
+        --sans: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif);
+        --text: var(--font-text-md-size, 13px);
+        --small: var(--font-text-sm-size, 12px);
+        --leading: var(--font-text-md-line-height, 1.5);
+        --heading: var(--font-text-md-size, 13px);
+        --semibold: var(--font-weight-semibold, 600);
+        --radius: var(--border-radius-md, 4px);
+        --border: var(--border-width-regular, 1px);
+        --sb-size: var(--centralu-scrollbar-size, 10px);
+        --sb-inset: var(--centralu-scrollbar-inset, 3px);
+        --sb-radius: var(--centralu-scrollbar-radius, 999px);
+        --sb-track: var(--centralu-scrollbar-track, transparent);
+        --sb-thumb: var(--centralu-scrollbar-thumb, #3c3c3c);
+        --sb-thumb-hover: var(--centralu-scrollbar-thumb-hover, #4d4d4d);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 12px; font-family: var(--sans); font-size: var(--text); line-height: var(--leading); color: var(--ink); background: transparent; }
+      button, input, select, textarea { font: inherit; color: inherit; background: var(--bg); border: var(--border) solid var(--edge); border-radius: var(--radius); padding: 3px 8px; max-width: 100%; }
+      button { cursor: pointer; }
+      button:hover { background: var(--bg-hover); }
+      button.quiet { border-color: transparent; background: transparent; color: var(--ink-2); }
+      button.quiet:hover { background: var(--bg-hover); }
+      textarea { width: 100%; min-height: 4.5em; resize: vertical; }
+      input[type='text'], input[type='number'], select { min-width: 0; }
+      :focus-visible { outline: var(--border) solid var(--ring); outline-offset: 1px; }
+      .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 10px; }
+      .bar .grow { flex: 1 1 160px; min-width: 0; }
+      .status { color: var(--ink-2); }
+      .status.bad { color: var(--danger); }
+      .add { display: flex; gap: 6px; margin-bottom: 12px; }
+      .add input { flex: 1 1 auto; }
+      h2 { margin: 14px 0 4px; font-size: var(--small); font-weight: var(--semibold); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+      h2.signal { color: var(--signal); }
+      .row { padding: 4px 0; border-top: var(--border) solid var(--edge); }
+      .row:first-of-type { border-top: 0; }
+      .line { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+      .line .title { flex: 1 1 14em; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+      .id { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+      .chip { color: var(--ink-2); font-size: var(--small); overflow-wrap: anywhere; }
+      .chip.signal { color: var(--signal); }
+      .chip.bad { color: var(--danger); }
+      .sub { color: var(--ink-2); font-size: var(--small); overflow-wrap: anywhere; }
+      .editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 6px 0 8px; }
+      .editor label { display: grid; gap: 2px; color: var(--ink-2); font-size: var(--small); }
+      .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(10em, 1fr)); gap: 6px; }
+      .blocker { display: flex; gap: 6px; align-items: center; }
+      .blocker input[type='text'] { flex: 1 1 auto; }
+      .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+      details { margin-top: 10px; }
+      summary { cursor: pointer; color: var(--ink-2); }
+      .error { color: var(--danger); margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .empty { color: var(--ink-3); padding: 6px 0; }
+      @media (max-width: 420px) { body { margin: 8px; } }
+      ::-webkit-scrollbar { width: var(--sb-size); height: var(--sb-size); }
+      ::-webkit-scrollbar-track { background: var(--sb-track); }
+      ::-webkit-scrollbar-thumb { background: var(--sb-thumb); border: var(--sb-inset) solid transparent; background-clip: content-box; border-radius: var(--sb-radius); }
+      ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: content-box; }
+      @supports not selector(::-webkit-scrollbar) { * { scrollbar-color: var(--sb-thumb) var(--sb-track); scrollbar-width: thin; } }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <label class="grow">Told: <select id="responsible"></select></label>
+      <span class="status" id="status"></span>
+      <button id="check" title="Read GitHub and the sessions now, and tell the responsible session what is due">Check now</button>
+    </div>
+    <form class="add" id="add">
+      <input type="text" id="title" placeholder="Add a task" aria-label="Add a task" maxlength="400" autocomplete="off" />
+      <button type="submit">Add</button>
+    </form>
+    <div id="notes"></div>
+    <div id="lists"></div>
+    <div id="more"></div>
+    <div class="error" id="error" role="alert"></div>
+
+    <!-- Centralu replaces this tag with the MCP App bridge (runtime/mcp-app.js). Keep it. -->
+    <script src="centralu:mcp-app.js"></script>
+    <script>
+      // The panel holds no state of its own: the server does. It shows what `show` says, edits through the same tools an
+      // agent calls, and asks again when Centralu says a tool changed something (and every 30 seconds, because a
+      // session's state changes without any tool being called).
+      const app = new McpApp.App({ name: 'task-ledger', version: '0.1.0' })
+      const $ = (id) => document.getElementById(id)
+      const STATES = ['ready', 'running', 'review', 'queued', 'blocked', 'done']
+      const GROUPS = [['running', 'Running'], ['review', 'Review'], ['queued', 'Queued'], ['blocked', 'Blocked'], ['ready', 'Ready']]
+      const KIND_LABEL = { issue: 'issue', pr: 'pull request', decision: 'decision', text: 'words' }
+
+      let st = null
+      let openId = null
+      let stale = false
+      let drafts = {}
+      // Which of the folded sections the person opened: they stay open when the panel shows new state
+      const unfolded = new Set()
+      // The issues ticked in "not in the ledger", kept when the panel shows new state
+      const picked = new Set()
+
+      function fold(key, summary, ...kids) {
+        return h('details', { open: unfolded.has(key), ontoggle: (e) => (e.target.open ? unfolded.add(key) : unfolded.delete(key)) }, h('summary', {}, summary), ...kids)
+      }
+
+      function h(tag, props, ...kids) {
+        const el = document.createElement(tag)
+        for (const [k, v] of Object.entries(props ?? {})) {
+          if (k === 'class') el.className = v
+          else if (k.startsWith('on')) el.addEventListener(k.slice(2), v)
+          else if (v === true) el.setAttribute(k, '')
+          else if (v !== false && v != null) el.setAttribute(k, String(v))
+        }
+        for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid)
+        return el
+      }
+
+      function setError(text) {
+        $('error').textContent = text || ''
+      }
+      const textOf = (r) => (r?.content ?? []).map((c) => c.text ?? '').join('\n')
+
+      async function call(name, args = {}) {
+        try {
+          const r = await app.callServerTool({ name, arguments: args })
+          setError(r?.isError ? textOf(r) : '')
+          return r
+        } catch (e) {
+          setError(String(e?.message ?? e))
+          return null
+        }
+      }
+
+      // `force`: the person has just done something (added, saved, closed): show it now, whatever is focused
+      async function reread(force = false) {
+        const r = await call('show')
+        if (r?.structuredContent) take(r.structuredContent, force)
+      }
+      async function change(name, args, { force = false } = {}) {
+        const r = await call(name, args)
+        if (r && !r.isError) await reread(force)
+        return r
+      }
+
+      // Whether the person is in the middle of writing: the add line, an open editor, or a field in Settings
+      function writing() {
+        const a = document.activeElement
+        if (!a || a === document.body) return false
+        return (a.id === 'title' && a.value !== '') || (openId !== null && !!a.closest('.editor')) || (!!a.closest('#more') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))
+      }
+
+      function take(next, force = false) {
+        st = next
+        // What the person is writing is not taken away: what changed is shown once they are done
+        if (!force && writing()) {
+          stale = true
+          return renderBar()
+        }
+        stale = false
+        render()
+      }
+
+      function ago(ms) {
+        const m = Math.max(0, Math.round((st.now - ms) / 60000))
+        return m < 1 ? 'just now' : m < 90 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+      }
+
+      function assigneeChip(t) {
+        if (!t.assignee) return null
+        const s = t.assigneeState
+        const word = !s ? 'not heard' : s.state === 'working' ? 'working' : s.state === 'waiting_approval' ? 'asking' : s.state === 'error' ? 'error' : s.state === 'limited' ? 'limit' : s.live ? 'idle' : 'asleep'
+        return h('span', { class: `chip${s?.state === 'waiting_approval' || s?.state === 'error' ? ' signal' : ''}` }, `${t.assignee.name} · ${word}`)
+      }
+
+      function taskRow(t, { attention = false } = {}) {
+        const blockers = t.blockers.filter((b) => b.open)
+        const row = h(
+          'div',
+          { class: 'row' },
+          h(
+            'div',
+            { class: 'line' },
+            h('span', { class: 'id' }, t.id),
+            h('span', { class: 'title', tabindex: 0, role: 'button', onclick: () => open(t.id), onkeydown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open(t.id)) }, t.title),
+            attention ? null : h('span', { class: 'chip' }, t.state),
+            assigneeChip(t),
+            t.issue ? h('span', { class: 'chip' }, `#${t.issue}`) : null,
+            blockers.map((b) => h('span', { class: `chip${b.why === 'closed without merging' ? ' bad' : ''}` }, b.kind === 'text' ? `“${b.text}”` : `${b.kind} #${b.ref} ${b.why}`)),
+          ),
+          t.next ? h('div', { class: 'sub' }, `Next: ${t.next}`) : null,
+          ...(attention
+            ? t.attention.map((a) =>
+                h(
+                  'div',
+                  { class: 'line' },
+                  h('span', { class: 'chip signal' }, a.detail),
+                  a.told === 'failed' ? h('span', { class: 'chip bad' }, 'not delivered') : a.told === 'sent' ? h('span', { class: 'chip' }, 'told') : null,
+                ),
+              )
+            : []),
+          attention ? h('div', { class: 'actions' }, h('button', { class: 'quiet', onclick: () => change('ledger_update', { id: t.id, seen: true }) }, 'Seen')) : null,
+          openId === t.id ? editor(t) : null,
+        )
+        return row
+      }
+
+      function open(id) {
+        openId = openId === id ? null : id
+        drafts = {}
+        render()
+      }
+
+      function editor(t) {
+        const d = (drafts[t.id] ??= { title: t.title, state: t.state, assignee: t.assignee?.sessionId ?? '', next: t.next, notes: t.notes, issue: t.issue ?? '', blockedBy: t.blockedBy.map((b) => ({ ...b })) })
+        const sessions = st.sessions.slice()
+        if (t.assignee && !sessions.some((s) => s.id === t.assignee.sessionId)) sessions.unshift({ id: t.assignee.sessionId, name: `${t.assignee.name} (gone)` })
+        const blockerRows = d.blockedBy.map((b, i) =>
+          h(
+            'div',
+            { class: 'blocker' },
+            h('select', { 'aria-label': 'Blocker kind', onchange: (e) => (b.kind = e.target.value, render()) }, ['issue', 'pr', 'decision', 'text'].map((k) => h('option', { value: k, selected: b.kind === k }, KIND_LABEL[k]))),
+            b.kind === 'text'
+              ? h('input', { type: 'text', value: b.text ?? '', placeholder: 'What it waits for', 'aria-label': 'Blocker words', maxlength: 200, oninput: (e) => (b.text = e.target.value) })
+              : h('input', { type: 'number', min: 1, value: b.ref ?? '', placeholder: '#', 'aria-label': 'Blocker number', oninput: (e) => (b.ref = e.target.value ? Number(e.target.value) : null) }),
+            h('button', { class: 'quiet', type: 'button', 'aria-label': 'Remove this blocker', onclick: () => (d.blockedBy.splice(i, 1), render()) }, '×'),
+          ),
+        )
+        const save = async () => {
+          const patch = {}
+          if (d.title !== t.title) patch.title = d.title
+          if (d.state !== t.state) patch.state = d.state
+          if (d.next !== t.next) patch.next = d.next
+          if (d.notes !== t.notes) patch.notes = d.notes
+          const issue = d.issue === '' ? null : Number(d.issue)
+          if (issue !== t.issue) patch.issue = issue
+          if ((d.assignee || null) !== (t.assignee?.sessionId ?? null)) patch.assignee = d.assignee || null
+          const blockers = d.blockedBy.map(({ kind, ref, text }) => (kind === 'text' ? { kind, text } : { kind, ref }))
+          if (JSON.stringify(blockers) !== JSON.stringify(t.blockedBy.map(({ kind, ref, text }) => (kind === 'text' ? { kind, text } : { kind, ref })))) patch.blockedBy = blockers
+          const r = await change('ledger_update', { id: t.id, ...patch }, { force: true })
+          if (r && !r.isError) close()
+        }
+        const confirm = h('button', { class: 'quiet', type: 'button', onclick: () => confirm.dataset.sure === '1' ? change('ledger_update', { id: t.id, remove: true }, { force: true }).then(close) : (confirm.dataset.sure = '1', (confirm.textContent = 'Remove it? Click again')) }, 'Remove')
+        return h(
+          'div',
+          { class: 'editor' },
+          h('label', {}, 'Title', h('input', { type: 'text', value: d.title, maxlength: 400, oninput: (e) => (d.title = e.target.value) })),
+          h(
+            'div',
+            { class: 'pair' },
+            h('label', {}, 'State', h('select', { onchange: (e) => (d.state = e.target.value) }, STATES.map((s) => h('option', { value: s, selected: d.state === s }, s)))),
+            h(
+              'label',
+              {},
+              'Session doing it',
+              h('select', { onchange: (e) => (d.assignee = e.target.value) }, h('option', { value: '' }, 'Nobody'), sessions.map((s) => h('option', { value: s.id, selected: d.assignee === s.id }, s.name))),
+            ),
+          ),
+          h('label', {}, 'Next step', h('input', { type: 'text', value: d.next, maxlength: 300, oninput: (e) => (d.next = e.target.value) })),
+          h('label', {}, 'GitHub issue (its title replaces this one)', h('input', { type: 'number', min: 1, value: d.issue, placeholder: 'none', oninput: (e) => (d.issue = e.target.value) })),
+          h('div', {}, h('div', { class: 'sub' }, 'Blocked by'), blockerRows, h('button', { class: 'quiet', type: 'button', onclick: () => (d.blockedBy.push({ kind: 'text', text: '' }), render()) }, '+ blocker')),
+          h('label', {}, 'Notes', h('textarea', { oninput: (e) => (d.notes = e.target.value) }, d.notes)),
+          h('div', { class: 'actions' }, h('button', { type: 'button', onclick: save }, 'Save'), h('button', { class: 'quiet', type: 'button', onclick: close }, 'Close'), confirm),
+        )
+      }
+
+      function close() {
+        openId = null
+        drafts = {}
+        stale = false
+        render()
+      }
+
+      function renderBar() {
+        const sel = $('responsible')
+        if (document.activeElement !== sel) {
+          sel.replaceChildren(
+            h('option', { value: '' }, 'nobody (nothing is sent)'),
+            st.choices.map((c) => h('option', { value: c.sessionId, selected: st.responsible?.sessionId === c.sessionId }, c.label)),
+          )
+          if (st.responsible && !st.choices.some((c) => c.sessionId === st.responsible.sessionId)) sel.append(h('option', { value: st.responsible.sessionId, selected: true }, st.responsible.label || st.responsible.sessionId.slice(0, 8)))
+        }
+        const o = st.observing
+        const status = $('status')
+        status.className = `status${o.ok ? '' : ' bad'}`
+        status.textContent = o.ok ? 'Hearing of the sessions' : `Not hearing of the sessions: ${o.reason}`
+        const notes = $('notes')
+        const lines = []
+        if (!st.responsible) lines.push('Nobody is responsible, so nobody is told. A session takes charge with ledger_take_charge, or pick one that has used the ledger.')
+        if (st.failedTold) lines.push(`${st.failedTold} message${st.failedTold === 1 ? '' : 's'} to the responsible session could not be delivered.`)
+        if (st.readOnly) lines.push('This ledger was written by a newer version of the app, so it can be read here but not changed.')
+        if (st.github.on && st.github.error) lines.push(`GitHub: ${st.github.error}`)
+        if (!st.github.on && st.tasks.some((t) => t.blockers.some((b) => b.kind !== 'text' && b.open))) lines.push('Some blockers are on GitHub: turn GitHub on in Settings for them to be resolved.')
+        if (stale) lines.push('Something changed; it is shown when you finish editing.')
+        notes.replaceChildren(...lines.map((l) => h('div', { class: 'sub' }, l)))
+      }
+
+      function render() {
+        renderBar()
+        const lists = $('lists')
+        const byId = new Map(st.tasks.map((t) => [t.id, t]))
+        const needing = [...new Set(st.attention.map((a) => a.taskId))].map((id) => byId.get(id)).filter(Boolean)
+        const parts = []
+        if (needing.length) parts.push(h('h2', { class: 'signal' }, 'Needs you'), needing.map((t) => taskRow(t, { attention: true })))
+        for (const [state, label] of GROUPS) {
+          const list = st.tasks.filter((t) => t.state === state && !needing.includes(t))
+          if (list.length) parts.push(h('h2', {}, `${label} · ${list.length}`), list.map((t) => taskRow(t)))
+        }
+        if (!st.tasks.some((t) => t.state !== 'done')) parts.push(h('div', { class: 'empty' }, 'No open tasks. Add one above, or let a session add them with ledger_add.'))
+        lists.replaceChildren(...parts.flat())
+
+        const more = []
+        const done = st.tasks.filter((t) => t.state === 'done')
+        if (done.length) {
+          more.push(
+            fold(
+              'done',
+              `Done · ${done.length} (kept 14 days)`,
+              done.map((t) => h('div', { class: 'row' }, h('div', { class: 'line' }, h('span', { class: 'id' }, t.id), h('span', { class: 'title' }, t.title), h('button', { class: 'quiet', onclick: () => change('ledger_update', { id: t.id, state: 'ready' }) }, 'Reopen')))),
+            ),
+          )
+        }
+        if (st.github.on && st.github.offers.length) {
+          for (const n of [...picked]) if (!st.github.offers.some((o) => o.number === n)) picked.delete(n)
+          more.push(
+            fold(
+              'offers',
+              `${st.github.offers.length} open issue${st.github.offers.length === 1 ? '' : 's'} not in the ledger`,
+              st.github.offers.slice(0, 100).map((o) => h('label', { class: 'line' }, h('input', { type: 'checkbox', checked: picked.has(o.number), onchange: (e) => (e.target.checked ? picked.add(o.number) : picked.delete(o.number)) }), h('span', { class: 'title' }, `#${o.number} ${o.title}`))),
+              h('div', { class: 'actions' }, h('button', { onclick: () => picked.size && change('ledger_adopt', { issues: [...picked] }, { force: true }) }, 'Add selected')),
+            ),
+          )
+        }
+        more.push(settings())
+        $('more').replaceChildren(...more)
+      }
+
+      function settings() {
+        const s = st.settings
+        const quiet = h('input', { type: 'number', min: 1, value: s.quietMinutes, 'aria-label': 'Quiet minutes' })
+        const sweep = h('input', { type: 'number', min: 1, value: s.sweepMinutes, 'aria-label': 'Sweep minutes' })
+        const on = h('input', { type: 'checkbox', checked: st.github.on })
+        const repo = h('input', { type: 'text', value: st.github.repo ?? '', placeholder: 'owner/name (this project’s remote if empty)', 'aria-label': 'GitHub repository' })
+        const save = () => change('ledger_settings', { quietMinutes: Number(quiet.value), sweepMinutes: Number(sweep.value), github: { on: on.checked, repo: repo.value.trim() || null } })
+        return fold(
+          'settings',
+          'Settings',
+          h(
+            'div',
+            { class: 'editor' },
+            h('label', {}, 'Tell when a running task’s session has been quiet for (minutes)', quiet),
+            h('label', {}, 'Check GitHub and the sessions again every (minutes)', sweep),
+            h('label', {}, h('span', {}, on, ' Read this project’s GitHub issues and pull requests (read only, through your gh)'), repo),
+            h('div', { class: 'actions' }, h('button', { onclick: save }, 'Save')),
+          ),
+        )
+      }
+
+      $('add').addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const title = $('title').value.trim()
+        if (!title) return
+        const r = await call('ledger_add', { title })
+        if (r && !r.isError) {
+          $('title').value = ''
+          await reread(true)
+        }
+      })
+      $('check').addEventListener('click', () => change('ledger_sweep'))
+      $('responsible').addEventListener('change', (e) => change('ledger_settings', { responsible: e.target.value || null }))
+
+      // Centralu's theme (the MCP Apps host context): keep this, it applies the colour scheme and the style variables
+      const applyTheme = () => {
+        const ctx = app.getHostContext() ?? {}
+        const root = document.documentElement
+        if (ctx.theme === 'light' || ctx.theme === 'dark') root.style.colorScheme = ctx.theme
+        const vars = { ...ctx.styles?.variables, ...ctx.centralu?.variables }
+        for (const [name, value] of Object.entries(vars)) if (typeof value === 'string' && value) root.style.setProperty(name, value)
+      }
+      app.onhostcontextchanged = applyTheme
+      app.ontoolresult = (params) => params?.structuredContent && take(params.structuredContent)
+      // Centralu's own notification: a tool changed the app's state
+      app.fallbackNotificationHandler = async (n) => {
+        if (n.method === 'centralu/notifications/changed') await reread()
+      }
+      app.connect().then(() => {
+        applyTheme()
+        return reread()
+      })
+      // A session's state changes with no tool being called, so the panel asks again now and then while it is seen
+      setInterval(() => {
+        if (!document.hidden && !stale) void reread()
+      }, 30000)
+      // Editing is over when the field loses focus and nothing is open
+      document.addEventListener('focusout', () => setTimeout(() => stale && st && !writing() && (stale = false, render()), 0))
+    </script>
+  </body>
+</html>
