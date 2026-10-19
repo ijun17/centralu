@@ -171,12 +171,14 @@ describe('set_project_trust', () => {
     expect(await trusted(one.id)).toBe(false)
   })
 
-  it('refuses arguments the window would not take, by name', async () => {
+  it('refuses arguments its schema would not take, naming the argument', async () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'set_project_trust', { project: 'x', trusted: 'yes' })
     expect(r.isError).toBe(true)
+    expect(r.text).toContain('trusted')
     const extra = await run(orc.id, 'set_project_trust', { project: 'x', trusted: true, shared: true })
     expect(extra.isError).toBe(true)
+    expect(extra.text).toContain('shared')
   })
 
   describe('checked again after Allow', () => {
@@ -465,11 +467,12 @@ describe('set_agent_limits', () => {
     expect((await prefs()).agentDepth).toBe(2)
   })
 
-  it('leaves set_preferences without these fields', async () => {
+  it('is the one way: set_preferences still has no field for them, and get_preferences names this command', async () => {
     const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { sessionTools: false } })
     expect(r.isError).toBe(true)
     expect((await prefs()).sessionTools).toBe(true)
+    expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'get_preferences', args: {} })).text).toContain('set_agent_limits changes them')
   })
 })
 
@@ -519,5 +522,9 @@ describe('who may run them', () => {
     expect(await trusted(target.id)).toBe(false)
     expect((await rpc('approvals.rules', {})) as unknown[]).toHaveLength(1)
     expect(((await rpc('prefs.get', {})) as { agentDepth?: number }).agentDepth ?? 1).toBe(1)
+    // What the ordinary session was refused, the orchestrator does (taking trust away asks nothing)
+    const orc = await mgr.orchestrator()
+    expect((await run(orc.id, 'set_project_trust', { project: p.id, trusted: false })).isError).toBeFalsy()
+    expect(await trusted(p.id)).toBe(false)
   })
 })
