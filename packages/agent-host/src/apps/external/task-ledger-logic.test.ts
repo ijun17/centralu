@@ -4,7 +4,7 @@ import { DONE_KEEP_MS, LIMITS, addTask, dropOldDone, emptyLedger, noteAddress, n
 // @ts-expect-error -- plain .mjs of a Centralu app
 import { attention, blockerStates, composeMessage, isUnblocked, titleLine } from '../../../../../.centralu/apps/task-ledger/triggers.mjs'
 // @ts-expect-error -- plain .mjs of a Centralu app
-import { GhError, readFacts } from '../../../../../.centralu/apps/task-ledger/github.mjs'
+import { GhError, isDecision, readFacts } from '../../../../../.centralu/apps/task-ledger/github.mjs'
 
 /**
  * The task ledger's rules as plain functions (docs/plans/task-ledger.md §1, §2, §5): what a task is and how it changes,
@@ -138,8 +138,10 @@ describe('the settings and the sessions that may be told', () => {
     const l = emptyLedger()
     expect(updateSettings(l, { quietMinutes: 'soon' }).error).toMatch(/number/)
     expect(updateSettings(l, { github: { repo: 'not a repo' } }).error).toMatch(/owner\/name/)
-    updateSettings(l, { quietMinutes: 45.4, sweepMinutes: 100000, github: { on: true, repo: 'ijun17/centralu' } })
-    expect(l.settings).toMatchObject({ quietMinutes: 45, sweepMinutes: 1440, github: { on: true, repo: 'ijun17/centralu' } })
+    updateSettings(l, { quietMinutes: 45.4, sweepMinutes: 100000, github: { on: true, repo: 'ijun17/centralu', deciders: ['maintainer-two', 'maintainer-two', ' other '] } })
+    expect(l.settings).toMatchObject({ quietMinutes: 45, sweepMinutes: 1440, github: { on: true, repo: 'ijun17/centralu', deciders: ['maintainer-two', 'other'] } })
+    expect(updateSettings(l, { github: { deciders: ['not a login!'] } }).error).toMatch(/list of GitHub logins/)
+    expect(l.settings.github.deciders).toEqual(['maintainer-two', 'other'])
   })
 
   it('keep the addresses of the last sessions that called, and read a session from an address', () => {
@@ -270,7 +272,7 @@ describe('what GitHub settles', () => {
       calls.push(args)
       if (args[0] === 'issue' && args[1] === 'list') return JSON.stringify([{ number: 1, title: 'one', state: 'OPEN' }, { number: 2, title: 'two', state: 'CLOSED' }])
       if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify([{ number: 7, state: 'MERGED' }])
-      if (args[0] === 'issue' && args[1] === 'view' && args[2] === '9') return JSON.stringify({ state: 'OPEN', comments: [{ body: 'Decision (owner, 2026-10-20): go' }] })
+      if (args[0] === 'issue' && args[1] === 'view' && args[2] === '9') return JSON.stringify({ state: 'OPEN', comments: [{ body: 'Decision (owner, 2026-10-20): go', authorAssociation: 'OWNER', author: { login: 'ijun17' } }] })
       if (args[0] === 'issue' && args[1] === 'view') return JSON.stringify({ number: 5, title: 'old one', state: 'CLOSED' })
       throw new Error(`unexpected ${args.join(' ')}`)
     }
@@ -298,10 +300,26 @@ describe('what GitHub settles', () => {
     expect((await readFacts({ run: garbage, repo: null, issues: new Set([1]), prs: new Set(), decisions: new Set(), wantOpen: false })).error).toMatch(/GitHub could not be read/)
   })
 
-  it('reads a decision as decided when the issue is closed, and as waiting when it is open with no decision comment', async () => {
-    const run = async (args: string[]) => JSON.stringify(args[2] === '1' ? { state: 'CLOSED', comments: [] } : { state: 'OPEN', comments: [{ body: 'what do you think?' }] })
-    const r = await readFacts({ run, repo: 'o/r', issues: new Set(), prs: new Set(), decisions: new Set([1, 2]), wantOpen: false })
-    expect([r.facts.decisions.get(1), r.facts.decisions.get(2)]).toEqual([true, false])
+  it('resolves a decision only by a "Decision (owner" comment written by the repository owner or a listed login', async () => {
+    const decision = 'Decision (owner, 2026-10-20): go ahead'
+    const comments: Record<string, any[]> = {
+      1: [{ body: decision, authorAssociation: 'OWNER', author: { login: 'ijun17' } }],
+      // Anyone can write the words on a public repository, whoever they are and whatever the issue's state
+      2: [{ body: decision, authorAssociation: 'NONE', author: { login: 'stranger' } }],
+      3: [{ body: decision, authorAssociation: 'CONTRIBUTOR', author: { login: 'a-contributor' } }],
+      4: [{ body: decision, authorAssociation: 'MEMBER', author: { login: 'Maintainer-Two' } }],
+      5: [{ body: 'what do you think?', authorAssociation: 'OWNER', author: { login: 'ijun17' } }],
+      6: [],
+    }
+    const run = async (args: string[]) => JSON.stringify({ state: args[2] === '6' ? 'CLOSED' : 'OPEN', comments: comments[args[2]!] })
+    const ask = (deciders: string[]) => readFacts({ run, repo: 'o/r', issues: new Set(), prs: new Set(), decisions: new Set([1, 2, 3, 4, 5, 6]), wantOpen: false, deciders })
+    const alone = await ask([])
+    expect([1, 2, 3, 4, 5, 6].map((n) => alone.facts.decisions.get(n))).toEqual([true, false, false, false, false, false])
+    // A maintainer of an organisation's repository is named in the settings, by login, any case
+    const listed = await ask(['maintainer-two'])
+    expect([1, 2, 3, 4].map((n) => listed.facts.decisions.get(n))).toEqual([true, false, false, true])
+    expect(isDecision({ body: '  Decision (owner): x', authorAssociation: 'OWNER' }, [])).toBe(true)
+    expect(isDecision({ body: 'Decision (owner): x', author: {} }, [''])).toBe(false)
   })
 })
 

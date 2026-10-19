@@ -212,7 +212,7 @@ export class Ledger {
   async sweep() {
     const refs = await this.serial(async () => this.refsToRead())
     const s = this.ledger.settings
-    const read = await this.deps.readFacts({ repo: s.github.repo, ...refs, wantOpen: s.github.on })
+    const read = await this.deps.readFacts({ repo: s.github.repo, deciders: s.github.deciders, ...refs, wantOpen: s.github.on })
     return this.serial(async () => {
       const now = this.now()
       if (read.ok) {
@@ -391,7 +391,7 @@ export class Ledger {
       choices: Object.entries(l.addresses).map(([sessionId, a]) => ({ sessionId, label: a.label || this.sessions.get(sessionId)?.name || sessionId.slice(0, 8) })),
       sessions: [...this.sessions.values()].filter((s) => s.appId === null).map((s) => ({ id: s.id, name: s.name, state: s.state, kind: s.kind })),
       observing: this.observing,
-      github: { on: l.settings.github.on, repo: l.settings.github.repo, ok: this.github.ok, error: this.github.error, at: this.github.at, offers: this.github.open.filter((o) => !linked.has(o.number)) },
+      github: { on: l.settings.github.on, repo: l.settings.github.repo, deciders: l.settings.github.deciders, ok: this.github.ok, error: this.github.error, at: this.github.at, offers: this.github.open.filter((o) => !linked.has(o.number)) },
       settings: { quietMinutes: l.settings.quietMinutes, sweepMinutes: l.settings.sweepMinutes },
       failedTold: failed,
     }

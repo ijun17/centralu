@@ -30,7 +30,7 @@ state     ready | running | review | queued | blocked | done      (done is not i
 blockedBy { kind: issue|pr|decision|text, ref: number|null, text }
           issue    resolved when the issue is closed
           pr       resolved when merged (closed unmerged: stays blocked, shown "closed without merging")
-          decision resolved when the issue is closed or has a comment starting "Decision (owner" (#NNN, CONTRIBUTING)
+          decision resolved by a comment starting "Decision (owner" written by the repository's owner or a login in `github.deciders` (corrected after review: the first version took anyone's comment, or the issue closing)
           text     "Mac only": resolved only by a person
 Settings  responsible: { sessionId, address, label }|null   one per project
           quietMinutes (30), sweepMinutes (10), github: { on, repo }
@@ -285,3 +285,11 @@ this is done. Where a linked machine's session state enters the feed, as the nex
   `machine_resync`. This is the part that needs real linked machines to test.
 - Limits, scope and the card are unchanged (the app's own project; it already says "state and counters").
 - #1324's session-state watches read the same feed, so a watch on a child that runs on a linked machine works the same way.
+- **A decision blocker is resolved only by who wrote it** (second review): a comment starting "Decision (owner" whose
+  GitHub `authorAssociation` is `OWNER`, or whose author is a login in the setting `github.deciders` (for an organisation's
+  maintainers, who are not `OWNER`). Anyone can write those words on a public repository, and what a decision unblocks may
+  be acted on. A decision issue being closed decides nothing (its author can close it). Left: an `issue` blocker closes
+  with the issue and a `pr` blocker with the merge (a merge needs a maintainer; an issue can be closed by its author), so a
+  stranger's issue used as a blocker can be closed by its author.
+- **What agents read is quoted.** `ledger_list` and the other tools quote each title, next step, blocker text and name on one
+  line, as the message to the responsible session does, so none can pass for a line of the ledger.

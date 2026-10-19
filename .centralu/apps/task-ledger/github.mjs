@@ -37,6 +37,19 @@ export function ghRunner({ cwd } = {}) {
     })
 }
 
+/**
+ * A comment that records a decision: it starts "Decision (owner" and its author is the repository's owner or a login the
+ * person listed (`github.deciders`, for an organisation's maintainers). Anyone can write that text on a public repository,
+ * and what a decision unblocks may be acted on: so who wrote it decides, not the words. An issue being closed does not
+ * decide anything either (its author can close it).
+ */
+export function isDecision(comment, deciders) {
+  if (!String(comment?.body ?? '').trimStart().startsWith('Decision (owner')) return false
+  if (comment?.authorAssociation === 'OWNER') return true
+  const login = String(comment?.author?.login ?? '').toLowerCase()
+  return login !== '' && deciders.some((d) => String(d).toLowerCase() === login)
+}
+
 const lower = (s) => String(s ?? '').toLowerCase()
 const withRepo = (args, repo) => (repo ? [...args, '-R', repo] : args)
 
@@ -47,7 +60,7 @@ const withRepo = (args, repo) => (repo ? [...args, '-R', repo] : args)
  * Answers `{ ok: true, facts, open }`, or `{ ok: false, error }` when the first call failed (nothing is retried in the
  * same sweep: a missing or logged-out `gh` would only fail again).
  */
-export async function readFacts({ run, repo, issues, prs, decisions, wantOpen }) {
+export async function readFacts({ run, repo, issues, prs, decisions, wantOpen, deciders = [] }) {
   const facts = { issues: new Map(), prs: new Map(), decisions: new Map() }
   let open = []
   if (!issues.size && !prs.size && !decisions.size && !wantOpen) return { ok: true, facts, open }
@@ -73,8 +86,8 @@ export async function readFacts({ run, repo, issues, prs, decisions, wantOpen })
       facts.prs.set(n, { state: lower(p.state) })
     }
     for (const n of [...decisions].slice(0, DECISION_READS)) {
-      const d = await json(['issue', 'view', String(n), '--json', 'state,comments'])
-      facts.decisions.set(n, lower(d.state) === 'closed' || (d.comments ?? []).some((c) => String(c.body ?? '').trimStart().startsWith('Decision (owner')))
+      const d = await json(['issue', 'view', String(n), '--json', 'comments'])
+      facts.decisions.set(n, (d.comments ?? []).some((c) => isDecision(c, deciders)))
     }
     return { ok: true, facts, open }
   } catch (e) {

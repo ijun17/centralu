@@ -353,7 +353,13 @@
         const sweep = h('input', { type: 'number', min: 1, value: s.sweepMinutes, 'aria-label': 'Sweep minutes' })
         const on = h('input', { type: 'checkbox', checked: st.github.on })
         const repo = h('input', { type: 'text', value: st.github.repo ?? '', placeholder: 'owner/name (this project’s remote if empty)', 'aria-label': 'GitHub repository' })
-        const save = () => change('ledger_settings', { quietMinutes: Number(quiet.value), sweepMinutes: Number(sweep.value), github: { on: on.checked, repo: repo.value.trim() || null } })
+        const deciders = h('input', { type: 'text', value: (st.github.deciders ?? []).join(', '), placeholder: 'only the repository owner', 'aria-label': 'GitHub logins that may record a decision' })
+        const save = () =>
+          change('ledger_settings', {
+            quietMinutes: Number(quiet.value),
+            sweepMinutes: Number(sweep.value),
+            github: { on: on.checked, repo: repo.value.trim() || null, deciders: deciders.value.split(/[\s,]+/).filter(Boolean) },
+          })
         return fold(
           'settings',
           'Settings',
@@ -363,6 +369,7 @@
             h('label', {}, 'Tell when a running task’s session has been quiet for (minutes)', quiet),
             h('label', {}, 'Check GitHub and the sessions again every (minutes)', sweep),
             h('label', {}, h('span', {}, on, ' Read this project’s GitHub issues and pull requests (read only, through your gh)'), repo),
+            h('label', {}, 'A decision blocker is resolved by a “Decision (owner” comment from the repository owner and from these GitHub logins', deciders),
             h('div', { class: 'actions' }, h('button', { onclick: save }, 'Save')),
           ),
         )

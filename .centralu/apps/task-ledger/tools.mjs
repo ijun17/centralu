@@ -10,18 +10,22 @@ const say = (text, structured) => ({ content: [{ type: 'text', text }], ...(stru
 const fail = (text) => ({ content: [{ type: 'text', text }], isError: true })
 
 const blocker = z.object({
-  kind: z.enum(BLOCKER_KINDS).describe('issue and pr: resolved when closed or merged; decision: an issue that has a "Decision (owner" comment or is closed; text: a person clears it'),
+  kind: z.enum(BLOCKER_KINDS).describe('issue and pr: resolved when closed or merged; decision: an issue with a "Decision (owner" comment written by the owner of the repository, or a login in the settings (closing the issue decides nothing); text: a person clears it'),
   ref: z.number().int().positive().optional().describe('The issue, pull request or decision issue number (not for text)'),
   text: z.string().max(LIMITS.blockerText).optional().describe('Words, for kind text ("Mac only")'),
 })
 
-/** One task as a line an agent reads */
+/**
+ * One task as a line an agent reads. Titles, next steps, notes and names can come from a GitHub issue somebody else wrote or
+ * from another session: each is cut to one line and quoted, so none can pass for the ledger's own words ("NEEDS YOU …")
+ */
 export function line(t, ledger) {
   const row = t.assignee ? ledger.sessions.get(t.assignee.sessionId) : null
-  const who = t.assignee ? ` · ${t.assignee.name}${row ? ` (${row.state})` : ''}` : ''
+  const q = (text, max = 120) => JSON.stringify(titleLine(text, max))
+  const who = t.assignee ? ` · ${q(t.assignee.name, 60)}${row ? ` (${row.state})` : ''}` : ''
   const issue = t.issue ? ` · #${t.issue}` : ''
-  const open = t.blockedBy.length ? ` · blocked by ${t.blockedBy.map((b) => (b.kind === 'text' ? `"${b.text}"` : `${b.kind} #${b.ref}`)).join(', ')}` : ''
-  return `${t.id} [${t.state}] ${titleLine(t.title, 120)}${issue}${who}${open}${t.next ? ` — next: ${titleLine(t.next, 120)}` : ''}`
+  const open = t.blockedBy.length ? ` · blocked by ${t.blockedBy.map((b) => (b.kind === 'text' ? q(b.text, 80) : `${b.kind} #${b.ref}`)).join(', ')}` : ''
+  return `${t.id} [${t.state}] ${q(t.title)}${issue}${who}${open}${t.next ? ` — next: ${q(t.next)}` : ''}`
 }
 
 /**
@@ -65,7 +69,7 @@ export function makeTools(ledger, { caller }) {
         // Done tasks are listed only when asked for
         const tasks = v.tasks.filter((t) => (state ? t.state === state : t.state !== 'done') && (!attention || needing.has(t.id)))
         const text = [
-          v.responsible ? `Responsible: ${v.responsible.label || v.responsible.sessionId.slice(0, 8)}` : 'Nobody is responsible yet (a session takes charge with ledger_take_charge).',
+          v.responsible ? `Responsible: ${JSON.stringify(titleLine(v.responsible.label || v.responsible.sessionId.slice(0, 8), 60))}` : 'Nobody is responsible yet (a session takes charge with ledger_take_charge).',
           ...v.attention.map((a) => `NEEDS YOU ${a.taskId}: ${a.detail}`),
           ...(tasks.length ? tasks.map((t) => line(ledger.get(t.id), ledger)) : ['No tasks.']),
         ].join('\n')
@@ -155,11 +159,11 @@ export function makeTools(ledger, { caller }) {
     ledger_settings: {
       config: {
         title: 'Ledger settings',
-        description: 'The panel\'s settings: quietMinutes, sweepMinutes, github { on, repo }, and responsible (a session id that has used the ledger, or null for nobody).',
+        description: "The panel's settings: quietMinutes, sweepMinutes, github { on, repo, deciders: GitHub logins, besides the repository owner, whose 'Decision (owner' comments count }, and responsible (a session id that has used the ledger, or null for nobody).",
         inputSchema: z.object({
           quietMinutes: z.number().optional(),
           sweepMinutes: z.number().optional(),
-          github: z.object({ on: z.boolean().optional(), repo: z.string().nullable().optional() }).optional(),
+          github: z.object({ on: z.boolean().optional(), repo: z.string().nullable().optional(), deciders: z.array(z.string()).max(10).optional() }).optional(),
           responsible: z.string().nullable().optional(),
         }),
         annotations: { readOnlyHint: false, destructiveHint: false },

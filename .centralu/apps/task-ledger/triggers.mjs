@@ -93,7 +93,7 @@ export function blockerStates(task, facts) {
     }
     const d = facts.decisions.get(b.ref)
     if (d === undefined) return { ...b, open: true, why: 'not read yet' }
-    return d ? { ...b, open: false, why: 'decided' } : { ...b, open: true, why: 'waiting for a decision' }
+    return d ? { ...b, open: false, why: 'decided' } : { ...b, open: true, why: 'waiting for the owner decision' }
   })
 }
 

@@ -25,7 +25,7 @@ export function defaultSettings() {
     responsible: null,
     quietMinutes: 30,
     sweepMinutes: 10,
-    github: { on: false, repo: null },
+    github: { on: false, repo: null, deciders: [] },
   }
 }
 
@@ -103,8 +103,16 @@ function cleanSettings(raw) {
     github: {
       on: isObj(raw.github) && raw.github.on === true,
       repo: isObj(raw.github) && typeof raw.github.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(raw.github.repo) ? raw.github.repo : null,
+      deciders: isObj(raw.github) ? cleanLogins(raw.github.deciders) : [],
     },
   }
+}
+
+/** GitHub logins: letters, digits and hyphens, up to 39, at most ten, each once */
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+export function cleanLogins(list) {
+  if (!Array.isArray(list)) return []
+  return [...new Set(list.filter((l) => typeof l === 'string' && LOGIN.test(l.trim())).map((l) => l.trim()))].slice(0, 10)
 }
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(n)))
@@ -269,6 +277,10 @@ export function updateSettings(ledger, patch) {
     if (patch.github.repo !== undefined) {
       if (patch.github.repo !== null && !/^[\w.-]+\/[\w.-]+$/.test(String(patch.github.repo))) return { error: 'A repository is owner/name.' }
       s.github.repo = patch.github.repo
+    }
+    if (patch.github.deciders !== undefined) {
+      if (!Array.isArray(patch.github.deciders) || patch.github.deciders.some((l) => typeof l !== 'string' || !LOGIN.test(l.trim()))) return { error: 'deciders is a list of GitHub logins.' }
+      s.github.deciders = cleanLogins(patch.github.deciders)
     }
   }
   if (patch.responsible === null) s.responsible = null

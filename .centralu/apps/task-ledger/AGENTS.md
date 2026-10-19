@@ -32,7 +32,9 @@ Rules that are easy to break:
    line of 80 characters (`titleLine`); never put a title or notes where they could start a line of their own.
 4. **Only `show` and read tools are `readOnlyHint: true`.** The panel is told to read again after any other call.
 5. The panel asks again every 30 seconds while it is seen, because a session's state changes with no tool being called.
-6. The sessions it sees are state and counters only (see `uses.sessions` in docs/apps.md §10): no conversation.
+6. **A decision is whoever recorded it.** `github.mjs` `isDecision`: the repository owner (`authorAssociation: OWNER`) or a
+   login in `github.deciders`. Never trust the words of a comment, or an issue being closed, for anything that unblocks work.
+7. The sessions it sees are state and counters only (see `uses.sessions` in docs/apps.md §10): no conversation.
 
 Run the tests with `pnpm exec vitest run packages/agent-host/src/apps/external/task-ledger-`; they run this folder with
 the real runtime.
