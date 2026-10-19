@@ -1,18 +1,28 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
+import { usePresence } from '../../components/presence.js'
+import { IconButton } from '../../components/IconButton.jsx'
+import { DotsIcon } from '../../components/icons.jsx'
 import { useStore, type PanelTab } from '../../store/store.js'
-import { PANEL_TAB_MIME, moveTab, moveTabToGroupEnd, splitTab, type PanelGroup } from '../../store/panelLayout.js'
+import {
+  PANEL_TAB_MIME,
+  moveTab,
+  moveTabToGroupEnd,
+  splitTab,
+  type PanelGroup,
+} from '../../store/panelLayout.js'
 import { fitTabs } from './fitTabs.js'
 import { TabActionSlot } from './tabActions.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { TabBody } from './TabBody.jsx'
 
-/** The gap between tabs (gap-0.5) and the `…` button's width — the two numbers the collapse calculation uses */
+/** The gap between tabs (gap-0.5) and the `…` button's width (an IconButton: 14px icon, p-1) — the two numbers the collapse calculation uses */
 const TAB_GAP = 2
-const MORE_W = 26
+const MORE_W = 22
 
 const TAB_LABELS: Record<PanelTab, string> = {
-  git: 'Git',
+  // The tab is named for what it shows, the working tree's changes (owner, 2026-10-19); its id stays `git`
+  git: 'Changes',
   history: 'History',
   files: 'Files',
   terminal: 'Terminal',
@@ -287,50 +297,49 @@ const dropsLeft = (rect: { left: number; width: number }, clientX: number): bool
  */
 function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPick: (t: PanelTab) => void }) {
   const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  // The wrapper holds the trigger and the list: a press inside either is not an outside press
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const { shown, leaving } = usePresence(open)
 
-  // The backdrop below catches the outside press, and covers an app's view, so there is no blur to wait for
-  useDismiss({ open, onClose: () => setOpen(false), returnFocusTo: triggerRef })
+  useDismiss({
+    open,
+    onClose: () => setOpen(false),
+    refs: [wrapRef],
+    returnFocusTo: wrapRef.current?.querySelector('button') ?? null,
+  })
 
   return (
-    <div className="relative shrink-0">
-      <button
-        ref={triggerRef}
-        type="button"
+    <div ref={wrapRef} className="relative shrink-0">
+      <IconButton
+        label={`${hidden.length} more tabs`}
         onClick={() => setOpen((o) => !o)}
-        data-testid={gi === 0 ? 'evidence-tabs-more' : `evidence-tabs-more-${gi}`}
-        aria-label={`${hidden.length} more tabs`}
-        title={hidden.map((t) => TAB_LABELS[t]).join(' · ')}
-        className={`rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-surface-hover/50 hover:text-ink ${
-          open ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted'
-        }`}
+        testId={gi === 0 ? 'evidence-tabs-more' : `evidence-tabs-more-${gi}`}
+        lit={open}
       >
-        …
-      </button>
-      {open && (
-        <>
-          {/* Closes when clicked outside — the menu itself sits at a higher z below */}
-          <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
-          <div
-            className="cc-drop absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded-md border border-line bg-surface-raised py-0.5 shadow-(--shadow-popover)"
-            data-testid={gi === 0 ? 'evidence-tabs-overflow' : `evidence-tabs-overflow-${gi}`}
-          >
-            {hidden.map((id) => (
-              <button
-                key={id}
-                type="button"
-                data-testid={`evidence-overflow-tab-${id}`}
-                onClick={() => {
-                  onPick(id)
-                  setOpen(false)
-                }}
-                className="block w-full px-3 py-1 text-left text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
-              >
-                {TAB_LABELS[id]}
-              </button>
-            ))}
-          </div>
-        </>
+        <DotsIcon />
+      </IconButton>
+      {shown && (
+        <div
+          role="menu"
+          className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-50 mt-1 min-w-28 overflow-hidden rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)`}
+          data-testid={gi === 0 ? 'evidence-tabs-overflow' : `evidence-tabs-overflow-${gi}`}
+        >
+          {hidden.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="menuitem"
+              data-testid={`evidence-overflow-tab-${id}`}
+              onClick={() => {
+                onPick(id)
+                setOpen(false)
+              }}
+              className="block w-full rounded-lg px-2 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            >
+              {TAB_LABELS[id]}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -402,16 +411,19 @@ function TabButton({
         e.stopPropagation()
         onLayout(moveTab(groups, dragged, id, dropsLeft(e.currentTarget.getBoundingClientRect(), e.clientX)))
       }}
-      className={`rounded-md px-2 py-0.5 text-sm transition-colors disabled:opacity-50 ${
-        active ? 'bg-surface-hover/50 text-ink' : 'text-ink-muted hover:text-ink'
+      className={`rounded-md px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
+        active
+          ? 'bg-surface-selected text-ink'
+          : 'text-ink-muted enabled:hover:bg-surface-hover/60 enabled:hover:text-ink'
       } ${dropLine(edge)}`}
     >
       {TAB_LABELS[id]}
       {running && (
         <span
-          className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-ink align-middle"
+          className="breathe ml-1 inline-block size-1.5 rounded-full bg-ink align-middle"
           data-testid="terminal-tab-running"
-          aria-label="a command is running"
+          role="img"
+          aria-label="A command is running"
         />
       )}
     </button>

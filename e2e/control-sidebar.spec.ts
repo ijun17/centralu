@@ -310,6 +310,36 @@ test('The sidebar uses only one row per project (vertical space)', async ({ page
 })
 
 /**
+ * An open project with no session and no app draws nothing below its header (owner, 2026-10-19): the empty list used to
+ * leave a 6px gap under the name, so a project with nothing in it stood taller than its one line. Measured as the
+ * distance from the header row's bottom margin edge to the end of the section's content, which is 0 with nothing below the header and
+ * the list's top margin with a row below it.
+ */
+test('An open project with no session and no app has no gap under its header', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const gapUnderHeader = () =>
+    page.getByTestId('project-alpha').evaluate((section) => {
+      const cs = getComputedStyle(section)
+      const contentBottom = section.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom)
+      // The header row pulls its own box 6px into the section's padding (-my-1.5): its margin edge is what the list follows
+      const header = section.firstElementChild!
+      return contentBottom - (header.getBoundingClientRect().bottom + parseFloat(getComputedStyle(header).marginBottom))
+    })
+  // A new project asks whether to trust it, which stands under the header too; answer it so only the list is measured
+  const notNow = page.getByTestId('trust-ask-no-alpha')
+  if (await notNow.isVisible()) await notNow.click()
+  await expect(page.getByTestId('trust-ask-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', /.*/)
+  await expect(page.locator('[data-testid^="session-row-"]')).toHaveCount(0)
+  expect(await gapUnderHeader()).toBeCloseTo(0, 0)
+
+  // With a session under it the list stands below the header, so the measure sees the rows and is not vacuous
+  await newSession(page, 'alpha', 'task')
+  await expect(page.locator('[data-testid^="session-row-"]')).toHaveCount(1)
+  expect(await gapUnderHeader()).toBeGreaterThan(20)
+})
+
+/**
  * A marker with a bare number and no unit prompts "what is this?" (it actually did). The
  * browser's default title takes 1-2 seconds to appear, which is as good as not being there in
  * that moment.

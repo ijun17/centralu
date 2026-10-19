@@ -30,9 +30,11 @@ export function ProjectSessionList({
   const focusedSessionId = useSelectedSessionId()
   // Folded groups (#666): the children of a session. `foldedGroups` is one array, so this re-renders only when it changes
   const foldedGroups = useStore((s) => s.prefs.foldedGroups)
+  const rows = treeRows(groupedSessions.project, (id) => foldedGroups.includes(childrenGroupKey(id)))
+  if (rows.length === 0) return null
   return (
-    <ul className="mt-1.5">
-      {treeRows(groupedSessions.project, (id) => foldedGroups.includes(childrenGroupKey(id))).map((row) => (
+    <ul>
+      {rows.map((row) => (
         <ProjectSessionRow
           key={row.s.id}
           row={row}

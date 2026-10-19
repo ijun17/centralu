@@ -28,7 +28,7 @@ export function ActionRow({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`block w-full px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/25 disabled:opacity-50 disabled:hover:bg-transparent ${
+      className={`block w-full rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/60 disabled:opacity-50 disabled:hover:bg-transparent ${
         danger ? 'text-ink-muted hover:text-ink-signal' : 'text-ink-muted hover:text-ink'
       } ${trailing ? 'flex items-center justify-between gap-2' : ''}`}
     >
