@@ -1,7 +1,5 @@
 import type { ProjectInfo } from '@cc/protocol'
 import { Tooltip } from '../../../components/primitives.jsx'
-import { formatChangedCount } from '../../../app/format.js'
-import { ChangesIcon } from '../../../components/icons.jsx'
 
 /**
  * Marks placed on the name line — they claim no new vertical space.
@@ -12,8 +10,6 @@ import { ChangesIcon } from '../../../components/icons.jsx'
  * is always on becomes background noise, not advice.
  */
 export function ProjectMarks({ project }: { project: ProjectInfo }) {
-  const changed = project.git?.changedFiles ?? 0
-  const count = formatChangedCount(changed, project.git?.more)
   const denied = project.git?.denied === true
 
   return (
@@ -28,21 +24,10 @@ export function ProjectMarks({ project }: { project: ProjectInfo }) {
       to come.
     */
     <span className="readout flex shrink-0 items-center gap-1.5 text-2xs text-ink-faint">
-      {changed > 0 && (
-        <Tooltip
-          content={`${count} uncommitted file${changed > 1 ? 's' : ''}`}
-          testId={`mark-changed-tip-${project.name}`}
-        >
-          {/* A capsule with the changes icon and the count (owner, 2026-10-18), the top bar's grammar */}
-          <span
-            className="flex h-[18px] items-center gap-1 rounded-full border border-line px-1.5 text-ink-faint"
-            data-testid={`mark-changed-${project.name}`}
-          >
-            <ChangesIcon size={11} />
-            <span className="translate-y-px leading-none">{count}</span>
-          </span>
-        </Tooltip>
-      )}
+      {/*
+        No changes count on the name line any more (owner, 2026-10-20): it took the line's room for little, and the
+        project's tooltip (ProjectDetail) says it, more plainly
+      */}
       {denied && (
         <Tooltip content="Folder access permission required" testId={`git-denied-tip-${project.name}`}>
           <span className="text-ink-muted" data-testid={`git-denied-${project.name}`}>
