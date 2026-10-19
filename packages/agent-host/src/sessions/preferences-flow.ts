@@ -35,7 +35,8 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
  * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
  * (`sessionTools`, the agent ceiling, depth and models, trust, approval rules), has no field here.
  *
- * Reversible means no card, with one exception: "apply updates when idle" turned **on** asks first, in every preset. With
+ * Reversible means no card, with two exceptions. Turning off the notification for an approval or an error asks first (the
+ * two that tell the person a card waits). And "apply updates when idle" turned **on** asks first, in every preset. With
  * it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
  * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
  * (docs/agent-host.md §4.5). Turning it off, and every other switch, acts at once.
@@ -85,7 +86,7 @@ export class PreferencesFlow {
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
       `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
       'Notifications (set_preferences notifications)',
-      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}`,
+      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval or error one off asks the person`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
@@ -150,7 +151,38 @@ export class PreferencesFlow {
       })
     }
     // The notification switches (#1306): only those named change, merged into the host's record one by one
-    const switches = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
+    const switches: Record<string, boolean> = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
+    /*
+     * Turning off the two that tell the person a card waits (an approval, an error) asks first: the orchestrator would be
+     * choosing what the person stops hearing about. Turning them on, and every other switch, asks nothing. A denial keeps
+     * them notifying, and the other switches of the call still change. A switch already off is no change.
+     */
+    const stops = (['approval', 'error'] as const).filter((k) => switches[k] === false)
+    if (stops.length) {
+      let current: Partial<Record<(typeof stops)[number], boolean>> = {}
+      try {
+        current = (await callWindow(rpc, 'prefs.get', {})).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+      } catch {
+        /* unread: treated as on, so it asks */
+      }
+      const turning = stops.filter((k) => current[k] !== false)
+      // One already off needs no write, and none is made: nothing the card did not name goes out after it
+      for (const k of stops) if (!turning.includes(k)) delete switches[k]
+      if (turning.length) {
+        const what = turning.map((k) => (k === 'approval' ? '"awaiting approval"' : '"error"')).join(' and ')
+        const refused = await this.ask(
+          sessionId,
+          `Stop the ${what} ${turning.length === 1 ? 'notification' : 'notifications'}? Centralu would no longer show a notice or play a sound when ${turning.map((k) => (k === 'approval' ? 'an agent waits for your approval' : 'a session fails')).join(' or ')}, ` +
+            `so ${turning.map((k) => (k === 'approval' ? 'an approval' : 'a failure')).join(' or ')} could go unnoticed while you are away. You can turn ${turning.length === 1 ? 'it' : 'them'} back on in Settings, Notifications.`,
+          signal,
+          turning.length === 1 ? 'it keeps notifying' : 'they keep notifying',
+        )
+        if (refused) {
+          failed.push(`Notifications: ${refused}`)
+          for (const k of turning) delete switches[k]
+        }
+      }
+    }
     if (Object.keys(switches).length) {
       await attempt('Notifications', async () => {
         const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
@@ -231,10 +263,10 @@ export class PreferencesFlow {
   }
 
   /** The preferences card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
-  private async ask(sessionId: string, question: string, signal?: AbortSignal): Promise<string | null> {
+  private async ask(sessionId: string, question: string, signal?: AbortSignal, stays = 'it stays off'): Promise<string | null> {
     const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
-    if (decision === 'deny') return 'The person did not approve it, so it stays off. Do not ask again unless they tell you to.'
-    if (decision === null) return 'The card was withdrawn before the person answered, so nothing changed.'
+    if (decision === 'deny') return `The person did not approve it, so ${stays}. Do not ask again unless they tell you to.`
+    if (decision === null) return 'The card was withdrawn before the person answered, so that change was not made.'
     return null
   }
 }

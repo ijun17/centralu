@@ -117,10 +117,11 @@ function run(orcId: string, command: (typeof COMMANDS)[number], args: Record<str
 }
 
 /** Runs a command whose card the person answers with `decision`; the card's question and the answer */
-async function answered(orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always') {
+async function answered(orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) {
   const call = run(orcId, 'set_preferences', args)
   await eventually(() => !!card(orcId))
   const question = card(orcId)!.text
+  await whileStanding?.()
   mgr.respondApproval(orcId, card(orcId)!.requestId, decision)
   return { question, r: await call }
 }
@@ -280,8 +281,80 @@ describe('the notification switches (#1306)', () => {
     expect(announced.filter((t) => t === 'prefs_changed')).toEqual(['prefs_changed'])
     expect(card(orc.id)).toBeUndefined()
     // A second call changes only its own switch
-    await run(orc.id, 'set_preferences', { notifications: { approval: false } })
-    expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: true, sound: false })
+    await run(orc.id, 'set_preferences', { notifications: { done: false } })
+    expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: true, error: true, done: false, allDone: true, whenFocused: true, sound: false })
+  })
+
+  // Turning off the two that tell the person a card waits is the orchestrator choosing what they stop hearing about
+  describe('the ones that say a card waits', () => {
+    it('ask before they are turned off, naming what stops notifying, and turn them off on Allow', async () => {
+      const orc = await mgr.orchestrator()
+      const { question, r } = await answered(orc.id, { notifications: { approval: false } }, 'allow')
+      expect(question).toContain('Stop the "awaiting approval" notification?')
+      expect(question).toContain('no longer show a notice or play a sound when an agent waits for your approval')
+      expect(question).toContain('an approval could go unnoticed while you are away')
+      expect(r.isError).toBeFalsy()
+      expect(((await prefs()) as { notifyPolicy: { approval: boolean } }).notifyPolicy.approval).toBe(false)
+      // Both at once are one card
+      const both = await answered(orc.id, { notifications: { error: false, approval: false } }, 'allow')
+      expect(both.question).toContain('Stop the "error" notification?')
+      expect(both.question).not.toContain('awaiting approval')
+    })
+
+    it('ask once for both, and keep them notifying when the person denies, the other switches of the call still changing', async () => {
+      const orc = await mgr.orchestrator()
+      const { question, r } = await answered(orc.id, { notifications: { approval: false, error: false, sound: false } }, 'deny')
+      expect(question).toContain('Stop the "awaiting approval" and "error" notifications?')
+      expect(question).toContain('an agent waits for your approval or a session fails')
+      expect(question).toContain('an approval or a failure could go unnoticed')
+      expect(r.isError).toBeFalsy()
+      expect(r.text).toContain('sound off')
+      expect(r.text).toContain('Not changed: Notifications: The person did not approve it, so they keep notifying.')
+      expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: true, error: true, done: true, allDone: true, whenFocused: false, sound: false })
+    })
+
+    it('ask under auto too, and "always" remembers nothing', async () => {
+      const orc = await mgr.orchestrator()
+      await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
+      await answered(orc.id, { notifications: { approval: false } }, 'always')
+      await run(orc.id, 'set_preferences', { notifications: { approval: true } })
+      const again = await answered(orc.id, { notifications: { approval: false } }, 'deny')
+      expect(again.r.isError).toBe(true)
+      expect(((await prefs()) as { notifyPolicy: { approval: boolean } }).notifyPolicy.approval).toBe(true)
+    })
+
+    it('write nothing the card did not name: one already off is left out, also when the person turns it on while the card stands', async () => {
+      const orc = await mgr.orchestrator()
+      await rpc('prefs.set', { patch: { notifyPolicy: { approval: false } } })
+      const { question } = await answered(orc.id, { notifications: { approval: false, error: false } }, 'allow', async () => {
+        await rpc('prefs.set', { patch: { notifyPolicy: { approval: true } } })
+      })
+      expect(question).toContain('Stop the "error" notification?')
+      expect(question).not.toContain('awaiting approval')
+      // error went off as the card said; approval, which the card did not name, is as the person left it
+      expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toMatchObject({ approval: true, error: false })
+    })
+
+    it('ask when the switches cannot be read, as if they were on', async () => {
+      const orc = await mgr.orchestrator()
+      mgr.useWindowRpc((method, params) => (method === 'prefs.get' ? Promise.reject(new Error('unreadable')) : rpc(method, params)))
+      await rpc('prefs.set', { patch: { notifyPolicy: { error: false } } })
+      const { question } = await answered(orc.id, { notifications: { error: false } }, 'deny')
+      expect(question).toContain('Stop the "error" notification?')
+    })
+
+    it('ask nothing for turning them on, for one already off, or for any other switch', async () => {
+      const orc = await mgr.orchestrator()
+      await rpc('prefs.set', { patch: { notifyPolicy: { error: false } } })
+      const off = await run(orc.id, 'set_preferences', { notifications: { error: false, approval: true, done: false, allDone: false, whenFocused: true, sound: false } })
+      expect(off.isError).toBeFalsy()
+      const on = await run(orc.id, 'set_preferences', { notifications: { error: true } })
+      expect(on.isError).toBeFalsy()
+      expect(card(orc.id)).toBeUndefined()
+      // ...while turning one off from on is what asks
+      const stop = await answered(orc.id, { notifications: { error: false } }, 'deny')
+      expect(stop.question).toContain('Stop the "error" notification?')
+    })
   })
 
   it('merge into what the window saved meanwhile: a patch carrying one switch does not undo another', async () => {
