@@ -1447,8 +1447,10 @@ then who may call it:
   It sees state and counters only (the sidebar name, state, liveness, open cards, the number of the
   last message, when the host last saw the session act), never a conversation or a preview, and only
   the sessions of the project it belongs to: not the orchestrator, another project, a linked machine
-  or the trash. Nothing is asked per use because no run exists to ask on; the declaration is what the
-  trust card lists, and the app runs only while its project is trusted. At most one poll open and 120
+  or the trash. The person is asked once, like every capability (`desk.ts` `watch` → `permit`): no run
+  started the poll, so the question stands on the app's pinned view, the answer is kept until the manifest's `uses`
+  changes, and an update that adds `observe` asks again. The declaration is also what the trust card lists, and the app
+  runs only while its project is trusted. At most one poll open and 120
   begun a minute per app; a poll leaves no run record, a refusal a line in the app's log
   (`session-watch.ts`, `desk.ts` `watch`; `session-watch.test.ts`, `observe-sessions.test.ts`,
   `app-observe.test.ts`).

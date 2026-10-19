@@ -106,7 +106,14 @@ export class SessionWatch {
     this.ring.push({ rev: this.rev, id, projectId })
     if (this.ring.length > WATCH_RING) this.ring.splice(0, this.ring.length - WATCH_RING)
     const change = this.ring[this.ring.length - 1]!
-    for (const fn of [...this.listeners]) fn(change)
+    // A reader that throws must not break the event path it is called from, nor the readers after it
+    for (const fn of [...this.listeners]) {
+      try {
+        fn(change)
+      } catch (e) {
+        console.error(`[agent-host] a reader of the session feed failed: ${(e as Error).message}`)
+      }
+    }
   }
 
   /**

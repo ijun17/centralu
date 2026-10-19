@@ -38,9 +38,9 @@ export function isHostCapability(name: string): name is HostCapability {
 }
 
 /**
- * What `uses.sessions` may name: what an app may do with its own project's sessions. Not asked about when used (there
- * is no run to ask on, and trust follows the project, docs/plans/task-ledger.md); declaring it is what the trust card
- * shows.
+ * What `uses.sessions` may name: what an app may do with its own project's sessions. Asked about once, like the other
+ * capabilities (the person's answer is kept until the manifest's `uses` changes, so an update that adds it asks again):
+ * with no run to ask on, the question stands on the app's pinned view.
  *
  *   observe  hear of the project's sessions' state and counters (`watch_sessions`), never a conversation
  */
@@ -49,6 +49,14 @@ export type SessionCapability = (typeof SESSION_CAPABILITIES)[number]
 
 export function isSessionCapability(name: string): name is SessionCapability {
   return (SESSION_CAPABILITIES as readonly string[]).includes(name)
+}
+
+/** The wording of a session capability for the question the person is asked (`uses.sessions`) */
+export function sessionCapabilityText(name: SessionCapability): string {
+  switch (name) {
+    case 'observe':
+      return "see the state of this project's sessions (working, finished, waiting for you; not their conversations)"
+  }
 }
 
 /** The wording for a person to read — used by capability approval's (D-4) question and by refusal reasons. The wording differs by scope. */
@@ -72,9 +80,11 @@ export function hostCapabilityText(name: HostCapability, scope: 'project' | 'use
  *          if an app with the same id is newly created in a project, the call target has changed
  *          (resolveCallTarget), and what the person allowed was not that app
  *   host   reads host data — per name
+ *   sessions  hears of the project's sessions (`uses.sessions`) — per name
  */
 export type Capability =
   | { kind: 'agent'; tool: string }
+  | { kind: 'sessions'; name: SessionCapability }
   | { kind: 'app'; target: AppRef }
   | { kind: 'host'; name: HostCapability }
 
@@ -87,6 +97,8 @@ export function capabilityKey(c: Capability): string {
       return `app:${appKeyOf(c.target.projectId, c.target.appId)}`
     case 'host':
       return `host:${c.name}`
+    case 'sessions':
+      return `sessions:${c.name}`
   }
 }
 

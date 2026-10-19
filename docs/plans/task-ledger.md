@@ -98,7 +98,7 @@ A notification is **keyed by the change that caused it**, written to the ledger 
 
 ### 6. The three core pieces
 
-**Trust, for all three.** The owner's decision holds: trust follows the project. An app of a trusted project has what its manifest declares, with no card per use; a manifest that declares something new asks again, showing what was added (the existing `usesStamp` fingerprint covers any new `uses` key by itself); an untrusted project's apps never run, and turning trust off stops them, so every pipe below closes. Because no run id exists outside a call, there is nowhere to put a per-use card for these three, so I do not add one.
+**Trust, for all three.** An untrusted project's apps never run, and turning trust off stops them, so every pipe below closes. For the rest: the owner's decision is that trust follows the project, with no card per use and a new card only when an update declares a new capability. That is **not built for any capability yet** (today each capability is asked once, on first use, and again when `uses` changes: `desk.permit`, `usesStamp`), and for a project app nothing holds an update that adds a capability. So `observe` follows the mechanism that exists: the question is asked once, on the app's pinned view because no run started the poll, and again when `uses` changes (corrected after review: the first version said it asked no card, and that an update would ask again, which nothing did). When the owner's model is built it replaces this for all capabilities together.
 
 **Manifest.** One new key, `uses.sessions`, a list of names: `"observe"` now, `"message"` later. A name this build does not know is a warning and refused, like `uses.host` (an older build reading a newer manifest still runs the app). It goes in the trust card and the inbox's "New app" notice in plain words (`uses-lines.ts`).
 
@@ -163,7 +163,7 @@ The board's merge queue runs in the background with no run id, so it cannot `cal
 1. **A separate app, `task-ledger`, from the start; not inside the board app** (the issue's order says inside, then extract). The board's server is 95 KB; the ledger needs its own state, tools and screen, and extracting later is cutting a monolith apart. As its own app in this repository it is the shared app the shape section describes, and the board uses it through `call_app`.
 2. **Observation is a long-poll with a cursor** over fd 3. Alternative: server-to-app MCP notifications. Rejected: it needs a new direction on the pipe, an app handler, and a replay story for a missed one; the cursor gives the same latency with a snapshot as the only recovery.
 3. **`uses.sessions`, not a new name in `uses.host`.** `host_data` is a call inside a run and asks the person once; observation has no run to ask on, and `message` joins it later. Alternative: `sessions.watch` in the closed host list.
-4. **No per-use card** for observation, following the trust decision.
+4. **Observation is asked about once**, like the other capabilities, on the app's screen (first version: no card, following the trust decision; but nothing in the code made an update that adds a capability ask again, so the docs promised what was not there).
 5. **The ledger ships on `busy` + `notify` + observation.** Alternative: wait for pieces 2 and 3. Rejected: the first useful version needs neither.
 6. **Storage in the app's data folder**, not the host store.
 7. **Tests of the app live with the other app tests** (`packages/agent-host/src/apps/external/`), not in `tooling/` (a guard tier for a non-guard).
@@ -196,3 +196,59 @@ restarts, delivered as a Centralu notice, listed and cancellable) and says it sh
   and batch several into one message, so it reads the sources raw and keeps its own conditions. A session registers its own
   watches with its own authority; an app's access stays `uses` plus project trust. A session may watch only sessions it can
   already read.
+
+### 13. Corrections after review
+
+A review of the three pull requests found two constraints the issue itself names that the first design did not meet, and a trust
+claim that was not true. What changed, and what is planned.
+
+**Trust (corrected in §6, decision 4).** The first version said an update that adds a capability "asks again" and that
+observation needs no card. For a project app nothing holds such an update (only an imported app is held when `uses` changes),
+and `usesStamp` re-asks only capabilities that raise a card when used. `observe` now raises one like the others: once, on the
+app's pinned view (no run started the poll), kept until `uses` changes. The owner's model (trust follows the project, a card
+only for what an update adds) is for all capabilities together and is not built.
+
+**The central orchestrator cannot be the responsible session in v1.** The issue says the responsible session is "usually the
+orchestrator". The orchestrator's apps are the user-folder apps and the root apps it attaches (#1205); it never attaches a
+project's inner app (`app-access.ts`), and the ledger is one. So it cannot call `ledger_take_charge`, and `notify` only
+reaches a session that called the app. In v1 the responsible session is a **project session**, in practice the one working as
+lead in that project (as here, where the orchestrating session is a worker session of the repository). The panel's "Responsible:
+orchestrator" sketch in §3 means that. How the central orchestrator becomes reachable, in order of preference:
+
+1. **Piece 3 with orchestrator reach** (below): the person picks the orchestrator in the panel, the app messages it with
+   `send_to_session`. Needs the trust discussion that follows.
+2. A ledger that is a *root* app of its own project, which the orchestrator can attach (#1205, `attach_app`): then it is the
+   project, not an app inside it. Rejected for this repository (its project is the product).
+3. A user-folder ledger shared by every project: it has no project, so it cannot observe one (piece 1 is for project apps).
+   It would need a project argument and its own scope rule.
+
+**Piece 3 needs its own trust decision before it is built.** Letting an app message the orchestrator turns repository code
+into a direct prompt channel into the most privileged session (it sees every project, starts agents, changes settings).
+Framing the text as the app's (a quoted block that says the person did not write it) does not make that safe: it is a
+convention a model may follow, not a boundary. So, proposed and left to the owner (tier `person`):
+
+- not folded into "trust the project": a **separate card per app, once**, naming the app and its project, saying it may write
+  into the orchestrator's conversation, showing what it was sent last; a deliberate exception to "no further cards";
+- only apps of trusted projects that declare `message`; a revoke in the orchestrator's own settings list;
+- the existing limits (4000 characters, 10 a minute, every send a run record naming the text) and a **lower ceiling to the
+  orchestrator** (for example 3 a minute, one open per app), and the orchestrator reads app text as it already does: it can
+  grant nothing and change no instruction;
+- the orchestrator never acts on app text without the person's own word for anything that spends or deletes.
+
+**Linked machines are not observed, and assignees there are invisible to triggers 2 and 4.** The ledger's children mostly run
+on a linked machine, and #1324's first case is exactly that remote poll, so "shares the source with #1324" is only half true until
+this is done. Where a linked machine's session state enters the feed, as the next step (a separate pull request on #1334):
+
+- The hub already holds it: `LinkedMachineConnection.onEvent` keeps a mirror of each machine's sessions
+  (`mirror.upsertSession`, `patchSession`, `removeSession`, and `machine_resync` after a reconnect) with ids qualified by the
+  machine (`qualify`). `SessionWatch` gets a second input from that mirror, not from the manager's emit path, so each
+  mirror change is a change in the same feed, fingerprint and cursor.
+- Which of the hub's projects a linked session belongs to: the pairing `start_agent machine` already uses, a machine's
+  project that is a checkout of this project's repository (`checkoutOn`: the same `origin`, `gitRemoteKey`). A linked project
+  with no such local project is invisible to every app; one with several checkouts is refused, as there.
+- The row gets `machine` (already in it) and `unreachable`, and **a session on an unreachable machine is not "gone" and not
+  "quiet"**: the mirror keeps the last state, and trigger 4 and "gone" must not fire from silence the link caused. `lastSeq`
+  and `activeAt` for a linked session are what the mirror last heard, so trigger 2 reads the machine's `lastSeq` after a
+  `machine_resync`. This is the part that needs real linked machines to test.
+- Limits, scope and the card are unchanged (the app's own project; it already says "state and counters").
+- #1324's session-state watches read the same feed, so a watch on a child that runs on a linked machine works the same way.

@@ -1044,9 +1044,12 @@ gate happens in one place, the broker desk (`desk.ts`).
   at rest, `lastSeq`; `activeAt` never does. Only for a project app (a user-folder app has no project), only the
   project's sessions (not the orchestrator, other projects, a linked machine's sessions or the trash). One poll open
   per app, `waitMs` at most 25 s (20 by default), a burst of changes is one answer, at most 120 polls begun a minute. It is
-  not a run: a poll every twenty seconds would bury the Runs panel, so a refusal is a line in the app's log. There is no
-  per-use card: no run exists to ask on, and trust follows the project (#1173), so what the person sees is the trust
-  card line "Sessions of its project: see their state … (not their conversations)". `centralu.watchSessions({ after })`
+  not a run: a poll every twenty seconds would bury the Runs panel, so a refusal is a line in the app's log. It is asked
+  about once, like every capability (§10 "Asked once"): no run started the poll, so the question stands on the app's
+  pinned view, the answer is kept until the manifest's `uses` changes, and an update that adds `observe` asks again
+  (`desk.ts` `watch` → `permit`). The owner's "trust follows the project, no further cards" (#1173) is not built for any
+  capability yet; when it is, this follows. The trust card also lists the declaration: "Sessions of its project: see their
+  state … (not their conversations)". Refused for good once the person says no. `centralu.watchSessions({ after })`
   is one poll; `centralu.observeSessions(onChange)` is the loop (backoff, ends on a refusal that will not go away).
   The host side is `SessionWatch` (`sessions/session-watch.ts`): a feed of changes that anything in the host can listen to
   (`onChange`), of which the long-poll is one reader.

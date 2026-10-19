@@ -67,10 +67,19 @@ async function session(): Promise<SessionInfo> {
   return (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
 }
 
-async function start(): Promise<void> {
+/** The person answers the question that stands on the app's screen (no run started the poll, so it cannot stand on a session's card) */
+async function answerQuestion(decision: 'allow' | 'deny'): Promise<void> {
+  const [q] = await until(() => w.mgr.appQuestionList(), (l) => l.length === 1)
+  expect(q).toMatchObject({ capability: 'sessions:observe', origin: { appId: 'ledger', projectId: w.projectId } })
+  expect(q!.text).toContain("see the state of this project's sessions")
+  await w.rpc('apps.answerQuestion', { questionId: q!.id, decision })
+}
+
+async function start(decision: 'allow' | 'deny' | null = 'allow'): Promise<void> {
   plantLedger()
   const out = await w.rt.call({ projectId: w.projectId, appId: 'ledger' }, 'ping', {}, { kind: 'session', sessionId: 'x' })
   expect(out.status).toBe('ok')
+  if (decision) await answerQuestion(decision)
 }
 
 // Each test starts a real app process and a manager: the limit is generous, for a loaded machine
@@ -83,6 +92,16 @@ describe("a project app hears the manager's sessions", { timeout: 20_000 * SLOW 
     expect(heard()[0]!.sessions.map((s) => s.id)).toEqual([a.id])
     const b = await session()
     await until(() => last(b.id), (s) => s?.state === 'idle')
+  })
+
+  it('hears nothing until the person has said yes on the app screen, and nothing if they say no', async () => {
+    const a = await session()
+    await start('deny')
+    await new Promise((r) => setTimeout(r, 1_500 * SLOW))
+    expect(heard()).toEqual([])
+    expect(await w.mgr.appQuestionList()).toEqual([])
+    // The answer is kept: the person is not asked again by the app's next poll
+    expect(w.mgr.listSessions().some((x) => x.id === a.id)).toBe(true)
   })
 
   it("hears a turn begin and end, with the answer's number, and no conversation", async () => {

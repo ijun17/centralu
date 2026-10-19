@@ -271,7 +271,7 @@ export const centralu = {
    * `sessions` is every session of the project: compare it with what you remember. A row carries state and counters,
    * never a conversation: `{ id, name, kind, tool, state, live, waitingSince, lastSeq, activeAt, parentId, askedBy,
    * pending: { approvals, questions }, createdAt, machine, appId }`. Callable anywhere, a timer included. The manifest
-   * must declare "uses": { "sessions": ["observe"] }. Throws a CentraluError that says why Centralu refused. One poll
+   * must declare "uses": { "sessions": ["observe"] }, and the person is asked once (on the app's screen) whether it may. Throws a CentraluError that says why Centralu refused. One poll
    * at a time per app: use `observeSessions` for a loop.
    */
   async watchSessions({ after, waitMs, signal } = {}) {
@@ -297,7 +297,7 @@ export const centralu = {
     let stopped = false
     const abort = new AbortController()
     // The last is an older Centralu, which has no such request: the MCP server answers "Tool … not found"
-    const permanent = /does not declare|has no project|has no sessions to observe|Tool watch_sessions not found|Method not found/
+    const permanent = /does not declare|has no project|has no sessions to observe|the person did not allow|Tool watch_sessions not found|Method not found/
     void (async () => {
       let cursor
       let delay = 1000

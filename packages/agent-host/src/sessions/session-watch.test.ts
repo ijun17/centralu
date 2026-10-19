@@ -285,4 +285,17 @@ describe('the feed', () => {
     w.happen(text('a'), (m) => (m.state = 'working'))
     expect(heard).toEqual(['1:a:p1', '2:a:p1'])
   })
+  it('does not let a reader that throws break the event path or the readers after it', async () => {
+    const w = world()
+    w.put(session('a'))
+    const heard: number[] = []
+    w.watch.onChange(() => {
+      throw new Error('a reader of the feed failed')
+    })
+    w.watch.onChange((c) => heard.push(c.rev))
+    const { cursor } = await w.watch.watch('p1', undefined, 0, live)
+    expect(() => w.happen(text('a'), (m) => (m.state = 'working'))).not.toThrow()
+    expect(heard).toEqual([1])
+    expect((await w.watch.watch('p1', cursor, 20, live)).sessions.map((s) => s.id)).toEqual(['a'])
+  })
 })

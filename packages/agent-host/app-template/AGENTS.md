@@ -96,6 +96,8 @@ createdAt, machine, appId }`: state and counters, never a conversation. `lastSeq
 message and survives a restart, so keep the one you last acted on and compare. Nothing is lost by a missed change: a
 `full` answer (after a restart of Centralu, or a long gap) is the whole project, compare it with what you remember. The
 loop retries by itself; `centralu.watchSessions({ after, waitMs })` is one poll if you want your own. Project apps only.
+The person is asked once, on the app's screen, whether it may see the project's sessions' state; until they answer, the poll
+waits and then refuses, and the loop asks again. A "no" ends the loop.
 
 **Telling a session later.** To tell the session that asked for work when that work ends (a job
 finished, something needs it), declare `"uses": { "notices": true }`, keep

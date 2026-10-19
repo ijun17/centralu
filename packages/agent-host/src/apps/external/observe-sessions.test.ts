@@ -269,7 +269,7 @@ describe('an older Centralu, which has no such request', () => {
 describe("the desk's own checks on a poll", () => {
   function desk(answer: () => Promise<SessionsAnswer> = async () => ({ cursor: 'e.1', full: true, sessions: [], gone: [] })) {
     const asked: { projectId: string; waitMs: number }[] = []
-    const apps = { redactor: () => (t: string) => t } as unknown as DeskApps
+    const apps = { redactor: () => (t: string) => t, denied: () => {}, origin: () => null } as unknown as DeskApps
     const d = new BrokerDesk(apps, memoryCapabilityBook(), () => ({ questionMs: 1_000, agentRateWindowMs: 60_000 }), memoryLedger())
     d.attach(
       fakeBrokerHost({
@@ -317,13 +317,15 @@ describe("the desk's own checks on a poll", () => {
     const a = app({ sessions: ['observe'] })
     const first = d.watch(a, {}, never)
     expect(await d.watch(a, {}, never)).toMatchObject({ refused: expect.stringMatching(/already open/) })
-    // Another app has its own place
+    // The host is asked once the capability has been settled, a moment after
+    await new Promise((r) => setTimeout(r, 20))
     release({ cursor: 'e.1', full: true, sessions: [], gone: [] })
     expect(await first).toMatchObject({ answer: { cursor: 'e.1' } })
     fail = true
     expect(await d.watch(a, {}, never)).toMatchObject({ refused: expect.stringMatching(/restarting/) })
     fail = false
     const again = d.watch(a, {}, never)
+    await new Promise((r) => setTimeout(r, 20))
     release({ cursor: 'e.2', full: false, sessions: [], gone: [] })
     expect(await again).toMatchObject({ answer: { cursor: 'e.2' } })
   })
@@ -334,6 +336,66 @@ describe("the desk's own checks on a poll", () => {
     for (let i = 0; i < WATCH_ANSWERS_PER_MINUTE; i++) expect(await d.watch(a, { waitMs: 0 }, never), `poll ${i + 1}`).toHaveProperty('answer')
     expect(await d.watch(a, { waitMs: 0 }, never)).toMatchObject({ refused: expect.stringMatching(new RegExp(`${WATCH_ANSWERS_PER_MINUTE} polls in the last minute`)) })
     expect(asked).toHaveLength(WATCH_ANSWERS_PER_MINUTE)
+  })
+})
+
+describe('asking the person (an update that adds uses.sessions asks again)', () => {
+  const never = new AbortController().signal
+  /** A desk whose host answers the question as `answers` says, one answer per question, and records each */
+  function desk(answers: ('allow' | 'deny' | null)[], book = memoryCapabilityBook()) {
+    const questions: { capability: string; text: string; origin: unknown }[] = []
+    const apps = { redactor: () => (t: string) => t, denied: () => {}, origin: () => null } as unknown as DeskApps
+    const d = new BrokerDesk(apps, book, () => ({ questionMs: 200, agentRateWindowMs: 60_000 }), memoryLedger())
+    d.attach(
+      fakeBrokerHost({
+        watchSessions: async () => ({ cursor: 'e.1', full: true, sessions: [], gone: [] }),
+        askCapability: async (q) => {
+          questions.push({ capability: q.capability, text: q.text, origin: q.origin })
+          return answers.shift() ?? null
+        },
+      }),
+    )
+    const app = (uses: AppManifest['uses']) => ({ ref: { projectId: 'p1', appId: 'ledger' }, name: 'ledger', manifest: { uses } as AppManifest })
+    return { d, questions, app }
+  }
+  const observing = { sessions: ['observe'] }
+
+  it('asks on the app own screen the first time, since no run started the poll, and not again once allowed', async () => {
+    const { d, questions, app } = desk(['allow'])
+    expect(await d.watch(app(observing), { waitMs: 0 }, never)).toHaveProperty('answer')
+    expect(await d.watch(app(observing), { waitMs: 0 }, never)).toHaveProperty('answer')
+    expect(questions).toHaveLength(1)
+    expect(questions[0]).toMatchObject({ capability: 'sessions:observe', origin: { kind: 'view', app: { projectId: 'p1', appId: 'ledger' } } })
+    expect(questions[0]!.text).toContain('not their conversations')
+  })
+
+  it('refuses when the person says no, keeps that answer, and does not ask again', async () => {
+    const { d, questions, app } = desk(['deny'])
+    expect(await d.watch(app(observing), {}, never)).toMatchObject({ refused: expect.stringMatching(/the person did not allow ledger to see the state of this project's sessions/) })
+    expect(await d.watch(app(observing), {}, never)).toMatchObject({ refused: expect.stringMatching(/did not allow/) })
+    expect(questions).toHaveLength(1)
+  })
+
+  it('asks again when a later manifest changes what the app uses, as it does for every capability', async () => {
+    const { d, questions, app } = desk(['allow', 'allow'])
+    await d.watch(app(observing), { waitMs: 0 }, never)
+    // The app's next commit declares one more thing: the fingerprint of `uses` is no longer the one that was answered
+    await d.watch(app({ ...observing, notices: true }), { waitMs: 0 }, never)
+    expect(questions).toHaveLength(2)
+  })
+
+  it('refuses without remembering anything when nobody answers, and asks again next time', async () => {
+    const { d, questions, app } = desk([null, 'allow'])
+    expect(await d.watch(app(observing), {}, never)).toMatchObject({ refused: expect.stringMatching(/question to the person was withdrawn|did not answer/) })
+    expect(await d.watch(app(observing), { waitMs: 0 }, never)).toHaveProperty('answer')
+    expect(questions).toHaveLength(2)
+  })
+
+  it('does not ask for an app that did not declare it, or for a user-folder app', async () => {
+    const { d, questions, app } = desk(['allow'])
+    await d.watch(app({}), {}, never)
+    await d.watch({ ...app(observing), ref: { projectId: null, appId: 'ledger' } }, {}, never)
+    expect(questions).toEqual([])
   })
 })
 

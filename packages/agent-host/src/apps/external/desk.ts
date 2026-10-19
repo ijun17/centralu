@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
-import { NOTICE_TOOL, type BrokerCall, type BrokerToolName, type SessionsAnswer } from './broker.js'
+import { NOTICE_TOOL, WATCH_TOOL, type BrokerCall, type BrokerToolName, type SessionsAnswer } from './broker.js'
 import { NOTICE_MAX_CHARS, NOTICES_PER_MINUTE } from './notices.js'
 import {
   HOST_CAPABILITIES,
   capabilityKey,
   hostCapabilityText,
+  sessionCapabilityText,
   isHostCapability,
   usesStamp,
   type Capability,
@@ -270,7 +271,7 @@ const RunAgentArgs = z.object({
 export type CapabilityDecisionListed = { capability: string; text: string; decision: 'allow' | 'deny'; decidedAt: number; current: boolean }
 
 /** The text of a denial — this goes both into the app's result and its stderr. Also states how to reverse it */
-function deniedText(tool: BrokerToolName, appName: string, text: string): string {
+function deniedText(tool: BrokerToolName | typeof WATCH_TOOL, appName: string, text: string): string {
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
 
@@ -500,7 +501,9 @@ export class BrokerDesk {
    * An app hears of its project's sessions (`watch_sessions`): the third request without a run id, after `busy` and
    * `notify`. Only with `"sessions": ["observe"]` in `uses`, only for a project app (the sessions are its project's),
    * one poll open at a time, and at most `WATCH_ANSWERS_PER_MINUTE` begun in a minute so a loop that does not wait is
-   * stopped. Answers the refusal, or what changed. No run row: see `WATCH_TOOL`.
+   * stopped. Asked once like every capability (`permit`): the answer is kept until the manifest's `uses` changes, so an
+   * update that adds `observe` asks the person again. No run started the poll, so the question stands on the app's pinned
+   * view. Answers the refusal, or what changed. No run row: see `WATCH_TOOL`.
    */
   async watch(app: DeskApp, args: { after?: string; waitMs?: number }, signal: AbortSignal): Promise<{ refused: string } | { answer: SessionsAnswer }> {
     const refuse = (why: string) => ({ refused: `watch_sessions refused: ${why}` })
@@ -523,6 +526,8 @@ export class BrokerDesk {
     const waitMs = Math.min(WATCH_WAIT_MAX_MS, Math.max(0, args.waitMs ?? WATCH_WAIT_DEFAULT_MS))
     this.watching.add(key)
     try {
+      const denied = await this.permit(WATCH_TOOL, app, { kind: 'sessions', name: 'observe' }, sessionCapabilityText('observe'), { parentRunId: '', signal, progress: () => {} })
+      if (denied) return { refused: firstText(denied.result) }
       return { answer: await host.watchSessions(projectId, args.after, waitMs, signal) }
     } catch (e) {
       return refuse((e as Error).message)
@@ -722,7 +727,7 @@ export class BrokerDesk {
    * denial, but **remembers nothing** — that is not an answer. It asks again the next time this is
    * used.
    */
-  private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
+  private async permit(tool: BrokerToolName | typeof WATCH_TOOL, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
     const key = capabilityKey(capability)
     const stamp = usesStamp(app.manifest.uses)
     const known = this.book.get(app.ref, key)
