@@ -230,8 +230,10 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     const desktop = s.indexOf("Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\"")
     expect(desktop).toBeGreaterThan(0)
     expect(s).toContain('$_.SessionId -gt 0')
-    expect(s).toContain("Invoke-CimMethod -InputObject $_ -MethodName GetOwner")
-    expect(s.indexOf("'CENTRALU-AUTOSTART nosession'")).toBeGreaterThan(desktop)
+    expect(s).toContain('Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid')
+    expect(s.indexOf('"CENTRALU-AUTOSTART nosession desktops=$($all.Count) unreadable=$unread"')).toBeGreaterThan(desktop)
+    // Matched by SID, never by the names this logon reports (#1223: USERDOMAIN is `WORKGROUP` in a workgroup's ssh logon)
+    expect(s).not.toContain('USERDOMAIN')
     expect(s.indexOf('Register-ScheduledTask')).toBeGreaterThan(s.indexOf('if (-not $same) {'))
     expect(s.indexOf('Start-ScheduledTask')).toBeGreaterThan(s.indexOf('Register-ScheduledTask'))
     // A trigger only ever comes from the task that was there (`$keep`), never a new one
@@ -261,14 +263,21 @@ describe('the Windows scheduled task (and WSL’s)', () => {
    */
   describe.runIf(process.platform === 'win32')('the task scripts, run against a stand-in Task Scheduler', () => {
     const action = taskActionScript({ how: 'wmi', launcher: 'C:\\Users\\me\\.centralu\\remote\\bin\\centralu.cmd', env: { CC_DATA_DIR: 'C:\\Users\\me\\.centralu' } })
-    const stubs = (task: string, legacyTask = '$null') =>
+    /*
+     * `explorers` are the Explorers WMI lists, each with what GetOwner (`User`, `Domain`) and GetOwnerSid (`Sid`) answer
+     * for it; `$self` is the SID of the account running the test. Task Scheduler refuses a principal whose account does
+     * not resolve, as the real one does
+     */
+    const desktop = '@([pscustomobject]@{ SessionId = 1; User = $env:USERNAME; Domain = $env:USERDOMAIN; Sid = $self })'
+    const stubs = (task: string, legacyTask = '$null', explorers = desktop) =>
       [
         "function Say($s) { [Console]::Out.WriteLine(\"CALL $s\") }",
-        'function Get-CimInstance { param($ClassName, $Filter) @([pscustomobject]@{ SessionId = 1 }) }',
-        'function Invoke-CimMethod { param($InputObject, $MethodName) [pscustomobject]@{ ReturnValue = 0; User = $env:USERNAME; Domain = $env:USERDOMAIN } }',
+        '$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+        `function Get-CimInstance { param($ClassName, $Filter) ${explorers} }`,
+        "function Invoke-CimMethod { param($InputObject, $MethodName) if ($MethodName -eq 'GetOwnerSid') { [pscustomobject]@{ ReturnValue = 0; Sid = $InputObject.Sid } } else { [pscustomobject]@{ ReturnValue = 0; User = $InputObject.User; Domain = $InputObject.Domain } } }",
         `function Get-ScheduledTask { param($TaskName, $TaskPath, $ErrorAction) if ($TaskName -eq $name) { ${task} } else { ${legacyTask} } }`,
         'function New-ScheduledTaskAction { param($Execute, $Argument) [pscustomobject]@{ Execute = $Execute; Arguments = $Argument } }',
-        'function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) [pscustomobject]@{ UserId = $UserId } }',
+        'function New-ScheduledTaskPrincipal { param($UserId, $LogonType, $RunLevel) try { [void](New-Object System.Security.Principal.NTAccount("$UserId")).Translate([System.Security.Principal.SecurityIdentifier]) } catch { throw "No mapping between account names and security IDs was done for $UserId" }; [pscustomobject]@{ UserId = $UserId } }',
         'function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries, [switch]$DontStopIfGoingOnBatteries, $ExecutionTimeLimit, $MultipleInstances) "settings" }',
         'function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) "logon" }',
         'function Register-ScheduledTask { param($TaskName, $TaskPath, $Action, $Trigger, $Principal, $Settings, $Description, [switch]$Force) Say "Register $TaskName action=$(@($Action)[0].Arguments -eq $arg) triggers=$(@($Trigger | Where-Object { $_ }).Count)" }',
@@ -277,9 +286,12 @@ describe('the Windows scheduled task (and WSL’s)', () => {
       ].join('\n')
     const mine = (args: string, triggers = '@()', user = '$env:USERNAME') =>
       `[pscustomobject]@{ Actions = @([pscustomobject]@{ Execute = (Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'); Arguments = ${args} }); Principal = [pscustomobject]@{ UserId = ${user}; LogonType = 'Interactive'; RunLevel = 'Limited' }; Triggers = ${triggers}; Settings = 's'; Description = 'd' }`
-    const run = (script: string, task: string, legacyTask?: string) => {
-      const all = `${stubs(task, legacyTask)}\n${script}`
-      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(all, 'utf16le').toString('base64')], { encoding: 'utf8' })
+    const run = (script: string, task: string, legacyTask?: string, { explorers, env }: { explorers?: string; env?: Record<string, string> } = {}) => {
+      const all = `${stubs(task, legacyTask, explorers)}\n${script}`
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(all, 'utf16le').toString('base64')], {
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+      })
       return r.stdout.split(/\r?\n/).filter((l) => l.startsWith('CALL ') || l.startsWith('CENTRALU-AUTOSTART')).map((l) => l.replace(/^CALL /, ''))
     }
     const signin = taskScript('signin', { name: 'Centralu host (me)', run: action, legacy: 'Centralu host' })
@@ -313,6 +325,53 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     it('removes this user’s task of the old name, and leaves another account’s', () => {
       expect(run(signin, mine('$arg'), mine("'x'"))).toEqual(['Unregister Centralu host', 'Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
       expect(run(signin, mine('$arg'), mine("'x'", '@()', "'OTHERPC\\someone'"))).toEqual(['Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+    })
+
+    /*
+     * Measured on a workgroup laptop over ssh (beta.30): the ssh logon's USERDOMAIN is `WORKGROUP`, while WMI's GetOwner
+     * answers the machine's name for the person's Explorer, so matching names found no sign-in and the host started
+     * through WMI in session 0. Accounts are matched by SID, and the task's principal is the account's resolvable name
+     */
+    describe('on a PC in a workgroup, where the ssh logon’s USERDOMAIN is not the account’s domain', () => {
+      const workgroup = { USERDOMAIN: 'WORKGROUP' }
+      const theirs = "@([pscustomobject]@{ SessionId = 4; User = $env:USERNAME; Domain = 'jungi'; Sid = $self })"
+      const me = '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
+
+      it('finds the person’s sign-in by the SID of its Explorer’s owner, and registers the task as their account', () => {
+        expect(run(signin, '$null', undefined, { explorers: theirs, env: workgroup })).toEqual([
+          'Register Centralu host (me) action=True triggers=0',
+          'CENTRALU-AUTOSTART-NOTE registered',
+          'Start Centralu host (me)',
+          'CENTRALU-AUTOSTART started',
+        ])
+      })
+
+      it('counts the task this account registered as its own, under whichever name Task Scheduler gives it', () => {
+        for (const user of [me, '$env:USERNAME', '$self']) {
+          expect(run(signin, mine('$arg', "@('logon')", user), undefined, { explorers: theirs, env: workgroup }), user).toEqual(['Start Centralu host (me)', 'CENTRALU-AUTOSTART started'])
+        }
+      })
+
+      it('finds no sign-in in the Explorer of another account with the same user name, and says how many desktops it saw', () => {
+        const other = "@([pscustomobject]@{ SessionId = 2; User = $env:USERNAME; Domain = $env:USERDOMAIN; Sid = 'S-1-5-21-1-2-3-1001' })"
+        expect(run(signin, '$null', undefined, { explorers: other, env: workgroup })).toEqual(['CENTRALU-AUTOSTART nosession desktops=1 unreadable=0'])
+      })
+
+      it('takes a task of another account that resolves (SYSTEM) as not this user’s: registered again, without its trigger', () => {
+        expect(run(signin, mine('$arg', "@('logon')", "'NT AUTHORITY\\SYSTEM'"), undefined, { explorers: theirs, env: workgroup })).toEqual([
+          'Register Centralu host (me) action=True triggers=0',
+          'CENTRALU-AUTOSTART-NOTE registered',
+          'Start Centralu host (me)',
+          'CENTRALU-AUTOSTART started',
+        ])
+      })
+
+      it('registers the task at sign-in (autostart on) as the account, not as WORKGROUP\\user', () => {
+        expect(run(taskScript('on', { name: 'Centralu host (me)', run: action, legacy: 'Centralu host' }), '$null', undefined, { env: workgroup })).toEqual([
+          'Register Centralu host (me) action=True triggers=1',
+          'CENTRALU-AUTOSTART on',
+        ])
+      })
     })
 
     it('off keeps the task and takes only its trigger; remove removes it', () => {
@@ -520,7 +579,7 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
   })
 
   it('starts the host in the sign-in through this data folder’s task, and says when nobody is signed in or it cannot (#1224)', async () => {
-    const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
+    const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART nosession desktops=2 unreadable=1', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
     const w = windows(() => ({ stdout: `${answers.shift()}\r\n` }))
     const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows', CC_DATA_DIR: w.dataDir }, home: w.base.home, platform: 'win32', run: w.r.run, user: 'me' }
     expect(await startInSignIn(ask)).toEqual({ started: true, name: 'Centralu host (me)' })
@@ -530,8 +589,10 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
     const action = Buffer.from(/-EncodedCommand ([A-Za-z0-9+/=]+)'/.exec(script)![1]!, 'base64').toString('utf16le')
     expect(texts(action)).toEqual([w.dataDir, join(w.dataDir, 'remote', 'bin', 'centralu.cmd')])
     expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession' })
+    // How many desktop Explorers of other accounts there were, for serve.log (#1223)
+    expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession', desktops: 2, unreadable: 1 })
     expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'error', message: 'Access is denied.' })
-    expect(w.r.runs).toHaveLength(3)
+    expect(w.r.runs).toHaveLength(4)
   })
 
   it('asks Task Scheduler nothing off Windows, inside WSL, with no launcher, or when CENTRALU_SIGNIN_TASK=off', async () => {

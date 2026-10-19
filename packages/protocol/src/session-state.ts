@@ -247,6 +247,34 @@ export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: numbe
   return step
 }
 
+/** How full a conversation's context is (`SessionInfo.context`); null when no reading has come yet */
+export type ContextReading = SessionInfo['context']
+
+/**
+ * The one way a session's context reading moves: the host's live facts, the UI's reducer and the mock all call this,
+ * so the gauge a reconnect reads back is the one the window showed live.
+ *
+ * A `context_update` (the tool's reading at a turn's end) replaces it; a fresh conversation (#304) empties it until the
+ * tool reports again. A compaction that says how big the conversation came out (Claude's `post_tokens`) sets that as an
+ * estimate in the window already known (#1282): the tool's next exact reading only comes when a turn ends, and until
+ * then the gauge kept the pre-compaction number (seen: "964k → 8.8k" on the marker, "Context 96%" in the composer,
+ * for good when the next turn failed). With no reading yet the window is unknown, so it stays null; a failed
+ * compaction shrank nothing, and one with no size (Codex's) leaves the reading for the tool's next one.
+ */
+export function nextContext(context: ContextReading, e: NormalizedEvent): ContextReading {
+  switch (e.type) {
+    case 'context_update':
+      return { used: e.used, window: e.window, exactness: e.exactness }
+    case 'conversation_reset':
+      return null
+    case 'compaction':
+      if (e.failed || e.after === undefined || !context) return context
+      return { used: e.after, window: context.window, exactness: 'estimate' }
+    default:
+      return context
+  }
+}
+
 /**
  * Blocked on a question and nothing else. The state says waiting_approval for both kinds of card, as the window shows
  * them; a text read by an agent names the card (list_sessions, a busy session, a handover).
