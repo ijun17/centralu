@@ -29,7 +29,7 @@ export const ComposerFooter = memo(function ComposerFooter({
     session.context && session.context.window > 0
       ? Math.round((session.context.used / session.context.window) * 100)
       : null
-  const estimate = session.context?.exactness === 'estimate'
+  const mark = session.context?.exactness === 'estimate' ? '≈' : ''
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
@@ -72,13 +72,10 @@ export const ComposerFooter = memo(function ComposerFooter({
           now, so a blank truly only ever means "never reported at all".)
         */}
       {/*
-        An estimate says so with ≈ (FR-14): the size a compaction reported (#1282), until the tool's own reading at the
-        next turn's end replaces it.
-      */}
-      {/*
         In the UI face, with figures of one width so the number does not jitter as it counts (owner, 2026-10-18).
         A thin bar under the number (owner, 2026-10-18), so how full it is reads at a glance: the track is a hairline,
-        the fill steps up to ink from 80% as the number does; unknown draws the track alone.
+        the fill steps up to ink from 80% as the number does; unknown draws the track alone. An estimate says so with ≈
+        (FR-14): the size a compaction reported (#1282), until the tool's own reading at the next turn's end.
       */}
       <span
         className={`ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs tabular-nums ${
@@ -87,13 +84,13 @@ export const ComposerFooter = memo(function ComposerFooter({
         data-testid="context-gauge"
         title={
           session.context
-            ? `Context ${estimate ? '≈' : ''}${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
-                estimate ? ' (estimated until the next turn ends)' : ''
+            ? `Context ${mark}${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
+                mark && ' (estimated until the next turn ends)'
               }`
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span className="leading-none">Context {ctxPct === null ? '—' : `${estimate ? '≈' : ''}${ctxPct}%`}</span>
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${mark}${ctxPct}%`}</span>
         <span className="block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
           {ctxPct !== null && (
             <span

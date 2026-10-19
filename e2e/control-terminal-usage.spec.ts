@@ -72,6 +72,7 @@ test('A compaction moves the context gauge to its reported size, as an estimate 
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 96%')
   await emitEvent(page, 0, { type: 'compaction', failed: false, before: 964000, after: 8800 })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context ≈1%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context ≈8\.8k \/ 1M tokens \(estimated/)
 
   // A reconnect reads back what the screen showed
   await page.evaluate(async () => {

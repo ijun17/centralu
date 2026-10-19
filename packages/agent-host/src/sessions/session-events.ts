@@ -280,7 +280,8 @@ export class SessionEvents {
    * While SessionInfo had none of these fields, a UI that disconnected and came back received only
    * state=waiting_approval, and **had no payload to draw the approval card with** — with no requestId
    * either, it could not even respond. These are never put in the DB (upsert does not know these
-   * fields) — if the host restarts, they really are gone; the context reading is the exception (#48, store v17). The cards, the activity and the limit are set with the
+   * fields) — if the host restarts, they really are gone. The context reading is the exception (#48,
+   * store v17). The cards, the activity and the limit are set with the
    * state they belong to (`applySessionState`, protocol session-state.ts); these are the rest.
    */
   private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
