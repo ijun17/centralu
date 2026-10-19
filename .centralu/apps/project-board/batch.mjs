@@ -198,29 +198,34 @@ export function splitBatch(q, b, { at, ref, min = 2 }) {
 }
 
 /**
- * Whether a pull request's checks show only what the batch did to it: every check passed or
- * skipped, apart from the runs the batch cancelled (their check suites). GitHub calls such a pull
- * request UNSTABLE, and that alone does not stop a batch member from landing.
+ * Whether a pull request's checks show only what made them moot: every check passed or skipped,
+ * apart from the runs the batch cancelled (their check suites) and the runs a successful run of the
+ * same workflow superseded (`supersededSuites`, #1015: a cancelled duplicate started in the same
+ * second, or an older run), either or both. GitHub calls such a pull request UNSTABLE, and that alone
+ * does not stop a batch member from landing.
  */
-export function onlyCancelledByBatch(checks, cancelledSuites) {
+export function onlyCancelledByBatch(checks, cancelledSuites, supersededSuites = []) {
   const suites = new Set(cancelledSuites)
+  const moot = new Set(supersededSuites)
   return checks.every((c) =>
     c.kind === 'status'
       ? c.state === 'success'
-      : (c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)) || (c.conclusion === 'cancelled' && suites.has(c.suiteId)),
+      : (c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)) || (c.conclusion === 'cancelled' && suites.has(c.suiteId)) || moot.has(c.suiteId),
   )
 }
 
 /**
  * The next step of landing a green batch, for the member `step` (the k-th). `mainTree` is the
  * default branch's tree now and `prevTree` the tree the batch had before this member (the base's,
- * for the first); `checks` every check on the member's head (only read when GitHub says UNSTABLE).
+ * for the first); `checks` every check on the member's head (only read when GitHub says UNSTABLE), and
+ * `superseded` the check suites on it that a successful run of the same workflow made moot (a cancelled
+ * duplicate, an older run): UNSTABLE from those, from the runs the batch cancelled, or both, lands.
  * Answers `{ do: 'merge' }`, `{ do: 'retarget', base }`, `{ do: 'wait', patch? }`, `{ do: 'landed' }`
  * (found merged and the default branch is the batch's tree after it: a driver stopped between the
  * merge and writing it down), or `{ do: 'stop', text }` (this one and the rest go back to their
  * own CI). `subjectMax` and `subject` the squash subject's limit and the subject.
  */
-export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBranch, lowerBranches = [], checks = null, subject, subjectMax, now, ref }) {
+export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBranch, lowerBranches = [], checks = null, superseded = [], subject, subjectMax, now, ref }) {
   const n = ref(b.repo, step.pr)
   if (!item) return { do: 'stop', text: `${n} left the queue before it landed` }
   if (pr.state === 'MERGED') return mainTree === step.tree ? { do: 'landed' } : { do: 'stop', text: `${n} was merged outside the batch` }
@@ -235,7 +240,9 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   if ([...subject].length > subjectMax) return { do: 'stop', text: `${n}'s squash subject is over ${subjectMax} characters` }
   if (['DIRTY', 'BEHIND', 'BLOCKED'].includes(pr.mergeStateStatus) || pr.mergeable === 'CONFLICTING')
     return { do: 'stop', text: `GitHub says ${pr.mergeStateStatus === 'BLOCKED' ? 'BLOCKED (a rule asks for something the batch does not give)' : pr.mergeStateStatus} for ${n}` }
-  const clean = pr.mergeable === 'MERGEABLE' && (pr.mergeStateStatus === 'CLEAN' || (pr.mergeStateStatus === 'UNSTABLE' && checks && onlyCancelledByBatch(checks, b.cancelled.map((c) => c.suite))))
+  const clean =
+    pr.mergeable === 'MERGEABLE' &&
+    (pr.mergeStateStatus === 'CLEAN' || (pr.mergeStateStatus === 'UNSTABLE' && checks && onlyCancelledByBatch(checks, b.cancelled.map((c) => c.suite), superseded)))
   if (clean) return { do: 'merge' }
   const since = b.uncleanSince?.pr === step.pr ? b.uncleanSince.at : new Date(now).toISOString()
   if (now - Date.parse(since) > LANDING_WAIT_MS) return { do: 'stop', text: `GitHub has said ${pr.mergeStateStatus ?? 'nothing'} for ${n} for ${Math.round(LANDING_WAIT_MS / 60_000)} minutes` }

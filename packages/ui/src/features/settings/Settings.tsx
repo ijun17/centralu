@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, agentDepthOf, type ToolName, type ToolStatus } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, agentDepthOf, hubAutoOf, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -921,6 +921,34 @@ function SessionToolsSwitch() {
         At 1, only the sessions you start can start agents; each step lets the agents below do the same. Auto stays within it.
       </p>
       <AgentModelsSection />
+      <HubAutoSwitch />
+    </div>
+  )
+}
+
+/**
+ * Whether a linked computer's `auto` session may start one here under `auto` too (#1273: start_agent with a machine,
+ * from the computer this one is linked to). On by default; off, such a session runs under normal here, and the other
+ * computer asks the person each time. This computer's own say, for a computer the person shares.
+ */
+function HubAutoSwitch() {
+  const on = useStore((s) => hubAutoOf(s.prefs))
+  const setPrefs = useStore((s) => s.setPrefs)
+  return (
+    <div className="mt-4">
+      <SettingToggle
+        checked={on}
+        onChange={(next) => setPrefs({ hubAuto: next })}
+        label="Allow auto from a linked computer"
+        testId="settings-hub-auto"
+        hint={
+          <>
+            When a computer that links to this one starts an agent here from a session running under auto, the agent
+            runs under auto here too, and that computer does not ask you first. Off, it runs under normal here and
+            that computer asks you each time.
+          </>
+        }
+      />
     </div>
   )
 }

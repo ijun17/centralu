@@ -217,8 +217,8 @@ describe('multiple terminals', () => {
     }
     let pids: number[] = []
     // Not in a `finally`: an error there would replace the assertion that failed
-    onTestFinished(async () => {
-      await cleanUp(pids)
+    onTestFinished(async (test) => {
+      await cleanUp(pids, test)
       rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     })
     const svc = new TerminalService(() => {}, recording)

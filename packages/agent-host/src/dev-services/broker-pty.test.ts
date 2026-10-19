@@ -126,9 +126,9 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-broker-term-')))
     const broker = PtyBroker.start(brokerPath())
     let pids: number[] = []
-    onTestFinished(async () => {
+    onTestFinished(async (test) => {
       broker.close()
-      await cleanUp(pids)
+      await cleanUp(pids, test)
       rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     })
     const exits: (number | null)[] = []

@@ -450,8 +450,11 @@ default 4: the owner's, 2026-10-19, this repository's too).
   checks, subject, lowers and branches as alone), each only while the default branch's tree is the
   tree the batch had before it; the last one leaves exactly the tree CI tested, and the batch's end
   says whether it did. A member's own runs were cancelled, so GitHub may call it UNSTABLE: that alone
-  does not stop it when every check that did not pass is a run the batch cancelled
-  (`onlyCancelledByBatch`); anything else waits 30 minutes, then the rest go back. Before each merge
+  does not stop it when every check that did not pass is a run the batch cancelled, or a run a
+  successful run of the same workflow superseded (a duplicate started in the same second, an older
+  run: `supersededSuites`, as on the single path, #1015), or a mix of both (`onlyCancelledByBatch`;
+  queue/batch-89 sat in landing for a same-second duplicate and looped back); anything else waits 30
+  minutes, then the rest go back. Before each merge
   a `merge-queue` success status on its head names the batch run. The default branch moved by
   something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
   rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
