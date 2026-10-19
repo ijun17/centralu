@@ -65,7 +65,7 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9); another project's session that attaches it, if the person shares it (§9.4) | Through git. Centralu has no button for it |
-| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
+| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9); the orchestrator and another project's session that attach it (§9.4) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
 | User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
@@ -614,7 +614,7 @@ live agent:
 | `reason` | When | The line says |
 |---|---|---|
 | `other-project` | Another project's app, a user-folder app outside the orchestrator, or a session an app stood up | Ask in a session of that project (or: only the orchestrator can use your apps) |
-| `untrusted` | The app's project, which is this session's, is not trusted | Trust the project |
+| `untrusted` | The app's project, which is this session's or that of an app it attached, is not trusted | Trust the project |
 | `app-unusable` | The app is `invalid`, `unconfirmed` or `failed` (`status`) | Fix the manifest, turn it on, or restart it |
 | `restart` | A Codex thread started before the app was attached: Codex keeps the servers a thread started with (§9.2). The adapter answers from the servers it configured (`appAttachment`) | Restart the session |
 | `bridge-failed` | Codex reported the app's bridge failed to start (`mcpServer/startupStatus/updated`), until it reports it ready | Restart the session |
@@ -751,13 +751,14 @@ and "Send to builder".
 
 | Session | Apps |
 |---|---|
-| Orchestrator | User-folder apps and the root apps of trusted projects (#1141: a project that is an app takes the user-folder app's place, and trust follows the project; an untrusted project's root app reaches it under no preset). Two of one id are named apart, and a name once seen stays with its app (below) |
+| Orchestrator | User-folder apps. The root apps of trusted projects it attaches when it needs one (§9.4, #1205); an untrusted project's root app reaches it under no preset. Two of one id are named apart, and a name once seen stays with its app (below) |
 | A project's sessions, worktree sessions included | That project's apps, if the project is trusted |
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
 
 Beyond this table, a project's session can attach an app **itself** for as long as it needs it: an
-app another project shares, or a user-folder app (§9.4). Apps that are `invalid`, `untrusted` or
+app another project shares, a user-folder app, or another project's root app; and so can the
+orchestrator, a trusted project's root app (§9.4). Apps that are `invalid`, `untrusted` or
 `failed` are not attached. The rule is checked again **at every call**, not only when attaching:
 Codex cannot change a running thread's servers, so the per-call check is what actually stops an app
 that was detached.
@@ -771,6 +772,19 @@ same book. No name is longer than `app-<id>` of the longest id (36 characters, `
 cut, and a name cut short stays unique by a number. **An untrusted project's apps attach nowhere**, its own project's sessions included and
 under `auto` too (owner, #1141): #603's opening of an untrusted project's apps to an `auto` session no
 longer applies, and the runtime refuses them for every caller.
+
+**A session's tool list does not grow with the projects the person trusts** (#1205). Every attached
+app is a server whose tools ride in each request: Claude defers them behind tool search, so their names
+still cost; Codex loads them. Until #1205 the orchestrator was given every trusted project's root app
+(#1141), so with ten projects that are apps it carried ten servers it mostly never called. A rule that
+gives a session apps by a count that grows on its own (projects, shares) is not added to decision 4;
+such apps are reached on demand (§9.4), and the session pays for the ones it attached. What it is given
+is bounded by things the person set up for that session: its own project's apps, its own app as a
+builder, and for the orchestrator the user folder, where an MCP server the person approved for it lands
+(A-7). Measured with the app `create_app` makes (two agent tools and the host's `run_status`), with 0, 3
+and 10 trusted root apps: before, Codex 6,800 / 9,179 / 14,733 characters and 11 / 20 / 41 tools, Claude
+6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 75 characters of
+instructions once (`sessions/orchestrator-app-cost.test.ts`, [tool-cost.md](tool-cost.md) §12).
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
 and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
@@ -861,9 +875,26 @@ session's apps (and so at every call):
 | This project's own app | Already attached by decision 4 | — |
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one
-asking, and an untrusted project runs none of its own apps either. Only a project's ordinary
-session has the tools (they ride with the reader set, below); the orchestrator, a coordinator, a
-builder and an agent an app stood up do not.
+asking, and an untrusted project runs none of its own apps either. A project's ordinary session has
+the tools (they ride with the reader set, below), and so does the orchestrator (#1205, below); a
+coordinator, a builder and an agent an app stood up do not.
+
+**The orchestrator** (#1205) is given the user-folder apps and attaches the root apps of trusted
+projects here, the one it needs when it needs it, under the same name book (`app-<id>`, a name once
+seen stays with its app). Nothing else: a project's inner app, shared or not, is that project's
+(`find_apps` does not list it and `attach_app` refuses it, naming `send_to_session`), and no card is
+asked, as for any root app. The three are among its rare commands, behind `centralu_run`
+(`RARE_COMMANDS` in `tool-seats.ts`): as tools they would not fit its ceiling, and its instructions
+name `find_apps` in one line. Each answer names the next call in the form the seat makes it
+(`centralu_run(command="attach_app", …)`). The attachment is kept per session like any other, so it
+lasts across restarts until `detach_app`; a Codex orchestrator's thread restarts when the turn ends,
+as a project session's does. `apps.reach` answers `reachable` for a root app it could attach and has
+not: its agent attaches it with nothing for the person to do; and `untrusted` for one it attached whose
+project has since lost trust (so for a project session's too), since trusting the project again is the fix.
+An orchestrator that had root apps attached before #1205 reads, once, before its first turn since, that
+they are no longer attached by default and how to find them (`rootAppsNotice`, [tool-cost.md](tool-cost.md) §12). A user-folder app the orchestrator had
+seen, when its folder becomes a project in place (#1141), stays attached to it as an attachment of its
+own, under the name it called it by (`UserAppAdoptionRecords.carry`).
 
 **Sharing** is the person's choice, per project app: "Share with other projects" in Settings → Apps,
 or the Share button in the app's header (`apps.setShared`). It is kept in the store's settings table
@@ -874,7 +905,7 @@ project" off in Settings takes them away at once (detach_app goes with the set).
 forgets the ones allowed with "Allow once", and turning it on again brings back the rest: those under
 an "always" the person still keeps, and user-folder apps (owner decision, #382).
 
-**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1):
+**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1; the orchestrator's as commands):
 
 | Tool | Does | Result names |
 |---|---|---|
@@ -1103,6 +1134,20 @@ restored version), the app is `unconfirmed` again ("Needs
 review"), and the review shows what it ran and asked for when it was enabled. Other fields, and the
 code itself, do not ask again: the confirmation is about what runs and what it may ask for, not a
 review of every edit.
+
+The file is also the only record of which apps were imported, so a broken one must not make an
+import read as the person's own (#1172). When the file is gone and a copy moved aside from it
+(`app-imports.json.unreadable-<ms>`) is in the data folder, the host writes a new file at once in
+which every app then in the user folder has a mark of its own (`lost`, naming the copy). Each of
+them, the person's own apps too, is `unconfirmed` until it is reviewed and enabled, and its reason
+names both files by full path. The review does not say the app was imported, and neither does
+Settings once it is enabled; like an import, it asks again if its `server` or `uses` changes. An
+app made after that is not held, and removing the copy changes nothing. Putting a mended copy back
+as `app-imports.json` makes it the record again, even while the host runs: the host reads the file
+again whenever it changes, so its next write keeps those marks. While no such file can be written
+(the file cannot be read at all, or the data folder cannot be listed), every app without a mark is
+held instead. A file that cannot be read at all stays in place and refuses writes, so nothing can
+be enabled until it reads again, and then its marks count as before.
 
 What is refused before anything lands (`imports.test.ts`):
 

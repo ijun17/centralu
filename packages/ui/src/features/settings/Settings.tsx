@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, agentDepthOf, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -730,47 +730,25 @@ function OrchestratorSettings() {
   const platform = usePlatform()
   const orchestratorId = useStore((s) => s.orchestratorId)
   const live = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
-  const switchTool = useStore((s) => s.switchTool)
-  const setToast = useStore((s) => s.setToast)
+  const chosen = useStore((s) => s.orchestratorTool)
+  const chooseTool = useStore((s) => s.chooseOrchestratorTool)
   /*
-   * Holds onto **the session itself**, not the saved choice.
-   *
-   * Before, only the tool name was pulled out. So whether there was something to switch was
-   * decided by `orchestratorId`, and that value only gets filled once the orchestrator has
-   * actually been **opened** during this run. For someone who launches the app and opens
-   * Settings first, it is always null, so even with a live session sitting there, the flow fell
-   * through to configureOrchestrator — a value the host has documented as "not read again once
-   * a session exists." The choice gets written, nobody reads it, and on the next render, peek
-   * read the old tool back from the session (dogfooding: "switch it, and it still comes back as
-   * Codex").
+   * The session itself, from the host: this run may not have opened it, and the tool it runs on is the truth once it
+   * exists. Read again when this run learns of it (`orchestratorId`) and after a switch, since a switch of a session
+   * this run has not opened changes nothing that `live` follows. A failed read says so beside the list rather than
+   * showing the first tool as the current one.
    */
-  const [peeked, setPeeked] = useState<SessionInfo | null>(null)
+  const peek = useLoad(() => platform.agents.orchestratorPeek(), [platform], [orchestratorId])
   // Holds onto the whole thing that was picked, not just its name — the confirmation dialog never has to hunt for the name again
   const [asking, setAsking] = useState<ToolStatus | null>(null)
   const tools = useTools()
 
-  // If there is no session yet, the only value the screen can show is the saved choice (whatever was picked on the intro screen)
-  useEffect(() => {
-    const alive = true
-    void platform.agents
-      .orchestratorPeek()
-      .then((s) => alive && setPeeked(s))
-      .catch(() => {})
-  }, [platform])
-
-  /** What to swap out — whether it was opened during this run or not, existing is enough */
-  const existingId = orchestratorId ?? peeked?.id ?? null
-  const current = live ?? peeked?.tool ?? (tools[0]?.name ?? null)
+  // With a session, its tool; before one, the choice made this run (the host keeps what it was told, but does not say it)
+  const current = live ?? peek.data?.tool ?? chosen ?? (tools[0]?.name ?? null)
 
   const apply = async (tool: ToolName) => {
-    try {
-      // If it is alive, swap it out; if not yet, only record the choice
-      if (existingId) await switchTool(existingId, tool)
-      else await platform.agents.configureOrchestrator(tool)
-      setPeeked((p: SessionInfo | null) => (p ? { ...p, tool } : p))
-    } catch (e) {
-      setToast((e as Error).message)
-    }
+    // A refusal is toasted by the store and moves nothing here
+    if (await chooseTool(tool)) await peek.reload()
   }
 
   return (
@@ -779,6 +757,9 @@ function OrchestratorSettings() {
         The orchestrator is the one session that belongs to the app rather than a project. Pick
         which agent it runs on.
       </p>
+      {peek.error && !orchestratorId && (
+        <LoadFailed what="the orchestrator" error={peek.error} onRetry={() => void peek.reload()} className="mt-2" testId="orchestrator-peek-failed" />
+      )}
       <div className="mt-3 space-y-1.5">
         {tools.map((t) => (
           <button

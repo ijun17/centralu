@@ -19,6 +19,7 @@ import {
   UpdateStatus,
 } from './entities.js'
 import { MachineInfo } from './machines.js'
+import { HostHandover } from './host-logon.js'
 
 /**
  * Normalized events flowing adapter → app (docs/protocol.md §2).
@@ -796,6 +797,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * `machines.list` answers, so the receiving side replaces its row rather than patching it.
    */
   z.object({ ...appScoped, type: z.literal('machine_status'), machine: MachineInfo }),
+  /**
+   * This host's hand-over into the person's Windows sign-in changed (#1224, `host.handover`): a hub linked to it keeps
+   * it on that machine's row (`MachineInfo.handover`) and passes it on to no one. Null: no hand-over is pending
+   */
+  z.object({ ...appScoped, type: z.literal('host_handover'), handover: HostHandover.nullable() }),
   /**
    * What the UI holds about one linked machine has to be read again (#82): the link (re)connected,
    * the remote host restarted, or the machine was removed. The UI re-reads `sessions.list` and

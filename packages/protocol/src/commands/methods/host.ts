@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { SessionId, UpdateStatus } from '../../entities.js'
+import { HostHandover } from '../../host-logon.js'
 import {
   HostActivity,
   HostReadSessionResult,
@@ -252,8 +253,22 @@ export const hostMethods = {
    * §4.7): on Windows a launcher can only be killed, and killing it ends the host without its
    * shutdown. Answers before the host starts to leave. Refused by a host under the app's keeper,
    * which the app stops (and which would only start the host again).
+   *
+   * `ifIdle` (#1224, additive): only if nothing a person would lose runs (the `hostBusy` rule) and no other call is in
+   * flight, decided and acted on at once: from the answer `ok: true` on, the host takes no new call (no turn, terminal or
+   * command can start), so a turn cannot slip in between the check and the stop. Otherwise `{ ok: false, busy, calls }`
+   * and nothing changes. A host older than `ifIdle` ignores it and stops; the hand-over sends it only to a host that says
+   * its logon, which came with it
    */
-  'host.stop': { params: z.object({}), result: z.object({ ok: z.literal(true) }) },
+  'host.stop': {
+    params: z.object({ ifIdle: z.boolean().optional() }),
+    result: z.union([z.object({ ok: z.literal(true) }), z.object({ ok: z.literal(false), busy: HostActivity, calls: z.number().int() })]),
+  },
+  /**
+   * What a `serve` in the person's Windows sign-in says about taking over from this host (#1224): this host keeps it,
+   * says it in its hellos and sends `host_handover`, so a hub's row can say it. `handover: null` clears it. Additive
+   */
+  'host.handover': { params: z.object({ handover: HostHandover.nullable() }), result: z.object({ ok: z.literal(true) }) },
   /**
    * A hub linked to this host says who it is and whether this host's sessions may ask its projects (#550, the reverse
    * direction, docs/plans/remote-hub.md §12.7). Sent by the hub at every connect and when its switch for this machine

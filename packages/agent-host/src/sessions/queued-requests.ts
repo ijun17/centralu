@@ -24,7 +24,7 @@ export type QueuedRequestsHost = Pick<
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
   Pick<RestartHost, 'inputsHeld'> & {
     /** ask_project's gates on the caller, read again when its queued request is delivered (ask-project-flow.ts) */
-    askGateError: (callerId: string) => string | null
+    askGateError: (callerId: string, quiet?: boolean) => string | null
     /** A registered project's row, read now */
     projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['projects']['listProjects']>[number] | undefined
     /** Whether a turn runs in the session for anyone: its state, or a wait on it not settled yet */
@@ -157,18 +157,29 @@ export class QueuedRequests {
     const from = { sessionId: caller.id, name: labelOf(this.host.store.messages, caller) }
     const project = this.host.projectRow(m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
+    /*
+     * And once more when the session is awake: a row being delivered is left out of `withdrawReaches` and
+     * `dropOpenedByAuto`, so trust or `auto` taken away while a restart or a wake is waited out is only seen here
+     */
+    // An untrusted project's `auto` boundary was logged by the read above, with no wait since
+    const logged = this.host.projectRow(caller.projectId)?.trusted !== true
+    const stillAllowed = () => {
+      const callerNow = this.host.meta.get(caller.id)
+      const targetNow = this.host.meta.get(sessionId)
+      return callerNow && targetNow ? this.queuedGateError(r, callerNow, targetNow, logged) : 'The session that asked, or the one asked, is gone.'
+    }
     let d: Delegation | undefined
     try {
       if (r.via === 'send_to_session') {
         this.host.children.ownTurn(sessionId, caller.id, true)
-        await this.host.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn)
+        await this.host.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else if (r.via === 'agent_session') {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
-        await this.host.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false, undefined, 'inline', handIn)
+        await this.host.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       } else {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'
-        await this.host.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn)
+        await this.host.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       }
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) this.host.children.queuedTurnStarted(sessionId)
@@ -193,12 +204,13 @@ export class QueuedRequests {
    * card covers the request, and revoking a remembered one drops the queue (`withdrawReaches`). agent_session: the
    * ownership a caller that is not `auto` needs (a session it started) and the preset rule (never work for a session
    * now above the caller). send_to_session queues behind the orchestrator's scope, which no card stands for.
+   * `quiet`: an earlier read already logged the `auto` boundary an ask_project row opens (`askGateError`).
    */
-  private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo): string | null {
+  private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo, quiet = false): string | null {
     const auto = caller.permissionPreset === 'auto'
     if (r.via === 'ask_project') {
       const project = this.host.projectRow(target.projectId)
-      const gate = this.host.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
+      const gate = this.host.askGateError(caller.id, quiet) ?? (project ? null : 'The project asked was removed from Centralu.')
       if (gate) return gate
       if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
         return "The asking session is no longer auto, and the person has not allowed its project to ask this one."
