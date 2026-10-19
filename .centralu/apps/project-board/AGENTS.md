@@ -551,8 +551,18 @@ looked into).
   green one (`nextStep`). A probe's branch is deleted once its run has spoken; a probe cancelled twice,
   or one whose run has not finished after 2 hours (`PROBE_MAX_MS`), ends the hunt without a culprit,
   and the issue says why.
-- **Once acted** on a red, the guard does nothing more about it (or about red runs on older commits)
-  until main is green again. Main green during a bisect (a flake) ends it.
+- **Known culprits** (`guard.known`: each culprit found, with its revert's pull request, or none when it
+  was not reverted) are never candidates again, and neither is a revert of one (by the pull request in
+  its subject) (#1259 review). A commit that still **carries** a known culprit (landed after it, before
+  its revert) is probed **without** it: a commit on it with the culprit's change taken out
+  (`commitWithout`, the revert's own way, pushed to the probe's branch). When the red commit itself
+  carries one, its own run proves nothing: the last candidate is probed without it first, and if that
+  passes the red is the known culprit's (`explained`: nothing filed or said again).
+- **One red at a time, none dropped**: a hunt under way goes on, and a newer red waits for it. Once it
+  has ended, the newest red not yet looked into (`guard.hunted`) starts the next hunt, over the commits
+  since the last green one without what is known. Main green during a hunt (a flake) ends it. The range
+  starts at the last fully green commit, not at a revert: a revert that lands while another culprit is
+  on main is red too, so the commits before it may still hold one.
 - **Acting** (`actOnRed`): the culprit is **reverted** in a pull request (`revert: <its subject>`,
   branch `revert/<sha>`): the reverse of its change applied to the default branch's tip in a temporary
   index from the checkout (nothing in the checkout moves) and pushed. It is **queued at the front**
@@ -565,6 +575,9 @@ looked into).
   did), and a message to the session that queued the culprit (its merged item, by the commit it
   landed as, else by the pull request in the subject: posted into that session as its notices are,
   and seen by its watch command). Kind `main-red`. The hunt then ends `reverting` or `reported`.
+- **Acting again is safe**: a `revert/<sha>` branch an earlier try pushed is used as it is, an open pull
+  request from it is the revert (not a second one), and the issue filed for a red is kept (`guard.acting`)
+  until the hunt records it, so a try that stopped half way files nothing twice.
 - **The release** still needs a fully green commit: its CI gate reads main's own push run (always
   the full tier) on that exact commit, never a batch's quick run on it (`ciForRelease`; test
   "refuses to tag a commit whose only green run is a batch's quick run …").

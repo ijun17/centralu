@@ -20,7 +20,7 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { attributeByPaths, mainVerdict, nextStep } from '../.centralu/apps/project-board/main-guard.mjs'
+import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -739,7 +739,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.prs[args[2]].state = 'CLOSED'
   save()
 } else if (args[0] === 'pr' && args[1] === 'list') {
-  out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
+  if (args.includes('--head')) out(Object.values(st.prs ?? {}).filter((p) => p.headRefName === args[args.indexOf('--head') + 1]))
+  else out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
 } else if (path === R + '/commits/main') {
   if (st.mainError) fail('Not Found (HTTP 404)')
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
@@ -759,6 +760,12 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const body = JSON.parse(stdin)
   if (st.dispatchError) fail(st.dispatchError)
   st.dispatched = [...(st.dispatched ?? []), { ref: body.ref, inputs: body.inputs ?? null }]
+  // A probe the test answers by its branch: a finished run on whatever commit the branch holds in GitHub's stand-in
+  const answer = (st.probeAnswers ?? {})[body.ref]
+  if (answer) {
+    const head = require('node:child_process').execFileSync('git', ['-C', st.origin, 'rev-parse', 'refs/heads/' + body.ref], { encoding: 'utf8' }).trim()
+    st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 7000 + st.dispatched.length, run_attempt: 1, head_sha: head, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: answer, created_at: '2099-01-01T00:00:00Z' }] }
+  }
   write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
@@ -2815,7 +2822,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
-    expect(issues()[0]!.body).toContain('The queue could not revert it: its reverse does not apply to main')
+    expect(issues()[0]!.body).toMatch(/The queue could not revert it: the reverse of [0-9a-f]{7} does not apply to main at/)
     expect(issues()[0]!.body).toContain('Revert it by hand.')
   })
 })
@@ -2824,3 +2831,90 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
 function landedBump(commit: string, pr = 90) {
   seedQueue([{ repo: R, pr, lowers: [], owner: 'other', state: 'merged', commit, title: `change ${pr}`, updatedAt: new Date().toISOString(), reruns: {} }])
 }
+
+describe('the main guard with overlapping failures, and when it acts again (#1259 review)', { timeout: 180_000 * SLOW }, () => {
+  it('finds a second culprit that landed after the first, probing its commit without the first, and never blames a known one or a revert again', async () => {
+    const repo = mainRepo([
+      { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
+      { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] },
+    ])
+    const [a, c] = repo.shas as [string, string]
+    seedQueue([
+      { repo: R, pr: 81, lowers: [], owner: 'tester', state: 'merged', commit: a, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} },
+      { repo: R, pr: 82, lowers: [], owner: 'writer', state: 'merged', commit: c, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} },
+    ])
+    const going = { ...mainRun(992, c, null), status: 'in_progress' }
+    guardRuntime(repo, {
+      origin: repo.origin,
+      branchRuns: { main: [going, mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 991: [failedJob(31, 'verify')], 992: [failedJob(32, 'verify')] },
+      // #82 without #81 still fails: it is a culprit of its own
+      probeAnswers: { [`queue/bisect-${c.slice(0, 12)}`]: 'failure' },
+    })
+    await call('merge_queue')
+    // #81's run failed first: the only commit since the last green one, reverted in #600
+    await until(() => guardOnDisk().hunt?.culprit?.sha === a && guardOnDisk().hunt?.endedAt, 'the first culprit')
+    expect(guardOnDisk().known).toEqual([{ sha: a, subject: 'feat(ui): change 81 (#81)', pr: 600 }])
+    // #82's run fails while that is under way: not dropped, the next hunt, with #81 out of the candidates
+    patchGh((s) => (s.branchRuns.main = [mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
+    await until(() => guardOnDisk().hunt?.red === c && guardOnDisk().hunt?.endedAt, 'the second culprit', 60_000)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c, how: expect.stringContaining('bisected') })
+    // Its commit was probed without #81: a commit on #82 with #81's change taken out
+    const probeBranch = `queue/bisect-${c.slice(0, 12)}`
+    const probed = g(repo.origin, 'rev-parse', probeBranch)
+    expect(g(repo.origin, 'rev-parse', `${probed}^`)).toBe(c)
+    expect(spawnSync('git', ['cat-file', '-e', `${probed}:packages/ui/src/a.ts`], { cwd: repo.origin, env: GIT_ENV }).status).not.toBe(0)
+    expect(g(repo.origin, 'show', `${probed}:packages/ui/src/b.ts`)).toBe('feat(ui): change 82 (#82)')
+    expect(writes().filter((w) => w[0] === 'pr-create').map((w) => w[2])).toEqual(['revert: feat(ui): change 81', 'revert: feat(ui): change 82'])
+    expect(issues().map((i) => i.title)).toEqual(['Main is red since #81 feat(ui): change 81', 'Main is red since #82 feat(ui): change 82'])
+
+    // #81's revert lands, and main is red on it (as #82 still is): nothing is left but known culprits and their reverts
+    g(repo.work, 'revert', '--no-edit', a)
+    g(repo.work, 'commit', '-q', '--amend', '-m', 'revert: feat(ui): change 81 (#600)')
+    const rv = g(repo.work, 'rev-parse', 'HEAD')
+    g(repo.work, 'push', '-q', 'origin', 'main')
+    patchGh((s) => (s.branchRuns.main = [mainRun(993, rv, 'failure'), mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
+    await until(() => guardOnDisk().hunt?.red === rv && guardOnDisk().hunt?.endedAt, 'the third red')
+    expect(guardOnDisk().hunt.outcome).toBe('explained')
+    await new Promise((r) => setTimeout(r, 500))
+    expect(issues()).toHaveLength(2)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(2)
+  })
+
+  it('acts again without a second revert or issue: a revert branch and pull request an earlier try made are used as they are', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const culprit = repo.shas[0]!
+    const branch = `revert/${culprit.slice(0, 12)}`
+    // An earlier try pushed the revert and opened #640, then stopped before the issue
+    g(repo.work, 'checkout', '-q', '-b', 'earlier', culprit)
+    g(repo.work, 'revert', '--no-edit', culprit)
+    const earlier = g(repo.work, 'rev-parse', 'HEAD')
+    g(repo.work, 'push', '-q', 'origin', `${earlier}:refs/heads/${branch}`)
+    landed(culprit)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, culprit, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      prs: { '77': ghPr(77), '640': ghPr(640, { headRefName: branch, headRefOid: earlier, title: 'revert: feat(ui): change 81' }) },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the act')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 640, branch })
+    expect(queueOnDisk().items.find((i: any) => i.pr === 640)).toMatchObject({ state: expect.any(String), front: expect.any(String) })
+    expect(g(repo.origin, 'rev-parse', branch)).toBe(earlier)
+  })
+
+  it('keeps known culprits and their reverts out of the candidates, and knows what a commit still carries', () => {
+    const c = (sha: string, subject: string) => ({ sha, subject, files: [] })
+    const listed = [c('a', 'feat: a (#81)'), c('b', 'feat: b (#82)'), c('r', 'revert: feat: a (#600)'), c('d', 'feat: d (#83)')]
+    const known = [{ sha: 'a', subject: 'feat: a (#81)', pr: 600 }]
+    const { all, commits } = sortCommits(listed, known)
+    expect(commits.map((x: { sha: string }) => x.sha)).toEqual(['b', 'd'])
+    // b landed after a and before its revert: it carries a; d is after the revert: it does not
+    expect(carried(all, known, 1)).toEqual(['a'])
+    expect(carried(all, known, 3)).toEqual([])
+    // Not reverted at all (a release bump, say): every later commit carries it
+    expect(carried(all, [{ sha: 'a', subject: '', pr: null }], 3)).toEqual(['a'])
+  })
+})

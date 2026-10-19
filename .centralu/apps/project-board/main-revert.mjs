@@ -5,7 +5,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createIssue, createPr, readRepo } from './github.mjs'
+import { createIssue, createPr, prsWithHead, readRepo } from './github.mjs'
 import { config } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { enqueue, pushEvent } from './queue.mjs'
@@ -52,33 +52,52 @@ export function revertTitle(subject) {
 }
 
 /**
- * A commit on the default branch's tip that undoes `sha`, made in a temporary index from the checkout (its branches,
- * index and work are not touched) and pushed to `branch` on GitHub's remote. Answers `{ sha, tip }`, or `{ error }`
- * when the reverse of its change does not apply to the tip any more (later commits changed the same lines).
+ * A commit on `base` with the changes of `shas` taken out (each one's reverse applied, newest first), made in a
+ * temporary index from the checkout (its branches, index and work are not touched) and pushed to `branch` on GitHub's
+ * remote: a revert on main's tip, or a bisect probe without the known culprits a commit carries. Answers `{ sha, base }`,
+ * or `{ error }` when a reverse does not apply any more (later commits changed the same lines). A branch already there
+ * (an earlier try that stopped half way) is used as it is: answered `{ sha, base, reused: true }`.
  */
+export async function commitWithout({ dir, repo, base, shas, branch, message }) {
+  const root = await topLevel(dir)
+  const remote = await remoteFor(root, repo)
+  if (!remote) return { error: `the checkout at ${root} has no remote for github.com/${repo}` }
+  const there = (await git(root, ['ls-remote', remote, `refs/heads/${branch}`])).trim().split(/\s+/)[0]
+  if (there) {
+    await fetchRefs(root, remote, [`refs/heads/${branch}`], REF_SPACE)
+    return { sha: there, base: (await git(root, ['rev-parse', `${there}^`])).trim(), reused: true }
+  }
+  const tmp = await mkdtemp(join(tmpdir(), 'centralu-revert-'))
+  const env = { GIT_INDEX_FILE: join(tmp, 'index') }
+  try {
+    await git(root, ['read-tree', base], { env })
+    for (const sha of [...shas].reverse()) {
+      const patch = await git(root, ['diff', '--binary', '--no-renames', sha, `${sha}^`])
+      try {
+        await git(root, ['apply', '--cached', '--whitespace=nowarn'], { env, input: patch })
+      } catch (e) {
+        if (!(e instanceof GitError)) throw e
+        return { error: `the reverse of ${short(sha)} does not apply to ${short(base)} (${e.message})` }
+      }
+    }
+    const tree = (await git(root, ['write-tree'], { env })).trim()
+    const commit = (await git(root, ['commit-tree', tree, '-p', base, '-F', '-'], { input: message })).trim()
+    await git(root, ['push', '--quiet', remote, `${commit}:refs/heads/${branch}`])
+    return { sha: commit, base }
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/** A revert of `sha` on the default branch's tip, pushed to `branch` (`commitWithout`): `{ sha, tip }` or `{ error }` */
 export async function revertCommit({ dir, repo, defaultBranch, sha, branch, message }) {
   const root = await topLevel(dir)
   const remote = await remoteFor(root, repo)
   if (!remote) return { error: `the checkout at ${root} has no remote for github.com/${repo}` }
   const [tip] = await fetchRefs(root, remote, [`refs/heads/${defaultBranch}`], REF_SPACE)
-  const tmp = await mkdtemp(join(tmpdir(), 'centralu-revert-'))
-  const env = { GIT_INDEX_FILE: join(tmp, 'index') }
-  try {
-    await git(root, ['read-tree', tip], { env })
-    const patch = await git(root, ['diff', '--binary', '--no-renames', sha, `${sha}^`])
-    try {
-      await git(root, ['apply', '--cached', '--whitespace=nowarn'], { env, input: patch })
-    } catch (e) {
-      if (!(e instanceof GitError)) throw e
-      return { error: `its reverse does not apply to ${defaultBranch} at ${short(tip)} (${e.message})` }
-    }
-    const tree = (await git(root, ['write-tree'], { env })).trim()
-    const commit = (await git(root, ['commit-tree', tree, '-p', tip, '-F', '-'], { input: message })).trim()
-    await git(root, ['push', '--quiet', remote, `${commit}:refs/heads/${branch}`])
-    return { sha: commit, tip }
-  } finally {
-    await rm(tmp, { recursive: true, force: true }).catch(() => {})
-  }
+  const made = await commitWithout({ dir, repo, base: tip, shas: [sha], branch, message })
+  if (made.error) return { error: made.error.replace(`to ${short(tip)}`, `to ${defaultBranch} at ${short(tip)}`) }
+  return { sha: made.sha, tip: made.base, reused: made.reused === true }
 }
 
 /** The issue a red main files: title and body */
@@ -153,12 +172,18 @@ export async function actOnRed(dir, found, { now = Date.now(), ref, update, rene
     }
     if (made.error) did = `The queue could not revert it: ${made.error}. Revert it by hand.`
     else {
-      const opened = await createPr(repo, { title: revertTitle(culprit.subject), head: branch, base: defaultBranch, body: revertBody({ red, culprit, how, name, defaultBranch, tip: made.tip }) })
+      // Idempotent: a revert pull request an earlier try opened from this branch is the one, not a failure
+      const open = (await prsWithHead(repo, branch)).find((p) => p.state === 'OPEN')
+      const opened = open ?? (await createPr(repo, { title: revertTitle(culprit.subject), head: branch, base: defaultBranch, body: revertBody({ red, culprit, how, name, defaultBranch, tip: made.tip }) }))
       revert = { pr: opened.number, branch, sha: made.sha }
       did = `Reverted it in ${ref(repo, opened.number)}, queued at the front of the merge queue; it lands after the fast tier.`
     }
   }
-  const issue = await createIssue(repo, redIssue({ red, culprit, how, why, did, ref }))
+  // Idempotent: an issue an earlier try filed for this red (kept as `acting`, until the hunt records it) is the one
+  let acting = null
+  update((q) => (acting = q.guard?.acting?.red === red.red ? q.guard.acting : null))
+  const issue = acting?.issue ? { number: acting.issue } : await createIssue(repo, redIssue({ red, culprit, how, why, did, ref }))
+  update((q) => (q.guard = { ...(q.guard ?? {}), acting: { red: red.red, issue: issue.number } }))
   const at = new Date(now).toISOString()
   update((q) => {
     const item = culprit ? landedItem(q, culprit.sha, culprit.subject) : null
@@ -166,12 +191,13 @@ export async function actOnRed(dir, found, { now = Date.now(), ref, update, rene
     if (revert) {
       const owner = item?.owner ?? null
       const out = enqueue(q, { repo, pr: revert.pr, lowers: [], owner, author: item?.author ?? owner, notice: item?.notice ?? null, deleteBranch: true, title: revertTitle(culprit.subject), at }, ref)
-      if (out.item) out.item.front = at
+      if (out.item) out.item.front = out.item.front ?? at
     }
     const text = culprit
       ? `Merge queue: main went red after ${name} (${culprit.subject}) landed: ${failureLine(red)}. Found as ${how}. ${did} ${ref(repo, issue.number)} has the failure; fix it on a new branch and queue it again.`
       : `Merge queue: main went red at ${short(red.red)} (${failureLine(red)}), and its culprit was not found: ${why} ${ref(repo, issue.number)} has the failure.`
     pushEvent(q, item ?? { repo, pr: pr ?? null, owner: null }, { kind: 'main-red', text, notify: true, at, data: { issue: issue.number, ...(revert ? { revert: revert.pr } : {}) } })
+    if (q.guard) delete q.guard.acting
   })
   return { outcome: revert ? 'reverting' : 'reported', issue: issue.number, ...(revert ? { revert } : {}) }
 }
