@@ -292,17 +292,17 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'forget_app_answer',
-    description: "Forgets the person's remembered answer to one thing an app asked for, so it asks again. Acts at once.",
+    description: "Forgets an app grant: the person's remembered answer to one thing an app asked for, so it asks again. Acts at once.",
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), capability: z.string().describe('As list_app_grants names it.') }).strict(),
   },
   {
     name: 'revoke_project_consent',
-    description: 'Revokes a remembered consent of one project reaching another, so the next reach asks again. Acts at once.',
+    description: 'Revokes a grant of one project reaching another (a remembered consent), so the next reach asks again. Acts at once.',
     schema: z.object({ from: z.string().describe('Project name or id.'), to: z.string().describe('Project name or id.'), kind: z.enum(['delegate', 'apps', 'agents']) }).strict(),
   },
   {
     name: 'share_app',
-    description: "Shares a project's inner app with the other projects, or stops. Sharing waits for the person's card; stopping acts at once.",
+    description: "Grants a project's inner app to the other projects (shares it), or stops. Sharing waits for the person's card; stopping acts at once.",
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
   },
   {
@@ -760,7 +760,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
-  'Linked machines: add_machine and others (centralu_commands "machine"). Settings: get_preferences, set_preferences. Trash: list_trash.',
+  // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
+  'Machines and trust: centralu_commands "machine trust rule grant limits". Settings: get_preferences, set_preferences. Trash: list_trash.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

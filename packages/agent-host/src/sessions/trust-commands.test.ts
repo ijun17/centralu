@@ -12,7 +12,7 @@ import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
+import { commandsFor, ORCHESTRATOR_INSTRUCTIONS, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -474,16 +474,13 @@ describe('set_agent_limits', () => {
 })
 
 describe('who may run them', () => {
-  it('are found through centralu_commands', async () => {
+  it('are found through centralu_commands with the words the instructions give', async () => {
     const orc = await mgr.orchestrator()
-    const found = [
-      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trust' })).text,
-      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'rule' })).text,
-      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'app' })).text,
-      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'consent' })).text,
-      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'limits' })).text,
-    ].join('\n')
+    const query = /centralu_commands "([^"]+)"/.exec(ORCHESTRATOR_INSTRUCTIONS.split('\n').find((l) => l.startsWith('Machines and trust'))!)![1]
+    const found = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query })).text
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
+    // The machine commands are found by the same words
+    expect(found).toContain('- add_machine:')
   })
 
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {

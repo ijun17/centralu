@@ -1462,7 +1462,7 @@ preferences) are the Trash screen's calls. `what` is `session` (the default) or 
 (`TrustFlow`, `sessions/trust-flow.ts`, through the same window RPC as the preferences) are the project list's and the
 trust switch's calls (`projects.list`, `projects.setTrusted`, with `apps.list` and `machines.list` to name what the
 trust covers and where). `project` is an id, or a name exactly one project has (two that share it are named with their
-ids).
+ids). The orchestrator's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
 
 - `list_projects`: each project with its id, folder, machine and whether it is trusted.
 - `set_project_trust` with `trusted: false` acts at once, as the window's switch does: the project's apps stop and its
