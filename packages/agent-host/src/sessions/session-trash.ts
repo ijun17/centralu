@@ -23,6 +23,7 @@ import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { gitWorktreeRemove } from '../dev-services/git-worktree.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
+import { withHubMark } from './hub-preset.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
 import { codeIntelligenceKey } from './tool-profiles.js'
 import { type DelegationFlow, agentStartPersonText } from './delegation-flow.js'
@@ -48,6 +49,8 @@ export type SessionTrashHost = {
   forgetCommits: (sessionId: string) => void
   /** The rest a card of it was raised in, if one is remembered (`CardRests`) */
   forgetCardRest: (sessionId: string) => void
+  /** Notices kept for it because it could not be woken (#1186) */
+  forgetHeldNotices: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -58,7 +61,7 @@ export type SessionTrashHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>
-  quitNotices: { sessionId: string; requester: string; }[]
+  quitNotices: { sessionId: string; requester: string; swapped?: true }[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
   readonly recoveryRepair: Promise<void>
@@ -304,6 +307,7 @@ export class SessionTrash {
     this.host.children.dropObserverNotesOf(sessionId)
     this.host.forgetCommits(sessionId)
     this.host.forgetCardRest(sessionId)
+    this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)
@@ -466,7 +470,8 @@ export class SessionTrash {
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
       if (fixed !== back || recovered) this.host.store.sessions.upsertSession(fixed)
-      this.host.meta.set(sessionId, fixed)
+      // Started from a linked computer (#1273): its mark is kept beside the row until the purge, and comes back with it
+      this.host.meta.set(sessionId, withHubMark(this.host.store.settings, fixed))
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
       if (recovered) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })

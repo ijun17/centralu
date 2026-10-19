@@ -1,4 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -49,6 +49,44 @@ const PATH_MAX = 4096
 function onePath(value: unknown): string {
   const text = String(value ?? '').replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
   return text.length > PATH_MAX ? `${text.slice(0, PATH_MAX)}…` : text
+}
+
+/** The most of a last response a hub reads in one call (`host.lastAnswer`'s ceiling) */
+const ANSWER_MAX_CHARS = 100_000
+
+/**
+ * The text of an assistant line an older machine's `host.readSession` gave, or null for any other line. That machine cut
+ * a line at 2,000 characters of its JSON and added an ellipsis, so a long answer's line did not parse, and the read
+ * went on to an older line or came back empty (#1186): the head of such a line is read back here, as cut
+ */
+function assistantText(line: string): { text: string; cut: boolean } | null {
+  try {
+    const parsed = JSON.parse(line) as { role?: unknown; text?: unknown }
+    return parsed.role === 'assistant' && typeof parsed.text === 'string' ? { text: parsed.text, cut: false } : null
+  } catch {
+    const m = /^\{"ts":"[^"]*","role":"assistant","text":"((?:[^"\\]|\\.)*)/.exec(line)
+    if (!m) return null
+    // A cut can end inside an escape (`\u00`): shorten it until it reads
+    for (let end = m[1]!.length; end >= Math.max(0, m[1]!.length - 6); end--) {
+      try {
+        return { text: JSON.parse(`"${m[1]!.slice(0, end)}"`) as string, cut: true }
+      } catch {
+        // Not a whole escape yet
+      }
+    }
+    return null
+  }
+}
+
+/** Whether a machine answered a read from an offset as one: no line, or one line that says what it shows (`lineText`) */
+function offsetAnswered(lines: readonly string[]): boolean {
+  if (lines.length === 0) return true
+  if (lines.length > 1) return false
+  try {
+    return typeof (JSON.parse(lines[0]!) as { shown?: unknown }).shown === 'string'
+  } catch {
+    return false
+  }
 }
 
 /** A machine's line of a conversation: kept when it is one line, as the machine's code makes it; quoted as one otherwise */
@@ -134,6 +172,8 @@ export function linkedSessions(
       machine: m.name,
       machineId: m.id,
       ...(typeof p.trusted === 'boolean' ? { trusted: p.trusted } : {}),
+      // Bounded here too: the machine's answer is its own, and the text goes into a task given there
+      ...(typeof p.agentInstructions === 'string' && p.agentInstructions.trim() ? { agentInstructions: p.agentInstructions.slice(0, AGENT_INSTRUCTIONS_MAX) } : {}),
     }
   }
 
@@ -282,10 +322,30 @@ export function linkedSessions(
           ...(opts.effort ? { effort: opts.effort } : {}),
           ...(opts.worktreeBranch ? { worktree: true, worktreeBranch: opts.worktreeBranch } : {}),
           ...(opts.agentDepth ? { agentDepth: opts.agentDepth } : {}),
-        })) as { id: string; name: string }
+          // The caller's preset carried across (#1273): the machine starts it under `auto` only as its own switch allows
+          ...(opts.callerPreset ? { fromHub: { callerPreset: opts.callerPreset } } : {}),
+        })) as { id: string; name: string; permissionPreset?: unknown }
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
-        return { sessionId: info.id, name: opts.name ?? info.name }
+        const preset = PermissionPreset.safeParse(info.permissionPreset)
+        return { sessionId: info.id, name: opts.name ?? info.name, ...(preset.success ? { preset: preset.data } : {}) }
       })
+    },
+
+    async hubAuto(machineId) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      // A build from before #1273 has no `host.hubAuto`, and drops `fromHub`: said as such, not as a failure
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
+          return { allowed: r?.allowed === true }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: host.hubAuto')) older = true
+          throw err
+        }
+      })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1273`, olderBuild: true } : r
     },
 
     async origin(project) {
@@ -321,6 +381,43 @@ export function linkedSessions(
         await route('agents.deleteSession', { sessionId })
         return {}
       })
+    },
+
+    async agentInstructions(project) {
+      const m = owner(project.id)
+      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
+      return attempt(m, async () => {
+        const list = await m.call('projects.list', {})
+        const now = (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).find((p) => p?.id === project.id)
+        if (!now) throw new Error(`${project.name} is no longer a project there`)
+        return { text: now.agentInstructions ?? '' }
+      })
+    },
+
+    async deleteAgentChild(sessionId, branch) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
+          if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
+          const { worktree, path, branch: on, why, note } = answer.data
+          // The machine's words, each on one line, as every text from it the hub puts in an answer
+          return {
+            worktree,
+            ...(path ? { path: onePath(path) } : {}),
+            ...(on ? { branch: oneLine(on) } : {}),
+            // A sentence, not a label: longer, and still one line
+            ...(why ? { why: oneLine(why, 1_000) } : {}),
+            ...(note ? { note: oneLine(note, 1_000) } : {}),
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: agents.deleteAgentChild')) older = true
+          throw err
+        }
+      })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1161`, olderBuild: true } : r
     },
 
     async lastUserMessage(sessionId) {
@@ -478,17 +575,28 @@ export function linkedSessions(
     },
 
     async lastWords(sessionId, maxChars) {
-      const r = await this.read(sessionId, 8)
-      for (const line of [...(r.lines ?? [])].reverse()) {
-        try {
-          const parsed = JSON.parse(line) as { role?: unknown; text?: unknown }
-          // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
-          if (parsed.role === 'assistant' && typeof parsed.text === 'string') return clipPreview(parsed.text, maxChars)
-        } catch {
-          // A line that is not the machine's JSON says nothing to report
-        }
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      await needed(m)
+      if (!m.reachable) return { ok: false, error: `${m.name} is ${NOT_REACHABLE}` }
+      try {
+        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
+        const r = HostLastAnswerResult.safeParse(answer)
+        if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+        // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
+        const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
+        return { ok: true, text, length: r.data.length, seq: r.data.seq }
+      } catch (err) {
+        if (!(err instanceof Error && /Unknown method: host\.lastAnswer/.test(err.message))) return { ok: false, error: cause(m, err) }
       }
-      return ''
+      // A machine on a Centralu from before #1186: its last assistant line, which it cut at 2,000 characters of JSON
+      const r = await this.read(sessionId, 8)
+      if (!r.ok) return { ok: false, error: r.error ?? 'it could not be read' }
+      for (const line of [...(r.lines ?? [])].reverse()) {
+        const said = assistantText(line)
+        if (said !== null) return { ok: true, text: clipPreview(said.text, maxChars) + (said.cut && said.text.length <= maxChars ? '…' : ''), length: said.text.length, seq: null }
+      }
+      return { ok: true, text: '', length: 0, seq: null }
     },
 
     async list() {
@@ -523,9 +631,17 @@ export function linkedSessions(
           ...(limit !== undefined ? { limit } : {}),
           ...(opts?.around !== undefined ? { around: opts.around } : {}),
           ...(opts?.tools ? { tools: true } : {}),
+          ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
         })
         const r = HostReadSessionResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+        /*
+         * A read from an offset that an older machine answered as its plain read (#1186): it ignores `offset`, so the same
+         * cut lines would come back on every read on, and the model would read them again and again. Said instead
+         */
+        if (opts?.offset !== undefined && !offsetAnswered(r.data.lines)) {
+          return { ok: false, error: `${m.name} runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters` }
+        }
         return { ok: true, state: oneLine(r.data.state, 40), lines: r.data.lines.map(fencedLine) }
       } catch (err) {
         return { ok: false, error: cause(m, err) }

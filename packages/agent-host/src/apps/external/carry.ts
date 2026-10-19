@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { VERSIONS_REL } from './versions.js'
 
@@ -23,6 +23,56 @@ export function carryAppFiles(dataRoot: string, fromKey: string, toKey: string):
   copyFolderOnce(join(dataRoot, 'app-data', fromKey), join(dataRoot, 'app-data', toKey))
   for (const suffix of ['.log', '.log.1']) copyFileOnce(join(dataRoot, 'app-logs', fromKey + suffix), join(dataRoot, 'app-logs', toKey + suffix))
   copyFolderOnce(join(dataRoot, VERSIONS_REL, fromKey), join(dataRoot, VERSIONS_REL, toKey))
+}
+
+/**
+ * The way back (#1204): what a deleted project's root app kept under its project's key goes back to the key it was
+ * carried from, so a folder put back into the user folder finds it (its adoption carries that key into its new project).
+ * Moved, not copied: the project's key has no reader left, since a project id is never reused.
+ *
+ * **Nothing the old key holds is deleted.** It is usually the copy the carry was taken from, but it can be the only
+ * copy of something: a previous build serving after a rollback keeps working on the old key (root-apps.md §4), so what
+ * the app wrote there is nowhere else. Where both keys hold an item, the old key's goes to `keep` first (in
+ * `app-trash/`, beside the folder the project gave back, where no sweep looks), then the project's takes its place. A
+ * host stopped between the two leaves both: the old key's in `keep`, the project's under the project's key, which the
+ * next return moves. An item only the old key holds stays where it is.
+ */
+export function returnAppFiles(dataRoot: string, fromKey: string, toKey: string, keep: string): void {
+  const item = (area: string, key: string, suffix = '') => join(dataRoot, area, key + suffix)
+  const back = (area: string, suffix = '') =>
+    returnOnce(item(area, fromKey, suffix), item(area, toKey, suffix), join(keep, area, basename(toKey) + suffix))
+  back('app-data')
+  for (const suffix of ['.log', '.log.1']) back('app-logs', suffix)
+  back(VERSIONS_REL)
+  // The key's scope folders (`<area>/<project id>/`), once nothing is left in them: a project id is never reused
+  const scope = dirname(fromKey)
+  if (scope !== '.') for (const area of ['app-data', 'app-logs', VERSIONS_REL]) removeIfEmpty(join(dataRoot, area, scope))
+}
+
+/** Removes a folder only when it is empty: `rmdir` refuses anything else */
+function removeIfEmpty(dir: string): void {
+  try {
+    rmdirSync(dir)
+  } catch {
+    // Absent, or something is still in it: left as it is
+  }
+}
+
+function returnOnce(from: string, to: string, aside: string): void {
+  if (!existsSync(from)) return
+  mkdirSync(dirname(to), { recursive: true })
+  const kept = existsSync(to)
+  if (kept) {
+    if (existsSync(aside)) throw new Error(`${aside} is already there`)
+    mkdirSync(dirname(aside), { recursive: true })
+    renameSync(to, aside)
+  }
+  try {
+    renameSync(from, to)
+  } catch (e) {
+    if (kept) renameSync(aside, to)
+    throw e
+  }
 }
 
 /** A copy left beside its place by a host that stopped mid-carry: `<name>.carry-<uuid>` */

@@ -112,7 +112,7 @@ export class TrashMock {
           // The mock has no disk: the folder is always there, so the project is registered again under its id
           const p: ProjectInfo = {
             id: t.project.id, path: t.project.path, name: t.project.name, defaultTool: this.toolsMock.firstRegisteredTool(), defaultModels: {},
-            commands: [], worktreeSetup: null, worktreeManager: null, trusted: false,
+            commands: [], worktreeSetup: null, agentInstructions: '', worktreeManager: null, trusted: false,
             git: { branch: 'main', changedFiles: 0, isRepo: true },
           }
           this.projectStore.list.push(p)

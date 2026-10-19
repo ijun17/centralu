@@ -389,6 +389,20 @@ describe('merging the session list on reconnect (U4)', () => {
     })
   })
 
+  // #1273: a session a linked computer started says so on its row and header, here and on that computer
+  it('a session a linked computer started is read as such from the list, new or already held', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('fh-1', sessionInfo('fh-1', { startedFromHub: true, permissionPreset: 'auto' }))
+    mock.sessions.set('fh-2', sessionInfo('fh-2'))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().sessions['fh-1']).toMatchObject({ startedFromHub: true, permissionPreset: 'auto' })
+    expect(useStore.getState().sessions['fh-2']!.startedFromHub).toBe(false)
+    mock.sessions.get('fh-2')!.startedFromHub = true
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+    await vi.waitFor(() => expect(useStore.getState().sessions['fh-2']!.startedFromHub).toBe(true))
+  })
+
   it('a session deleted while disconnected leaves nothing behind, the way a deletion does (#163)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('u4-kept', sessionInfo('u4-kept'))

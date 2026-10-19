@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
+import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, ORCHESTRATOR_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
 import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
@@ -216,6 +216,11 @@ describe('offersAlways', () => {
   // The orchestrator's change to a linked machine (#1219): each is asked on its own, and the host remembers nothing
   it("is off for the orchestrator's change to a linked machine", () => {
     expect(offersAlways({ kind: 'other', raw: 'Remove the linked machine Laptop (me@laptop)?', about: MACHINE_CHANGE })).toBe(false)
+  })
+
+  // The orchestrator's change to its settings or the trash (#1219): asked every time, nothing remembered
+  it("is off for the orchestrator's change to its settings or the trash", () => {
+    expect(offersAlways({ kind: 'other', raw: 'Delete 2 sessions in the trash for good?', about: ORCHESTRATOR_CHANGE })).toBe(false)
   })
 })
 

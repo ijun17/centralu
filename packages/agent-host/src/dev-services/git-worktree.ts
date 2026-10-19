@@ -140,6 +140,22 @@ export async function gitBranchAhead(repoCwd: string, branch: string, trunk: str
   }
 }
 
+/**
+ * How many commits of a worktree's own neither a remote nor the trunk has (#1161 item 3): what removing the worktree and
+ * its branch would lose for good. Its own: those its checkout is on now (`head`, a commit id) and those of the branch
+ * made for it, which the agent may have moved off. Read in the repository, against every remote-tracking ref as last
+ * fetched or pushed: a branch pushed from here has its own. null when it cannot be told (a ref gone, git failing),
+ * which a caller must read as "keep it".
+ */
+export async function gitUnpublishedCommits(repoCwd: string, head: string, branch: string, trunk: string): Promise<number | null> {
+  try {
+    const n = Number((await git(repoCwd, ['rev-list', '--count', head, `refs/heads/${branch}`, '--not', trunk, '--remotes'])).trim())
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  }
+}
+
 /** Deletes a branch ref after the caller has preserved local work or obtained the person's discard decision. */
 export async function gitBranchDelete(repoCwd: string, branch: string, trust: GitTrust = {}): Promise<void> {
   await git(repoCwd, ['branch', '-D', branch], trust)

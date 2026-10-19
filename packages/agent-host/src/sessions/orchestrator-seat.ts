@@ -8,8 +8,11 @@ import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { FolderAdded } from './project-creation.js'
 import type { MachineAnswer, MachineRequest } from './machine-flow.js'
+import type { PreferencesAnswer, PreferencesRequest } from './preferences-flow.js'
+import type { TrashAnswer, TrashRequest } from './trash-flow.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
-import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
+import { LINE_WINDOW_CHARS, lineText, sessionLines } from './session-lines.js'
+import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
  * What the orchestrator tools reach of the session manager (#428): its sessions and store, who owns whose work, and
@@ -78,6 +81,10 @@ export type OrchestratorSeatHost = {
   machineList(): MachineInfo[]
   /** The machine commands (#1219): `MachineFlow.run`, with the orchestrator as the session its cards stand in */
   machineRequest(sessionId: string, req: MachineRequest, signal?: AbortSignal): Promise<MachineAnswer>
+  /** The preference commands (#1219): `PreferencesFlow.run`, with the orchestrator as the session its card stands in */
+  preferencesRequest(sessionId: string, req: PreferencesRequest, signal?: AbortSignal): Promise<PreferencesAnswer>
+  /** The trash commands (#1219): `TrashFlow.run`, with the orchestrator as the session its cards stand in */
+  trashRequest(sessionId: string, req: TrashRequest, signal?: AbortSignal): Promise<TrashAnswer>
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -107,6 +114,9 @@ export type OrchestratorSeatHost = {
  * Report requests of overlapping linked sends (#839): what each one replaced, and those whose send failed while another
  * send's request stood over them. A failed send puts back what was there before it, past any such failed request.
  */
+/** The rows one read from an offset loads (#1186): a response's messages, merged into the one line it reads */
+const OFFSET_READ_ROWS = 200
+
 const replacedBy = new WeakMap<LinkedReport, LinkedReport | undefined>()
 const failedSends = new WeakSet<LinkedReport>()
 
@@ -476,6 +486,21 @@ export function orchestratorToolsFor(
        * row was a delta, unchanged, to today's merged rows would mean pulling up hundreds of messages.
        */
       const around = opts?.around
+      /*
+       * A line read from an offset (#1186): the one line that starts at `around`, built from its rows on with the same
+       * merging as the plain read, from character `offset` on. A long answer cut in a plain read (or by ask_project's
+       * cut) is read to its end this way; before, the middle of it could not be read back at all.
+       */
+      if (around != null && opts?.offset != null) {
+        const from = host.store.messages.loadMessagesFrom(sessionId, around - 1, OFFSET_READ_ROWS)
+        const line = sessionLines(cut === null ? from : from.filter((r) => r.seq < cut), opts)[0]
+        return {
+          ok: true,
+          state: target.state,
+          ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
+          lines: line ? [lineText(line, opts.offset, LINE_WINDOW_CHARS, true)] : [],
+        }
+      }
       const read = around
         ? [
             ...host.store.messages.loadMessages(sessionId, limit, around + 1),
@@ -483,63 +508,25 @@ export function orchestratorToolsFor(
           ]
         : host.store.messages.loadMessages(sessionId, limit * 2)
       const rows = cut === null ? read : read.filter((r) => r.seq < cut)
-
-      const lines: string[] = []
+      const lines = sessionLines(rows, opts)
       /** The line that contains the seq `around` points at — the window is cut to align with this */
-      let anchor = -1
-      const stamp = (ts: number) => new Date(ts).toISOString().slice(0, 16).replace('T', ' ')
-      for (const r of rows) {
-        const p = r.payload as { text?: string; summary?: { title?: string; tool?: string } }
-        if (r.kind === 'text' && r.role === 'assistant') {
-          const text = p.text ?? ''
-          const last = lines[lines.length - 1]
-          if (last) {
-            try {
-              const parsed = JSON.parse(last) as { role?: string; text?: string }
-              // Two messages of one response are two paragraphs, as `turnAnswer` joins them (#428)
-              if (parsed.role === 'assistant') {
-                lines[lines.length - 1] = JSON.stringify({ ...parsed, text: parsed.text ? `${parsed.text}\n\n${text}` : text })
-              } else {
-                lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
-              }
-            } catch {
-              lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
-            }
-          } else {
-            lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
-          }
-        } else if (r.kind === 'text') {
-          // Who wrote it (#838): a child's report or an app's text is not the person's, and says so on its line
-          const author = authorOf(r.payload)
-          const by = author.kind === 'session' ? { from: author.name } : author.kind === 'app' ? { fromApp: author.name } : {}
-          lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'user', ...by, text: p.text ?? '' }))
-        } else if (r.kind === 'tool_call' && p.summary?.title) {
-          /*
-           * **A tool call is folded up.** Expanded, a full python script or a full commit message
-           * takes up all the space, burying the actual person-agent conversation underneath it (a
-           * dogfooding finding). One line is enough to say what happened; the full body can be
-           * expanded with tools:true if it is actually needed.
-           */
-          const title = opts?.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
-          lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'tool', tool: p.summary.tool ?? '?', title }))
-        }
-        if (around != null && anchor < 0 && r.seq >= around && lines.length > 0) anchor = lines.length - 1
-      }
+      const at = around != null ? rows.find((r) => r.seq >= around)?.seq : undefined
+      const anchor = at === undefined ? -1 : lines.findLastIndex((l) => l.seq <= at)
       /*
        * When `around` is given, the window is cut **centered on that spot.**
        * Both branches used to cut off the tail the same way, so even arriving with the seq recall
        * pointed at, only the trailing end of the window was ever visible — leaving the same "found
        * it but cannot get there" state intact.
        */
-      const from = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
-      const picked = from >= 0 ? lines.slice(from, from + limit) : lines.slice(-limit)
+      const start = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
+      const picked = start >= 0 ? lines.slice(start, start + limit) : lines.slice(-limit)
       // The cards of a turn this seat gave it (#676): this read is where a directing seat finds them
       const cards = host.routedCards(sessionId, orchestratorId)
       return {
         ok: true,
         state: target.state,
         ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
-        lines: picked.map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
+        lines: picked.map((l) => lineText(l)),
         ...(cards.length ? { cards } : {}),
       }
     },
@@ -694,6 +681,12 @@ export function orchestratorToolsFor(
 
     // Changes to the linked machines (#1219), behind the person's card where they change a machine or this computer's reach
     machine: async (req, signal) => (central ? host.machineRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes linked machines' }),
+
+    // The preferences (#1219): the central orchestrator's alone, through the window's own calls
+    preferences: async (req, signal) => (central ? host.preferencesRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes preferences' }),
+
+    // The trash (#1219): the central orchestrator's alone; deleting for good waits for the person's card
+    trash: async (req, signal) => (central ? host.trashRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator manages the trash' }),
 
     /*
      * A handoff (#694): the central orchestrator's alone (the profile gives it no other seat; checked here too, as this

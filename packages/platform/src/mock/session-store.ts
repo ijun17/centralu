@@ -4,6 +4,7 @@ import {
   continuesStreamRow,
   endsStreamRow,
   keepsSubagentStep,
+  nextContext,
   recordedRowKind,
   streamRowKind,
   subagentStepRow,
@@ -88,20 +89,17 @@ export class SessionStore {
     } else if (event.type === 'worktree_pr') {
       // The same rule as the real thing (#76 stage 3): the PR state also stays in the list after a reconnect
       s.worktreePr = event.pr
-    } else if (event.type === 'context_update') {
-      /*
-       * The same rule as the real thing (the host): context usage **stays on the session**
-       * (issue #48).
-       *
-       * While the mock was only emitting this, the gauge reverted to `—` on every path
-       * that re-fetches the list (app restart, reconnect) — the real thing holds onto the
-       * value, so if this spot is left empty, e2e passes a state the real thing could
-       * never produce as normal.
-       */
-      s.context = { used: event.used, window: event.window, exactness: event.exactness }
     }
-    // The same rule as the real thing (#304): a fresh conversation empties the gauge until the tool reports again
-    if (event.type === 'conversation_reset') s.context = null
+    /*
+     * The same rule as the real thing (the host, `nextContext`): context usage **stays on the session** (issue #48), a
+     * fresh conversation empties the gauge until the tool reports again (#304), and a compaction that says its size
+     * moves it there (#1282).
+     *
+     * While the mock only emitted the reading, the gauge reverted to `—` on every path that re-fetches the list (app
+     * restart, reconnect) — the real thing holds onto the value, so if this spot is left empty, e2e passes a state the
+     * real thing could never produce as normal.
+     */
+    s.context = nextContext(s.context, event)
     // The same rule as the real thing (#297): the CLI version the process reports stays on the session
     if (event.type === 'agent_version') s.agentVersion = event.version
     // The same rule as the real thing (#568): a session put to sleep lists as not live until it is woken

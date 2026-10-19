@@ -148,6 +148,27 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /**
+   * The machine's own "Allow auto from a linked computer" (#1273 review): read (`host.hubAuto` there), or set when
+   * `allowed` is given (`host.setHubAuto`), as that machine answers it. Only over the link while it is up: nothing is
+   * started or connected for it. `older`: that machine's Centralu predates the switch; `unreachable`: the link is not up,
+   * or went down during the call. Any other failure (a timeout, a refusal there) is thrown in its own words (#1273
+   * review), never passed off as the link being down
+   */
+  async hubAuto(allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'> {
+    const client = this.client
+    if (!client?.connected) return 'unreachable'
+    try {
+      const r = (await (allowed === undefined ? client.call('host.hubAuto', {}) : client.call('host.setHubAuto', { allowed }))) as { allowed?: unknown }
+      return r?.allowed === true ? 'on' : 'off'
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err)
+      if (/^Unknown method/.test(message)) return 'older'
+      if (!client.connected) return 'unreachable'
+      throw rpcError(`${this.name} did not answer for its "Allow auto from a linked computer": ${message}`)
+    }
+  }
+
+  /**
    * What would stop there if its host stopped now (`host.activity` on the remote), for the "Update"
    * prompt. Through the link when connected; while the link is held at `versions_differ` on one
    * protocol, through a short connection of its own. Null when the machine cannot say

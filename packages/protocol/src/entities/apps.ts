@@ -84,8 +84,10 @@ export const ExternalAppInfo = z.object({
    * when it could not be moved, and saving is refused until the file is fixed or removed. `at` is when the host met
    * it. Gone once this app has a value again (the file holds every app's, #993 review), or once a stuck file reads
    * again; a copy moved aside is found in the data folder, so a restart says it again. Absent from older hosts.
+   * `reason` says why in a few words (`it is not valid JSON`, `Centralu may not read it (EACCES)`), never anything the
+   * file holds (#944); absent when the host does not know (a copy found after a restart) and from older hosts.
    */
-  secretsUnreadable: z.object({ movedTo: z.string().nullable(), at: z.number() }).optional(),
+  secretsUnreadable: z.object({ movedTo: z.string().nullable(), at: z.number(), reason: z.string().optional() }).optional(),
   /** Which linked machine the app lives on (#82); absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
   machine: z.string().nullable().optional(),
   /**

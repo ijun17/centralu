@@ -194,6 +194,63 @@ export const ORCHESTRATOR_TOOLS = [
     description: 'Turns on or off a machine starting Centralu when it boots. The person approves a card first.',
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
   },
+  /*
+   * #1219: the preferences. Rare commands (RARE_COMMANDS), through the window's own calls. Only the
+   * reversible settings the window offers have a field; trust, approval rules and what widens agents' reach have none.
+   */
+  {
+    name: 'get_preferences',
+    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, idle sleep, the update switches.",
+    schema: z.object({}),
+  },
+  {
+    name: 'set_preferences',
+    description:
+      'Changes settings the window offers, as it does; give only what changes (get_preferences shows the values and the choices). ' +
+      'Turning on applyUpdatesWhenIdle asks the person first; the rest act at once.',
+    schema: z
+      .object({
+        theme: z.string().optional().describe('A theme by id or name. It sets the dark or light side by its base and shows that side.'),
+        textSize: z.number().optional().describe('0.85, 0.925, 1, 1.1 or 1.25; another number lands on the nearest.'),
+        bodyFont: z.string().optional().describe('A font family; empty for the default.'),
+        codeFont: z.string().optional().describe('A font family; empty for the default.'),
+        lineHeight: z.enum(['compact', 'normal', 'relaxed']).optional(),
+        idleSleepMinutes: z.union([z.number().int().positive(), z.literal('never')]).optional().describe('Minutes before an idle session sleeps, or "never".'),
+        checkForUpdates: z.boolean().optional(),
+        applyUpdatesWhenIdle: z.boolean().optional(),
+        moveIdleSessionsToNewAgentCli: z.boolean().optional(),
+      })
+      .strict(),
+  },
+  /*
+   * #1219: the trash. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
+   * waits for the person's card naming what goes.
+   */
+  {
+    name: 'list_trash',
+    description: 'Lists the trash: deleted sessions, kept app runs, trashed subagent steps, and sessions whose subagent steps could be trashed.',
+    schema: z.object({}),
+  },
+  {
+    name: 'restore_trashed',
+    description: 'Brings a session back from the trash, or (what "steps") puts its trashed subagent steps back under their cards. No card.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
+  },
+  {
+    name: 'trash_subagent_steps',
+    description: "Moves a live session's subagent steps to the trash (its conversation stays); restore_trashed brings them back. No card.",
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.') }),
+  },
+  {
+    name: 'delete_trashed',
+    description: 'Deletes one trashed session, or (what "steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
+  },
+  {
+    name: 'empty_trash',
+    description: 'Deletes everything listed in the trash for good, kept app runs included. The person approves a card naming what goes first.',
+    schema: z.object({}),
+  },
   {
     name: 'create_session',
     description:
@@ -638,7 +695,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
-  'Commands for linked machines: add_machine, install_machine, remove_machine, reconnect_machine, set_machine_connect, set_machine_autostart.',
+  'Linked machines: add_machine and others (centralu_commands "machine"). Settings: get_preferences, set_preferences. Trash: list_trash.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',
@@ -717,8 +774,11 @@ const ORCHESTRATOR_ARGS = schemasOf(ORCHESTRATOR_TOOLS)
  */
 export const TOOL_ARGS = {
   ...ORCHESTRATOR_ARGS,
-  // The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required
-  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional() }),
+  /*
+   * The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required. `offset`
+   * (#1186) is shown to no seat: a line cut, and ask_project's cut, spell out the read that uses it, as recall does `around`
+   */
+  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional(), offset: z.number().int().min(0).optional() }),
   ...schemasOf(AGENT_TOOLS),
   /*
    * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one
