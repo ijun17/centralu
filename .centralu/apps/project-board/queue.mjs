@@ -87,10 +87,13 @@ const refIn = (defaultRepo) => (repo, n) => (String(repo).toLowerCase() === Stri
 /**
  * Adds an event; `notify` ones are what the queuing session hears about. Keeps the last MAX_EVENTS.
  * `data` adds fields of its own: a conflict's `step` and `ms` (how long it took), a hand-off's `relay`.
+ * A message for the session whose item has a notice address (#1161 item 1) carries it as `to`: the server posts it
+ * into that session (queue-tools.mjs `tellSessions`) and marks it `told`.
  */
 export function pushEvent(q, item, { kind, text, notify = false, at, data = null }) {
   q.seq += 1
-  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text, ...(data ?? {}) })
+  const to = notify && item.notice ? { to: item.notice } : {}
+  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text, ...(data ?? {}), ...to })
   if (q.events.length > MAX_EVENTS) q.events.splice(0, q.events.length - MAX_EVENTS)
   return q.seq
 }
@@ -99,10 +102,12 @@ export function pushEvent(q, item, { kind, text, notify = false, at, data = null
  * Queues a pull request (or a stack through its top). Queuing one already queued replaces its lowers,
  * owner, author and branch setting. A pull request may be in one active item only, as a top or a lower.
  * `owner` is the session that queued it (it hears the queue's news); `author` the session that opened
- * or owns the pull request, which a conflict is handed to (#1182), or null when none is known.
+ * or owns the pull request, which a conflict is handed to (#1182), or null when none is known. `notice` is the
+ * queuing session's notice address (#1161 item 1), where its news is posted; queued again without one, it keeps
+ * the first.
  * Answers `{ item, replaced }`, or `{ error }` and changes nothing.
  */
-export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
+export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null, notice = null, deleteBranch = true, title = null, at }, ref = refIn(repo)) {
   const mine = findItem(q, repo, pr)
   for (const other of q.items.filter((i) => ACTIVE.has(i.state) && i !== mine && String(i.repo).toLowerCase() === String(repo).toLowerCase())) {
     if (other.lowers.includes(pr)) return { error: `${ref(repo, pr)} is already queued under ${ref(other.repo, other.pr)}.` }
@@ -117,6 +122,7 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null,
       lowers,
       owner: owner ?? mine.owner,
       author: author ?? mine.author ?? null,
+      notice: notice ?? mine.notice ?? null,
       deleteBranch,
       state: 'waiting',
       reason: null,
@@ -147,6 +153,7 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null,
     lowers,
     owner,
     author,
+    notice,
     deleteBranch,
     title,
     state: 'waiting',

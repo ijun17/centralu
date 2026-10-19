@@ -9,6 +9,7 @@ export function usesLines(uses: AppUses): string[] {
   if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
   // Kept running with nothing open while it says it is busy (#1236), in the app's own words
   if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
+  if (uses.notices) out.push('Post notices into the sessions that called it')
   return out
 }
 

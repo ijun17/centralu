@@ -6,6 +6,7 @@ import type { AppProcess } from './app-process.js'
 import { RUN_META } from './broker.js'
 import type { CapabilityDenial, CapabilityOrigin } from './desk.js'
 import type { HeldErrorBundle } from './errors.js'
+import { NOTICE_META } from './notices.js'
 import type { AppRef } from './ref.js'
 import { RunRow, type RunLedger } from './runs.js'
 import type { AppCallOutcome, AppCaller, AppRunStatus, RuntimeTiming } from './runtime-types.js'
@@ -21,6 +22,8 @@ export type CallsHost = {
   masker(ref: AppRef): (text: string) => string
   recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc?: AppProcess | null): void
   emitChanged(ref: AppRef, cause?: AppCaller | null): void
+  /** The address this app may later post a notice to for that session (#1161 item 1), or null: not declared, or no key */
+  noticeAddress(e: AppEntry, sessionId: string): string | null
 }
 
 /** How a caller follows one call (`ExternalApps.call`) */
@@ -208,6 +211,9 @@ export class AppCalls {
         sent = true
         readOnly = found.tool.annotations?.readOnlyHint === true
         callee = proc
+        // A session started this chain: an app that declares notices gets that session's address with the call (#1161 item 1)
+        const origin = this.chainOrigin(runId)
+        const notice = origin?.kind === 'session' ? this.host.noticeAddress(e, origin.sessionId) : null
         try {
           /*
            * Why `onprogress` is provided: the MCP SDK only attaches a progress token to a request when
@@ -220,7 +226,7 @@ export class AppCalls {
            * it is waiting for. Before this, it was dropped here and never reached anywhere.
            */
           const result = await proc.client.callTool(
-            { name, arguments: args, _meta: { [RUN_META]: runId } },
+            { name, arguments: args, _meta: { [RUN_META]: runId, ...(notice ? { [NOTICE_META]: notice } : {}) } },
             {
               signal: abort.signal,
               timeout: this.host.timing.callTimeoutMs,

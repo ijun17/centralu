@@ -72,6 +72,8 @@ export type BrokerAdmission = {
    * it is refused, or null once taken.
    */
   busy(reason: string | null): string | null
+  /** The app posts a notice to `address` (#1161 item 1, `NOTICE_TOOL`). Answers why it is refused, or null once delivered */
+  notify(address: string, text: string): Promise<string | null>
   /** Also records a request that was never admitted, in the run ledger (D-6) — a denial is a row too. This is where a person reads it, in the app's runs panel */
   refused(tool: BrokerToolName, args: Record<string, unknown>, why: string): void
 }
@@ -108,6 +110,13 @@ const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<
  */
 export const BUSY_TOOL = 'busy'
 
+/**
+ * The other request without a run id (#1161 item 1): a notice the app posts into a session that called it, to the
+ * address it was given with that call (`notices.ts`). Its whole check is the desk's (`BrokerDesk.notice`), which
+ * records it as a run row with no parent.
+ */
+export const NOTICE_TOOL = 'notify'
+
 const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) })
 
 /**
@@ -141,6 +150,22 @@ export function serveBroker(
             return text(refused, true)
           }
           return text(busy ? `busy: ${said}` : 'not busy')
+        },
+      )
+      server.registerTool(
+        NOTICE_TOOL,
+        {
+          description:
+            'Post a notice into a session that called this app, to the address the call carried in _meta["centralu/notice"]. Needs "uses": { "notices": true } in the manifest; no run id',
+          inputSchema: z.object({ to: z.string().max(400), text: z.string().max(20_000) }),
+        },
+        async ({ to, text: body }) => {
+          const refused = await admission.notify(to, body)
+          if (refused) {
+            admission.note(`broker ${refused}`)
+            return text(refused, true)
+          }
+          return text('delivered')
         },
       )
       for (const tool of BROKER_TOOLS) {

@@ -24,7 +24,7 @@ export class AppStartEnv {
     private readonly timing: RuntimeTiming,
     private readonly secrets: SecretStore,
     private readonly calls: Pick<AppCalls, 'openRuns'>,
-    private readonly desk: Pick<BrokerDesk, 'refused' | 'handle'>,
+    private readonly desk: Pick<BrokerDesk, 'refused' | 'handle' | 'notice'>,
     private readonly lifecycle: Pick<AppLifecycle, 'setBusy'>,
   ) {}
 
@@ -76,6 +76,8 @@ export class AppStartEnv {
             note,
             // Its own state, on its own pipe: whether this process is the app's current one is the lifecycle's to say (#1236)
             busy: (reason) => this.lifecycle.setBusy(e, pipeId, reason),
+            // Under the manifest this process started with, as every request it makes (#1161 item 1)
+            notify: (to, text) => this.desk.notice({ ref: e.ref, name: m.name, manifest: m }, to, text),
             refused: (tool, args, why) => this.desk.refused({ ref: e.ref, name: m.name, manifest: m }, tool, args, why),
           },
           /*

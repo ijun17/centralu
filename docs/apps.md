@@ -47,6 +47,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
 | `uses.agent`, `uses.apps`, `uses.host` | What the app **declares** it will ask Centralu for (§10) | Optional. A declaration, not a permission. Absent means nothing |
+| `uses.notices` | `true`: the app may post notices into a session that called it (§10, `notify`) | Optional. In `uses`, as above |
 | `uses.background` | What the app does in the background, in words the person reads (§4, "Busy") | Optional, 1 to 200 characters. Without it the app cannot keep itself running. In `uses`, so an imported app adding it is reviewed again (§12) and the trust card lists it |
 | `secrets` | Names of the secrets the app needs | Optional. Environment-variable names; `CENTRALU_*` and `CC_*` are reserved |
 | `view.origin` | `opaque` (default) or `app` (§6.4) | An unknown value is refused, not read as the default |
@@ -952,6 +953,21 @@ gate happens in one place, the broker desk (`desk.ts`).
   `uses.background`; a refusal goes to the app's log. Not a run: it leaves no run record. The
   template's `centralu.busy(reason)` sends only changes, in order, and resolves false (said once on
   stderr) when Centralu did not take it.
+- **`notify { to, text }`, the other request without a run id (#1161 item 1).** A notice into a
+  session that called the app, posted later from a timer or a queue: "merged #77", "#78 needs
+  attention". With `uses.notices: true`, every call a session's chain started carries that session's
+  address in `_meta["centralu/notice"]` (`centralu.noticeAddress()` in a tool handler). The address is
+  the session id with a MAC over (app, session) under a key in the data folder (`app-notice.key`,
+  0600; `notices.ts`): the app can name only sessions that called it, never one it read from a list,
+  another app's address does not open for it, and it still opens after the host restarts. The session
+  receives it as a report arrives: recorded as the app's message, handed to the agent in the app-text
+  frame (`appMessageFrame` `notice`: every line quoted, "the person did not write or read it"), and
+  an idle or asleep session wakes. Refused, with a reason the app reads, when undeclared, for an
+  address it was not given, when empty or over 4000 characters, past 10 a minute, while the host
+  hands over or quits (the app tries again), and once the session is gone. Every notice is a run
+  record with no parent, its session and text in the arguments, delivered or refused, so the Runs
+  panel shows what the app told which session. `centralu.notify(address, text)` resolves true once
+  delivered.
 - **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
   default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
   undeclared is refused before anything runs. Declaring is not permission.
@@ -1197,8 +1213,9 @@ from there it is an ordinary import, turned off unless the person enables it.
   is checked against the app-server protocol and a fake adapter only). fd 3 on Windows (spike
   S-5, §10) passes the broker test suites in the Windows CI job with Node apps; a Python app, and
   any app in the packaged Windows app, have not been tried.
-- The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
-  watcher). The host data list has two names.
+- The broker answers only while the app handles a call, except `busy` and `notify`: an app cannot
+  run an agent, call an app or read host data by itself (a timer, a watcher). The host data list has
+  two names.
 - Attaching another project's app (§9.4) is a project session's: the orchestrator, a worktree
   manager and a coordinator cannot. Codex gets an attached app only from its next turn, so the
   person has to send another message for the model to use it.

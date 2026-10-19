@@ -21,6 +21,7 @@ import { SecretStore, secretValueProblem } from './secrets.js'
 import { AppStartEnv } from './app-start-env.js'
 import { AppResources } from './app-resources.js'
 import { BusyBook } from './busy-book.js'
+import { NoticeAddresses } from './notices.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
 import { carryAppFiles, sweepCarryLeftovers } from './carry.js'
@@ -114,6 +115,8 @@ export class ExternalApps {
   /** The one wait before resuming them, from the first scan (`refresh`) */
   private resumeTimer: NodeJS.Timeout | null = null
   private resumeScheduled = false
+  /** The addresses an app may post a notice to: the sessions that called it (#1161 item 1) — `notices.ts` */
+  private notices: NoticeAddresses
 
   /** An app process's lifecycle (A-3) — `app-lifecycle.ts` */
   private lifecycle: AppLifecycle
@@ -125,6 +128,7 @@ export class ExternalApps {
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
     this.busyBook = new BusyBook(join(deps.dataRoot, 'app-busy.json'))
+    this.notices = new NoticeAddresses(join(deps.dataRoot, 'app-notice.key'))
     this.lifecycle = new AppLifecycle({
       timing: this.timing,
       disposed: () => this.disposed,
@@ -168,6 +172,7 @@ export class ExternalApps {
       masker: (ref) => this.startEnv.masker(ref),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       emitChanged: (ref, caller) => this.deps.emitChanged?.(ref, caller),
+      noticeAddress: (e, sessionId) => (e.manifest?.uses.notices ? this.notices.mint(this.startEnv.appKey(e.ref), sessionId) : null),
     })
     this.desk = new BrokerDesk(
       {
@@ -180,6 +185,7 @@ export class ExternalApps {
         chain: (runId) => this.calls.chainOf(runId),
         denied: (runId, d) => this.calls.denied(runId, d),
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
+        noticeSession: (ref, address) => this.notices.open(this.startEnv.appKey(ref), address),
       },
       deps.permissions ?? memoryCapabilityBook(),
       () => ({ questionMs: this.timing.capabilityQuestionMs, agentRateWindowMs: this.timing.agentRateWindowMs }),
@@ -878,7 +884,7 @@ export class ExternalApps {
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141)
-      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background) ? { uses: m.uses } : {}),
+      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background || m.uses.notices) ? { uses: m.uses } : {}),
       // Holding its process for background work now (#1236): the row says so, in the app's words
       ...(this.lifecycle.busyReason(e) !== null ? { busy: this.lifecycle.busyReason(e)! } : {}),
     }

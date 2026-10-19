@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
-import type { BrokerCall, BrokerToolName } from './broker.js'
+import { NOTICE_TOOL, type BrokerCall, type BrokerToolName } from './broker.js'
+import { NOTICE_MAX_CHARS, NOTICES_PER_MINUTE } from './notices.js'
 import {
   HOST_CAPABILITIES,
   capabilityKey,
@@ -96,6 +97,8 @@ export type DeskApps = {
    * can state it that way (alongside C-6).
    */
   denied(runId: string, denial: CapabilityDenial): void
+  /** The session a notice address names, if this app was given it with a call (#1161 item 1, `notices.ts`) */
+  noticeSession(ref: AppRef, address: string): string | null
   call(
     ref: AppRef,
     tool: string,
@@ -174,6 +177,12 @@ export type BrokerHost = {
    * sees them as they will stay. It never fails the app's call.
    */
   agentRunEnded?(run: { runId: string; sessionId: string; status: 'ok' | 'error' | 'cancelled' | 'rejected' }): Promise<void>
+  /**
+   * Posts an app's notice into a session that called it (#1161 item 1), as a report arrives: recorded as the app's
+   * message and handed to the agent framed as the app's text, waking an idle or asleep session. Throws with a reason
+   * the app reads when it cannot be delivered now (the session is gone, Centralu is restarting).
+   */
+  appNotice?(sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }): Promise<void>
 }
 
 /**
@@ -299,7 +308,7 @@ const firstText = (r: CallToolResult): string => r.content.find((c): c is { type
  * call_app, only if it ends without ever reaching the called app (if it does reach it, that app's own
  * row is the record).
  */
-function brokerRow(ledger: RunLedger | null, app: AppRef, tool: BrokerToolName, args: Record<string, unknown>, parentRunId: string | null, redact: (text: string) => string): RunRow {
+function brokerRow(ledger: RunLedger | null, app: AppRef, tool: BrokerToolName | typeof NOTICE_TOOL, args: Record<string, unknown>, parentRunId: string | null, redact: (text: string) => string): RunRow {
   return new RunRow(
     ledger,
     {
@@ -425,6 +434,51 @@ export class BrokerDesk {
    */
   refused(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, why: string): void {
     brokerRow(this.ledger, app.ref, tool, args, null, this.apps.redactor(app.ref)).close('rejected', why)
+  }
+
+  /** When each app's recent notices were posted (#1161 item 1), for `NOTICES_PER_MINUTE` */
+  private noticeTimes = new Map<string, number[]>()
+
+  /**
+   * A notice an app posts into a session that called it (#1161 item 1, `notify`) — the one request besides `busy`
+   * without a run id: the app's queue or timer speaks when nothing is calling it. Only with `uses.notices` declared,
+   * only to an address it was given with a call (`notices.ts`), at most `NOTICES_PER_MINUTE`, up to
+   * `NOTICE_MAX_CHARS`. Recorded as a run row with no parent, delivered or refused, so the person reads in the app's
+   * Runs panel what it told which session. Answers the refusal, or null once delivered.
+   */
+  async notice(app: DeskApp, address: string, text: string): Promise<string | null> {
+    // The session it names, recorded with the text: which session the app told what
+    const sessionId = this.apps.noticeSession(app.ref, address)
+    const row = brokerRow(this.ledger, app.ref, NOTICE_TOOL, { session: sessionId, text }, null, this.apps.redactor(app.ref))
+    const refuse = (why: string) => {
+      row.close('rejected', why)
+      return why
+    }
+    if (!app.manifest.uses.notices) {
+      return refuse('notify refused: this app does not declare "uses": { "notices": true } in centralu.app.json')
+    }
+    if (!sessionId) return refuse('notify refused: not an address this app was given with a call (a session that called it)')
+    const body = text.trim()
+    if (!body) return refuse('notify refused: the text is empty')
+    if (body.length > NOTICE_MAX_CHARS) return refuse(`notify refused: ${body.length} characters, over ${NOTICE_MAX_CHARS}; say less and point at where the rest is`)
+    const key = appKeyOf(app.ref.projectId, app.ref.appId)
+    const now = Date.now()
+    const recent = (this.noticeTimes.get(key) ?? []).filter((t) => now - t < 60_000)
+    if (recent.length >= NOTICES_PER_MINUTE) {
+      this.noticeTimes.set(key, recent)
+      return refuse(`notify refused: ${NOTICES_PER_MINUTE} notices in the last minute; post fewer, or one with several things in it`)
+    }
+    const host = this.host
+    if (!host?.appNotice) return refuse('notify is unavailable: this Centralu has no sessions to tell')
+    row.open()
+    try {
+      await host.appNotice(sessionId, body, { appId: app.ref.appId, projectId: app.ref.projectId, name: app.name })
+    } catch (e) {
+      return refuse(`notify could not reach the session: ${(e as Error).message}`)
+    }
+    this.noticeTimes.set(key, [...recent, now])
+    row.close('ok', null)
+    return null
   }
 
   /**

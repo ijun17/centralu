@@ -11,6 +11,8 @@
  *   centralu.callApp(app, tool, args)              call another app's tool (over fd 3)
  *   centralu.host(name)                            read Centralu data declared in uses.host (over fd 3)
  *   centralu.busy(reason) / centralu.busy(false)   keep running with nothing open while busy (uses.background)
+ *   centralu.noticeAddress()                       the calling session's address, for a notice later (uses.notices)
+ *   centralu.notify(address, text)                 post a notice into that session, from anywhere (over fd 3)
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
  */
@@ -148,6 +150,7 @@ export const centralu = {
         runId: ctx?.mcpReq?._meta?.[RUN_META] ?? null,
         signal: ctx?.mcpReq?.signal,
         progressToken: ctx?.mcpReq?._meta?.progressToken,
+        notice: ctx?.mcpReq?._meta?.['centralu/notice'] ?? null,
         notify: ctx?.mcpReq?.notify,
       }
       return runs.run(store, async () => {
@@ -230,6 +233,33 @@ export const centralu = {
     const want = reason === false || reason === null || reason === undefined ? null : String(reason).trim().slice(0, 200) || 'background work'
     busyWanted = want
     return sendBusy()
+  },
+
+  /**
+   * The address of the session whose call this is, for a notice later (`centralu.notify`), or null: the call did not
+   * come from a session (a view, or no Centralu), or the manifest does not declare "uses": { "notices": true }. Only
+   * inside a tool handler; keep it with the work it belongs to. It names that session for this app only.
+   */
+  noticeAddress() {
+    return runs.getStore()?.notice ?? null
+  },
+
+  /**
+   * Posts `text` into the session `address` names (from `centralu.noticeAddress()`), as a report arrives there: the
+   * agent reads it as this app's text, and an idle session wakes. Callable anywhere, a timer included. Resolves true
+   * once delivered, false when Centralu did not take it, said on stderr: the session is gone, Centralu is restarting
+   * (post it again later), too many notices (10 a minute), no declaration, or an older Centralu. Up to 4000 characters.
+   */
+  async notify(address, text) {
+    if (typeof address !== 'string' || !address) return false
+    try {
+      const r = await callBroker('notify', { to: address, text: String(text) }, undefined)
+      if (r?.isError) throw new Error(textOf(r))
+      return true
+    } catch (e) {
+      console.error(`[centralu] centralu.notify: Centralu did not take it: ${e?.message ?? e}`)
+      return false
+    }
   },
 
   /** Reads `<data folder>/<file>` as JSON, or `fallback` if the file does not exist yet. */

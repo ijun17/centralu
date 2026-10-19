@@ -87,6 +87,14 @@ included. Meanwhile it keeps running, and its row says "Running: <what it is doi
 can stop it. It resolves false (said on stderr) when Centralu did not take it. Hold it only while
 there is work.
 
+**Telling a session later.** To tell the session that asked for work when that work ends (a job
+finished, something needs it), declare `"uses": { "notices": true }`, keep
+`centralu.noticeAddress()` (inside the tool handler of that session's call) with the work, and when
+it is done call `await centralu.notify(address, 'what happened')`: anywhere, a timer included. The
+session receives it as your app's message. It resolves false (said on stderr) when Centralu did not
+take it: the session is gone, Centralu is restarting (try again later), or more than 10 a minute.
+The address is null when a view called, or the manifest does not declare it.
+
 ## Dragging an item out of the screen
 
 An item the person may want to hand to a session (a card, a row, a record) should be draggable and

@@ -29,6 +29,8 @@ export const AppUses = z.object({
    * manifest's words. Absent from an older host, and from an app that declares none.
    */
   background: z.string().optional(),
+  /** It may post notices into a session that called it (#1161 item 1). Absent from an older host, and when not declared */
+  notices: z.boolean().optional(),
 })
 export type AppUses = z.infer<typeof AppUses>
 
