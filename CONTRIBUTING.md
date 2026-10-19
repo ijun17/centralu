@@ -340,6 +340,9 @@ see, on your branch's commits (not the working tree), each in a temporary worktr
 - and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
   and what a merge would conflict on.
 
+It also prints the change's **risk tier** ([below](#review-before-you-say-done)), and the board's
+`open_pr` writes it into **Verified** as a `Tier:` line and labels the pull request `tier:<name>`.
+
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
 checks a branch other than the one checked out. When one check's finding stands for a reason (a
 test that cannot fail without the change, and why), leave that check out with the reason:
@@ -386,6 +389,25 @@ change with no behaviour (documents, a pure refactor) writes n/a.
   at the same moment ([the interleaving rule above](#what-has-to-pass-before-you-send-it)).
 - **The person using the same session.** They type, approve, stop or switch while this runs.
 - **Data loss.** What is deleted, what is kept, and what a crash halfway through leaves behind.
+
+### Review before you say done
+
+Every change has a risk tier by the paths it touches (#1259): `pnpm tier [--base origin/main]`
+prints it and the files that put it there. The rules, one reason each, are in
+[`.centralu/tiers.json`](.centralu/tiers.json); a change takes the highest tier of its files, and
+a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). No rules, rules that cannot be
+read, or a skipped `pnpm pre-pr` make it deep.
+
+| Tier | What falls in it | Review, inside the author's loop |
+|---|---|---|
+| auto | `docs/**` (not `security-boundaries.md`), fixture data (not code), UI icons and fonts | none beyond the checks |
+| light | everything no rule names: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
+| deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
+| person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
+
+The author runs that review before saying done and fixes what it finds; nobody relays review
+rounds. **Verified** records who reviewed (which model or session) and what they found, fixed
+or left. Raise a tier by hand when the paths understate the risk; never lower it.
 
 ## Commits and pull requests
 

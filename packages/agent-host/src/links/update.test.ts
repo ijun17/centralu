@@ -209,7 +209,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(await uninstallRemote(c)).toEqual({ stopped: true })
     expect(seen).toEqual(['hold', 'stop', 'autostart', 'remove'])
     // The boot entry goes, through the Centralu it would start, after the host stopped and before its files go
-    expect(events()).toEqual(['stop 9.9.1', 'autostart off'])
+    expect(events()).toEqual(['stop 9.9.1', 'autostart remove'])
     expect(existsSync(data('autostart'))).toBe(false)
     expect(existsSync(remote())).toBe(false)
     expect(existsSync(data('serve.json'))).toBe(true)
@@ -219,9 +219,19 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
   it('does not uninstall when the boot entry would not go: it would start a launcher that is gone at every boot', async () => {
     await installedAndRunning()
     writeFileSync(data('autostart'), 'on')
-    await expect(uninstallRemote(control({ FAKE_AUTOSTART_FAILS: '1' }).c)).rejects.toThrow('Centralu on box could not stop starting at boot: Failed to connect to bus')
+    await expect(uninstallRemote(control({ FAKE_AUTOSTART_FAILS: '1' }).c)).rejects.toThrow('Centralu on box could not remove its start at boot: Failed to connect to bus')
     expect(existsSync(remote('versions', '9.9.1', 'install.json'))).toBe(true)
     expect(existsSync(data('autostart'))).toBe(true)
+  }, 60_000 * SLOW)
+
+  /** Since #1224's review uninstall asks `--autostart remove`; a serve from before it is asked `off`, which removed the entry there */
+  it('removes the boot entry of a serve that predates --autostart remove through its off', async () => {
+    await installedAndRunning()
+    writeFileSync(data('autostart'), 'on')
+    rmSync(data('events'), { force: true })
+    expect(await uninstallRemote(control({ FAKE_NO_REMOVE: '1' }).c)).toEqual({ stopped: true })
+    expect(events()).toEqual(['stop 9.9.1', 'autostart off'])
+    expect(existsSync(data('autostart'))).toBe(false)
   }, 60_000 * SLOW)
 
   it('uninstalls a version that predates --autostart: it cannot have written an entry from here', async () => {

@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,6 +50,11 @@ import {
   heldHere,
   lockHolderIsAlive,
   lockHolderPid,
+  lockHolder,
+  moveIntoSignIn,
+  runServe,
+  runWindow,
+  serveFrom,
   processStartTime,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
@@ -119,6 +125,15 @@ describe('serve arguments', () => {
 
   it('shows help for --help', () => {
     expect(parseServeArgs(['--help']).mode).toBe('help')
+  })
+
+  /** The hub's name, for the host.lock a second Centralu on the folder reads (#1223) */
+  it('takes --from <hub> with serve and --detach only, and only a name that cannot break a sentence or a command line', () => {
+    expect(parseServeArgs(['--detach', '--from', 'Mac-mini.local'])).toEqual({ mode: 'detach', port: null, from: 'Mac-mini.local' })
+    expect(parseServeArgs(['--from=Mac'])).toEqual({ mode: 'serve', port: null, from: 'Mac' })
+    expect(parseServeArgs(['--detach', '--from', 'a b']).error).toMatch(/--from needs a computer's name/)
+    expect(parseServeArgs(['--detach', '--from']).error).toMatch(/got nothing/)
+    expect(parseServeArgs(['--connection', '--from', 'Mac']).error).toMatch(/--from goes with/)
   })
 })
 
@@ -268,7 +283,8 @@ describe('replacing a file that a reader holds open (#1041)', () => {
 describe('the connection line', () => {
   it('has exactly the fields the client reads, in one JSON object', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
+    // `takes`: the options an older serve refuses, so a hub (`from`) or the window (`window`) uses them only on one that says so (#1223)
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window'] })
     expect(line).not.toContain('\n')
   })
 
@@ -292,6 +308,27 @@ describe('how the host is started', () => {
    * #538: a process's start environment stays readable to every process of its user while it runs (#502), and its
    * arguments to every user. The token goes as the first line on the host's stdin, a pipe to this launcher.
    */
+  /*
+   * #1223: the host writes who asked for it to its host.lock (`CC_SERVE_FROM`, which it takes out of its environment
+   * before it starts anything). A `--detach` runs in the ssh session and its launcher does not, so it carries what it found
+   */
+  it('tells the host who asked for it: the hub --from named and the ssh client, carried past --detach', () => {
+    const ssh = { SSH_CLIENT: '192.168.0.5 52344 22' }
+    expect(serveFrom(ssh, 'Mac-mini')).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    expect(serveFrom({ SSH_CONNECTION: 'fe80::1 52344 fe80::2 22' })).toEqual({ ssh: 'fe80::1' })
+    expect(serveFrom({})).toBeNull()
+    expect(serveFrom({ SSH_CLIENT: '$(rm) 1 22' }, 'a b')).toBeNull()
+    const carried = { CENTRALU_STARTED_FROM: JSON.stringify({ hub: 'Mac-mini', ssh: '192.168.0.5' }) }
+    expect(serveFrom(carried)).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    const spec = decodeChildSpec(encodeChildSpec({ env: { ...carried, SSH_CLIENT: 'x' }, log: '/d/serve.log' }))
+    expect(spec.env).toEqual(carried)
+    const e = hostEnv({ ...carried, CC_STARTED_BY: 'app' }, { dataDir: '/d', version: '1.0.0', hostDir: '/h', from: serveFrom(carried) })
+    expect(JSON.parse(e.CC_SERVE_FROM)).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    expect(e.CENTRALU_STARTED_FROM).toBeUndefined()
+    expect(e.CC_STARTED_BY).toBeUndefined()
+    expect(hostEnv({ CC_SERVE_FROM: 'stale' }, { dataDir: '/d', version: '1.0.0', hostDir: '/h' }).CC_SERVE_FROM).toBeUndefined()
+  })
+
   it('hands the token over on stdin, never in the environment or on the command line', () => {
     const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: '/h' })
     expect(e.CC_HOST_TOKEN).toBeUndefined()
@@ -414,7 +451,8 @@ async function freePort(): Promise<number> {
 }
 
 function cliEnv(dataDir: string): NodeJS.ProcessEnv {
-  return { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1' }
+  // No scheduled task from a test: on a Windows machine with a desktop, --detach would start the host through one (#1224)
+  return { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1', CENTRALU_SIGNIN_TASK: 'off' }
 }
 
 /** `centralu serve <args>` in the background, its output collected */
@@ -734,8 +772,8 @@ describe('starting through WMI', () => {
     expect(parseWmiAnswer('').ok).toBe(false)
   })
 
-  /** runDetach with WMI stood in for, on a port nobody serves */
-  async function detachWith(start: (...a: unknown[]) => Promise<unknown>) {
+  /** runDetach with WMI stood in for, on a port nobody serves; the sign-in task (#1224) stood in for too, nobody signed in */
+  async function detachWith(start: (...a: unknown[]) => Promise<unknown>, signIn: (...a: unknown[]) => Promise<unknown> = async () => ({ started: false, reason: 'nosession' })) {
     const d = tempDir()
     ensureServeState(d)
     recordServePort(d, await freePort())
@@ -749,12 +787,59 @@ describe('starting through WMI', () => {
       platform: 'win32',
       how: 'wmi',
       start,
+      signIn,
+      signInMs: 600,
       timeoutMs: 5_000,
       noStartMs: 300,
       write: (l: string) => void lines.push(l),
     })
-    return { code, line: JSON.parse(lines.join('')) as { v: number; detach: { ok: boolean; reason: string; message: string } } }
+    return { code, line: JSON.parse(lines.join('')) as { v: number; hostRunning?: boolean; detach: { ok: boolean; how: string; reason: string; message: string } }, dataDir: d }
   }
+
+  /*
+   * #1224: a host WMI creates keeps the ssh session's network logon, where Git cannot use the credentials saved in
+   * Windows. With someone signed in, --detach starts it through the sign-in task instead, and WMI is not asked
+   */
+  it('starts the host in the Windows sign-in through the task when someone is signed in, and asks WMI nothing', async () => {
+    const servers: HostServer[] = []
+    let wmi = 0
+    try {
+      const r = await detachWith(
+        async () => {
+          wmi++
+          return { ok: false, blocked: true, message: 'not asked' }
+        },
+        async (...a: unknown[]) => {
+          // What the task's serve does: a host on this folder's port, with its token
+          const { dataDir } = a[0] as { dataDir: string }
+          const state = readServeState(dataDir)!
+          const server = new HostServer({ port: state.port!, token: state.token, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+          servers.push(server)
+          await server.listen()
+          return { started: true, name: 'Centralu host 1a2b3c4d' }
+        },
+      )
+      expect(r.code).toBe(0)
+      expect(r.line).toMatchObject({ hostRunning: true, detach: { ok: true, how: 'task', already: false } })
+      expect(wmi).toBe(0)
+    } finally {
+      for (const s of servers) await s.close()
+    }
+  })
+
+  it('falls back to WMI when nobody is signed in, or when the task’s host does not answer in time', async () => {
+    let wmi = 0
+    const refused = async () => {
+      wmi++
+      return { ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }
+    }
+    expect((await detachWith(refused)).line.detach).toMatchObject({ ok: false, how: 'wmi', reason: 'wmi_blocked' })
+    expect(wmi).toBe(1)
+    const t0 = Date.now()
+    expect((await detachWith(refused, async () => ({ started: true, name: 'Centralu host' }))).line.detach).toMatchObject({ ok: false, how: 'wmi' })
+    expect(wmi).toBe(2)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(500)
+  })
 
   it('reports a start WMI refused as wmi_blocked', async () => {
     const r = await detachWith(async () => ({ ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }))
@@ -772,6 +857,275 @@ describe('starting through WMI', () => {
     expect(Date.now() - t0).toBeLessThan(4_000)
     // What it created is ended, not left waiting
     expect(ended).toBe(1)
+  })
+})
+
+/*
+ * #1224: a host the hub's ssh started before anyone signed in runs in a network logon, where Git cannot use the
+ * credentials saved in Windows. The serve the sign-in task starts takes the folder over, but only once that host has
+ * nothing running a person would lose: Windows has no keeper, so stopping it ends what runs in it
+ */
+describe('moving a host that runs in a network logon into the Windows sign-in', () => {
+  const idle = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
+
+  /**
+   * A host on a data folder's recorded port, with its token: it says `logon`, answers `host.stop {ifIdle}` busy while
+   * `counts` (taken one per stop) says something runs and goes when it does not, and keeps what `host.handover` told it
+   */
+  async function heldFolder(logon: 'network' | 'interactive' | null, counts: Record<string, number>[]) {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const state = readServeState(d)!
+    const calls: string[] = []
+    const told: unknown[] = []
+    const server: HostServer = new HostServer({
+      port: state.port!,
+      token: state.token,
+      ...(logon ? { logon: () => logon } : {}),
+      build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
+      onRpc: async (method, params) => {
+        calls.push(`${method}${(params as { ifIdle?: boolean })?.ifIdle ? ' ifIdle' : ''}`)
+        if (method === 'host.handover') told.push((params as { handover: unknown }).handover)
+        if (method === 'host.stop') {
+          const now = counts.length > 1 ? counts.shift()! : counts[0]!
+          if ((params as { ifIdle?: boolean })?.ifIdle && Object.values(now).some((n) => n > 0)) return { ok: false, busy: now, calls: 0 }
+          setTimeout(() => void server.close(), 20)
+          return { ok: true }
+        }
+        return { ok: true }
+      },
+    })
+    await server.listen()
+    const existing = await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })
+    return { d, server, calls, told, existing }
+  }
+
+  it('reads the logon a host says in its hello', async () => {
+    const h = await heldFolder('network', [idle])
+    try {
+      expect(h.existing).toMatchObject({ running: true, logon: 'network' })
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  /*
+   * #1224's review: the check and the stop are one call, `host.stop {ifIdle}`, which the host decides and acts on in one
+   * step (lifecycle/stop-gate.ts there); asked as two (the activity, then the stop), a turn the hub started in between
+   * was ended with the host
+   */
+  it('stops only through host.stop {ifIdle}, asking again while it answers busy, and says it waits', async () => {
+    const h = await heldFolder('network', [{ ...idle, working: 1 }, { ...idle, terminals: 1 }, idle])
+    try {
+      const moved = await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform: 'win32', logonOf: async () => 'interactive', pollMs: 50 })
+      expect(moved).toBe(true)
+      expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual(['host.stop ifIdle', 'host.stop ifIdle', 'host.stop ifIdle'])
+      expect(h.calls).not.toContain('host.activity')
+      expect(h.told).toEqual([{ state: 'waiting', since: expect.any(Number) }])
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(false)
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  it('gives up after the bound with the host still busy, says so to the host, and never stops it', async () => {
+    const h = await heldFolder('network', [{ ...idle, working: 1 }])
+    let clock = 0
+    try {
+      const moved = await moveIntoSignIn({
+        dataDir: h.d,
+        entry: SOURCE_HOST,
+        env: {},
+        existing: h.existing,
+        platform: 'win32',
+        logonOf: async () => 'interactive',
+        pollMs: 10,
+        maxWaitMs: 30 * 60_000,
+        // Ten minutes pass between two asks
+        now: () => (clock += 10 * 60_000),
+      })
+      expect(moved).toBe(false)
+      expect(h.told.map((t) => (t as { state: string }).state)).toEqual(['waiting', 'gave_up'])
+      expect(h.calls.every((c) => c !== 'host.stop')).toBe(true)
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  it('moves nothing that is not a network logon, nor from a serve that is not in the sign-in itself, nor off Windows', async () => {
+    for (const [logon, mine, platform] of [
+      ['interactive', 'interactive', 'win32'],
+      [null, 'interactive', 'win32'],
+      ['network', 'network', 'win32'],
+      ['network', null, 'win32'],
+      ['network', 'interactive', 'linux'],
+    ] as const) {
+      const h = await heldFolder(logon, [idle])
+      try {
+        expect(await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform, logonOf: async () => mine, pollMs: 50 }), `${logon} ${mine} ${platform}`).toBe(false)
+        expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual([])
+      } finally {
+        await h.server.close()
+      }
+    }
+  })
+
+  /** What the sign-in task runs: `serve` in the foreground, which used to give up on a folder another host held */
+  it('starts its own host once the hand-over freed the folder, where it used to refuse', async () => {
+    const h = await heldFolder('network', [idle])
+    const fake = join(tempDir(), 'host.mjs')
+    const ran = `${fake}.ran`
+    // As a bundle says it: its protocol, and that it reads the token on stdin
+    writeFileSync(join(fake, '..', 'bundle-info.json'), JSON.stringify({ protocolVersion: PROTOCOL_VERSION, tokenOnStdin: 1 }))
+    // A stand-in host: reads its token line, says it is ready on the port it was given, then ends
+    writeFileSync(
+      fake,
+      `import { writeFileSync } from 'node:fs'
+process.stdin.once('data', () => {
+  const port = Number(process.argv[process.argv.indexOf('--port') + 1])
+  writeFileSync(${JSON.stringify(ran)}, String(port))
+  console.log(JSON.stringify({ ready: true, port, token: 'x' }))
+  setTimeout(() => process.exit(0), 50)
+})
+`,
+    )
+    let asked = 0
+    try {
+      const code = await runServe({
+        env: { CC_DATA_DIR: h.d },
+        home: h.d,
+        entry: fake,
+        version: '1.0.0',
+        cliPath: null,
+        platform: 'win32',
+        handOver: async (o: { existing: { logon?: string } }) => {
+          asked++
+          expect(o.existing.logon).toBe('network')
+          await h.server.close()
+          return true
+        },
+      })
+      expect(asked).toBe(1)
+      expect(code).toBe(0)
+      expect(existsSync(ran)).toBe(true)
+    } finally {
+      await h.server.close()
+    }
+  }, 60_000 * SLOW)
+})
+
+/*
+ * #1223: the desktop window on Windows found the folder held by the host a hub's link started there, and its own host
+ * was refused by the lock: "Could not start the agent host". With serve installed in the folder, the window runs
+ * `serve --window` instead, which hands it the folder's serve host (started in this sign-in when none runs)
+ */
+describe('centralu serve --window: the desktop window uses the folder’s serve host', () => {
+  async function folder() {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    return { d, state: readServeState(d)! }
+  }
+  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive') => {
+    const server = new HostServer({ port: state.port!, token: state.token, logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+    await server.listen()
+    return server
+  }
+  const window = (d: string, o: Record<string, unknown> = {}) => {
+    const lines: string[] = []
+    const stdin = new PassThrough()
+    const calls = { detach: 0, signIn: 0 }
+    const done = runWindow({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'win32',
+      write: (l: string) => void lines.push(l),
+      stdin,
+      detach: async () => {
+        calls.detach++
+        throw new Error('not asked')
+      },
+      signIn: async () => {
+        calls.signIn++
+        return { started: true, name: 'Centralu host' }
+      },
+      pollMs: 50,
+      misses: 3,
+      ...o,
+    }) as Promise<number>
+    return { lines, stdin, calls, done }
+  }
+
+  it('hands the window the running host’s port and token as a ready line, and leaves the host running when the window goes', async () => {
+    const { d, state } = await folder()
+    const server = await hostOn(state)
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(JSON.parse(w.lines[0]!)).toEqual({ ready: true, port: state.port, token: state.token, db: join(d, 'store.db') })
+      expect(w.calls).toEqual({ detach: 0, signIn: 0 })
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+      expect((await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('starts the host the way --detach does when none runs, then ends when that host stops answering, so the window starts it again', async () => {
+    const { d, state } = await folder()
+    let server: HostServer | null = null
+    try {
+      const w = window(d, {
+        detach: async (o: { write: (l: string) => void }) => {
+          server = await hostOn(state)
+          o.write(`${JSON.stringify({ v: 1, port: state.port, token: state.token, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
+          return 0
+        },
+      })
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: state.token })
+      await server!.close()
+      expect(await w.done).toBe(1)
+    } finally {
+      await (server as HostServer | null)?.close()
+    }
+  })
+
+  it('says why and prints no ready line when the host cannot be started', async () => {
+    const { d } = await folder()
+    const w = window(d, {
+      detach: async (o: { write: (l: string) => void }) => {
+        o.write(`${JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'blocked' } })}\n`)
+        return 1
+      },
+    })
+    expect(await w.done).toBe(1)
+    expect(w.lines).toEqual([])
+  })
+
+  it('uses a host in a network logon now, and starts the sign-in task that moves it into this sign-in once idle (#1224)', async () => {
+    const { d, state } = await folder()
+    const server = await hostOn(state, 'network')
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(w.calls).toEqual({ detach: 0, signIn: 1 })
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('takes no port: the one serve recorded is the window’s', () => {
+    expect(parseServeArgs(['--window'])).toEqual({ mode: 'window', port: null })
+    expect(parseServeArgs(['--window', '--port', '9000']).error).toMatch(/--window .* takes no --port/)
   })
 })
 
@@ -1081,6 +1435,20 @@ describe('the pid host.lock names', () => {
     expect(at(JSON.stringify({ pid: 4242, started: 'Thu Oct 16 10:00:00 2026' }))).toBe(4242)
     expect(at(JSON.stringify({ pid: 4242 }))).toBe(4242)
     for (const bad of ['0', '{"pid":0}', '{"pid":-3}', '{"pid":"4242"}', '{"pid":4.5}', '"4242"', '4.0', 'null', 'not a lock', '']) expect(at(bad), bad).toBeNull()
+  })
+
+  // So a serve refused on a folder says whose host holds it (#1223): what it says, never what it does not
+  it('reads who started that host when the lock says, and nothing it does not know', () => {
+    const d = tempDir()
+    const at = (v: unknown) => {
+      writeFileSync(join(d, 'host.lock'), JSON.stringify(v))
+      return lockHolder(d)
+    }
+    expect(at({ pid: 4242, started: null, by: 'app', at: 1 })).toEqual({ pid: 4242, started: null, by: 'app' })
+    expect(at({ pid: 4242, started: null, by: 'serve', from: { hub: 'Mac' } })).toEqual({ pid: 4242, started: null, by: 'serve' })
+    expect(at({ pid: 4242, started: null, by: 'robot' })).toEqual({ pid: 4242, started: null })
+    writeFileSync(join(d, 'host.lock'), '77')
+    expect(lockHolder(d)).toEqual({ pid: 77, started: null })
   })
 })
 

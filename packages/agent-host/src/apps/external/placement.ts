@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, renameSync } from 'node:fs'
+import { lstatSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
@@ -19,6 +19,37 @@ import { PROJECT_APPS_PARTS, USER_APPS_PARTS } from './discovery.js'
  */
 
 /**
+ * A name that is already taken: lstat, not exists, so a broken link of that name is a name taken too — and nothing is
+ * ever written over what the person (or an agent) put there.
+ */
+export function nameTaken(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Where the folder of an app with this id goes, `<apps folder>/<id>`; nothing is created */
+export function appFolderPath(root: string, projectId: string | null, id: string): string {
+  return join(root, ...(projectId === null ? USER_APPS_PARTS : PROJECT_APPS_PARTS), id)
+}
+
+/** Whether something already stands where an app with this id goes — even a folder with a broken manifest belongs to someone */
+export function appFolderTaken(root: string, projectId: string | null, id: string): boolean {
+  return nameTaken(appFolderPath(root, projectId, id))
+}
+
+/** The folder of a new app is taken: `placeAppFolder` writes nothing and leaves what stands there as it is */
+export class AppFolderTaken extends Error {
+  constructor(readonly dir: string) {
+    super(`Something is already at ${dir}`)
+    this.name = 'AppFolderTaken'
+  }
+}
+
+/**
  * The folder an app of this scope lives in, created down from `root` through the path guard
  * (`ensureDirInside`) — so a linked `.centralu` or `apps/` that points elsewhere stops it before
  * anything is written.
@@ -32,13 +63,19 @@ export function appsFolderOf(root: string, projectId: string | null): string {
  * temp folder starting with a dot (skipped by discovery), which is then renamed into place — there
  * is never a moment where discovery could read a half-written manifest as "a broken app". If
  * anything fails, the temp folder is removed and the error is passed on as it is.
+ *
+ * **A name that is taken is refused** (`AppFolderTaken`), before `fill` runs and again right before the rename: renaming
+ * onto an empty folder would replace it without a word, and the first check cannot see one that appeared while `fill`
+ * ran. Every door that makes a new app asks here, so none of them builds that path and that test by hand.
  */
 export function placeAppFolder(root: string, projectId: string | null, id: string, fill: (staging: string) => void, remove?: (path: string) => void): string {
   const parent = appsFolderOf(root, projectId)
   const dir = join(parent, id)
+  if (nameTaken(dir)) throw new AppFolderTaken(dir)
   const staging = join(parent, `.${id}.${randomUUID()}`)
   try {
     fill(staging)
+    if (nameTaken(dir)) throw new AppFolderTaken(dir)
     renameSync(staging, dir)
   } catch (err) {
     removeDataQuietly(staging, '[apps]', remove)

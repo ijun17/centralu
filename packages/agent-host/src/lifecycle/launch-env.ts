@@ -26,6 +26,17 @@ export type LaunchEnv = {
    */
   startedByServe: boolean
   /**
+   * Who started this host, for `host.lock` and the conflict message a second host on the folder prints (#1223):
+   * `CC_STARTED_BY=app` from the desktop window; the keeper and `centralu serve` are told apart by their own
+   * variables. Null when nothing says (a host from source, a script)
+   */
+  startedBy: 'app' | 'keeper' | 'serve' | null
+  /**
+   * Where a `centralu serve` was asked for from (`CC_SERVE_FROM`, #1223): the hub's name when a hub's link passed it
+   * (`serve --detach --from <hub>`), and the ssh client's address when it ran in an ssh session. Null when neither
+   */
+  serveFrom: ServeFrom | null
+  /**
    * The token handed over in the environment, by a keeper or `centralu serve` older than #538 (and by scripts that
    * start a host themselves). Under a keeper the keeper's, the same for every host it runs
    */
@@ -37,8 +48,39 @@ export type LaunchEnv = {
   tokenOnStdin: boolean
 }
 
+/** Where a `centralu serve` was asked for from (`LaunchEnv.serveFrom`) */
+export type ServeFrom = { hub?: string; ssh?: string }
+
 /** The variables `takeLaunchEnv` reads and removes. Nothing the host spawns may see any of them */
-export const LAUNCH_VARIABLES = ['CC_KEEPER', 'CC_HOST_SOURCE', 'CC_FRONT_DOOR', 'CC_SERVE', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN'] as const
+export const LAUNCH_VARIABLES = [
+  'CC_KEEPER',
+  'CC_HOST_SOURCE',
+  'CC_FRONT_DOOR',
+  'CC_SERVE',
+  'CC_SERVE_FROM',
+  'CC_STARTED_BY',
+  'CC_HOST_TOKEN',
+  'CC_HOST_TOKEN_ON_STDIN',
+] as const
+
+/** A hub's name or an address as the launcher passed it: short, and only characters that cannot break a sentence */
+const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
+
+/** `CC_SERVE_FROM`, field by field; a field of the wrong shape is left out, never trusted */
+export function parseServeFrom(raw: string | undefined): ServeFrom | null {
+  if (!raw) return null
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  const from: ServeFrom = {}
+  if (typeof o.hub === 'string' && NAME_RE.test(o.hub)) from.hub = o.hub
+  if (typeof o.ssh === 'string' && NAME_RE.test(o.ssh)) from.ssh = o.ssh
+  return from.hub || from.ssh ? from : null
+}
 
 export function takeLaunchEnv(env: Record<string, string | undefined> = process.env): LaunchEnv {
   const launch: LaunchEnv = {
@@ -46,6 +88,8 @@ export function takeLaunchEnv(env: Record<string, string | undefined> = process.
     keeperSource: env.CC_HOST_SOURCE,
     frontDoor: env.CC_FRONT_DOOR,
     startedByServe: env.CC_SERVE === '1',
+    startedBy: env.CC_KEEPER === '1' ? 'keeper' : env.CC_SERVE === '1' ? 'serve' : env.CC_STARTED_BY === 'app' ? 'app' : null,
+    serveFrom: env.CC_SERVE === '1' ? parseServeFrom(env.CC_SERVE_FROM) : null,
     token: env.CC_HOST_TOKEN,
     tokenOnStdin: env.CC_HOST_TOKEN_ON_STDIN === '1',
   }

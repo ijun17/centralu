@@ -1,6 +1,6 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import type { AppReach, NormalizedEvent, SessionInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { inTurn } from '../idle.js'
@@ -16,6 +16,13 @@ import { APP_NAMES_PREFIX, SessionAppsHub } from './session-apps.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueriesHost } from './tool-queries.js'
 import { isAppAgent } from './tool-profiles.js'
+
+/** `orchestrator_apps_notice:<session id>`: set once an orchestrator's first turn by a build since #1205 has gone in (purged with the session) */
+export const ROOT_APPS_NOTICE_PREFIX = 'orchestrator_apps_notice:'
+
+/** The line an orchestrator that had root apps attached reads once, on its first turn since #1205 */
+export const ROOT_APPS_NOTICE =
+  'Project apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you need.'
 
 /**
  * What the app wiring reaches of the session manager (#428), typed as the manager declares each member. The manager
@@ -92,9 +99,13 @@ export class SessionAppWiring {
         /*
          * Only while the session holds the reader set (#382): attach_app and detach_app are part of it, so a
          * session the person turned the set off for (or that became a manager) would keep tools it can no
-         * longer detach. The records stay; they count again once the set is back.
+         * longer detach. The records stay; they count again once the set is back. The orchestrator holds them
+         * as commands (#1205), for the root apps it attaches.
          */
-        allowed: (session, app) => this.host.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
+        allowed: (session, app) => {
+          const profile = this.host.toolProfileOf(session.id)
+          return (profile === 'reader' || (profile === 'orchestrator' && session.kind === 'orchestrator')) && (this.appAccess?.allowed(session, app) ?? false)
+        },
       },
     })
     this.appAccess = new AppAccess({
@@ -193,6 +204,28 @@ export class SessionAppWiring {
       void this.host.restartSession(sessionId, 'thread_restart').catch(() => {})
     }
     return 'next_turn'
+  }
+
+  /**
+   * The line an orchestrator reads once, on its first turn since #1205, when it had root apps attached before: its earlier
+   * turns used `mcp__app-<id>__*` names that are gone now, and nothing else tells it why. Asked on every turn delivered;
+   * the first one for an orchestrator marks it (`ROOT_APPS_NOTICE_PREFIX`), whether or not there was anything to say,
+   * so a new orchestrator, or one that attaches a root app later, never reads it. "Had root apps" is read from the names
+   * it has seen (`session_app_names:<id>`, #1141): a project's key there, for an orchestrator, was a root app given to
+   * it, unless it is attached now (one carried through an adoption, `UserAppAdoptionRecords.carry`).
+   */
+  rootAppsNotice(sessionId: string): string | null {
+    const m = this.host.meta.get(sessionId)
+    if (!m || m.kind !== 'orchestrator') return null
+    const settings = this.host.store.settings
+    const key = `${ROOT_APPS_NOTICE_PREFIX}${sessionId}`
+    if (settings.appSetting(key) !== null) return null
+    settings.setAppSetting(key, '1')
+    const book = parseJson(settings.appSetting(`${APP_NAMES_PREFIX}${sessionId}`))
+    if (!isObj(book)) return null
+    const attached = new Set((this.appAccess?.attached(sessionId) ?? []).map((x) => appKeyOf(x.ref.projectId, x.ref.appId)))
+    const hadRootApp = Object.keys(book).some((k) => !k.startsWith(`${USER_APP_SCOPE}/`) && !attached.has(k))
+    return hadRootApp ? ROOT_APPS_NOTICE : null
   }
 
   /**

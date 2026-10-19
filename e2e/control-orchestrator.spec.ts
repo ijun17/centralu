@@ -238,6 +238,84 @@ test("Someone who opens settings first can still switch the orchestrator's agent
 })
 
 /**
+ * The mark beside the orchestrator's agent follows what was done (#1143 U10).
+ *
+ * Settings read the session by hand and moved the mark itself after a switch it never checked: a switch the host
+ * refused still moved it; before any session existed the choice never moved it at all (and the saved one was not shown);
+ * and a failed look for the session fell through to the recorded choice, which the host ignores once a session exists.
+ */
+const settingsOrchestrator = async (page: Page) => {
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-orchestrator').click()
+}
+const checked = (page: Page, tool: string) => expect(page.getByTestId(`orchestrator-tool-${tool}`))
+
+test('A switch the host refuses leaves the mark on the agent that is still running', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('orchestrator-input').fill('hello')
+  await page.getByTestId('orchestrator-input').press('Enter')
+  const orcId = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
+  // A freshly launched app: the session exists, this run has not opened it
+  await page.evaluate(() => {
+    const w = window as any
+    w.__store.setState({ orchestratorId: null })
+    w.__mock.agents.switchTool = async () => {
+      throw new Error('Codex is not installed')
+    }
+  })
+  await settingsOrchestrator(page)
+  await checked(page, 'claude').toHaveAttribute('aria-checked', 'true')
+
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await page.getByTestId('orchestrator-switch-confirm-btn').click()
+  await expect(page.getByTestId('toast')).toContainText('Codex is not installed')
+  await checked(page, 'claude').toHaveAttribute('aria-checked', 'true')
+  await checked(page, 'codex').toHaveAttribute('aria-checked', 'false')
+  expect(await page.evaluate((s) => (window as any).__store.getState().sessions[s].tool, orcId)).toBe('claude')
+})
+
+test('Before the orchestrator has a session, the choice made in settings moves the mark and is still there on reopening', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await settingsOrchestrator(page)
+  await checked(page, 'claude').toHaveAttribute('aria-checked', 'true')
+
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await page.getByTestId('orchestrator-switch-confirm-btn').click()
+  await checked(page, 'codex').toHaveAttribute('aria-checked', 'true')
+  expect(await page.evaluate(() => (window as any).__mock.orchestratorTool)).toBe('codex')
+
+  await page.keyboard.press('Escape')
+  await settingsOrchestrator(page)
+  await checked(page, 'codex').toHaveAttribute('aria-checked', 'true')
+  await checked(page, 'claude').toHaveAttribute('aria-checked', 'false')
+})
+
+test('When the look for the orchestrator fails, settings say so and record no choice the host would ignore', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const w = window as any
+    w.__mock.agents.orchestratorPeek = async () => {
+      throw new Error('The host did not answer')
+    }
+    w.__recorded = 0
+    const configure = w.__mock.agents.configureOrchestrator
+    w.__mock.agents.configureOrchestrator = (tool: string) => {
+      w.__recorded++
+      return configure(tool)
+    }
+  })
+  await settingsOrchestrator(page)
+  await expect(page.getByTestId('orchestrator-peek-failed')).toContainText('The host did not answer')
+
+  await page.getByTestId('orchestrator-tool-codex').click()
+  await page.getByTestId('orchestrator-switch-confirm-btn').click()
+  await expect(page.getByTestId('toast')).toContainText('The host did not answer')
+  expect(await page.evaluate(() => (window as any).__recorded)).toBe(0)
+  await checked(page, 'codex').toHaveAttribute('aria-checked', 'false')
+})
+
+/**
  * A message inserted by the orchestrator must also appear in the conversation.
  *
  * It used to be that the UI was the only place that produced user messages, so it was enough for
