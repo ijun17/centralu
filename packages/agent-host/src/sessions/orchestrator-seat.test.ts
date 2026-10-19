@@ -513,3 +513,75 @@ describe('what read_session says of who wrote a line', () => {
     ])
   })
 })
+
+/*
+ * #1186: read_session cut every line at 2,000 characters of its JSON with no word of it, so the middle of a long answer
+ * (where ask_project's cut sent the caller) could not be read back at all. A cut line now says what it shows and the
+ * read that goes on, and following those reads gives the whole text, at every size around the two limits.
+ */
+describe('a long line in read_session', () => {
+  const putTurn = (texts: string[]) => {
+    store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    store.sessions.upsertSession({
+      id: 'a', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a', autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
+      scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+    store.messages.appendMessages([
+      { sessionId: 'a', seq: 1, role: 'user', kind: 'text', payload: { text: 'write the report' }, ts: 1 },
+      { sessionId: 'a', seq: 2, role: 'assistant', kind: 'tool_call', payload: { summary: { tool: 'Read', title: 'README.md' } }, ts: 2 },
+      ...texts.map((text, i) => ({ sessionId: 'a', seq: 3 + i, role: 'assistant' as const, kind: 'text' as const, payload: { text }, ts: 3 + i })),
+    ])
+  }
+  /** The last line of a plain read, then every read it names, joined back together */
+  const readWhole = async (tools: OrchestratorTools): Promise<{ text: string; reads: number }> => {
+    const first = await tools.readSession('a')
+    if (!first.ok) throw new Error(first.error)
+    let line = JSON.parse(first.lines!.at(-1)!) as { text: string; readOn?: string }
+    let text = line.text
+    let reads = 1
+    while (line.readOn) {
+      const m = /around=(\d+) and offset=(\d+)/.exec(line.readOn)
+      if (!m) throw new Error(`no read in ${line.readOn}`)
+      const next = await tools.readSession('a', 40, { around: Number(m[1]), offset: Number(m[2]) })
+      if (!next.ok) throw new Error(next.error)
+      expect(next.lines).toHaveLength(1)
+      line = JSON.parse(next.lines![0]!) as { text: string; readOn?: string }
+      text += line.text
+      if (++reads > 20) throw new Error('reads without end')
+    }
+    return { text, reads }
+  }
+  const sizes = [0, 1, 1999, 2000, 2001, 4000, 9999, 10_000, 10_001, 18_000, 18_001, 30_000]
+
+  it.each(sizes)('reads a %i-character answer whole by the reads its cut names', async (n) => {
+    // Characters JSON escapes, so a cut counted on the JSON rather than the text would show
+    const answer = Array.from({ length: n }, (_, i) => '"\\ab\ncd'[i % 7]).join('')
+    expect(answer).toHaveLength(n)
+    putTurn([answer])
+    const { text, reads } = await readWhole(orchestratorToolsFor(host, 'orch'))
+    expect(text).toBe(answer)
+    expect(reads).toBe(n <= 2000 ? 1 : 1 + Math.ceil((n - 2000) / 8000))
+  })
+
+  it('reads a response of several messages as the one line the plain read shows', async () => {
+    putTurn(['x'.repeat(1500), 'y'.repeat(1500), 'z'.repeat(1500)])
+    const tools = orchestratorToolsFor(host, 'orch')
+    const plain = await tools.readSession('a')
+    const last = JSON.parse((plain as { lines: string[] }).lines.at(-1)!) as Record<string, unknown>
+    expect(last).toMatchObject({ role: 'assistant', shown: 'characters 0-2000 of 4504', readOn: 'read_session with around=3 and offset=2000 reads on from here' })
+    expect((await readWhole(tools)).text).toBe(['x'.repeat(1500), 'y'.repeat(1500), 'z'.repeat(1500)].join('\n\n'))
+  })
+
+  it('says a line it shows whole nothing more, and an offset past the end shows nothing of it', async () => {
+    putTurn(['short'])
+    const tools = orchestratorToolsFor(host, 'orch')
+    expect((await tools.readSession('a') as { lines: string[] }).lines.at(-1)).not.toContain('readOn')
+    const past = await tools.readSession('a', 40, { around: 3, offset: 50 })
+    expect(JSON.parse((past as { lines: string[] }).lines[0]!)).toMatchObject({ text: '', shown: 'characters 5-5 of 5' })
+    // A read from an offset says what it shows even when that is all of it: a hub tells an older machine by its absence
+    const whole = await tools.readSession('a', 40, { around: 3, offset: 0 })
+    expect(JSON.parse((whole as { lines: string[] }).lines[0]!)).toMatchObject({ text: 'short', shown: 'characters 0-5 of 5' })
+  })
+})

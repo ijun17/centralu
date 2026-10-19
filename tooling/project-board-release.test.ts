@@ -1323,6 +1323,24 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
   })
 
+  // #1259: changes land after the fast tier, so main's own push run (the full tier) is the only evidence for a release
+  it("refuses to tag a commit whose only green run is a batch's quick run, until main's own full run on it passes", async () => {
+    const s = repo({ bumped: true })
+    patchState((st) => {
+      st.ci = 'green'
+      // The run GitHub has on the tip is the merge queue's batch's (workflow_dispatch on queue/batch-1), not main's push run
+      st.ciRunOverrides = { ...st.ciRunOverrides, [s.tip]: { event: 'workflow_dispatch', head_branch: 'queue/batch-1' } }
+    })
+    runtime()
+    const refused = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true, confirm: true })
+    expect(refused.data.problems).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^CI on main at ${s.tip.slice(0, 7)} is not green`))]))
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+    // Main's own push run on it passed: CI is no longer a reason
+    patchState((st) => delete st.ciRunOverrides?.[s.tip])
+    const status = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true })
+    expect((status.data.problems ?? []).filter((p: string) => p.startsWith('CI on main'))).toEqual([])
+  })
+
   it('approves only the tag release run, only what GitHub says this login may approve', async () => {
     const s = repo({ bumped: true })
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)

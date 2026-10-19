@@ -59,6 +59,33 @@ test('The context gauge stays filled in after restarting the app (#48)', async (
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 84%')
 })
 
+/*
+ * A compaction that reports its size moves the gauge there (#1282). Seen: the marker said "964k → 8.8k" and the gauge
+ * kept "Context 96%"; the first turn after it failed, so no turn-end reading ever corrected it. Until the tool's own
+ * reading it is an estimate, and says so.
+ */
+test('A compaction moves the context gauge to its reported size, as an estimate (#1282)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+
+  await emitEvent(page, 0, { type: 'context_update', used: 964000, window: 1000000, exactness: 'exact' })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 96%')
+  await emitEvent(page, 0, { type: 'compaction', failed: false, before: 964000, after: 8800 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≈1%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context ≈8\.8k \/ 1M tokens \(estimated/)
+
+  // A reconnect reads back what the screen showed
+  await page.evaluate(async () => {
+    const w = window as any
+    await w.__store.getState().attach(w.__mock)
+  })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≈1%')
+
+  // The tool's own reading at the next turn's end replaces the estimate
+  await emitEvent(page, 0, { type: 'context_update', used: 12000, window: 1000000, exactness: 'exact' })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 1%')
+})
+
 test('A terminal belongs to the project, so it persists across switching sessions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first session')

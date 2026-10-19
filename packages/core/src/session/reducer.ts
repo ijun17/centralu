@@ -1,4 +1,4 @@
-import { applyBackgroundTasks, toolCallLine } from '@cc/protocol'
+import { applyBackgroundTasks, nextContext, toolCallLine } from '@cc/protocol'
 import type {
   BackgroundTask,
   Interruption,
@@ -243,14 +243,15 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       }
     case 'usage_update':
       return { ...next, usage: event.tokens }
-    case 'context_update':
-      return { ...next, context: { used: event.used, window: event.window, exactness: event.exactness } }
     /*
-     * A fresh conversation inside the session (#304, Claude Code's /clear): the old reading describes a conversation
-     * the model no longer has. "Unknown" until the tool reports the new one, the same as a session with no turn yet.
+     * The tool's reading at a turn's end. A fresh conversation inside the session (#304, Claude Code's /clear) empties
+     * it: "unknown" until the tool reports the new one, the same as a session with no turn yet. A compaction that says
+     * its size moves it there (#1282). The host and the mock run the same rule (`nextContext`, protocol session-state.ts).
      */
+    case 'context_update':
     case 'conversation_reset':
-      return { ...next, context: null }
+    case 'compaction':
+      return { ...next, context: nextContext(s.context, event) }
     case 'limit_reached':
       return {
         ...next,
