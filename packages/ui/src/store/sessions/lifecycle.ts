@@ -1,3 +1,4 @@
+import { APP_ARRIVAL_ID_PREFIX, isAppArrivalId } from '@cc/core'
 import type { NormalizedEvent, ToolDefaults, ToolName } from '@cc/protocol'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
@@ -318,6 +319,8 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
   },
 
   async markRead(sessionId) {
+    // Done on an app's arrival notice (#1141) takes it off; it is not a session
+    if (isAppArrivalId(sessionId)) return get().dismissAppArrival(sessionId.slice(APP_ARRIVAL_ID_PREFIX.length))
     const s = get().sessions[sessionId]
     if (!s || s.lastReadSeq >= s.lastSeq) return
     try {

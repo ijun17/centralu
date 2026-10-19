@@ -219,7 +219,7 @@ export function sidebarMachinesTests(): void {
       })
     })
 
-    test("a linked machine's user-folder apps stand in Your apps with its badge, dimmed while it is away", async ({ page }) => {
+    test("a linked machine's user-folder apps (an older build there, #1141) stand in Other apps with its badge, dimmed while it is away", async ({ page }) => {
       await setup(page)
       await link(page, 'Box')
       await page.evaluate((notes) => {

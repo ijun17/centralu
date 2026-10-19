@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react'
-import { changedFileCount } from '@cc/protocol'
-import { ChevronIcon } from '../../components/icons.jsx'
+import { BranchIcon, ChevronIcon } from '../../components/icons.jsx'
+import { Tooltip } from '../../components/primitives.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { useStore, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
 import { PANEL_TABS } from '../../store/panelLayout.js'
 import { DragRegion } from '../../components/DragRegion.jsx'
-import { useLoad } from '../../app/useLoad.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { PanelGroups } from './PanelTabs.jsx'
-import { useGitRefreshKey } from './GitChanges.jsx'
 
 /**
  * The evidence lane (right side).
@@ -124,11 +121,14 @@ export function EvidencePanel() {
         </>
       ) : (
         // Leaves a trace even while closed — vanished and collapsed are not the same thing
-        <CollapsedRail projectId={projectId} isRepo={!!project.git} />
+        <CollapsedRail />
       )}
     </aside>
   )
 }
+
+/** The collapse and expand marks: one size, larger than a row's disclosure arrow, since they move a whole panel */
+const PANEL_FOLD_ICON = 16
 
 /** The collapsed strip's width. Has to match what CollapsedRail draws, or the transition breaks continuity */
 const RAIL_W = 32
@@ -147,90 +147,64 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
    */
   return (
     <DragRegion className="flex h-10 items-center gap-2 border-b border-line px-3">
-      <span className="readout truncate text-xs text-ink-muted" data-testid="evidence-project">
+      {/* A name the person gave, so the UI face; the branch is git's own word, so the code face */}
+      <span className="truncate text-sm text-ink" data-testid="evidence-project">
         {projectName}
       </span>
       {branch && (
-        <button
-          className="readout truncate text-2xs text-ink-faint transition-colors hover:text-ink"
-          onClick={openBranches}
-          data-testid="evidence-branch"
-          title="Switch branch"
-        >
-          {branch}
-        </button>
+        <Tooltip content="Switch branch">
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs text-ink-faint transition-colors hover:bg-surface-hover/60 hover:text-ink"
+            onClick={openBranches}
+            data-testid="evidence-branch"
+          >
+            <BranchIcon size={12} />
+            <span className="readout truncate">{branch}</span>
+          </button>
+        </Tooltip>
       )}
-      <span className="ml-auto shrink-0">
-      <IconButton
-        label={`Collapse panel (${sc('mod', 'B')})`}
-        onClick={() => togglePanel(false)}
-        testId="evidence-close"
-        align="right"
-      >
-        {/* Collapsing is 'the opposite of expanding', so it wears the same mark — same meaning, same shape */}
-        <ChevronIcon open={false} />
-      </IconButton>
+      {/* A flex box, not an inline span: a line box would sit the button 2px above the header's middle, where the rail's expand button is */}
+      <span className="ml-auto flex shrink-0">
+        <IconButton
+          label={`Collapse panel (${sc('mod', 'B')})`}
+          onClick={() => togglePanel(false)}
+          testId="evidence-close"
+          align="right"
+        >
+          {/* Collapsing is 'the opposite of expanding', so it wears the same mark — same meaning, same shape */}
+          <ChevronIcon open={false} size={PANEL_FOLD_ICON} />
+        </IconButton>
       </span>
     </DragRegion>
   )
 }
 
-/** The vertical strip left behind when the panel is collapsed. Where it went stays visible, and the change count is still readable while collapsed */
-function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boolean }) {
+/**
+ * The strip left behind when the panel is collapsed: the expand button where the collapse button was, the same
+ * component and the same mark turned the other way. No count, no label and no running dot (owner, 2026-10-19): the
+ * sidebar's changes capsule already says what changed, and a label named the panel by its internal name
+ */
+function CollapsedRail() {
   const togglePanel = useStore((s) => s.togglePanel)
-  const platform = usePlatform()
   const sc = useShortcut()
-  const touched = useGitRefreshKey(projectId)
-  // Collapsing the panel must not collapse the fact that "a command is running" (the reason for the #60 carryover)
-  const running = useStore((s) => Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running))
-
-  // A response arriving late while switching projects must not draw another project's number (`useLoad`). A failed
-  // read shows no number: the rail has no room to say why, and the panel says it once opened
-  const files = useLoad(() => (isRepo ? platform.git.status(projectId) : null), [platform, projectId, isRepo], [touched])
-  const count = files.data ? changedFileCount(files.data) : null
 
   return (
     /* The shell (width, border, background) belongs to the outer aside — drawing it here too would double the line during the transition */
-    <div
-      className="flex h-full w-8 shrink-0 flex-col items-center gap-2 py-2"
-      data-testid="evidence-rail"
-    >
-      <button
-        className="rounded-md px-1 py-0.5 text-sm text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
-        onClick={() => togglePanel(true)}
-        data-testid="evidence-open"
-        title={`Expand evidence panel (${sc('mod', 'B')})`}
-      >
-        ‹
-      </button>
-      {count !== null && count > 0 && (
-        <button
-          className="readout rounded-md px-1 text-2xs text-ink-muted transition-colors hover:text-ink"
+    <div className="flex h-full w-8 shrink-0 flex-col items-center" data-testid="evidence-rail">
+      {/* The header's height (h-10), so the button sits exactly where the collapse button was */}
+      <DragRegion className="flex h-10 w-full shrink-0 items-center justify-center">
+        <IconButton
+          label={`Expand panel (${sc('mod', 'B')})`}
           onClick={() => togglePanel(true)}
-          data-testid="evidence-rail-count"
-          title={`${count} changed files`}
+          testId="evidence-open"
+          align="right"
         >
-          {count}
-        </button>
-      )}
-      {running && (
-        <button
-          className="flex items-center justify-center rounded-md px-1 py-1"
-          onClick={() => togglePanel(true)}
-          data-testid="evidence-rail-running"
-          title="A command is running — open the terminal tab"
-        >
-          <span className="size-1.5 animate-pulse rounded-full bg-ink" />
-        </button>
-      )}
-      {/* Vertical text — states what the collapsed strip is a strip of */}
-      <span
-        className="mt-1 text-2xs text-ink-faint"
-        style={{ writingMode: 'vertical-rl' }}
-        aria-hidden
-      >
-        Evidence
-      </span>
+          <span className="inline-flex rotate-180">
+            <ChevronIcon open={false} size={PANEL_FOLD_ICON} />
+          </span>
+        </IconButton>
+      </DragRegion>
     </div>
   )
 }

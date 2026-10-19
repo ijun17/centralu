@@ -38,7 +38,13 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   // Is trust being asked about right after registration (M4, decision 3)? Asked only once, then dismissed once answered
   const askingTrust = useStore((s) => s.trustAsk === projectId)
   // This project's apps (M4 B-2) — stand below the sessions, in the same row shape
-  const projectApps = useProjectApps(projectId)
+  const apps = useProjectApps(projectId)
+  /*
+   * A root app (#1141) is the project itself: it is marked on the project's own line (ProjectHeader) rather than given a
+   * row under it, and its sessions (its builder, the agents it started) are the project's sessions
+   */
+  const rootApp = apps.find((a) => a.info.root === true)
+  const projectApps = useMemo(() => apps.filter((a) => a.info.root !== true), [apps])
   const groupedSessions = useMemo(() => groupProjectAppSessions(sessions, projectApps.map((app) => app.appId)), [sessions, projectApps])
   const [deleting, setDeleting] = useState(false)
   // Fold state (#205) — held by the store: remembered per project and persists across restarts
@@ -91,6 +97,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         projectId={projectId}
         folded={folded}
         sessions={sessions}
+        rootApp={rootApp}
+        appCount={apps.length}
         setNewAppOpen={setNewAppOpen}
         setDeleting={setDeleting}
       />
@@ -109,20 +117,27 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         to show it would be a spot that never accepts the drop anyway. If a session's own project
         is folded, there is no row to drag from it in the first place.
       */}
-      {!folded && (
-        <ProjectSessionList
-          projectId={projectId}
-          sessions={sessions}
-          groupedSessions={groupedSessions}
-          renaming={renaming}
-          setRenaming={setRenaming}
-          sessionMenu={sessionMenu}
-          setSessionMenu={setSessionMenu}
-          setHandingOff={setHandingOff}
-          setConfirming={setConfirming}
-        />
+      {/* An open project with no session and no app draws nothing below its line: no empty gap under the header */}
+      {!folded && (sessions.length > 0 || projectApps.length > 0) && (
+        <div className="mt-1.5">
+          <ProjectSessionList
+            projectId={projectId}
+            sessions={sessions}
+            groupedSessions={groupedSessions}
+            renaming={renaming}
+            setRenaming={setRenaming}
+            sessionMenu={sessionMenu}
+            setSessionMenu={setSessionMenu}
+            setHandingOff={setHandingOff}
+            setConfirming={setConfirming}
+          />
+          <AppRows
+            apps={projectApps}
+            sessionsByApp={groupedSessions.byApp}
+            testId={`project-apps-${project.name}`}
+          />
+        </div>
       )}
-      {!folded && <AppRows apps={projectApps} sessionsByApp={groupedSessions.byApp} testId={`project-apps-${project.name}`} />}
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}

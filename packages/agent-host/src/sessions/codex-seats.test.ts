@@ -88,6 +88,8 @@ beforeEach(async () => {
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
   rt.refresh()
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  // Where an app made without a project goes (#1141): this test's ~/Centralu
+  mgr.useProjectsHome(() => join(root, 'Centralu'))
   mgr.prLookup = async () => null
   mgr.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })

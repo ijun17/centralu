@@ -58,7 +58,7 @@ export function RowMenu({
       ref={ref}
       role="menu"
       data-testid={testId}
-      className="fixed z-30 w-48 overflow-y-auto rounded-md border border-line bg-surface-raised py-1 shadow-(--shadow-popover)"
+      className="fixed z-30 w-48 overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)"
       style={{
         top: place?.top ?? 0,
         left: place?.left ?? 0,

@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { TrustProjectButton } from './TrustCard.jsx'
+import { useEffect, useState } from 'react'
 import { newAppIdProblem } from '@cc/protocol'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
-import { TextField } from '../../components/TextField.jsx'
+import { TextField, TextInput } from '../../components/TextField.jsx'
 import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
@@ -31,12 +33,18 @@ import { useToolChoice } from './useToolChoice.js'
  *
  * The host does not create an app in an untrusted project (an app is code that runs on this
  * machine). That fact is stated before the rejection arrives, with a way to trust it right there.
+ *
+ * Without a project (#1141) the app is a project of its own, made like a new project: a folder named by its id, in
+ * `~/Centralu` unless the person picks another parent, with the same preview and refusals as the new project dialog
+ * (`projects.createPreview`), so the folder that will be made stands on the form before anything is made. Importing an
+ * app lands the same way, so its door is here too.
  */
 export function NewAppDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
+  const platform = usePlatform()
+  const openImport = useStore((s) => s.openImport)
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const orchestratorTool = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
   const createApp = useStore((s) => s.createApp)
-  const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   const allTools = useTools()
   /*
    * The default tool is guessed to match what the host would choose — a project app defaults to
@@ -56,8 +64,30 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const id = idEdit ?? deriveAppId(name)
   const problem = newAppIdProblem(id)
   const untrusted = !!project && !project.trusted
+  // Without a project: where its folder goes. Null is ~/Centralu; a typed parent is sent as typed, the host judges it
+  const [parent, setParent] = useState<string | null>(null)
+  const [where, setWhere] = useState<{ parent: string; path: string | null; error: string | null; asked: string } | null>(null)
+  // What the preview was asked for: an answer for older input does not count, so Enter in the pause before it lands waits
+  const asked = `${problem === null ? id : ''}
+${parent?.trim() ?? ''}`
+  useEffect(() => {
+    if (projectId) return
+    let live = true
+    // Asked after a pause in typing, as the new project dialog does
+    const t = setTimeout(() => {
+      platform.projects
+        .createPreview(problem === null ? id : '', parent?.trim() || undefined, null)
+        .then((p) => live && setWhere({ ...p, asked }))
+        .catch((e: Error) => live && setWhere({ parent: parent ?? '', path: null, error: e.message, asked }))
+    }, 150)
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [platform, projectId, id, problem, parent, asked])
+  const placed = projectId !== null || (where?.asked === asked && !!where.path && !where.error)
 
-  const canCreate = !busy && name.trim() !== '' && problem === null && !blocked && !untrusted && tool !== ''
+  const canCreate = !busy && name.trim() !== '' && problem === null && !blocked && !untrusted && tool !== '' && placed
 
   return (
     <Modal onClose={onClose} testId="new-app-dialog" align="top">
@@ -73,7 +103,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
           setBusy(true)
           setError(null)
           try {
-            await createApp({ projectId, id, name: name.trim(), tool })
+            await createApp({ projectId, id, name: name.trim(), tool, ...(projectId === null && parent?.trim() ? { parent: parent.trim() } : {}) })
             onClose()
           } catch (err) {
             // Exactly the host's own wording — a toast disappears after 2.5 seconds and would look like "nothing happened when pressed." Kept inside the dialog instead
@@ -85,13 +115,18 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
       >
         <header className="shrink-0 border-b border-line px-4 py-2.5">
           <h2 className="text-md font-medium text-ink">
-            New app <span className="text-ink-faint">·</span>{' '}
-            <span className="text-ink-muted">{project ? project.name : 'Your apps'}</span>
+            New app
+            {project && (
+              <>
+                {' '}
+                <span className="text-ink-faint">·</span> <span className="text-ink-muted">{project.name}</span>
+              </>
+            )}
           </h2>
           <p className="mt-1 text-xs leading-body text-ink-faint">
             {projectId
               ? 'Lives in this project, in .centralu/apps, and is shared with the repository.'
-              : 'Lives on this machine and works in every project.'}
+              : 'A project of its own, in a new folder. The orchestrator and your other projects can use it.'}
           </p>
         </header>
 
@@ -153,21 +188,78 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
             )}
           </div>
 
+          {projectId === null && (
+            <div className="text-xs leading-body text-ink-muted" data-testid="new-app-location">
+              {parent === null ? (
+                // Change sits at the row's end, as in the new project dialog: the location arrives a moment after the dialog opens
+                <p className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1">
+                    In <span className="readout break-all text-ink" data-testid="new-app-parent-shown">{where?.parent ?? '…'}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+                    onClick={() => setParent(where?.parent ?? '')}
+                    data-testid="new-app-change-parent"
+                    aria-label="Change the folder its folder goes in"
+                  >
+                    Change
+                  </button>
+                </p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <TextInput
+                    value={parent}
+                    onChange={(e) => setParent(e.target.value)}
+                    placeholder="The full path of a folder"
+                    aria-label="The folder its folder goes in"
+                    font="mono"
+                    spellCheck={false}
+                    autoComplete="off"
+                    data-testid="new-app-parent"
+                    className="min-w-0 flex-1"
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-faint hover:text-ink"
+                    onClick={async () => {
+                      try {
+                        const picked = await platform.system.pickDirectory()
+                        if (picked) setParent(picked)
+                      } catch (e) {
+                        // A picker the shell refused is said in the form, not dropped as an unhandled rejection (#972)
+                        setError((e as Error).message)
+                      }
+                    }}
+                    data-testid="new-app-pick-parent"
+                  >
+                    Choose…
+                  </button>
+                </div>
+              )}
+              {where?.path && !where.error && (
+                <p className="mt-1 text-ink-faint">
+                  Its folder will be{' '}
+                  <span className="readout break-all text-ink-muted" data-testid="new-app-path">
+                    {where.path}
+                  </span>
+                </p>
+              )}
+              {where?.error && problem === null && id !== '' && (
+                <p className="mt-1 text-danger" role="alert" data-testid="new-app-location-error">
+                  {where.error}
+                </p>
+              )}
+            </div>
+          )}
+
           {untrusted && project && (
             <div className="rounded-md border border-line bg-surface-raised px-2.5 py-2" data-testid="new-app-untrusted">
               <p className="text-xs leading-body text-ink-muted">
                 Apps only run in projects you trust. Trust {project.name} to make an app here.
               </p>
-              <Button
-                variant="primary"
-                onRaised
-                size="sm"
-                className="mt-1.5"
-                onClick={() => void setProjectTrusted(project.id, true)}
-                data-testid="new-app-trust"
-              >
-                Trust this project
-              </Button>
+              {/* The same card as the project's row, with its apps listed (#1141) */}
+              <TrustProjectButton projectId={project.id} testId="new-app-trust" className="mt-1.5" />
             </div>
           )}
 
@@ -182,7 +274,21 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
           )}
         </div>
 
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
+        <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-4 py-2.5">
+          {/* An import lands as a project of its own too (#1141), so its door stands where a new app is made */}
+          {projectId === null && (
+            <button
+              type="button"
+              className="mr-auto rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink"
+              onClick={() => {
+                onClose()
+                openImport()
+              }}
+              data-testid="new-app-import"
+            >
+              Import one…
+            </button>
+          )}
           <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={onClose}>
             Cancel
           </button>

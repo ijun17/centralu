@@ -374,12 +374,13 @@ const HANDLERS: ToolHandlers = {
     return { text: r.text }
   },
 
-  async create_app(args, { tools }) {
-    const spec = { id: args.id.trim(), name: args.name.trim(), project: trimmed(args.project), description: args.description, tool: args.tool }
+  async create_app(args, { tools, signal }) {
+    const parent = trimmed(args.parent)
+    const spec = { id: args.id.trim(), name: args.name.trim(), project: trimmed(args.project), description: args.description, tool: args.tool, ...(parent ? { parent } : {}) }
     if (!spec.id || !spec.name) return { text: 'Give id and name — a folder name and a name to show the person are needed for the app to stand.', isError: true }
-    const r = await tools.createApp(spec)
+    const r = await tools.createApp(spec, signal)
     if (!r.ok) return { text: `Could not create it — ${r.error}`, isError: true }
-    const where = r.projectId === null ? 'user folder' : 'project'
+    const where = spec.project ? 'project' : 'a new project of its own'
     /*
      * What comes next belongs to the building session — the orchestrator does not write app code
      * (it has no hands). It tells the model to hand off what to build to that session. If the

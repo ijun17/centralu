@@ -188,16 +188,22 @@ export function sidebarSelectionTests(): void {
 
     /*
      * A user-folder app's sessions have no project, so no project's list holds them. They stand under the app's row in
-     * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the orchestrator row. An agent
+     * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the orchestrator row, and since
+     * #1141 in "Other apps": an app made now is a project of its own, so a user-folder app here is a linked machine's on
+     * an older build, or one this host could not move into a project. An agent
      * its `run_agent` started runs on `safe` and can stop at an approval card, so it needs a row to be found by.
      * A session with no project that no listed app claims (a coordinator the removed control app left, a session of an
      * app that is gone) gets no row: the palette, search and the inbox still reach it.
      */
     test('a user-folder app’s own sessions stand under its row; a session no app claims has none', async ({ page }) => {
       await setup(page, ['/tmp/alpha'])
-      const builder = await page.evaluate(
-        async () => (await (window as any).__mock.apps.create({ projectId: null, id: 'timer', name: 'Timer', tool: 'claude' })).builder.id as string,
-      )
+      const builder = await page.evaluate(async () => {
+        const m = (window as any).__mock
+        m.setExternalApps([
+          { appId: 'timer', projectId: null, dir: '/mock/data/apps/timer', name: 'Timer', version: '0.1.0', description: null, home: 'show', trusted: true, status: 'stopped', error: null, warnings: [] },
+        ])
+        return (await m.apps.createBuilder('timer', null, 'claude')).id as string
+      })
       // As the host sends them: an agent the app's run_agent stood up, waiting on an approval; a foreman of the removed
       // control app; an agent of a user-folder app that has since been removed
       const [agent, foreman, stray] = await page.evaluate((base) => {

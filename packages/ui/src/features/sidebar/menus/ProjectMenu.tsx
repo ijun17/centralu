@@ -20,8 +20,10 @@ export function ProjectMenu({
   anchorEl,
   onClose,
   onNewSession,
+  onOpenApp,
   onNewApp,
   onToggleTrust,
+  trustListsApps,
   onOpenInVsCode,
   onDelete,
 }: {
@@ -30,8 +32,12 @@ export function ProjectMenu({
   onClose: () => void
   /** Starts a session: at once with what the project remembers (#543), or in the window a worktree proposal waits in */
   onNewSession: () => void
+  /** The project is an app (#1141): open its screen */
+  onOpenApp?: () => void
   onNewApp?: () => void
   onToggleTrust: () => void
+  /** Trusting opens the card listing the project's apps (#1141), so the row ends in an ellipsis */
+  trustListsApps?: boolean
   /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
   onOpenInVsCode?: () => void
   onDelete: () => void
@@ -47,6 +53,8 @@ export function ProjectMenu({
         the empty screen switches the tool and offers past conversations, so no window of options is needed here.
       */}
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
+      {/* A project whose folder has the app manifest at its root is an app (#1141): its screen, by name */}
+      {onOpenApp && <ActionRow label="Open as app" onClick={pick(onOpenApp)} testId={`open-app-${project.name}`} />}
       {/*
         New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
         so they belong in the same group. It shows up even for an untrusted project too: the dialog
@@ -72,7 +80,7 @@ export function ProjectMenu({
         the menu, reading the label and pressing it.
       */}
       <ActionRow
-        label={project.trusted ? 'Stop trusting this project' : 'Trust this project'}
+        label={project.trusted ? 'Stop trusting this project' : trustListsApps ? 'Trust this project…' : 'Trust this project'}
         onClick={pick(onToggleTrust)}
         testId={`toggle-trust-${project.name}`}
       />

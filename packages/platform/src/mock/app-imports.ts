@@ -1,5 +1,5 @@
 import { appKeyOf } from '@cc/protocol'
-import type { AppReview, AppVersions, ExternalAppInfo } from '@cc/protocol'
+import type { AppReview, AppVersions, ExternalAppInfo, ProjectInfo } from '@cc/protocol'
 import type { MockClock } from './clock.js'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
@@ -22,6 +22,11 @@ export class AppImportsMock {
   readonly appVersions = new Map<string, AppVersions>()
   /** Restores that reached the host — tests check they only arrive after confirmation */
   readonly restoredVersions: { appId: string; id: string }[] = []
+  /**
+   * Makes and registers a new project folder with the trust given (wired by the mock platform): where an import lands,
+   * as the host's does (#1141)
+   */
+  makeProject: ((name: string, parent: string | undefined, trusted: boolean) => Promise<ProjectInfo>) | null = null
   readonly apps = {
     /**
      * Import (M4 E-3). The mock has no filesystem — for each source, a test plugs in the
@@ -37,36 +42,37 @@ export class AppImportsMock {
       if (refusal) throw new Error(refusal)
       const review = this.importSources.get(source)
       if (!review) throw new Error(`Nothing to import at ${source}`)
-      if (this.registry.externalAppList.some((a) => a.appId === review.appId && a.projectId === null)) {
-        throw new Error(`An app with the id "${review.appId}" is already in your apps. Remove it first, or change the id in its manifest`)
-      }
       const token = `mock-import-${this.clock.next()}`
       this.stagedImports.set(token, structuredClone(review))
       return { token, review: structuredClone(review) }
     },
-    importCommit: async (token: string, opts: { enable: boolean; reviewKey?: string }): Promise<ExternalAppInfo> => {
+    /**
+     * Like the host (#1141): the app lands as a project of its own, a folder `<parent>/<id>` (~/Centralu), registered
+     * untrusted, or trusted for "Import and enable"; trusting it later is enabling it
+     */
+    importCommit: async (token: string, opts: { enable: boolean; reviewKey?: string; parent?: string }): Promise<ExternalAppInfo> => {
       const review = this.stagedImports.get(token)
       if (!review) throw new Error('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
       if (opts.enable && opts.reviewKey !== review.reviewKey) throw new Error('What would be enabled is not what you reviewed. Review it again')
+      if (!this.makeProject) throw new Error('This mock cannot make a project')
+      const project = await this.makeProject(review.appId, opts.parent, opts.enable)
       this.stagedImports.delete(token)
-      const at = this.clock.now()
       const app: ExternalAppInfo = {
         appId: review.appId,
-        projectId: null,
-        dir: `/mock/data/apps/${review.appId}`,
+        projectId: project.id,
+        dir: project.path,
         name: review.name,
         version: review.version,
         description: review.description,
         home: review.home,
-        trusted: true,
-        status: opts.enable ? 'stopped' : 'unconfirmed',
-        error: opts.enable ? null : 'This app was imported and is not enabled yet. Review what it runs, then enable it',
+        trusted: opts.enable,
+        status: opts.enable ? 'stopped' : 'untrusted',
+        error: null,
         warnings: [],
-        imported: { source: review.source, at, confirmedAt: opts.enable ? at : null },
+        root: true,
         ...(review.secrets.length ? { secrets: review.secrets.map((name) => ({ name, set: false })) } : {}),
       }
       this.registry.externalAppList.push(app)
-      this.appReviews.set(appKeyOf(null, review.appId), review)
       this.importCommits.push({ token, enable: opts.enable, appId: review.appId })
       this.emit({ type: 'external_apps_changed' })
       return structuredClone(app)

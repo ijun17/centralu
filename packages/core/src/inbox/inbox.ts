@@ -38,6 +38,59 @@ export type InboxCandidate = {
   asking?: boolean
   /** Set on a pending orchestrator proposal (#703): this row is the proposal, not a session, and `id` is not a session id */
   proposal?: PendingProposal
+  /** Set on an app a trusted project gained (#1141): this row is the notice, not a session, and `id` is not a session id */
+  arrival?: AppArrival
+}
+
+/**
+ * An app a project already trusted gained since the window last looked (#1141), say a manifest a `git pull` brought: it
+ * is trusted with the project (owner), so the inbox says so once, with what it declares it may ask for (`asks`, plain
+ * words, empty for nothing beyond its own tools). Dismissed by opening it or with Done.
+ */
+export type AppArrival = { key: string; projectId: string; appId: string; title: string; asks: string[] }
+
+/** The id prefix of a row that stands for an app arrival: `app-arrival:<app key>`. No session id has it. */
+export const APP_ARRIVAL_ID_PREFIX = 'app-arrival:'
+
+export const isAppArrivalId = (id: string): boolean => id.startsWith(APP_ARRIVAL_ID_PREFIX)
+
+/** The arrivals as inbox candidates: unread and waiting on the person, like a finished turn, so Done clears them */
+export function appArrivalCandidates(arrivals: readonly AppArrival[]): InboxCandidate[] {
+  return arrivals.map((a) => ({
+    id: `${APP_ARRIVAL_ID_PREFIX}${a.key}`,
+    projectId: a.projectId,
+    name: `New app: ${a.title}`,
+    state: 'waiting_input' as const,
+    waitingSince: null,
+    lastSeq: 1,
+    lastReadSeq: 0,
+    arrival: a,
+  }))
+}
+
+/**
+ * Which apps of trusted projects are new since the window last looked (#1141), and what it has seen now.
+ *
+ * `seen` holds, per trusted project the window has looked at, the keys of its apps then. A project not in it yet is
+ * looked at for the first time (just registered, just trusted, or a window from before this): its apps are taken as
+ * seen without a notice, since the person trusted or made it with them there. An app of a project in it whose key it
+ * does not hold is new. An untrusted project is dropped, so trusting it again starts afresh: its trust card lists its
+ * apps then.
+ */
+export function noteAppArrivals(
+  apps: readonly { key: string; projectId: string | null; appId: string; title: string; asks: string[] }[],
+  trusted: ReadonlySet<string>,
+  seen: Readonly<Record<string, readonly string[]>>,
+): { seen: Record<string, string[]>; arrived: AppArrival[] } {
+  const next: Record<string, string[]> = {}
+  const arrived: AppArrival[] = []
+  for (const projectId of trusted) {
+    const mine = apps.filter((a) => a.projectId === projectId)
+    const before = seen[projectId]
+    if (before) for (const a of mine) if (!before.includes(a.key)) arrived.push({ key: a.key, projectId, appId: a.appId, title: a.title, asks: a.asks })
+    next[projectId] = [...new Set([...(before ?? []), ...mine.map((a) => a.key)])].sort()
+  }
+  return { seen: next, arrived }
 }
 
 /** An orchestrator proposal waiting for the person's answer, by the name it was proposed under */

@@ -23,6 +23,9 @@ type AppInfo = {
   status: 'invalid' | 'untrusted' | 'stopped' | 'starting' | 'running' | 'crashed' | 'failed'
   error: string | null
   warnings: string[]
+  root?: boolean
+  uses?: { agent?: boolean | string[]; apps?: string[]; host?: string[] }
+  shared?: boolean
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -80,9 +83,9 @@ test('the settings app list: every app shows in one list, and status and reason 
   await expect(page.locator('[data-testid^="app-toggle-"]')).toHaveCount(0)
   await expect(page.getByTestId('settings-apps-empty')).toHaveCount(0)
   const list = page.getByTestId('settings-external-apps')
-  // That project's apps under the project name, user-folder apps in their own group
+  // That project's apps under the project name, user-folder apps still listed in their own group
   await expect(list).toContainText('alpha')
-  await expect(list).toContainText('Your apps')
+  await expect(list).toContainText('Other apps')
   const notes = page.getByTestId(`external-app-${pid}/notes`)
   await expect(notes).toHaveAttribute('data-status', 'running')
   await expect(notes.getByTestId('external-app-status')).toHaveText('Running')
@@ -143,7 +146,7 @@ test('registering a project asks to trust it once — "Later" sends nothing, and
   await expect.poll(async () => (await trustCalls(page)).at(-1)).toEqual({ projectId: beta, trusted: true })
 })
 
-test('an app from an untrusted project shows with a reason, and can be trusted right there in one click', async ({ page }) => {
+test("an app from an untrusted project shows with a reason, and can be trusted right there, through the card listing its project's apps", async ({ page }) => {
   await page.goto('/?mock=1')
   const pid = await addProject(page, '/tmp/alpha')
   await page.getByTestId('trust-ask-no-alpha').click()
@@ -153,7 +156,12 @@ test('an app from an untrusted project shows with a reason, and can be trusted r
   const row = page.getByTestId(`external-app-${pid}/notes`)
   await expect(row.getByTestId('external-app-status')).toHaveText('Not trusted')
   await expect(row.getByTestId('external-app-reason')).toHaveText("This project isn't trusted, so its apps don't run.")
+  // The same card as the project's row, with the project's apps listed (#1141): nothing is trusted on the first press
   await row.getByTestId('external-app-trust').click()
+  const card = row.getByTestId('external-app-trust-card')
+  await expect(card.getByTestId(`external-app-trust-card-app-${pid}/notes`)).toContainText('App notes')
+  expect(await trustCalls(page)).toEqual([])
+  await card.getByTestId('external-app-trust-card-yes').click()
   await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
   // The host rescans and broadcasts — the app becomes stopped, and the trust button disappears
   await expect(row.getByTestId('external-app-status')).toHaveText('Stopped')
@@ -399,6 +407,10 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     expect(await opened(page)).toEqual([])
 
     await blocked.getByTestId('pinned-trust').click()
+    // The card lists the project's apps before anything is trusted (#1141)
+    await expect(blocked.getByTestId(`pinned-trust-card-app-${pid}/slider`)).toBeVisible()
+    expect(await trustCalls(page)).toEqual([])
+    await blocked.getByTestId('pinned-trust-card-yes').click()
     await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
@@ -746,14 +758,144 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(pinned).toBeVisible()
   })
 
-  test('a user-folder app has its own group outside any project', async ({ page }) => {
+  test('a user-folder app still listed (a linked machine on an older build, #1141) stands under Other apps, outside any project', async ({ page }) => {
     await addProject(page, '/tmp/alpha')
+    await expect(page.getByTestId('user-apps')).toHaveCount(0)
     await setApps(page, [app('timer', null, { name: 'Timer' })])
     const group = page.getByTestId('user-apps')
-    await expect(group).toContainText('Your apps')
+    await expect(group).toContainText('Other apps')
+    // Its New app and Import buttons are gone with "Your apps": those stand at the bottom and in the palette
+    await expect(group.getByRole('button', { name: /New app|Import/ })).toHaveCount(0)
     await group.getByTestId('app-row-_user/timer').click()
     const pinned = page.getByTestId('pinned-app-_user/timer')
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     expect(await opened(page)).toEqual([{ appId: 'timer', projectId: null }])
+  })
+
+  test('a project whose folder has the manifest at its root is an app (#1141): its line carries the app mark, the mark and the menu open it, and it is not a row under itself', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    // The test view this harness serves is the timer's; the project's folder is named as the person likes
+    await setApps(page, [
+      app('timer', pid, { name: 'Board', dir: '/tmp/board', root: true }),
+      app('notes', pid, { name: 'Notes' }),
+    ])
+    const block = page.getByTestId('project-board')
+    const mark = block.getByTestId('project-app-mark-board')
+    await expect(mark).toHaveAttribute('data-status', 'stopped')
+    // The inner app keeps its row; the root app has none, the project is it
+    await expect(block.getByTestId(`app-row-${pid}/notes`)).toBeVisible()
+    await expect(block.getByTestId(`app-row-${pid}/timer`)).toHaveCount(0)
+
+    await block.getByTestId('project-app-board').click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/timer`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    expect(await opened(page)).toEqual([{ appId: 'timer', projectId: pid }])
+    await expect(block.getByTestId('project-app-board')).toHaveAttribute('aria-label', 'Open the app Board')
+
+    // The same from the project's menu, by name
+    await block.getByTestId('project-menu-board').click()
+    await expect(page.getByTestId('open-app-board')).toHaveText('Open as app')
+    await page.keyboard.press('Escape')
+    // A plain project has neither
+    await addProject(page, '/tmp/plain')
+    await expect(page.getByTestId('project-plain')).toBeVisible()
+    await expect(page.getByTestId('project-app-mark-plain')).toHaveCount(0)
+  })
+
+  test('a root app that cannot run says why on its mark, dimmed, and the manifest going takes the mark away', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('board', pid, { name: 'Board', dir: '/tmp/board', root: true, status: 'invalid', error: 'centralu.app.json is not JSON' })])
+    const mark = page.getByTestId('project-app-mark-board')
+    await expect(mark).toHaveAttribute('data-status', 'invalid')
+    await expect(mark).toHaveClass(/opacity-50/)
+    await expect(page.getByTestId('project-app-board')).toHaveAttribute('aria-label', 'Open the app Board — invalid: centralu.app.json is not JSON')
+    await setApps(page, [])
+    await expect(page.getByTestId('project-app-mark-board')).toHaveCount(0)
+    await expect(page.getByTestId('project-board')).toBeVisible()
+  })
+
+  /*
+   * Trust follows the project, with no switch per app (owner, 2026-10-18, #1141): the trust card lists what trusting
+   * covers, each app with its name, description and what its manifest says it may ask for.
+   */
+  test("the trust card lists the project's apps, root and inner alike, with what each may ask for; the menu's trust row opens it again", async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [
+      app('board', pid, { name: 'Board', description: 'The team board\nwith more lines', dir: '/tmp/board', root: true, status: 'untrusted', trusted: false, uses: { agent: true, apps: ['notes'], host: ['sessions.list'] } }),
+      app('notes', pid, { name: 'Notes', description: 'Plain notes', status: 'untrusted', trusted: false }),
+    ])
+    const card = page.getByTestId('trust-ask-board')
+    await expect(card.getByTestId('trust-ask-apps-title-board')).toHaveText('Its 2 apps:')
+    const board = card.getByTestId(`trust-ask-app-${pid}/board`)
+    await expect(board).toContainText('Board')
+    // The whole description, not its first line only
+    await expect(board.getByTestId('trust-card-app-description')).toHaveText('The team board\nwith more lines')
+    await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the orchestrator and your other projects can use it.')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: run your default agent in a new session')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: call other apps: notes')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText("the names and states of its project's sessions (sessions.list)")
+    const notes = card.getByTestId(`trust-ask-app-${pid}/notes`)
+    await expect(notes.getByTestId('trust-ask-app-uses')).toHaveText('Asks for nothing beyond its own tools.')
+    await expect(notes.getByTestId('trust-ask-app-reach')).toHaveCount(0)
+
+    // Not now, then the menu's row says it lists them, and opens the card again instead of trusting at once
+    await card.getByTestId('trust-ask-no-board').click()
+    await expect(card).toHaveCount(0)
+    await page.getByTestId('project-menu-board').click()
+    await expect(page.getByTestId('toggle-trust-board')).toHaveText('Trust this project…')
+    await page.getByTestId('toggle-trust-board').click()
+    await expect(page.getByTestId('trust-ask-board')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([])
+    await page.getByTestId('trust-ask-yes-board').click()
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.trustCalls)).toEqual([{ projectId: pid, trusted: true }])
+  })
+
+  /*
+   * An app a trusted project gains later (a manifest a git pull brought) is trusted with it (owner, #1141), and the inbox
+   * says so once, with what it may ask for
+   */
+  test('an app a trusted project gains stands once in the inbox with what it may ask for; opening it opens the app, and it does not come back', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('notes', pid, { name: 'Notes', trusted: false, status: 'untrusted' })])
+    await page.getByTestId('trust-ask-yes-board').click()
+    await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
+    // The host reads its apps again for the change of trust
+    await setApps(page, [app('notes', pid, { name: 'Notes' })])
+    // The apps it was trusted with are no news
+    await expect.poll(() => page.evaluate(() => (window as any).__store.getState().appsSeen)).toEqual({ [pid]: [`${pid}/notes`] })
+    expect(await page.evaluate(() => (window as any).__store.getState().appArrivals)).toEqual([])
+
+    await setApps(page, [app('notes', pid, { name: 'Notes' }), app('timer', pid, { name: 'Timer', uses: { agent: true } })])
+    await page.getByTestId('counter').click()
+    const item = page.getByTestId(`inbox-item-app-arrival:${pid}/timer`)
+    await expect(item).toContainText('New app: Timer')
+    await expect(page.getByTestId(`inbox-arrival-asks-app-arrival:${pid}/timer`)).toContainText('May ask to: run your default agent in a new session')
+    await item.click()
+    await expect(page.getByTestId(`pinned-app-${pid}/timer`)).toBeVisible()
+    // Read once: the next list read does not bring it back
+    await setApps(page, [app('notes', pid, { name: 'Notes' }), app('timer', pid, { name: 'Timer', uses: { agent: true } })])
+    expect(await page.evaluate(() => (window as any).__store.getState().appArrivals)).toEqual([])
+  })
+
+  test('a long list of apps scrolls inside the trust card', async ({ page }) => {
+    const pid = await addProject(page, '/tmp/many')
+    await setApps(page, Array.from({ length: 12 }, (_, i) => app(`a${i}`, pid, { name: `App ${i}`, description: 'Does one thing', status: 'untrusted', trusted: false })))
+    const list = page.getByTestId('trust-ask-apps-many')
+    await expect(list.locator(':scope > li')).toHaveCount(12)
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    // The card's buttons stay in reach under it
+    await expect(page.getByTestId('trust-ask-yes-many')).toBeInViewport()
+  })
+
+  test("a root app has no share switch, in Settings or on its screen: its project's trust decides", async ({ page }) => {
+    const pid = await addProject(page, '/tmp/board')
+    await setApps(page, [app('timer', pid, { name: 'Board', dir: '/tmp/board', root: true }), app('notes', pid, { name: 'Notes' })])
+    await page.getByTestId('project-app-board').click()
+    await expect(page.getByTestId(`pinned-app-${pid}/timer`)).toBeVisible()
+    await expect(page.getByTestId('pinned-share-toggle')).toHaveCount(0)
+    await openAppsSettings(page)
+    await expect(page.getByTestId(`external-app-${pid}/timer`).getByTestId('external-app-share')).toHaveCount(0)
+    // An app inside the project keeps its switch
+    await expect(page.getByTestId(`external-app-${pid}/notes`).getByTestId('external-app-share')).toBeVisible()
   })
 })

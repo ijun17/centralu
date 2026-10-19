@@ -128,27 +128,24 @@ const create = async (projectId: string, t: ToolName) =>
   (await rpc('agents.createSession', { projectId, cwd: join(root, projectId === alpha ? 'alpha' : 'beta'), tool: t })) as SessionInfo
 
 describe('sharing an app (apps.setShared)', () => {
-  it.each(['claude', 'codex'] as const)('%s: auto attaches and calls an untrusted target from an untrusted caller, without a card or stored consent', async (cli) => {
+  /*
+   * An untrusted project's apps attach nowhere, auto included (owner, #1141): #603 opened them to an auto session; it no
+   * longer does for apps. The caller under auto may still reach out from its untrusted project, to a trusted one's app
+   */
+  it.each(['claude', 'codex'] as const)('%s: auto does not attach or call an untrusted project\'s app, from any caller', async (cli) => {
     const s = await mgr.createSession({ projectId: alpha, cwd: join(root, 'alpha'), tool: cli, permissionPreset: 'auto' })
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     await rpc('projects.setTrusted', { projectId: alpha, trusted: false })
     await rpc('projects.setTrusted', { projectId: beta, trusted: false })
     rt.refresh()
     expect(rt.list().find((a) => a.appId === 'board')?.status).toBe('untrusted')
-    expect((await tool(s.id, 'find_apps')).text).toContain('beta/board')
+    expect((await tool(s.id, 'find_apps')).text).not.toContain('beta/board')
     const result = await mgr.runOrchestratorTool(s.id, 'attach_app', { app: 'beta/board' })
-    expect(result.isError).toBeFalsy()
-    expect(result.text).toContain('peek')
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining('not trusted') })
     expect(card(s.id)).toBeUndefined()
     expect(mgr.projectConsents()).toEqual([])
-    const adapter = cli === 'claude' ? claude : codex
-    const apps = adapter.last().apps!
-    expect((await apps.call('app-board', 'peek', {})).isError).toBe(false)
-    // The auto-started server is still untrusted for other callers and screens.
-    expect((await rt.call({ projectId: beta, appId: 'board' }, 'peek', {}, { kind: 'session', sessionId: 'missing' })).status).toBe('rejected')
-    await mgr.updateSettings(s.id, { permissionPreset: 'normal' })
-    expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBe(true)
-    expect((await apps.call('app-board', 'peek', {})).isError).toBe(true)
+    // Nor is it run for that session, by any name
+    expect((await rt.call({ projectId: beta, appId: 'board' }, 'peek', {}, { kind: 'session', sessionId: s.id })).status).toBe('rejected')
   })
 
   it('auto keeps an existing attachment after remembered consent is revoked, until its own preset changes', async () => {

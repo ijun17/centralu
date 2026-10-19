@@ -30,6 +30,11 @@ the control rail (#81), were removed in #372 (decided in #97). Security reasonin
 The folder name is the app's id. An app is identified by (project, id): two projects may each have
 a `notes` app, and they are two apps.
 
+A **root app** (#1141) is a registered project whose own root holds the manifest: the project is the
+app. Its folder is the project's, named as the person likes, so its id is the manifest's `id`, not the
+folder name; it is still identified by (project, id), and its data, secrets, grants and runs are kept
+under that key. The design and the reasons: [plans/root-apps.md](plans/root-apps.md).
+
 ### 1.1 The manifest, `centralu.app.json`
 
 One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check` alike.
@@ -37,7 +42,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | Field | Meaning | Rule |
 |---|---|---|
 | `manifestVersion` | Manifest format | Must be `1`. Anything else is refused with "update Centralu": guessing at a format we do not know would run a changed field with its old meaning |
-| `id` | App id | Equal to the folder name. `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
+| `id` | App id | Equal to the folder name (a root app's is the manifest's own, §1). `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
 | `name`, `version`, `description` | What people and agents read | Not empty; at most 80, 64 and 2000 characters |
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
@@ -60,14 +65,39 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9); another project's session that attaches it, if the person shares it (§9.4) | Through git. Centralu has no button for it |
+| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
 | User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.
+- The root's own `centralu.app.json` is read with it, and the root is always watched, so a manifest
+  added or removed there is seen without a restart. An app in `.centralu/apps/` with the same id keeps
+  it; the root app is then listed `invalid` with the reason. A root manifest that does not pass is listed
+  under its `id` when that much reads, else under `centralu-root`, an id no app can take.
 - A folder watcher follows apps appearing, disappearing and changing (the manifest, and one level of
   subfolders such as `ui/`). Discovery only reads; it starts nothing.
 - Broken or untrusted apps are not hidden. They stand in the list with their reason (`invalid`,
   `untrusted`), so a person can see why an app does not run.
+- **User-folder apps become projects** (#1141): once the host is ready (where the steps a swap left
+  for later run, so a host failing before then has moved nothing), each `<data folder>/apps/<id>/`
+  whose manifest is valid and names its folder's id is registered as a project **in place**, in the
+  same store transaction as the move below, and is that project's root app from then on, once (`apps.adoptedUserApps`, bound to a random mark written in the folder, `.centralu/adopted`, so a
+  project the person deletes is not registered again, and a folder made later under the same name is:
+  not the folder's file id, which ext4 gives again to a folder made where one was just removed, birth
+  time and all). What was kept under `_user/<id>` is carried to `<project id>/<id>`: data,
+  logs, kept versions and secrets are copied; grants are copied, and so are other apps' grants to
+  call it; runs and the app's sessions move to the project; the builder map, attachments, grid panel,
+  view origin port and the window's span and open app follow the new key. The project is trusted,
+  except an imported app the person never enabled. Sessions the manager already loaded follow, and
+  windows hear them again (`session_created`), so the builder is found under the new key in the same
+  run. A folder whose manifest is invalid or names another id (a backup copy) is not moved: it stays
+  listed with its reason, as today. Copies leave the old key's state for a previous
+  build during a swap (`user-app-adoption.ts`, [plans/root-apps.md](plans/root-apps.md) §4). One that
+  appears later, such as an approved MCP server, is registered the same way while the host runs.
+  **The old key still reaches it:** a call or any other request by `user/<id>` (an older window during
+  a swap, a stored name, a script) resolves to the project's root app (`ExternalApps.resolve`, which
+  every runtime method taking a key reads first), with that app's trust and rules, while the user
+  folder has no app of that id and the project still exists.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes
@@ -134,7 +164,19 @@ either to act.
   folder (below, #655), and the sidebar asks once with a card
   (*Trust this project? Trusting lets this project's apps run and its settings apply.*), not a modal
   dialog. It can be changed later from the project menu, or with "Trust this project" on an
-  untrusted app.
+  untrusted app. Trust follows the project, with no switch per app (owner, #1141), so the card lists
+  what trusting covers: each of the project's apps (its root app and those in `.centralu/apps`) with
+  its name, the first line of its description and what its manifest's `uses` declares, in plain words
+  (`uses` is on the app list for this, a protocol addition), and says that the project's own root
+  app then reaches the orchestrator and other projects. A long list scrolls inside the card, and each
+  description is shown whole. When the project has apps, the menu's "Trust this project…" opens that
+  card instead of trusting at once, and so does every other "Trust this project…" (an untrusted app's
+  screen, its row in Settings, the New app dialog), in place (`TrustCard`).
+- **An app a trusted project gains later** (a manifest a `git pull` brought, root or inside) is
+  trusted with the project (owner). The inbox says so once ("New app: <name>", with what it may ask
+  for); opening it opens the app, Done takes it off. The window keeps what it has seen per trusted
+  project in its workspace snapshot (`noteAppArrivals` in @cc/core); a project seen for the first
+  time, or whose trust just changed, gives no notice, since its card listed its apps.
 - **Migration**: the `trusted` column arrived untrusted by default (store v33); then v35 marked
   **every project that existed at that moment** as trusted, once. Those were folders the person had
   chosen and worked in for weeks, and an update must not silently start ignoring their `.claude/`
@@ -303,7 +345,14 @@ ext-apps examples here, from their published npm packages, with a minimal manife
 
 ### 6.2 Pinned, in the main area (Centralu's way, within the standard)
 
-Apps stand in the sidebar under their project; user-folder apps under "Your apps". Opening one
+Apps stand in the sidebar under their project. A **root app** is its project (#1141): it has no row of
+its own; the project's line carries an app mark (dimmed, with the reason in its label, when the app
+cannot run; lit while its screen shows or its view asks something), and the mark and "Open as app" in
+the project's menu open it. The project's line is dragged onto the grid or its project screen as an
+app row is. Its sessions (its builder, its agents) are the project's sessions. The
+"Your apps" section is gone, which also settles #732's crowded bottom; a user-folder app still listed
+(a linked machine on a build from before #1141, or one this host could not move into a project)
+stands in "Other apps" above the bottom row, which is drawn only while there is one. Opening one
 makes the host call the manifest's `home` tool, as a `view` caller, and show the result's view in
 the main area. A host calling a tool is within the standard, and the view is still born from a tool
 call.
@@ -311,7 +360,7 @@ call.
 A project app's sessions (its builder, the agents its `run_agent` started) belong to the
 project and stand indented under the app's row, with their session menus and badges (#591).
 Sessions of a removed project app return to the project's ordinary session list. A user-folder
-app's sessions have no project and stand indented under its row in "Your apps". An app row says
+app's sessions have no project and stand indented under its row in "Other apps". An app row says
 "asks you" for an approval or a pending question, including a question from its view; a completed
 turn awaiting another message does not set that mark. A session with no project that no listed
 app claims (a coordinator the control app left behind, #372; a session of a user-folder app since
@@ -604,9 +653,20 @@ and "Send to builder".
   `.centralu` link pointing outside the project stops it). The template is expanded into a hidden
   folder, which discovery skips, then renamed into place. The data folder is created. Nothing is
   started.
-- **New app** (the UI's door to the same function): "New app…" in each project's menu, and a + on
-  the "Your apps" group, which now always stands so the first user-folder app has somewhere to be
-  made. The dialog asks for a name and the agent that builds it. It derives the id from the name
+- **Without a project** (#1141) the app becomes a project of its own: a new folder `<parent>/<id>`
+  (`~/Centralu` unless a parent is given, with a new project's rules: the default is made when
+  missing, a chosen parent must exist, nothing of that name may be there), the template written
+  there through a dot-named sibling, then registered as a **trusted** project (Centralu made it, as
+  an empty project folder, #655) whose root is the app. A folder that fails to register is removed.
+  The builder works in that project, at its root. The orchestrator's `create_app` without `project`
+  raises create_project's card for the folder first, since it is the one thing it makes outside a
+  project.
+- **New app** (the UI's door to the same function): "New app…" in each project's menu, and the app
+  button beside Add project and New folder at the bottom of the sidebar, for an app that is a project
+  of its own (#1141). The dialog asks for a name and the agent that builds it; without a project it
+  also shows the folder it will make, in `~/Centralu` unless the person changes it (Choose… is the
+  folder picker), judged as the new project dialog judges it (`projects.createPreview`), and offers
+  "Import one…". It derives the id from the name
   (editable) and judges it by the host's own rule, which lives in `@cc/protocol` (`app-id.ts`) so
   both halves share one copy. What only the host can know (an existing id, trust, the template)
   comes back as the host's refusal, shown word for word. The picked agent is always sent. One that
@@ -691,7 +751,7 @@ and "Send to builder".
 
 | Session | Apps |
 |---|---|
-| Orchestrator | User-folder apps |
+| Orchestrator | User-folder apps and the root apps of trusted projects (#1141: a project that is an app takes the user-folder app's place, and trust follows the project; an untrusted project's root app reaches it under no preset). Two of one id are named apart, and a name once seen stays with its app (below) |
 | A project's sessions, worktree sessions included | That project's apps, if the project is trusted |
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
@@ -702,7 +762,15 @@ app another project shares, or a user-folder app (§9.4). Apps that are `invalid
 Codex cannot change a running thread's servers, so the per-call check is what actually stops an app
 that was detached.
 
-Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`.
+Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`. A name a session has seen stays bound to its app for the session's life (#1141,
+`session_app_names:<session>`, purged with the session): a later app with the same id (the root app of
+another project, say) gets a name qualified by its project, `app-<id>-<project>`, never a name another
+app held, one gone for the moment (its manifest broken mid-edit) included; `attach_app` keeps to the
+same book. No name is longer than `app-<id>` of the longest id (36 characters, `SERVER_NAME_MAX`), so
+`mcp__<server>__` leaves a tool 21 of the 64 characters a tool name may have: a long project name is
+cut, and a name cut short stays unique by a number. **An untrusted project's apps attach nowhere**, its own project's sessions included and
+under `auto` too (owner, #1141): #603's opening of an untrusted project's apps to an `auto` session no
+longer applies, and the runtime refuses them for every caller.
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
 and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
@@ -789,6 +857,7 @@ session's apps (and so at every call):
 |---|---|---|
 | Another project's app | The person shares it (off by default), its project is trusted, and it is not `invalid`, `untrusted` or `failed` | Once per pair of projects, in the calling session: the consent card (Allow once, Always for this pair, Deny). "Always" is kept per (from project, to project, `apps`) in `project_consents` (store v44, shared with part B's `ask_project`) and listed in Settings, where revoking it detaches what it allowed. "Once" lasts for that attachment; a denial is not remembered |
 | User-folder app | Not `invalid`, `unconfirmed` or `failed` | Never: the person put it in their own folder to use across projects |
+| Another project's root app (#1141) | Its project is trusted (an untrusted project's apps are never attached, under any preset, `auto` included), and it is not `invalid` or `failed`. Found as `<project>/<id>`, and attached by its bare id too when one project's root app has it | Never, as a user-folder app: it took that app's place. It has no share switch: its project's trust decides (owner), and the trust card lists the project's apps (§3) |
 | This project's own app | Already attached by decision 4 | — |
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one
@@ -837,9 +906,11 @@ That smoke test ran before `ask_project` (#371 part B) was loaded on the same se
 | Detach | The proxy server is removed at once | Every call is checked against the current set, so a call by the old name is refused at once; the name leaves the thread with the same end-of-turn restart |
 
 **Names.** The app attaches as `app-<id>`, or `app-<id>-2` (and so on) when that name is taken in
-the session, for instance by its own project's app of the same id. The name is chosen when it is
-attached and kept for the session; an app that later appears in the session's own project under the
-same name keeps the name, and the attached one steps back.
+the session, for instance by its own project's app of the same id, or was ever given to another app
+of the session, one gone for the moment included (#1141, the session's book `session_app_names`,
+`SessionAppsHub.claimAttachName`). The name is written in that book, so it stays with the app for the
+session's life, and attaching it again after a detach gives it the same name; an app that later
+appears in the session's own project with the same id gets a name of its own (`app-<id>-<project>`).
 
 **Where it runs and what is recorded.** Nothing about the app changes: it runs where it lives, with
 its own folder as working directory and its own data folder, one instance per (project, app) shared
@@ -911,10 +982,12 @@ gate happens in one place, the broker desk (`desk.ts`).
   through `ExternalApps.call` with caller `app` and the parent run id (§5): visibility, trust, the
   record, the change notification (the cause is the asking run) and cancellation are the same as
   for any other caller. A project app reaches its own project's app of that id first, then the user
-  folder's; a user-folder app reaches only user-folder apps.
+  folder's, then the root app of that id (#1141) when exactly one trusted project is an app of that id; a
+  user-folder app or a root app reaches the user folder's, then that root app. Another project's inner
+  app is never reached.
 - **`host_data { name }`.** A closed list, read-only, deny by default: `sessions.list` (the names
   shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
-  project's sessions for a project app, every session for a user-folder app; never those in the trash, FR-22) and `git.status` (the
+  project's sessions for a project app, a root app included as its permission card says (#1141), every session for a user-folder app; never those in the trash, FR-22) and `git.status` (the
   project's branch and changed files; project apps only). Only names declared in `uses.host`.
 - **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
   the person is asked where the chain started: on the approval card of the session whose agent
@@ -989,8 +1062,9 @@ next plan. Code: `apps/external/handover.ts` (staging, confirmation, versions), 
 
 ### 12.1 Import (E-3)
 
-"Import" on the **Your apps** group opens one dialog for a folder, a `.zip` file, or an https
-link to a `.zip`. It takes two steps.
+"Import one…" in the New app dialog, or "Import an app" in the command palette, opens one dialog for
+a folder, a `.zip` file, or an https link to a `.zip` (the "Your apps" group that had the button is
+gone, #1141). It takes two steps.
 
 1. **Review.** `apps.importPrepare` copies the source into a staging folder in the data folder
    (`app-staging/`, which discovery never scans, so nothing there can start or attach), judges it,
@@ -998,10 +1072,14 @@ link to a `.zip`. It takes two steps.
    runs, as the person), what it declares in `uses` (run your agent, call other apps, read Centralu
    data), the secrets it wants, whether it has a screen, and every file with its size, plus what
    was not copied and why. A download goes to a temporary folder first and is removed afterwards.
-2. **Bring it in.** "Import" moves it to `<data folder>/apps/<id>/` **turned off** (`unconfirmed`).
-   "Import and enable" does the same and confirms at once, sending back the key of the review the
-   person just saw; the host re-reads the staged manifest and refuses a key that does not match
-   it. Closing the dialog drops the staging; staging also expires after 30 minutes and is cleared
+2. **Bring it in.** The app lands as a **project of its own** (#1141): its folder moves to
+   `<parent>/<id>` (`~/Centralu` unless the person picks another parent, with a new project's folder
+   rules), which is registered as a project whose root is the app. "Import" registers it
+   **untrusted**, so it never runs until the person trusts the project (trusting it is enabling it);
+   "Import and enable" registers it trusted, sending back the key of the review the person just saw;
+   the host re-reads the staged manifest and refuses a key that does not match it. A host before
+   #1141 moved it to `<data folder>/apps/<id>/` turned off (`unconfirmed`) instead, and that path
+   (`commitImport`) is still what the import mark below governs. Closing the dialog drops the staging; staging also expires after 30 minutes and is cleared
    when the host starts. The app lands in the list and its pinned view opens.
 
 An imported app that is not enabled is treated like an untrusted project's app: it never starts,
@@ -1052,6 +1130,12 @@ fingerprint does not count dot-names as code either.
 A **project app** is versioned by git: the Versions panel beside its pinned view lists the recent
 commits that touched `.centralu/apps/<id>` (read by the host core with `git log -- <folder>`;
 `repo: false` outside a repository). It is read-only; going back is done with git.
+
+A **root app** in a repository is versioned by git the same way, over the whole repository (its folder
+is the project). Outside a repository it keeps copies like a user-folder app, under
+`<data folder>/app-versions/<project id>/<id>/` (#1141). Its folder is the person's whole project,
+so a restore writes the version's files back and **deletes nothing** the version lacks, and it is
+refused when the copy of the current files it takes first cannot be made (over 64 MiB, a disk error).
 
 A **user-folder app** (imported ones included) has no git, so the host keeps copies. Each time the
 app starts on code it has not kept yet, and when an app is imported, its folder is copied to

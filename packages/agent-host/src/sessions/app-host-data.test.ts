@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -54,6 +55,28 @@ describe('sessions.list', () => {
     const r = await read(orchestrator, 'app-timer', 'sessions.list')
     const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()
     expect(ids).toEqual([orchestrator.id, worker.id].sort())
+  })
+})
+
+describe('sessions.list for a project that is an app (#1141)', () => {
+  it("a root app receives its project's sessions only, as the permission card says, also when the orchestrator calls it", async () => {
+    plantApp(w.root, 'repo', {
+      id: 'board',
+      server: { command: process.execPath, args: [fileURLToPath(new URL('../apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'mediation'] },
+      uses: { host: ['sessions.list'] },
+    })
+    w.rt.refresh()
+    const other = join(w.root, 'other')
+    execFileSync('git', ['init', '-q', '-b', 'main', other])
+    const otherId = ((await w.rpc('projects.add', { path: other })) as { id: string }).id
+    const orchestrator = await w.mgr.orchestrator()
+    const mine = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
+    const elsewhere = (await w.rpc('agents.createSession', { projectId: otherId, cwd: other, tool: 'claude' })) as SessionInfo
+    const r = await read(orchestrator, 'app-board', 'sessions.list')
+    expect(r.isError).toBe(false)
+    const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()
+    expect(ids).toEqual([mine.id])
+    expect(ids).not.toContain(elsewhere.id)
   })
 })
 

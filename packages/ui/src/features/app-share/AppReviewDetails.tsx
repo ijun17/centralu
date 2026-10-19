@@ -1,5 +1,6 @@
-import type { AppReview, AppUses } from '@cc/protocol'
+import type { AppReview } from '@cc/protocol'
 import { formatBytes } from '../../app/format.js'
+import { usesLines } from '../../store/app-catalog.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
@@ -145,13 +146,6 @@ function Command({ server, testId = 'review-command' }: { server: AppReview['ser
   )
 }
 
-/** `uses` in plain words — one line per capability */
-export function usesLines(uses: AppUses): string[] {
-  const out: string[] = []
-  if (uses.agent === true) out.push('Run your default agent in a new session')
-  else if (Array.isArray(uses.agent) && uses.agent.length) out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
-  if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
-  if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.join(', ')}`)
-  return out
-}
+/** `uses` in plain words — kept with the app catalog, which the trust card and the inbox read too (#1141) */
+export { usesLines }
 

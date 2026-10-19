@@ -533,6 +533,28 @@ export class SessionManager {
   }
 
   /**
+   * Sessions the store moved into a project behind the manager's back (#1141: a user-folder app's builder and agents,
+   * when its folder became a project in place, after this manager loaded them). The loaded copies follow, so the
+   * builder is found under the app's new key in this same run, and each window hears the session again
+   * (`session_created`, which a window applies to a session it already holds when the project differs). A live
+   * handle's attachment is moved as well, so a builder that outlived the move (kept across a host swap) is still given
+   * its own app.
+   */
+  sessionsMovedToProject(sessionIds: readonly string[], projectId: string): void {
+    for (const id of sessionIds) {
+      const m = this.meta.get(id)
+      if (!m || m.projectId === projectId) continue
+      const moved = { ...m, projectId }
+      this.meta.set(id, moved)
+      // A live handle's app attachment follows too (a builder kept running across a swap): it gets its own app again at once
+      this.apps.appsHub?.sessionMoved(id, projectId)
+      this.emit({ type: 'session_created', sessionId: id, session: moved })
+    }
+    // The names sessions saw the app under moved to its new key in the store (#1141): the hub reads them again
+    this.apps.appsHub?.reloadNames()
+  }
+
+  /**
    * Deletes a project (this is a **delete**, not an unregister).
    *
    * Files are left untouched — removing a folder only ever happens through the OS trash, and that
@@ -570,6 +592,8 @@ export class SessionManager {
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
     const root = this.projectRow(projectId)?.path
     this.store.trash.deleteProject(projectId)
+    // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
+    this.apps.appsHub?.rt.forgetProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
     this.watchers.drop(projectId)
     if (root) invalidateFileIndex(root)
@@ -2179,6 +2203,8 @@ export class SessionManager {
       appHostData: (...a) => self.appSessions.appHostData(...a),
       answerQuestion: (...a) => self.answerQuestion(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
+      appProjectTarget: (...a) => self.projectCreation.appProjectTarget(...a),
+      registerMadeFolder: (...a) => self.projectCreation.registerMadeFolder(...a),
       applyStateHint: (...a) => self.events.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askProject: (...a) => self.askProject(...a),
@@ -2478,6 +2504,7 @@ export class SessionManager {
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
       autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
       createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
+      askAppProject: (sessionId, spec, signal) => this.projectCreation.askAppProject(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),
       addFolderAsked: (sessionId, path, signal) => this.projectCreation.addFolderAsked(sessionId, path, signal),
       addFolderOnMachine: (sessionId, reader, machine, path, signal) => this.projectCreation.addFolderOnMachine(sessionId, reader, machine, path, signal),
@@ -2507,6 +2534,11 @@ export class SessionManager {
   /** `AppSessions.createApp` (app-sessions.ts), kept on the manager for its callers */
   createApp(...a: Parameters<AppSessions['createApp']>): ReturnType<AppSessions['createApp']> {
     return this.appSessions.createApp(...a)
+  }
+
+  /** `AppSessions.commitImport` (app-sessions.ts): an import brought in as a project of its own (#1141) */
+  commitImport(...a: Parameters<AppSessions['commitImport']>): ReturnType<AppSessions['commitImport']> {
+    return this.appSessions.commitImport(...a)
   }
 
   /** `AppSessions.builderOf` (app-sessions.ts), kept on the manager for its callers */

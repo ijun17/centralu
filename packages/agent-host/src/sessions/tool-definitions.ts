@@ -279,7 +279,8 @@ export const ORCHESTRATOR_TOOLS = [
     description:
       'Creates a new app (a Centralu app) from a template (M4) — use it when the person says "make me a tool/screen that does…". An app is a small MCP server that ' +
       'the person clicks as a screen and an agent calls as the same tools, as functions. If project is given, it is created inside that project ' +
-      '(`.centralu/apps/<id>/`, committed to the repository and shared with the team); if not, it is created in the user folder (an app used across several projects). It can only be created in a trusted project, and an id that already exists is ' +
+      '(`.centralu/apps/<id>/`, committed to the repository and shared with the team); if not, it becomes a new project of its own, a folder <parent>/<id> ' +
+      '(~/Centralu unless parent is given) whose root is the app, after the person allows it on a card. It can only be created in a trusted project, and an id that already exists is ' +
       "not overwritten. Deleting it is the person's job.",
     schema: z.object({
       /*
@@ -288,7 +289,8 @@ export const ORCHESTRATOR_TOOLS = [
        */
       id: z.string().describe('App id (for example, resource-search) — lowercase letters, digits, and hyphens, 32 characters or fewer, and must not start with "centralu" or "app-". Becomes both the folder name and the session\'s server name app-<id>.'),
       name: z.string().describe('The name shown to the person (for example, Resource Search).'),
-      project: z.string().optional().describe('Project name or id. If omitted, a user-folder app.'),
+      project: z.string().optional().describe('Project name or id. If omitted, a new project that is the app.'),
+      parent: z.string().optional().describe('Without project: the full path of the folder its folder goes in. ~/Centralu if omitted.'),
       description: z.string().optional().describe('One line on what the app does.'),
       tool: ToolName.optional().describe("The tool for the building session. If omitted, the project's default tool."),
     }),

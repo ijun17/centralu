@@ -76,6 +76,66 @@ test('a conversation read back over two days is divided by day, each message wit
   await expect(page.getByTestId('said-at')).toHaveText([/^9:05\sAM$/, /^9:06\sAM$/, /^3:42\sPM$/, /^3:43\sPM$/])
 })
 
+/**
+ * The person's message stands 24px from what precedes it and from what follows it, and its time sits 4px under the
+ * bubble, as the answer's does (owner, 2026-10-19). Measured on a conversation read back: the answer's time above, the
+ * answer's bubble below. The time's own box starts at the bubble's bottom edge and carries the 4px as its top padding in
+ * both places, so the two callers share one value rather than a margin and a gap that happen to add up.
+ */
+test("the person's message stands 24px from its neighbours and its time 4px under the bubble, as the answer's does", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const at = new Date(2026, 9, 18, 15, 42).getTime()
+  const id = await page.evaluate(async (t) => {
+    const m = (window as any).__mock
+    const project = Object.values((window as any).__store.getState().projects)[0] as { id: string; path: string }
+    const info = await m.agents.createSession({ projectId: project.id, cwd: project.path, tool: 'claude' })
+    m.emit({ type: 'session_created', sessionId: info.id, session: info })
+    const row = (seq: number, role: string, text: string, ts: number) => ({ sessionId: info.id, seq, role, kind: 'text', payload: { text }, ts })
+    m.messages.set(info.id, [
+      row(1, 'user', 'First question', t),
+      row(2, 'assistant', 'First answer', t + 60_000),
+      row(3, 'user', 'Second question', t + 120_000),
+      row(4, 'assistant', 'Second answer', t + 180_000),
+    ])
+    return info.id as string
+  }, at)
+  await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), id)
+  await expect(page.getByTestId('said-at')).toHaveCount(4)
+  await expect(page.getByTestId('chat-stream')).not.toHaveAttribute('data-settling', /.*/)
+
+  const box = async (locator: import('@playwright/test').Locator) => (await locator.boundingBox())!
+  const measure = async () => {
+    const times = page.getByTestId('said-at')
+    const row = page.getByTestId('msg-user').nth(1)
+    const bubble = row.getByText('Second question')
+    const answerTime = await box(times.nth(1))
+    const personBubble = await box(bubble)
+    const personTime = await box(row.getByTestId('said-at'))
+    const nextBubble = await box(page.locator('[data-bubble="solo"]').last())
+    return {
+      before: personBubble.y - (answerTime.y + answerTime.height),
+      after: nextBubble.y - (personTime.y + personTime.height),
+      timeFromBubble: personTime.y - (personBubble.y + personBubble.height),
+    }
+  }
+  await expect
+    .poll(async () => {
+      const m = await measure()
+      return [Math.round(m.before), Math.round(m.after), Math.round(m.timeFromBubble)]
+    })
+    .toEqual([24, 24, 0])
+
+  // The 4px is the time's own top padding, the same under the person's bubble and under the answer's last one
+  const padTop = (locator: import('@playwright/test').Locator) =>
+    locator.evaluate((el) => getComputedStyle(el).paddingTop)
+  const times = page.getByTestId('said-at')
+  expect(await padTop(times.nth(0))).toBe('4px')
+  expect(await padTop(times.nth(1))).toBe('4px')
+  const answerBubble = await box(page.locator('[data-bubble="solo"]').first())
+  const answerTime = await box(times.nth(1))
+  expect(Math.round(answerTime.y - (answerBubble.y + answerBubble.height))).toBe(0)
+})
+
 test("the conversation's scrollbar is drawn over its content, and the native one takes no width", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'a long one')

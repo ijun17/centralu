@@ -34,6 +34,30 @@ test('The Add project button sits inside the sidebar, below the project list', a
 })
 
 /**
+ * An app is made like a project (#1141), so New app stands with the other two ways a project comes to be, and the
+ * "Your apps" section that crowded the bottom is gone (#732). The row has to hold all three at the sidebar's narrowest.
+ */
+test('New app stands on the Add project row, inside the sidebar at its default and narrowest widths, and no apps section stands below the list', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await expect(page.getByTestId('user-apps')).toHaveCount(0)
+  for (const width of [240, 180]) {
+    await page.evaluate((w) => (window as any).__store.getState().setSidebarWidth(w), width)
+    await expect.poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width)).toBe(width)
+    const sidebar = (await page.getByTestId('sidebar').boundingBox())!
+    const add = (await page.getByTestId('add-project').boundingBox())!
+    const create = (await page.getByTestId('create-project').boundingBox())!
+    const app = (await page.getByTestId('create-app').boundingBox())!
+    expect(Math.abs(app.y + app.height / 2 - (add.y + add.height / 2)), `${width}px`).toBeLessThanOrEqual(1)
+    expect(app.x, `${width}px`).toBeGreaterThan(create.x + create.width - 1)
+    expect(app.x + app.width, `${width}px`).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
+    // Add project keeps room to be pressed
+    expect(add.width, `${width}px`).toBeGreaterThanOrEqual(24)
+  }
+  await page.getByTestId('create-app').click()
+  await expect(page.getByTestId('new-app-dialog')).toBeVisible()
+})
+
+/**
  * The menu appears **right next to the button that opened it**.
  *
  * It used to be fixed at one spot in the top right of the sidebar (with no positioned ancestor,
@@ -307,6 +331,36 @@ test('The sidebar uses only one row per project (vertical space)', async ({ page
   await page.getByTestId('project-header-alpha').hover()
   await expect(page.getByTestId('project-tip-alpha')).toBeVisible()
   await expect(page.getByTestId('project-tip-alpha')).toContainText('/tmp/alpha')
+})
+
+/**
+ * An open project with no session and no app draws nothing below its header (owner, 2026-10-19): the empty list used to
+ * leave a 6px gap under the name, so a project with nothing in it stood taller than its one line. Measured as the
+ * distance from the header row's bottom margin edge to the end of the section's content, which is 0 with nothing below the header and
+ * the list's top margin with a row below it.
+ */
+test('An open project with no session and no app has no gap under its header', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const gapUnderHeader = () =>
+    page.getByTestId('project-alpha').evaluate((section) => {
+      const cs = getComputedStyle(section)
+      const contentBottom = section.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom)
+      // The header row pulls its own box 6px into the section's padding (-my-1.5): its margin edge is what the list follows
+      const header = section.firstElementChild!
+      return contentBottom - (header.getBoundingClientRect().bottom + parseFloat(getComputedStyle(header).marginBottom))
+    })
+  // A new project asks whether to trust it, which stands under the header too; answer it so only the list is measured
+  const notNow = page.getByTestId('trust-ask-no-alpha')
+  if (await notNow.isVisible()) await notNow.click()
+  await expect(page.getByTestId('trust-ask-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', /.*/)
+  await expect(page.locator('[data-testid^="session-row-"]')).toHaveCount(0)
+  expect(await gapUnderHeader()).toBeCloseTo(0, 0)
+
+  // With a session under it the list stands below the header, so the measure sees the rows and is not vacuous
+  await newSession(page, 'alpha', 'task')
+  await expect(page.locator('[data-testid^="session-row-"]')).toHaveCount(1)
+  expect(await gapUnderHeader()).toBeGreaterThan(20)
 })
 
 /**

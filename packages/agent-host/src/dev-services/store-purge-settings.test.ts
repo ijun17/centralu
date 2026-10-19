@@ -23,11 +23,12 @@ const KEEP_ALL = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', r
  * Every per-session key the host writes today, as its builder spells it: `agentDepthKey`, `hubAskDepthKey`
  * (sessions/agent-depth.ts), `pausedReportKey` (child-ownership.ts), `freshStartKey` (session-start.ts),
  * `codeIntelligenceKey` (tool-profiles.ts), the three of launch-records.ts, `externalSyncedKey`
- * (external-conversations.ts) and app-access.ts's session list.
+ * (external-conversations.ts), app-access.ts's session list and the names a session has seen its apps under
+ * (`APP_NAMES_PREFIX`, session-apps.ts, #1141).
  */
 const PER_SESSION = [
   'agent_depth', 'hub_ask_depth', 'report_paused', 'fresh_start', 'code_intelligence',
-  'background_tasks', 'tool_prefix', 'launch_settings', 'external_synced', 'session_apps',
+  'background_tasks', 'tool_prefix', 'launch_settings', 'external_synced', 'session_apps', 'session_app_names',
   // Where a list setting sets aside a value it could not read (#384, `asideKeyOf`)
   asideKeyOf('session_apps:x').slice(0, -2),
 ]

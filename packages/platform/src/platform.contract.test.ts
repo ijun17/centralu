@@ -1499,21 +1499,23 @@ describe('Platform contract: app secrets (web + real host)', () => {
 })
 
 /**
- * Import (M4 E-3) — the web implementation's `importPrepare`, `importCommit`, `review` and
- * `enable` run through a real host and a real runtime. An admitted app stands in the list
- * disabled (`unconfirmed`), and enabling it with the key the person reviewed makes it an
- * ordinary user-folder app. Rejection arrives exactly as the host phrased it.
+ * Import (M4 E-3) — the web implementation's `importPrepare` and `importCommit` run through a real host and a real
+ * runtime. An app lands as a project of its own (#1141): "Import" registers it untrusted, so it does not run until the
+ * person trusts it; "Import and enable" registers it trusted, only with the key the person reviewed, and in the parent
+ * the person chose. Rejection arrives exactly as the host phrased it.
  */
 describe('Platform contract: app import (web + real host)', () => {
-  it('preparing does not admit it, admitting it stands it up disabled, it is enabled with the review window key — a different key is rejected with the host wording', async () => {
+  it('preparing does not admit it; "Import" lands it as an untrusted project, "Import and enable" as a trusted one where asked — a different key is rejected with the host wording', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-import-')))
     mkdirSync(join(fixture, 'data'))
     const source = plantApp(join(fixture, 'src'), 'notes', { uses: { agent: true } })
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+    mgr.useProjectsHome(() => join(fixture, 'Centralu'))
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
+    mgr.useExternalApps(rt)
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
     const port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
@@ -1524,11 +1526,17 @@ describe('Platform contract: app import (web + real host)', () => {
       expect(await platform.apps.list()).toEqual([])
 
       const app = await platform.apps.importCommit(token, { enable: false })
-      expect(app).toMatchObject({ appId: 'notes', projectId: null, status: 'unconfirmed', imported: { source, confirmedAt: null } })
-      expect((await platform.apps.review('notes', null)).reviewKey).toBe(review.reviewKey)
-      await expect(platform.apps.enable('notes', null, 'nope')).rejects.toThrow('This app changed since you reviewed it. Review it again')
-      expect(await platform.apps.enable('notes', null, review.reviewKey)).toMatchObject({ status: 'stopped', imported: { confirmedAt: expect.any(Number) } })
-      await expect(platform.apps.importPrepare(source)).rejects.toThrow('An app with the id "notes" is already in your apps')
+      expect(app).toMatchObject({ appId: 'notes', root: true, dir: join(fixture, 'Centralu', 'notes'), trusted: false, status: 'untrusted' })
+      expect((await platform.projects.list()).find((p) => p.id === app.projectId)).toMatchObject({ trusted: false })
+
+      const again = await platform.apps.importPrepare(source)
+      // Its folder in ~/Centralu is taken by the first: refused before anything is written, as for a new project
+      await expect(platform.apps.importCommit(again.token, { enable: false })).rejects.toThrow('Something named "notes" is already in')
+      const parent = join(fixture, 'elsewhere')
+      mkdirSync(parent)
+      await expect(platform.apps.importCommit(again.token, { enable: true, reviewKey: 'nope', parent })).rejects.toThrow('What would be enabled is not what you reviewed. Review it again')
+      const enabled = await platform.apps.importCommit(again.token, { enable: true, reviewKey: again.review.reviewKey, parent })
+      expect(enabled).toMatchObject({ appId: 'notes', root: true, dir: join(parent, 'notes'), trusted: true, status: 'stopped' })
       await expect(platform.apps.importPrepare('http://example.com/a.zip')).rejects.toThrow('Only folders and .zip files on this machine, or https links, can be imported')
     } finally {
       await platform.dispose()

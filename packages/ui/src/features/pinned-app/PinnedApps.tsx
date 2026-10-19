@@ -1,3 +1,4 @@
+import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -134,7 +135,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const release = useStore((s) => s.releasePinnedView)
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
-  const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Your apps'))
+  const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Other apps'))
   // The Runs panel (B-7) opens independently per view — a person watching one app's runs moving to another app sees that app's own panel state first
   const [runsOpen, setRunsOpen] = useState(false)
   // The Secrets panel (M4 E) — only exists for an app that declares secrets. If any are unset, the header's button states the count
@@ -367,8 +368,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {missing ? `Secrets · ${missing} missing` : 'Secrets'}
             </button>
           )}
-          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is */}
-          {app?.projectId && (
+          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is. A root app has none: its project's trust decides (#1141) */}
+          {app?.projectId && !app.info.root && (
             <button
               type="button"
               className={`rounded-md px-2 py-0.5 text-xs transition-colors ${
@@ -452,7 +453,6 @@ function Body({
   onRestart: () => void
   onMessage: (m: AppFrameMessage) => Promise<boolean>
 }) {
-  const trust = useStore((s) => s.setProjectTrusted)
   const connection = useStore((s) => s.connection)
   const title = app?.title ?? pv.appId
   /*
@@ -517,9 +517,8 @@ function Body({
       <Notice testId="pinned-untrusted" title={app.status.reason ?? ''}>
         Trusting lets this project&apos;s apps run and its settings apply.
         {app.projectId && (
-          <Button variant="primary" className="mt-3 block" onClick={() => void trust(app.projectId!, true)} data-testid="pinned-trust">
-            Trust this project
-          </Button>
+          // The same card as the project's row, with its apps listed (#1141): trusting is never one press away
+          <TrustProjectButton projectId={app.projectId} testId="pinned-trust" className="mt-3 block" />
         )}
       </Notice>
     )

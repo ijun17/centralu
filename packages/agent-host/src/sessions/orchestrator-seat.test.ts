@@ -55,6 +55,7 @@ beforeEach(() => {
     forkFor: vi.fn(),
     autoBoundaryOpen: vi.fn(() => true),
     createProjectAsked: vi.fn(),
+    askAppProject: vi.fn(async () => null),
     createProjectOnMachine: vi.fn(),
     addFolderAsked: vi.fn(),
     addFolderOnMachine: vi.fn(),

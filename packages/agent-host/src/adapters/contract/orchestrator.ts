@@ -580,19 +580,22 @@ export type OrchestratorTools = {
    *
    * Why this is a power rather than a propose: what gets created is **a copy of a template** — it
    * loads no code that is already in the repository, and no command the person did not choose. An
-   * app is only ever created in a trusted project (or a user folder), and it never overwrites an
-   * id that already exists. Deletion is still a human's job (a project app through git, a
-   * user-folder app through `apps.remove`).
+   * app is only ever created in a trusted project, and it never overwrites an id that already
+   * exists. Without a project it makes a new folder and registers it as a project whose root is the
+   * app (#1141); that folder is the one thing it makes outside a project, so the person allows it on
+   * create_project's card first. Deletion is still a human's job.
    */
   createApp(spec: {
-    /** The project's name or id. A user-folder app if omitted */
+    /** The project's name or id. A new app project if omitted (#1141) */
     project?: string
+    /** Without a project: the full path of the folder the new app project's folder goes in; `~/Centralu` if omitted */
+    parent?: string
     id: string
     name: string
     description?: string
     /** The tool for the session that creates it (C-2). The project's default tool if omitted */
     tool?: ToolName
-  }): Promise<{
+  }, signal?: AbortSignal): Promise<{
     ok: boolean
     error?: string
     appId?: string

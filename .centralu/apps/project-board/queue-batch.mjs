@@ -12,6 +12,7 @@ import {
   decideLanding,
   endBatch,
   formBatch,
+  gathering,
   markBatchless,
   NOT_STARTED,
   releaseMembers,
@@ -38,19 +39,21 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, pushEvent, SUBJECT_MAX } from './queue.mjs'
-import { afterMerge, batchable, land, latestRuns, permissionsOf, pollMs, takeLease, updateQueue } from './queue-driver.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX } from './queue.mjs'
+import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
 const RED = new Set(['failed', 'failing'])
-/**
- * Fewer than this left after a conflict or a change, and there is no batch (QUEUE.batch.min is for
- * starting one). With two tiers a batch of one is a batch: every pull request lands through one.
- */
-const KEEP_MIN = QUEUE.batch ? Math.min(2, QUEUE.batch.min) : 2
 const TIERS = CI.fullTier !== null
+/**
+ * Fewer than this left after a split, a conflict or a change, and there is no batch (QUEUE.batch.min
+ * is for starting one). With two tiers a batch of one is a batch, whatever `min`: every pull request
+ * lands through one, and a red batch is split down to single pull requests (bisect), each half that
+ * passes landing.
+ */
+const KEEP_MIN = TIERS ? 1 : 2
 const workflowFile = (path) => path.split('/').pop()
 const list = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
@@ -60,7 +63,11 @@ export function batchWork(q, now) {
   const b = activeBatch(q)
   if (b) return Date.parse(b.nextAt ?? 0) <= now ? { batch: b } : null
   if (q.batchOff && Date.parse(q.batchOff.until) > now) return null
-  return batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS }).length >= QUEUE.batch.min ? { form: true } : null
+  const items = batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS })
+  if (items.length < QUEUE.batch.min) return null
+  // One queued a moment ago and not read yet joins this batch rather than wait for the next
+  if (gathering(q, { repo: items[0].repo, now, size: items.length, max: QUEUE.batch.max })) return null
+  return { form: true }
 }
 
 /** Forms the batch batchWork saw, on the queue as it is now (inside updateQueue). */
@@ -218,14 +225,16 @@ async function build(b, ctx) {
       then: (fq) => (fq.batchOff = { until: new Date(now + BATCH_OFF_MS).toISOString(), reason: e.message }),
     })
   }
-  // Their own runs that have not started are not needed now: the batch's run tests them. Each is
-  // written down before it is cancelled, so a driver stopped in between leaves no cancelled run
-  // the batch does not know (landing accepts UNSTABLE only from runs on that list). A batch made
-  // from another (split, tested again) starts with that one's list.
+  // Their own runs that have not started are not needed now: the batch's run tests them; with two
+  // tiers, their quick runs still going are not either (the full run tests what they test, and their
+  // runners are the batch's). Each is written down before it is cancelled, so a driver stopped in
+  // between leaves no cancelled run the batch does not know (landing accepts UNSTABLE only from runs
+  // on that list). A batch made from another (split, tested again) starts with that one's list.
   const cancelled = [...(b.cancelled ?? [])]
+  const needless = (x) => (TIERS ? x.status !== 'completed' : NOT_STARTED.has(x.status))
   for (const s of steps) {
     const own = await readWorkflowChecks(repo, s.head, { workflows: CI.workflows })
-    for (const run of own.runs.filter((x) => NOT_STARTED.has(x.status))) {
+    for (const run of own.runs.filter(needless)) {
       // Not the driver any more: the next one builds this batch again from the start
       if (!renew()) return { yielded: true }
       const entry = { pr: s.pr, run: run.id, suite: run.check_suite_id ?? null }
@@ -304,10 +313,12 @@ async function runCi(b, ctx) {
   const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
   const runs = latestRuns(scoped.runs, { headRefName: b.branch })
   const n = `Batch ${b.branch}`
-  const d = decideRun({ subject: b, head: b.head, checks, runs, now, n })
+  // Why a finished run failed: a real failure is split at once, only an infrastructure one rerun
+  const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, b.failures) : {}
+  const d = decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
-    save((fq, fb) => Object.assign(fb, { required, reruns: d.patch.reruns }))
+    save((fq, fb) => Object.assign(fb, { required, failures, reruns: d.patch.reruns }))
     try {
       await rerunRun(repo, d.action.runId, { failedOnly: d.action.failedOnly })
     } catch (e) {
@@ -336,6 +347,30 @@ async function runCi(b, ctx) {
       batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
     })
     return { state: 'landing' }
+  }
+  // Red alone (the end of a bisect, or a batch of one): its session hears at once, with the job and
+  // its first failure line. Back on its own CI, its run (cancelled for the batch) would be rerun first
+  // and say only "quick tier passed" (2026-10-19)
+  if (RED.has(d.reason.kind) && b.steps.length === 1 && TIERS) {
+    const s = b.steps[0]
+    const line = await failingLine(repo, d.reason.job)
+    const reason = {
+      ...d.reason,
+      kind: 'failed',
+      text: `${ref(repo, s.pr)} failed alone in batch ${b.branch}, a full run of it on ${defaultBranch} at ${short(b.base?.sha ?? '')}: ${d.reason.text.replace(/^Batch \S+: /, '')}${line}`,
+    }
+    return drop(b, ctx, `${d.reason.text.replace(/ Read it with.*$| Look with.*$/, '')} ${ref(repo, s.pr)} failed alone; its session is told.`, {
+      state: 'failed',
+      why: reason.text,
+      then: (fq) => {
+        const it = findItem(fq, repo, s.pr)
+        if (!it) return
+        // Not batched again on this head, and its poll answers this same reason (queue.mjs decideCi)
+        it.alone = { head: s.head, text: reason.text, reason }
+        Object.assign(it, { state: 'attention', reason, noticeKey: noticeKey(reason, s.head), updatedAt: at, nextAt: new Date(now + pollMs('attention')).toISOString() })
+        pushEvent(fq, it, { kind: 'attention', text: attentionText(it, reason, ref), notify: true, at })
+      },
+    })
   }
   // Attention for a batch is not a session's: red is split and tried again, anything else goes back
   if (RED.has(d.reason.kind) && b.steps.length >= 2) {

@@ -53,6 +53,8 @@ export type ProjectsSlice = {
    */
   trustAsk: string | null
   answerTrustAsk(trust: boolean): Promise<void>
+  /** Puts the trust card up under a project (#1141): the project menu's "Trust this project…" when it has apps to list */
+  askTrust(projectId: string): void
   /**
    * Turns trust on and off. The app list follows from the host's broadcast
    * (`external_apps_changed`).

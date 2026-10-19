@@ -1,3 +1,4 @@
+import type { AppArrival } from '@cc/core'
 import { DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol'
 import type {
   ExternalAppInfo,
@@ -223,6 +224,24 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
       }),
     ),
   })
+  // What this window had seen of trusted projects' apps, and the notices not yet read (#1141); a snapshot from before has none
+  const savedSeen = (snap as { appsSeen?: unknown }).appsSeen
+  if (savedSeen && typeof savedSeen === 'object' && !Array.isArray(savedSeen)) {
+    const seen: Record<string, string[]> = { ...get().appsSeen }
+    for (const [pid, keys] of Object.entries(savedSeen)) {
+      if (Array.isArray(keys)) seen[pid] = [...new Set([...(seen[pid] ?? []), ...keys.filter((k): k is string => typeof k === 'string')])].sort()
+    }
+    set({ appsSeen: seen })
+  }
+  const savedArrivals = (snap as { appArrivals?: unknown }).appArrivals
+  if (Array.isArray(savedArrivals)) {
+    const ok = savedArrivals.filter(
+      (a): a is AppArrival =>
+        !!a && typeof a === 'object' && typeof a.key === 'string' && typeof a.projectId === 'string' && typeof a.appId === 'string' && typeof a.title === 'string' && Array.isArray(a.asks),
+    )
+    const held = new Set(get().appArrivals.map((a) => a.key))
+    set({ appArrivals: [...get().appArrivals, ...ok.filter((a) => !held.has(a.key))] })
+  }
   // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
   const savedSpans = (snap as { appSpans?: unknown }).appSpans
   if (savedSpans && typeof savedSpans === 'object' && !Array.isArray(savedSpans)) {
@@ -630,6 +649,9 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       focusedSessionId: s.focusedSessionId,
       view: s.view,
       focusedApp: s.focusedApp,
+      // Apps trusted projects gained, and what was seen (#1141): a notice is said once, also across a reload
+      appsSeen: s.appsSeen,
+      appArrivals: s.appArrivals,
       panelOpen: s.panelOpen,
       // The single-tab field predates the arrangement (#20). It keeps carrying the
       // top group's active tab so an older build reading this snapshot still lands

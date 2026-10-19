@@ -13,6 +13,16 @@
 // numbers) is never regenerated, whatever the mechanical list says; any other conflict is handed to
 // the pull request's author session (queue.mjs handoffReason).
 //
+// A pull request stacked on one this queue has just landed as a squash (#1221 on #1218, 2026-10-19):
+// GitHub moves its base to the default branch, but its branch still carries the lower's original
+// commits, which conflict with their own squash on the default branch. Merging the default branch in
+// cannot fix that. So when the branch contains the head of a pull request the queue landed (and the
+// default branch does not: it was squashed), the queue rebases the branch onto the default branch
+// without those commits (`git rebase --onto <default> <landed head>`) and pushes with a lease on the
+// head it read (`--force-with-lease`: refused when the branch moved since, as the merge's push is). The
+// owner asked for that push (2026-10-19); it is the only one the queue forces. Only a rebase that
+// itself conflicts is handed off.
+//
 // Every step answers how long it took, for the queue's events (the daily metrics count conflicts the
 // queue handled without a person).
 import { execFile } from 'node:child_process'
@@ -301,6 +311,73 @@ function failure(argv, e, timeoutMs) {
   return `${commandLine(argv)} failed (exit ${e.code ?? '?'})${said ? `: ${said.length > 200 ? `${said.slice(0, 199)}…` : said}` : ''}`
 }
 
+/** Whether `a` is an ancestor of `b` in `dir` (false when either is not there). */
+async function isAncestor(dir, a, b) {
+  try {
+    await git(dir, ['merge-base', '--is-ancestor', a, b])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The pull request the queue landed as a squash whose original commits `branchTip` still carries: of
+ * `landed` (`{ pr, head }`, the queue's merged items), those whose head is in the branch and not in the
+ * default branch (squashed, not merged), the nearest one (the others are under it). Null when none.
+ */
+export async function landedUnder(dir, landed, branchTip, mainTip) {
+  let best = null
+  for (const l of landed ?? []) {
+    if (!l?.head || l.head === branchTip) continue
+    if (!(await isAncestor(dir, l.head, branchTip)) || (await isAncestor(dir, l.head, mainTip))) continue
+    if (!best || (await isAncestor(dir, best.head, l.head))) best = l
+  }
+  return best
+}
+
+/**
+ * Rebases the branch (checked out detached in `tmp` at `branchTip`) onto the default branch without
+ * the commits of `under`, the pull request the queue landed as a squash, and pushes it with a lease on
+ * `branchTip`. Answers as mergeMain does; `steps` gain `rebase` (`dropped`: that pull request, `files`
+ * when it conflicted) and `push` (`lease: true`).
+ */
+async function restack({ root, tmp, remote, branch, branchTip, mainTip, defaultBranch, under, renew, clock, steps, handoff }) {
+  const started = clock()
+  const how = `git rebase --onto ${defaultBranch} ${short(under.head)}`
+  try {
+    await git(tmp, [...HOOKS_OFF, 'rebase', '--onto', mainTip, under.head])
+  } catch (e) {
+    const files = (await git(tmp, ['diff', '--name-only', '--diff-filter=U']).catch(() => '')).split('\n').filter(Boolean)
+    await git(tmp, ['rebase', '--abort']).catch(() => {})
+    if (!files.length) throw e
+    steps.push({ step: 'rebase', ms: clock() - started, files, dropped: under.pr, onto: mainTip })
+    return handoff(
+      `#${under.pr} landed as a squash, and ${branch} still carries its original commits; the queue rebased ${branch} onto ${defaultBranch} without them (${how}), and that conflicts too. It pushed nothing.`,
+      files,
+      `Rebase ${branch} onto ${defaultBranch} without #${under.pr}'s commits (git rebase --onto origin/${defaultBranch} ${under.head}), resolve the conflicts and push with --force-with-lease; conflicted files: ${files.join(', ')}.`,
+    )
+  }
+  const sha = (await git(tmp, ['rev-parse', 'HEAD'])).trim()
+  steps.push({ step: 'rebase', ms: clock() - started, files: [], dropped: under.pr, onto: mainTip, sha })
+  if (sha === mainTip) return handoff(`#${under.pr} landed as a squash, and once its commits are dropped from ${branch} (${how}) nothing of its own is left. It pushed nothing; close it if it is done.`)
+  if (!renew()) return { outcome: 'yielded' }
+  const pushing = clock()
+  try {
+    // A lease on the head that was read: refused when the branch moved since (its author pushed)
+    await git(root, ['push', '--quiet', `--force-with-lease=refs/heads/${branch}:${branchTip}`, remote, `${sha}:refs/heads/${branch}`])
+  } catch (e) {
+    const [tip] = await fetchRefs(root, remote, [`refs/heads/${branch}`], REF_SPACE).catch(() => [null])
+    if (tip && tip !== branchTip) {
+      steps.push({ step: 'superseded', ms: clock() - pushing, sha, tip })
+      return { outcome: 'superseded', tip, files: [], steps }
+    }
+    return handoff(`The queue rebased ${branch} onto ${defaultBranch} without #${under.pr}'s commits (${how}), but pushing ${short(sha)} failed: ${e.message}`)
+  }
+  steps.push({ step: 'push', ms: clock() - pushing, sha, lease: true })
+  return { outcome: 'pushed', sha, files: [], steps, dropped: under.pr }
+}
+
 /**
  * Merges `defaultBranch` into the pull request's branch and, when the conflicts are mechanical,
  * regenerates them, commits and pushes. `pr` is what GitHub said (`headRefName`, `headRefOid`);
@@ -316,10 +393,10 @@ function failure(argv, e, timeoutMs) {
  * and `stat`: each regenerated file's lines added and removed against the default branch's version),
  * `push` (the commit), `superseded`.
  */
-export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew, clock = Date.now }) {
+export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew, landed = [], clock = Date.now }) {
   const branch = pr.headRefName
   const steps = []
-  const handoff = (why, files = []) => ({ outcome: 'handoff', files, why, steps })
+  const handoff = (why, files = [], instruction = null) => ({ outcome: 'handoff', files, why, steps, ...(instruction ? { instruction } : {}) })
   if (!dir) return handoff('The queue has no checkout to merge it in.')
   let root
   try {
@@ -338,6 +415,9 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
     if (branchTip !== pr.headRefOid) return { outcome: 'moved' }
     tmp = await mkdtemp(join(tmpdir(), `${TMP_PREFIX}${process.pid}-`))
     await git(root, [...HOOKS_OFF, 'worktree', 'add', '--detach', '--quiet', tmp, branchTip])
+    // Stacked on a pull request the queue landed as a squash: its old commits go, not main comes in
+    const under = await landedUnder(tmp, landed, branchTip, mainTip)
+    if (under) return await restack({ root, tmp, remote, branch, branchTip, mainTip, defaultBranch, under, renew, clock, steps, handoff })
     const message = `Merge ${defaultBranch} into ${branch}`
     let files = []
     try {

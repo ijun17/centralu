@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, ExternalAppInfo, ToolName } from '@cc/protocol'
+import type { AdapterCapabilities, ExternalAppInfo, NormalizedEvent, ProjectInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -11,6 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { DEFAULT_RARE_TIER, profileAllows, setRareTier } from './orchestrator-tools.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Creating a new app (M4 C-1b) — whether the `apps.create` RPC and the orchestrator's `create_app`
@@ -53,6 +54,9 @@ let rt: ExternalApps
 let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 let projectId = ''
+/** This test's `~/Centralu`: where a new app project goes by default (#1141) */
+let home = ''
+let events: NormalizedEvent[] = []
 
 const appsDir = () => join(repo, ...PROJECT_APPS)
 const create = (params: Record<string, unknown>) => rpc('apps.create', params) as Promise<{ app: ExternalAppInfo }>
@@ -66,7 +70,10 @@ beforeEach(async () => {
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new FakeAdapter('claude')]])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  events = []
+  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  home = join(root, 'Centralu')
+  mgr.useProjectsHome(() => home)
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'] })
   rt.refresh()
@@ -107,11 +114,27 @@ describe('apps.create', () => {
     expect(tools.map((t) => t.name)).toEqual(['show', 'increment', 'reset'])
   })
 
-  it('creates it in the user folder when projectId is null', async () => {
+  it('with no project, makes a new folder in ~/Centralu, writes the template there and registers it as a trusted project whose root is the app (#1141)', async () => {
     const { app } = await create({ projectId: null, id: 'timer', name: 'Timer', description: 'Counts down' })
-    expect(app).toMatchObject({ appId: 'timer', projectId: null, description: 'Counts down', trusted: true })
-    expect(app.dir).toBe(join(dataRoot, 'apps', 'timer'))
-    expect(existsSync(join(dataRoot, 'app-data', '_user', 'timer'))).toBe(true)
+    expect(app.dir).toBe(join(home, 'timer'))
+    expect(readdirSync(app.dir)).toEqual(expect.arrayContaining(['centralu.app.json', 'server.mjs', 'ui', 'runtime']))
+    const project = ((await rpc('projects.list', {})) as ProjectInfo[]).find((p) => p.path === app.dir)
+    expect(project).toMatchObject({ name: 'timer', trusted: true })
+    expect(app).toMatchObject({ appId: 'timer', projectId: project!.id, root: true, description: 'Counts down', trusted: true, status: 'stopped' })
+    expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
+    // Nothing is left in the user folder, nor half made beside the new folder
+    expect(existsSync(join(dataRoot, 'apps', 'timer'))).toBe(false)
+    expect(readdirSync(home)).toEqual(['timer'])
+  })
+
+  it('with no project, puts the new folder in the parent the person chose, and refuses one that is not there', async () => {
+    const parent = join(root, 'code')
+    mkdirSync(parent)
+    const { app } = await create({ projectId: null, id: 'notes', name: 'Notes', parent })
+    expect(app.dir).toBe(join(parent, 'notes'))
+    expect(app.root).toBe(true)
+    await expect(create({ projectId: null, id: 'later', name: 'Later', parent: join(root, 'nowhere') })).rejects.toThrow(/There is no folder at/)
+    expect(existsSync(join(root, 'nowhere'))).toBe(false)
   })
 
   it('does not create in an untrusted project — no folder appears either', async () => {
@@ -145,9 +168,14 @@ describe('apps.create', () => {
     await expect(create({ projectId, id: 'draft', name: 'Draft' })).rejects.toThrow(/An app "draft" already exists/)
     expect(JSON.parse(readFileSync(join(appsDir(), 'notes', 'centralu.app.json'), 'utf8')).server.args).toEqual(['mine.mjs'])
     expect(readdirSync(join(appsDir(), 'draft'))).toEqual(['half-written.txt'])
-    // Even creating the same id twice — the second attempt is refused
-    await create({ projectId: null, id: 'once', name: 'Once' })
-    await expect(create({ projectId: null, id: 'once', name: 'Once' })).rejects.toThrow(/An app "once" already exists/)
+    // Even creating the same id twice — the second attempt is refused, and the first folder is left as it was
+    const { app } = await create({ projectId: null, id: 'once', name: 'Once' })
+    writeFileSync(join(app.dir, 'mine.txt'), 'the person wrote this')
+    await expect(create({ projectId: null, id: 'once', name: 'Once' })).rejects.toThrow(/Something named "once" is already in/)
+    expect(readFileSync(join(app.dir, 'mine.txt'), 'utf8')).toBe('the person wrote this')
+    // A refused id writes no folder at all
+    await expect(create({ projectId: null, id: 'app-x', name: 'X' })).rejects.toThrow(/ids starting with "app-"/)
+    expect(readdirSync(home)).toEqual(['once'])
   })
 
   it('does not create if a project\'s .centralu is a link pointing outside its repository — writes nothing outside it', async () => {
@@ -168,8 +196,23 @@ describe('create_app (the orchestrator)', () => {
     expect(made.text).toContain(`Created the "Board" app (project, id board): ${join(appsDir(), 'board')}`)
     expect(existsSync(join(appsDir(), 'board', 'server.mjs'))).toBe(true)
 
-    const user = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock', name: 'Clock' })
-    expect(user.text).toContain('(user folder, id clock)')
+    // Without a project it makes a folder and a project (#1141): only once the person allows create_project's card
+    const card = () => {
+      const pending = mgr.listSessions().find((s) => s.id === orch.id)?.pendingApproval
+      return pending?.detail.kind === 'project_create' ? pending : undefined
+    }
+    const asked = mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock', name: 'Clock' })
+    await eventually(() => !!card())
+    expect(card()!.detail).toEqual({ kind: 'project_create', name: 'clock', path: join(home, 'clock') })
+    expect(existsSync(join(home, 'clock'))).toBe(false)
+    mgr.respondApproval(orch.id, card()!.requestId, 'allow')
+    const user = await asked
+    expect(user.text).toContain(`Created the "Clock" app (a new project of its own, id clock): ${join(home, 'clock')}`)
+    const refused = mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock2', name: 'Clock' })
+    await eventually(() => !!card())
+    mgr.respondApproval(orch.id, card()!.requestId, 'deny')
+    expect((await refused).text).toContain('The person did not approve it')
+    expect(existsSync(join(home, 'clock2'))).toBe(false)
 
     const again = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(again).toMatchObject({ isError: true })

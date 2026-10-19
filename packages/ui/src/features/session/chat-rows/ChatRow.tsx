@@ -9,7 +9,7 @@ import { formatCount, formatSaidAt } from '../../../app/format.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
-import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
+import { WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
 import { CentraluCallBody } from './CentraluCallBody.jsx'
 import { Badge } from '../../../components/Badge.jsx'
@@ -57,7 +57,7 @@ export const ChatRow = memo(function ChatRow({
 }) {
   if (item.kind === 'user') {
     return (
-      <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
+      <div className="flex flex-col items-end" data-testid="msg-user">
         {/*
           A message that came in through delegation (FR-11). Placed in the same spot (right) as
           the person's own messages — to the session it is equally "a directive received" —
@@ -65,7 +65,7 @@ export const ChatRow = memo(function ChatRow({
           (the palette rule): the distinction is made by shape, not brightness.
         */}
         {item.from && (
-          <div className="text-xs text-ink-muted" data-testid="msg-user-from">
+          <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from">
             {item.from.name} ⤷
           </div>
         )}
@@ -75,7 +75,7 @@ export const ChatRow = memo(function ChatRow({
           one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
-          <div className="text-xs text-ink-muted" data-testid="msg-user-from-app">
+          <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-app">
             {item.fromApp.name} app ⤷
           </div>
         )}
@@ -100,7 +100,7 @@ export const ChatRow = memo(function ChatRow({
           sent text differing from the rendered text.
         */}
         {item.attachments && item.attachments.length > 0 && (
-          <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
+          <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5 pb-0.5">
             {item.attachments.map((a, i) => (
               <UserAttachment key={`${a.path}-${i}`} att={a} />
             ))}
@@ -198,8 +198,6 @@ export const ChatRow = memo(function ChatRow({
   // A manager's worktree proposal (#69) — a line pointing at the door rather than a tool card, and the value
   // (branch name) is pre-filled into the window
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
-  // Another project asked to do a task (#371) — a compact card that links to the session doing it
-  if (/(^|__)ask_project$/.test(item.tool)) return <AskProjectRow item={item} sessionId={sessionId} />
   return (
     <>
       <ToolCard item={item} sessionId={sessionId} projectRoot={projectRoot} projectId={projectId} />
@@ -257,6 +255,15 @@ const PREVIEW_LINES = 3
 const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
 
 /**
+ * An ask_project call no adapter marked as Centralu's (#371 part B): Codex names no server for a call made from inside
+ * `exec`, and an older record carries no mark, yet the tool's bare name is Centralu's alone. Its card is the Centralu
+ * call's all the same. Any other bare name stays an ordinary tool's (#843).
+ */
+function unmarkedAskProject(item: Extract<ChatItem, { kind: 'tool' }>): NonNullable<ReturnType<typeof centraluCallOf>> | null {
+  return item.tool === 'ask_project' ? { tool: 'ask_project' } : null
+}
+
+/**
  * The tool card.
  *
  * **No scrolling inside it.** A small scroll area inside the conversation intercepts the wheel,
@@ -288,7 +295,7 @@ export function ToolCard({
 }) {
   const [open, setOpen] = useState(false)
   // A call to Centralu's own tools (#730): its own title row and a stronger edge; the rest is this card's
-  const read = useMemo(() => centraluCallOf(item), [item])
+  const read = useMemo(() => centraluCallOf(item) ?? unmarkedAskProject(item), [item])
   /*
    * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
    * window knows, since a repository's own server may carry that name (#730 review)
@@ -297,6 +304,8 @@ export function ToolCard({
     (s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app),
   )
   const call = knownApp ? read : null
+  // ask_project (#371 part B) keeps the testids its e2e reads the card, its toggle and its answer by
+  const ask = call?.tool === 'ask_project'
   // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
   const pieces = useMemo(
     () => titlePieces(item.title, item.paths, projectRoot),
@@ -334,7 +343,7 @@ export function ToolCard({
           ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong/70'}`
           : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line'}`
       }
-      data-testid="tool-card"
+      data-testid={ask ? 'ask-project-card' : 'tool-card'}
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
     >
       {call ? (
@@ -443,7 +452,7 @@ export function ToolCard({
 
       {/* A Centralu call folds to its sentence: the answer shows only when the card is opened (owner, 2026-10-18) */}
       {call && open && item.result && item.result.trim() && (
-        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-output">
+        <div className="border-t border-line/70 px-3 py-2" data-testid={ask ? 'ask-project-result' : 'tool-card-output'}>
           <CentraluCallBody result={item.result} open={open} onOpen={() => setOpen(true)} />
         </div>
       )}
@@ -592,10 +601,14 @@ export function trashedLine(trashed: number, more: boolean): string {
   return `${what} moved to the trash. Settings → Trash restores ${one ? 'it' : 'them'}.`
 }
 
-/** When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink */
+/**
+ * When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink. The 4px between the
+ * bubble and the time (owner, 2026-10-19) is its own, so the person's row and the answer's share one value; a caller
+ * gives only the side padding that lines the time up with the bubble's corner.
+ */
 export function SaidAt({ at, className = '' }: { at: number; className?: string }) {
   return (
-    <div className={`text-2xs text-ink-faint ${className}`} data-testid="said-at">
+    <div className={`pt-1 text-2xs text-ink-faint ${className}`} data-testid="said-at">
       {formatSaidAt(at)}
     </div>
   )
