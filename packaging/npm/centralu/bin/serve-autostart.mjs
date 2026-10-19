@@ -158,30 +158,59 @@ const TASK_WORD = 'CENTRALU-AUTOSTART'
  * line. Registered for this user only, at this user's sign-in, run only while they are signed in
  * (`Interactive`): the kind of task a user may create without an administrator. On a laptop, it runs
  * on battery too, and with no time limit (the default ends a task after 72 hours).
+ *
+ * The same task without its trigger is how `serve --detach` starts the host in the person's Windows
+ * sign-in when they are signed in (#1224, `signin`): a task whose principal is `Interactive` runs in
+ * that user's session with their sign-in's token, also when Start-ScheduledTask is called from an ssh
+ * session. Measured on a linked Windows 11 PC (2026-10-19): a task started that way from the hub's
+ * ssh logon ran in session 1 with an interactive logon at medium integrity and saw the user's
+ * Credential Manager entries, where the ssh logon's own processes saw none. `--autostart on` adds the
+ * `AtLogOn` trigger to it; a task with no trigger is read as autostart off (`status` says `notrigger`).
  */
 export function taskScript(action, { name, run = '' }) {
   const head = ["$ErrorActionPreference = 'Stop'", PS_MODULE_PATH, '[Console]::OutputEncoding = [Text.Encoding]::UTF8', `$name = ${psText(name)}`]
   const fail = `} catch { "${TASK_WORD}-ERROR $($_.Exception.Message -replace '\\s+', ' ')" }`
   const find = "$t = Get-ScheduledTask -TaskName $name -TaskPath '\\' -ErrorAction SilentlyContinue"
-  if (action === 'status') return [...head, 'try {', `  ${find}`, `  if ($t) { "${TASK_WORD} state $($t.State)" } else { '${TASK_WORD} state none' }`, fail].join('\n')
+  if (action === 'status') {
+    return [...head, 'try {', `  ${find}`, `  if (-not $t) { '${TASK_WORD} state none' } elseif (@($t.Triggers).Count -eq 0) { '${TASK_WORD} state notrigger' } else { "${TASK_WORD} state $($t.State)" }`, fail].join('\n')
+  }
   if (action === 'off') {
     return [...head, 'try {', `  ${find}`, "  if ($t) { Unregister-ScheduledTask -TaskName $name -TaskPath '\\' -Confirm:$false }", `  '${TASK_WORD} off'`, fail].join('\n')
   }
   const encoded = encodedCommand(run)
-  return [
-    ...head,
-    'try {',
-    "  $exe = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'",
-    `  $arg = '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}'`,
-    '  $user = if ($env:USERDOMAIN) { "$env:USERDOMAIN\\$env:USERNAME" } else { $env:USERNAME }',
-    '  $a = New-ScheduledTaskAction -Execute $exe -Argument $arg',
-    '  $tr = New-ScheduledTaskTrigger -AtLogOn -User $user',
-    '  $p = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited',
-    '  $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew',
-    `  Register-ScheduledTask -TaskName $name -TaskPath '\\' -Action $a -Trigger $tr -Principal $p -Settings $s -Description ${psText('Starts the Centralu host (centralu serve) when you sign in. Written by centralu serve --autostart on.')} -Force | Out-Null`,
-    `  '${TASK_WORD} on'`,
-    fail,
-  ].join('\n')
+  const withTrigger = action === 'on'
+  const register = [
+    "$exe = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'",
+    `$arg = '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}'`,
+    '$user = if ($env:USERDOMAIN) { "$env:USERDOMAIN\\$env:USERNAME" } else { $env:USERNAME }',
+    '$a = New-ScheduledTaskAction -Execute $exe -Argument $arg',
+    ...(withTrigger ? ['$tr = New-ScheduledTaskTrigger -AtLogOn -User $user'] : []),
+    '$p = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited',
+    '$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew',
+    `Register-ScheduledTask -TaskName $name -TaskPath '\\' -Action $a${withTrigger ? ' -Trigger $tr' : ''} -Principal $p -Settings $s -Description ${psText(withTrigger ? 'Starts the Centralu host (centralu serve) when you sign in. Written by centralu serve --autostart on.' : 'Starts the Centralu host (centralu serve) in your sign-in when a linked computer asks for it. Written by centralu serve --detach; centralu serve --autostart off removes it.')} -Force | Out-Null`,
+  ]
+  if (action === 'signin') {
+    /*
+     * Someone is signed in when this user owns an Explorer in a session of its own (not session 0, where an ssh
+     * logon's processes run). Asked of WMI for the owner, which needs no administrator for the user's own processes
+     * and reads the same in every language. Only then is the task registered (without a trigger) and started
+     */
+    return [
+      ...head,
+      'try {',
+      "  $desk = @(Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Where-Object { $_.SessionId -gt 0 } | Where-Object { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; $o.ReturnValue -eq 0 -and $o.User -eq $env:USERNAME -and (-not $env:USERDOMAIN -or $o.Domain -eq $env:USERDOMAIN) })",
+      `  if ($desk.Count -eq 0) { '${TASK_WORD} nosession' } else {`,
+      `    ${find}`,
+      '    if (-not $t) {',
+      ...register.map((l) => `      ${l}`),
+      '    }',
+      "    Start-ScheduledTask -TaskName $name -TaskPath '\\'",
+      `    '${TASK_WORD} started'`,
+      '  }',
+      fail,
+    ].join('\n')
+  }
+  return [...head, 'try {', ...register.map((l) => `  ${l}`), `  '${TASK_WORD} on'`, fail].join('\n')
 }
 
 /** What a task script printed: `{ ok: true, word }` (`on`, `off`, or the state after `state`) or `{ ok: false, message }` */
@@ -298,7 +327,8 @@ async function taskAutostart(action, { dataDir, env, name, run, user, platform, 
   if (action === 'status') {
     const a = await ask(taskScript('status', { name }))
     if (!a.ok) return { ...base, ok: false, on: readAutostartMark(dataDir)?.how === 'task', message: `Task Scheduler did not answer: ${a.message}` }
-    const on = a.word !== 'none' && a.word !== 'Disabled'
+    // A task without its trigger is the one `--detach` starts in the sign-in (#1224): no start at sign-in
+    const on = a.word !== 'none' && a.word !== 'Disabled' && a.word !== 'notrigger'
     if (on) writeAutostartMark(dataDir, { how: 'task', name, linger: null })
     else clearAutostartMark(dataDir)
     return { ...base, on }
@@ -316,6 +346,33 @@ async function taskAutostart(action, { dataDir, env, name, run, user, platform, 
   if (!a.ok) return { ...base, ok: false, on: false, message: `Task Scheduler did not take the task: ${a.message}` }
   writeAutostartMark(dataDir, { how: 'task', name, linger: null })
   return { ...base, on: true }
+}
+
+/**
+ * Starts this data folder's host in the person's Windows sign-in, when someone is signed in (#1224): the task
+ * `--autostart` writes, registered without its trigger when it is not there, started with Start-ScheduledTask. Called
+ * by `serve --detach` before it falls back to WMI, whose process keeps the caller's logon: from an ssh session that is a
+ * network logon, which cannot open the user's Credential Manager vault, runs elevated for an administrator (#702) and
+ * opens what it shows in session 0, where nobody sees it.
+ *
+ * `{ started: true, name }`, or `{ started: false, reason, message? }`: `nosession` (nobody is signed in here),
+ * `off` (`CENTRALU_SIGNIN_TASK=off`, for a person who wants no task, and for tests on a machine with a desktop),
+ * `not_windows`, `no_launcher`, `error`. `run` is a parameter so tests never reach the real Task Scheduler.
+ */
+export async function startInSignIn({ dataDir, env, home, platform = process.platform, run = runCaptured }) {
+  if (platform !== 'win32' || env.WSL_DISTRO_NAME) return { started: false, reason: 'not_windows' }
+  if (env.CENTRALU_SIGNIN_TASK === 'off') return { started: false, reason: 'off' }
+  const launcher = autostartLauncher(dataDir, platform)
+  if (!launcher) return { started: false, reason: 'no_launcher' }
+  const ps = windowsPowershell('wmi', env)
+  if (!ps) return { started: false, reason: 'error', message: 'Windows PowerShell is not reachable' }
+  const name = autostartName('task', { dataDir, home, env, platform })
+  const runScript = taskActionScript({ how: 'wmi', launcher, env })
+  const a = await askPowershell(ps, taskScript('signin', { name, run: runScript }), env, parseTaskAnswer, run)
+  if (!a.ok) return { started: false, reason: 'error', message: a.message }
+  if (a.word === 'started') return { started: true, name }
+  if (a.word === 'nosession') return { started: false, reason: 'nosession' }
+  return { started: false, reason: 'error', message: `Task Scheduler answered ${a.word}` }
 }
 
 /**

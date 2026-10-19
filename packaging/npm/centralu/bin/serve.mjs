@@ -30,6 +30,6 @@ export { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, par
 export { SERVE_HELP, AUTOSTART_ACTIONS, parseServeArgs } from './serve-args.mjs'
 export { launcherScript, ensureLauncher, remoteLayout, parsePointer, installInfo, managedLauncherScript } from './serve-install.mjs'
 export { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, mismatchServerVersion, hostProvesOf, probeHost, askHostToStop, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
-export { AUTOSTART_FILE, AUTOSTART_ENV, autostartHow, autostartUnsupported, pathKey, autostartName, autostartLauncher, systemdUnit, taskActionScript, taskScript, parseTaskAnswer, readAutostartMark, autostartInfo, lingerMessage, runAutostart } from './serve-autostart.mjs'
+export { AUTOSTART_FILE, AUTOSTART_ENV, autostartHow, autostartUnsupported, pathKey, autostartName, autostartLauncher, systemdUnit, taskActionScript, taskScript, parseTaskAnswer, readAutostartMark, autostartInfo, lingerMessage, runAutostart, startInSignIn } from './serve-autostart.mjs'
 export { printConnection, runServe, rotateToken } from './serve-run.mjs'
 export { CARRIED_ENV, encodeChildSpec, decodeChildSpec, startDetached, runDetach, runDetachedChild, runStop } from './serve-detach.mjs'

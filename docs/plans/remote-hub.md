@@ -413,6 +413,18 @@ its agents are killed with it. `centralu serve --stop` therefore asks the runnin
 WebSocket with the token from `serve.json` (an additive RPC), waits for the port to close, and only then ends the
 process. On posix, SIGTERM to the launcher stays the stop (agent-host.md §4.7).
 
+**In the person's Windows sign-in when someone is signed in (#1224, 2026-10-19).** A host WMI creates from the hub's
+ssh session keeps that session's logon: a key login is a network logon without the password, so DPAPI cannot unlock
+the user's vault there, Git Credential Manager can neither use nor save a sign-in, an administrator's token is the
+full one (§10.9c), and what the host opens for the person lands in session 0. Measured on a linked Windows 11 PC: the
+host's children saw `cmdkey /list` empty while the profile held 46 credential files. A scheduled task whose principal
+is `Interactive`, started with `Start-ScheduledTask` from that same ssh session, ran in session 1 with an interactive
+logon at medium integrity and saw the user's entries. So `serve --detach` on Windows first looks for this user's
+Explorer outside session 0; with one, it registers the data folder's task without a trigger (the one `--autostart on`
+gives an `AtLogOn` trigger; a task with no trigger reads as autostart off) and starts it. WMI stays the start when
+nobody is signed in, and the host then says which logon it runs in (`hello_ok.logon`), which the machine's row turns
+into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out.
+
 **Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.
 Windows: a per-user scheduled task at logon (no administrator needed; not created on the test laptop, so not

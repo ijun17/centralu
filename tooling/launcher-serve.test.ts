@@ -447,7 +447,8 @@ async function freePort(): Promise<number> {
 }
 
 function cliEnv(dataDir: string): NodeJS.ProcessEnv {
-  return { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1' }
+  // No scheduled task from a test: on a Windows machine with a desktop, --detach would start the host through one (#1224)
+  return { ...process.env, CC_DATA_DIR: dataDir, CENTRALU_HOST_ENTRY: SOURCE_HOST, CI: '1', CENTRALU_SIGNIN_TASK: 'off' }
 }
 
 /** `centralu serve <args>` in the background, its output collected */
@@ -767,8 +768,8 @@ describe('starting through WMI', () => {
     expect(parseWmiAnswer('').ok).toBe(false)
   })
 
-  /** runDetach with WMI stood in for, on a port nobody serves */
-  async function detachWith(start: (...a: unknown[]) => Promise<unknown>) {
+  /** runDetach with WMI stood in for, on a port nobody serves; the sign-in task (#1224) stood in for too, nobody signed in */
+  async function detachWith(start: (...a: unknown[]) => Promise<unknown>, signIn: (...a: unknown[]) => Promise<unknown> = async () => ({ started: false, reason: 'nosession' })) {
     const d = tempDir()
     ensureServeState(d)
     recordServePort(d, await freePort())
@@ -782,12 +783,59 @@ describe('starting through WMI', () => {
       platform: 'win32',
       how: 'wmi',
       start,
+      signIn,
+      signInMs: 600,
       timeoutMs: 5_000,
       noStartMs: 300,
       write: (l: string) => void lines.push(l),
     })
-    return { code, line: JSON.parse(lines.join('')) as { v: number; detach: { ok: boolean; reason: string; message: string } } }
+    return { code, line: JSON.parse(lines.join('')) as { v: number; hostRunning?: boolean; detach: { ok: boolean; how: string; reason: string; message: string } }, dataDir: d }
   }
+
+  /*
+   * #1224: a host WMI creates keeps the ssh session's network logon, where Git cannot use the credentials saved in
+   * Windows. With someone signed in, --detach starts it through the sign-in task instead, and WMI is not asked
+   */
+  it('starts the host in the Windows sign-in through the task when someone is signed in, and asks WMI nothing', async () => {
+    const servers: HostServer[] = []
+    let wmi = 0
+    try {
+      const r = await detachWith(
+        async () => {
+          wmi++
+          return { ok: false, blocked: true, message: 'not asked' }
+        },
+        async (...a: unknown[]) => {
+          // What the task's serve does: a host on this folder's port, with its token
+          const { dataDir } = a[0] as { dataDir: string }
+          const state = readServeState(dataDir)!
+          const server = new HostServer({ port: state.port!, token: state.token, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+          servers.push(server)
+          await server.listen()
+          return { started: true, name: 'Centralu host 1a2b3c4d' }
+        },
+      )
+      expect(r.code).toBe(0)
+      expect(r.line).toMatchObject({ hostRunning: true, detach: { ok: true, how: 'task', already: false } })
+      expect(wmi).toBe(0)
+    } finally {
+      for (const s of servers) await s.close()
+    }
+  })
+
+  it('falls back to WMI when nobody is signed in, or when the task’s host does not answer in time', async () => {
+    let wmi = 0
+    const refused = async () => {
+      wmi++
+      return { ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }
+    }
+    expect((await detachWith(refused)).line.detach).toMatchObject({ ok: false, how: 'wmi', reason: 'wmi_blocked' })
+    expect(wmi).toBe(1)
+    const t0 = Date.now()
+    expect((await detachWith(refused, async () => ({ started: true, name: 'Centralu host' }))).line.detach).toMatchObject({ ok: false, how: 'wmi' })
+    expect(wmi).toBe(2)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(500)
+  })
 
   it('reports a start WMI refused as wmi_blocked', async () => {
     const r = await detachWith(async () => ({ ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }))

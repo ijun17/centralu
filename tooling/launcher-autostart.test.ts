@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   AUTOSTART_FILE,
   autostartHow,
@@ -12,6 +13,7 @@ import {
   parseServeArgs,
   parseTaskAnswer,
   runAutostart,
+  startInSignIn,
   systemdUnit,
   taskActionScript,
   taskScript,
@@ -203,6 +205,40 @@ describe('the Windows scheduled task (and WSL’s)', () => {
     expect(taskScript('status', { name: 'Centralu host' })).toContain("'CENTRALU-AUTOSTART state none'")
   })
 
+  /*
+   * #1224: `serve --detach` starts the host in the person's sign-in through this task when someone is signed in. Only
+   * the trigger-less task is registered that way, and only after a desktop of this user's was found
+   */
+  it('starts the task in the sign-in only when this user has a desktop, registering it without a trigger when missing', () => {
+    const run = taskActionScript({ how: 'wmi', launcher: 'C:\\c.cmd', env: {} })
+    const s = taskScript('signin', { name: 'Centralu host', run })
+    const desktop = s.indexOf("Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\"")
+    expect(desktop).toBeGreaterThan(0)
+    expect(s).toContain('$_.SessionId -gt 0')
+    expect(s).toContain("Invoke-CimMethod -InputObject $_ -MethodName GetOwner")
+    expect(s.indexOf("'CENTRALU-AUTOSTART nosession'")).toBeGreaterThan(desktop)
+    expect(s.indexOf('Register-ScheduledTask')).toBeGreaterThan(s.indexOf('if (-not $t) {'))
+    expect(s.indexOf('Start-ScheduledTask')).toBeGreaterThan(s.indexOf('Register-ScheduledTask'))
+    expect(s).not.toContain('New-ScheduledTaskTrigger')
+    expect(s).not.toContain('-Trigger')
+    expect(s).toContain('-LogonType Interactive -RunLevel Limited')
+    const encoded = /-WindowStyle Hidden -EncodedCommand ([A-Za-z0-9+/=]+)'/.exec(s)?.[1]
+    expect(Buffer.from(encoded!, 'base64').toString('utf16le')).toBe(run)
+    // A task with no trigger is read as autostart off
+    expect(taskScript('status', { name: 'Centralu host' })).toContain("'CENTRALU-AUTOSTART state notrigger'")
+  })
+
+  // Windows PowerShell's own parser reads every script these build (nothing runs)
+  it.runIf(process.platform === 'win32')('builds scripts Windows PowerShell parses without an error', () => {
+    const run = taskActionScript({ how: 'wmi', launcher: 'C:\\c.cmd', env: { CC_DATA_DIR: 'C:\\d' } })
+    for (const action of ['on', 'off', 'status', 'signin']) {
+      const script = taskScript(action, { name: 'Centralu host', run })
+      const check = `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$e); $e.Count`
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', check], { input: script, encoding: 'utf8' })
+      expect(r.stdout.trim(), action).toBe('0')
+    }
+  })
+
   it('reads what the task script printed', () => {
     expect(parseTaskAnswer('CENTRALU-AUTOSTART on\r\n')).toEqual({ ok: true, word: 'on' })
     expect(parseTaskAnswer('CENTRALU-AUTOSTART state Ready\r\n')).toEqual({ ok: true, word: 'Ready' })
@@ -390,6 +426,37 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
     expect((await autostart({ ...v.base, action: 'status' })).line).toMatchObject({ ok: false, message: 'Task Scheduler did not answer: PowerShell did not answer' })
     const silent = windows(() => ({ code: 1 }))
     expect((await autostart({ ...silent.base, action: 'off' })).line).toMatchObject({ ok: false, on: true, message: 'Task Scheduler did not remove the task "Centralu host": PowerShell did not answer' })
+  })
+
+  it('a task with no trigger, the one --detach starts in the sign-in, counts as autostart off (#1224)', async () => {
+    const w = windows(() => ({ stdout: 'CENTRALU-AUTOSTART state notrigger\r\n' }))
+    expect((await autostart({ ...w.base, action: 'status' })).line).toEqual({ ok: true, how: 'task', on: false, linger: null })
+    expect(existsSync(join(w.dataDir, AUTOSTART_FILE))).toBe(false)
+  })
+
+  it('starts the host in the sign-in through this data folder’s task, and says when nobody is signed in or it cannot (#1224)', async () => {
+    const answers = ['CENTRALU-AUTOSTART started', 'CENTRALU-AUTOSTART nosession', 'CENTRALU-AUTOSTART-ERROR Access is denied.']
+    const w = windows(() => ({ stdout: `${answers.shift()}\r\n` }))
+    const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows', CC_DATA_DIR: w.dataDir }, home: w.base.home, platform: 'win32', run: w.r.run }
+    expect(await startInSignIn(ask)).toEqual({ started: true, name: 'Centralu host' })
+    const script = ps(w.r.runs[0]!.args)
+    expect(script).toContain('Start-ScheduledTask')
+    // The task it registers runs this data folder's managed launcher, with the folder set
+    const action = Buffer.from(/-EncodedCommand ([A-Za-z0-9+/=]+)'/.exec(script)![1]!, 'base64').toString('utf16le')
+    expect(texts(action)).toEqual([w.dataDir, join(w.dataDir, 'remote', 'bin', 'centralu.cmd')])
+    expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'nosession' })
+    expect(await startInSignIn(ask)).toEqual({ started: false, reason: 'error', message: 'Access is denied.' })
+    expect(w.r.runs).toHaveLength(3)
+  })
+
+  it('asks Task Scheduler nothing off Windows, inside WSL, with no launcher, or when CENTRALU_SIGNIN_TASK=off', async () => {
+    const w = windows(() => ({ stdout: 'CENTRALU-AUTOSTART started\r\n' }))
+    const ask = { dataDir: w.dataDir, env: { SystemRoot: 'C:\\Windows' }, home: w.base.home, platform: 'win32', run: w.r.run }
+    expect(await startInSignIn({ ...ask, platform: 'linux' })).toEqual({ started: false, reason: 'not_windows' })
+    expect(await startInSignIn({ ...ask, env: { WSL_DISTRO_NAME: 'Ubuntu' } })).toEqual({ started: false, reason: 'not_windows' })
+    expect(await startInSignIn({ ...ask, env: { ...ask.env, CENTRALU_SIGNIN_TASK: 'off' } })).toEqual({ started: false, reason: 'off' })
+    expect(await startInSignIn({ ...ask, dataDir: home() })).toEqual({ started: false, reason: 'no_launcher' })
+    expect(w.r.runs).toHaveLength(0)
   })
 
   it('inside WSL with no way to Windows PowerShell, it says so instead of writing anything', async () => {

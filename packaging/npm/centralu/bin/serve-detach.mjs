@@ -11,6 +11,7 @@ import { SERVE_LOG_FILE, serveDataDir, readServeState, ensureServeState, heldHer
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
+import { startInSignIn } from './serve-autostart.mjs'
 import { protocolVersionOf, connectionLine, hostProvesOf, probeHost, askHostToStop, serveFrom } from './serve-host.mjs'
 import { describe, runServe, serveFolder } from './serve-run.mjs'
 
@@ -117,6 +118,8 @@ export async function runDetach({
   cwd = process.cwd(),
   start = startDetached,
   how = detachHow(platform, env),
+  signIn = startInSignIn,
+  signInMs = 20_000,
   timeoutMs = 30_000,
   noStartMs = 10_000,
   write = (line) => process.stdout.write(line),
@@ -124,13 +127,36 @@ export async function runDetach({
   // Created here, so the token exists before the launcher reads it and `answered` reads it again
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
   const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
-  const answered = async (already) => {
+  const answered = async (already, as = how) => {
     const d = await describe({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
     if (!d?.hostRunning) return false
-    write(`${connectionLine({ ...d, detach: { ok: true, how, already } })}\n`)
+    write(`${connectionLine({ ...d, detach: { ok: true, how: as, already } })}\n`)
     return true
   }
   if (await answered(true)) return 0
+
+  /*
+   * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
+   * when nobody is. WMI's process keeps this ssh session's network logon, where Git cannot use the credentials saved in
+   * Windows. A task-started host that does not answer in time is left to the lock: the WMI start below then either
+   * holds the folder or is refused by it, never a second host on it.
+   */
+  if (how === 'wmi') {
+    const s = await signIn({ dataDir, env, home, platform })
+    if (s.started) {
+      say(`started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`)
+      const t0 = Date.now()
+      while (Date.now() - t0 < signInMs) {
+        if (await answered(false, 'task')) return 0
+        await sleep(250)
+      }
+      say(`the host the sign-in task started did not answer within ${Math.round(signInMs / 1000)} s; starting one through WMI instead`)
+    } else if (s.reason === 'nosession') {
+      say('nobody is signed in to Windows here: starting the host through WMI, outside any sign-in, where Git cannot use the credentials saved in Windows')
+    } else if (s.reason === 'error') {
+      say(`could not start the host in the Windows sign-in (${s.message}); starting it through WMI`)
+    }
+  }
 
   const log = join(dataDir, SERVE_LOG_FILE)
   // One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows
