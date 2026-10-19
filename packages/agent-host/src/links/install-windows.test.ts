@@ -9,7 +9,7 @@ import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { connectionCommand, SshTunnel, type RemoteCommand } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rmFakeDir } from '../fake-exe.test-helpers.js'
-import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath, clixmlErrors, remoteScriptText } from './windows-remote.test-helpers.js'
+import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath, clixmlErrors, execThroughSilentDeath, remoteScriptText } from './windows-remote.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -76,7 +76,14 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   const recorded = (t: SshTunnel) => async (c: RemoteCommand) => {
     const what = remoteScriptText(c)
     try {
-      const r = await t.exec(c)
+      const r = await execThroughSilentDeath((x) => t.exec(x), c, {
+        onDied: (died, attempt) => {
+          // Seen in the log of a passing test too: how often it happens is worth knowing (#1244)
+          const why = JSON.stringify(clixmlErrors(died.stderr).slice(-500))
+          ran.push(`- ${what}\n  exit ${died.code} with nothing printed (stderr ${why}), run ${attempt}; run again`)
+          console.warn(`The remote ended without a word (exit ${died.code}, stderr ${why}), running: ${what}\nRun again.`)
+        },
+      })
       ran.push(`- ${what}\n  exit ${r.code}\n  stdout: ${JSON.stringify(r.stdout.slice(-1_000))}\n  stderr: ${JSON.stringify(clixmlErrors(r.stderr).slice(-2_000))}`)
       return r
     } catch (e) {
