@@ -30,6 +30,7 @@ import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linke
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
+import { lastResponse, lastResponseSeq } from './turn-answer.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -115,6 +116,8 @@ export { PAUSED_REPORT_SETTLE_MS }
  * cannot ask for a whole store over the link
  */
 const HOST_READ_MAX_LINES = 200
+/** The longest last response a hub reads of this host in one call (`host.lastAnswer`, #1186) */
+const HOST_ANSWER_MAX_CHARS = 100_000
 const HOST_RECALL_MAX_HITS = 50
 
 /*
@@ -262,7 +265,7 @@ export class SessionManager {
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
-  private quitNotices: { sessionId: string; requester: string }[] = []
+  private quitNotices: { sessionId: string; requester: string; swapped?: true }[] = []
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -408,7 +411,8 @@ export class SessionManager {
     }
     // A card the previous host left standing over a kept process closes back into its rest here too (#428)
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
-    this.children.restoreReports(this.meta, keeperOpts.keptSessions)
+    // A turn that ended while the old host let go is told as such (#1186), once the start is done, as a quit's is
+    for (const m of this.children.restoreReports(this.meta, keeperOpts.keptSessions)) this.quitNotices.push({ sessionId: m.sessionId, requester: m.callerSessionId, swapped: true })
     this.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()
@@ -874,11 +878,23 @@ export class SessionManager {
 
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
+    lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
     const view = this.orchestratorToolsFor('', undefined, undefined, true)
     return {
+      /*
+       * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
+       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown
+       */
+      lastAnswer: async (sessionId, maxChars) => {
+        const m = this.meta.get(sessionId)
+        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        const rows = this.store.messages.loadMessages(sessionId, 200)
+        const text = lastResponse(rows)
+        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows) }
+      },
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
         const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
@@ -1025,7 +1041,7 @@ export class SessionManager {
     if (this.disposing || this.handingOver) return
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
-    for (const n of now) void this.reports.tellAskerOfInterruption(n.sessionId, n.requester)
+    for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester))
   }
 
   /**
@@ -2042,6 +2058,7 @@ export class SessionManager {
       },
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
+      forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),

@@ -5,17 +5,21 @@
 //
 //   quick   a pull request: `changes`, `verify` and the Windows unit tests, the jobs that catch most
 //           problems cheaply. Every other job is left out, and reports nothing.
-//   full    everything else: a commit already on main, a manual run (workflow_dispatch: the merge
-//           queue's batches, or a person asking for it on a branch), and a release bump's pull
+//   full    everything else: a commit already on main, a manual run (workflow_dispatch: a person
+//           asking for it on a branch, or the main guard's bisect), and a release bump's pull
 //           request. Inside the full tier the files still leave out what they cannot affect.
+//           A manual run that asks for the quick tier (input `tier: quick`) runs the quick tier
+//           instead (#1259): the merge queue's batches, unless it is a release bump or on main.
 //   none    a draft pull request (#1066): `changes` alone. A stack's lower PRs are drafts
 //           (CONTRIBUTING.md): the top's run, and the merge queue's batch, are what prove the
 //           stack, and a lower's own run only queued behind them. Marked ready for review (a lower
 //           that became a top), it runs the quick tier again.
 //
-// Nothing lands on the quick tier alone: the merge queue lands a pull request only from a full run
-// on what lands, a batch built on main (.centralu/apps/project-board/batch.mjs) or a full run on its
-// own head. The full tier's `full tier` job is how it tells the two apart: it passes only on a full run.
+// What lands on what (#1259, the owner's decision of 2026-10-19): the merge queue lands a pull request
+// after the fast tier, its own quick run and its batch's quick run on what lands
+// (.centralu/apps/project-board/batch.mjs, project.json `ci.landTier`); the full tier runs on main after
+// it lands, and a red main is bisected and reverted (the board's main guard). The full tier's `full tier`
+// job is how the two are told apart: it passes only on a full run.
 //
 // Inside the full tier, this answers on $GITHUB_OUTPUT what each group of jobs reads:
 //
@@ -112,9 +116,13 @@ export function classify(files) {
  * to main, or null when that is not known. `draft`: the run is a draft pull request's, which is
  * asked last: a release bump runs in full, a draft or not.
  */
-export function tierOf({ files, onMain = false, dispatch = false, draft = false }) {
+export function tierOf({ files, onMain = false, dispatch = false, dispatchTier = 'full', draft = false }) {
   if (onMain) return { tier: 'full', why: 'the commit is on main' }
-  if (dispatch) return { tier: 'full', why: 'a manual run (workflow_dispatch), as the merge queue starts for a batch' }
+  // A manual run that asks for the quick tier (#1259): the merge queue's batch. A release bump still runs in full
+  if (dispatch && dispatchTier === 'quick' && files !== null && !files.includes(VERSION_SOURCE)) {
+    return { tier: 'quick', why: 'a manual run that asked for the quick tier, as the merge queue starts for a batch' }
+  }
+  if (dispatch) return { tier: 'full', why: 'a manual run (workflow_dispatch)' }
   if (files === null) return { tier: 'full', why: 'the changed files are not known' }
   if (files.includes(VERSION_SOURCE)) return { tier: 'full', why: `it changes ${VERSION_SOURCE}, as a release bump does` }
   if (draft) return { tier: 'none', why: "a draft pull request, as a stack's lower PRs are: nothing runs until it is marked ready for review" }
@@ -177,7 +185,9 @@ function main() {
   // A manual run sets the workflow_dispatch input; a push or a pull request leaves it empty
   const dispatch = process.env.EVERYTHING === 'true' || process.env.EVERYTHING === 'false'
   const changed = changedFiles()
-  const { tier, why } = tierOf({ files: changed.files, onMain: changed.onMain === true, dispatch, draft: !dispatch && draftOf(process.env.GITHUB_EVENT_PATH) })
+  // The tier a manual run asks for (input `tier`, empty elsewhere): `quick` for the merge queue's batches (#1259)
+  const dispatchTier = process.env.DISPATCH_TIER === 'quick' ? 'quick' : 'full'
+  const { tier, why } = tierOf({ files: changed.files, onMain: changed.onMain === true, dispatch, dispatchTier, draft: !dispatch && draftOf(process.env.GITHUB_EVENT_PATH) })
   // A manual run builds everything unless it asks otherwise (`everything` unticked)
   const files = process.env.EVERYTHING === 'true' ? null : changed.files
   const failFast = failFastOf({ files: changed.files, onMain: changed.onMain === true, dispatch })

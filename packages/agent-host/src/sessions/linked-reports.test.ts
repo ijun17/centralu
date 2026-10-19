@@ -41,7 +41,7 @@ beforeEach(() => {
   /** The hub's reader over its links, as far as the reports read it: the mirror, the last words, and the machine's list */
   const reader = {
     describe: (id: string) => mirror.get(id) ?? null,
-    lastWords: async (id: string) => `last words of ${id}`,
+    lastWords: async (id: string) => ({ ok: true as const, text: `last words of ${id}`, length: 0, seq: null }),
     machineLinked: (id: string) => linked.has(id),
     backgroundTasks: (id: string) => listing(id),
   } as unknown as LinkedSessions
@@ -313,7 +313,8 @@ describe('a machine removed from Centralu', () => {
     await flush()
     expect(delivered.slice(1)).toEqual([
       { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: '(in the paused report before this one)', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify] } },
-      { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
+      // Not an empty last response (#1186): nothing could be read, and it says why
+      { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '(not read: its machine could not be reached)', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
     ])
     expect([...children.linkedReports.keys()]).toEqual(['m10.w1'])
   })

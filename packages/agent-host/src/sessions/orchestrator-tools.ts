@@ -226,6 +226,7 @@ const HANDLERS: ToolHandlers = {
     const r = await tools.readSession(args.sessionId ?? '', args.limit, {
       around: args.around,
       tools: args.tools === true,
+      ...(args.offset !== undefined ? { offset: args.offset } : {}),
     })
     if (!r.ok) return { text: `Could not read it — ${r.error}`, isError: true }
     /*
