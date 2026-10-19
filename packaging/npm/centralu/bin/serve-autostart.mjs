@@ -194,10 +194,18 @@ export function taskScript(action, { name, run = '', legacy = null }) {
   const head = ["$ErrorActionPreference = 'Stop'", PS_MODULE_PATH, '[Console]::OutputEncoding = [Text.Encoding]::UTF8', `$name = ${psText(name)}`]
   const fail = `} catch { "${TASK_WORD}-ERROR $($_.Exception.Message -replace '\\s+', ' ')" }`
   const find = "$t = Get-ScheduledTask -TaskName $name -TaskPath '\\' -ErrorAction SilentlyContinue"
-  // Whether a task's principal is this user's, as this serve registers it. Task Scheduler gives the id with or without the domain
+  /*
+   * Who this user is: their account's SID, and its name as Windows resolves it (`PC\user`, `DOMAIN\user`), which a task
+   * principal is registered with. Never USERDOMAIN: in an ssh logon on a PC in a workgroup it says `WORKGROUP`, which
+   * names no account (#1223, measured on a laptop with beta.30). Whether a task's principal is this user's, as this
+   * serve registers it, is decided by SID too: Task Scheduler gives the id with the domain, without it, or as a SID
+   */
   const mine = [
-    '$me = if ($env:USERDOMAIN) { "$env:USERDOMAIN\\$env:USERNAME" } else { $env:USERNAME }',
-    "function Test-Mine($x) { $x -and $x.Principal -and ($x.Principal.UserId -eq $me -or $x.Principal.UserId -eq $env:USERNAME) -and \"$($x.Principal.LogonType)\" -eq 'Interactive' -and \"$($x.Principal.RunLevel)\" -eq 'Limited' }",
+    '$account = [System.Security.Principal.WindowsIdentity]::GetCurrent()',
+    '$sid = $account.User.Value',
+    '$me = $account.Name',
+    "function Get-Sid($n) { if (\"$n\" -match '^S-1-') { return \"$n\" }; if (-not \"$n\") { return $null }; try { (New-Object System.Security.Principal.NTAccount(\"$n\")).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $null } }",
+    "function Test-Mine($x) { $x -and $x.Principal -and ((Get-Sid $x.Principal.UserId) -eq $sid) -and \"$($x.Principal.LogonType)\" -eq 'Interactive' -and \"$($x.Principal.RunLevel)\" -eq 'Limited' }",
   ]
   const old = legacy
     ? [`$legacy = ${psText(legacy)}`, "$old = Get-ScheduledTask -TaskName $legacy -TaskPath '\\' -ErrorAction SilentlyContinue"]
@@ -238,15 +246,21 @@ export function taskScript(action, { name, run = '', legacy = null }) {
   if (action === 'signin') {
     /*
      * Someone is signed in when this user owns an Explorer in a session of its own (not session 0, where an ssh
-     * logon's processes run). Asked of WMI for the owner, which needs no administrator for the user's own processes
-     * and reads the same in every language
+     * logon's processes run). Asked of WMI for the owner's SID, which needs no administrator for the user's own
+     * processes, reads the same in every language, and does not depend on what this logon calls its domain (GetOwner's
+     * domain is the PC's name for a local account, while an ssh logon's USERDOMAIN may say `WORKGROUP`). When none is
+     * found, how many desktop Explorers there were at all, and how many of their owners WMI would not tell, goes into
+     * serve.log's line
      */
     return [
       ...head,
       'try {',
       ...mine.map((l) => `  ${l}`),
-      "  $desk = @(Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Where-Object { $_.SessionId -gt 0 } | Where-Object { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; $o.ReturnValue -eq 0 -and $o.User -eq $env:USERNAME -and (-not $env:USERDOMAIN -or $o.Domain -eq $env:USERDOMAIN) })",
-      `  if ($desk.Count -eq 0) { '${TASK_WORD} nosession' } else {`,
+      "  $all = @(Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Where-Object { $_.SessionId -gt 0 })",
+      '  $owners = @($all | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid })',
+      '  $desk = @($owners | Where-Object { $_.ReturnValue -eq 0 -and $_.Sid -eq $sid })',
+      '  $unread = @($owners | Where-Object { $_.ReturnValue -ne 0 }).Count',
+      `  if ($desk.Count -eq 0) { "${TASK_WORD} nosession desktops=$($all.Count) unreadable=$unread" } else {`,
       ...[...want, ...old, find, dropOld].map((l) => `    ${l}`),
       '    $acts = @(if ($t) { $t.Actions })',
       '    $same = (Test-Mine $t) -and $acts.Count -eq 1 -and $acts[0].Execute -eq $exe -and $acts[0].Arguments -eq $arg',
@@ -409,7 +423,9 @@ async function taskAutostart(action, { dataDir, env, home, name, run, user, plat
  * network logon, which cannot open the user's Credential Manager vault, runs elevated for an administrator (#702) and
  * opens what it shows in session 0, where nobody sees it.
  *
- * `{ started: true, name }`, or `{ started: false, reason, message? }`: `nosession` (nobody is signed in here),
+ * `{ started: true, name }`, or `{ started: false, reason, message?, desktops? }`: `nosession` (this user is not signed
+ * in here; `desktops` is how many desktop Explorers, of any account, there were, `unreadable` how many of their owners
+ * WMI would not tell),
  * `off` (`CENTRALU_SIGNIN_TASK=off`, for a person who wants no task, and for tests on a machine with a desktop),
  * `not_windows`, `no_launcher`, `error`. `run` is a parameter so tests never reach the real Task Scheduler.
  */
@@ -422,10 +438,14 @@ export async function startInSignIn({ dataDir, env, home, platform = process.pla
   if (!ps) return { started: false, reason: 'error', message: 'Windows PowerShell is not reachable' }
   const name = autostartName('task', { dataDir, home, env, platform, user })
   const runScript = taskActionScript({ how: 'wmi', launcher, env })
-  const a = await askPowershell(ps, taskScript('signin', { name, run: runScript, legacy: legacyTaskName({ dataDir, home, env, platform }) }), env, parseTaskAnswer, run)
+  const parse = (out) => {
+    const m = /nosession desktops=(\d+)(?: unreadable=(\d+))?/.exec(String(out ?? ''))
+    return { ...parseTaskAnswer(out), ...(m ? { desktops: Number(m[1]), unreadable: Number(m[2] ?? 0) } : {}) }
+  }
+  const a = await askPowershell(ps, taskScript('signin', { name, run: runScript, legacy: legacyTaskName({ dataDir, home, env, platform }) }), env, parse, run)
   if (!a.ok) return { started: false, reason: 'error', message: a.message }
   if (a.word === 'started') return { started: true, name }
-  if (a.word === 'nosession') return { started: false, reason: 'nosession' }
+  if (a.word === 'nosession') return { started: false, reason: 'nosession', ...(a.desktops !== undefined ? { desktops: a.desktops, unreadable: a.unreadable } : {}) }
   return { started: false, reason: 'error', message: `Task Scheduler answered ${a.word}` }
 }
 
