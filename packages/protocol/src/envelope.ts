@@ -117,11 +117,34 @@ export const ProofServer = z.object({
 })
 export type ProofServer = z.infer<typeof ProofServer>
 
-export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, ProveClient, RpcRequest])
+/**
+ * The reverse direction (#550, docs/plans/remote-hub.md §12.7): a host calls a hub linked to it, over the socket the hub
+ * opened. The call is an `RpcRequest` sent by the host, and only to a socket whose hub said it answers them
+ * (`host.hubOffer`); the hub answers it with this frame under the same id. Ids of the two directions never meet: a host
+ * reads an answer only for a call it sent on that socket. A hub without a handler for the reverse direction (any build
+ * before it) drops the call; a host from before it answers this frame with "Unknown frame", which nothing waits on.
+ */
+export const RpcAnswer = z.object({
+  kind: z.literal('res'),
+  id: z.string(),
+  ok: z.boolean(),
+  result: z.unknown().optional(),
+  error: ProtocolError.optional(),
+})
+export type RpcAnswer = z.infer<typeof RpcAnswer>
+
+/**
+ * How a host withdraws a call it sent a hub (#550): a reverse call of this method, `{ id }` naming the call. The hub
+ * aborts that call's work; nothing waits on the answer to either.
+ */
+export const CANCEL_CALL_METHOD = 'call.cancel'
+
+export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, ProveClient, RpcRequest, RpcAnswer])
 export type ClientFrame = z.infer<typeof ClientFrame>
 
-// 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union
-export const ServerFrame = z.union([HelloServer, ProofServer, EventPush, RpcResponse, TerminalPush, TerminalExit])
+// 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union.
+// `rpc` here is a host's call to a hub linked to it (#550, `RpcAnswer`)
+export const ServerFrame = z.union([HelloServer, ProofServer, EventPush, RpcResponse, TerminalPush, TerminalExit, RpcRequest])
 export type ServerFrame = z.infer<typeof ServerFrame>
 
 export function parseClientFrame(raw: unknown) {

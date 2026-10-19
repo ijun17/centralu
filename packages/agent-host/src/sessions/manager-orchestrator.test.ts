@@ -536,6 +536,69 @@ describe('the orchestrator', () => {
     expect(worker?.kind).toBe('worker')
   })
 
+  /*
+   * #1233: work the orchestrator hands out with create_session's first message is its own turn, and it hears when that
+   * turn ends, as start_agent's caller does. It used to be a plain send: nobody owned the turn, nobody was owed its end,
+   * and the orchestrator's own new session even counted as busy for it.
+   */
+  describe('create_session with a first message (#1233)', () => {
+    const created = async (args: Record<string, unknown>) => {
+      const p = await addProject()
+      const orc = await mgr.orchestrator()
+      const projName = ((await rpc('projects.list', {})) as { id: string; name: string }[]).find((x) => x.id === p.id)!.name
+      const made = await mgr.runOrchestratorTool(orc.id, 'create_session', { project: projName, name: 'Handed out', ...args })
+      expect(made.isError).toBeFalsy()
+      const worker = ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.name === 'Handed out')!
+      const tools = (mgr as unknown as { orchestratorToolsFor(id: string): typeof adapter.lastOrchestratorTools }).orchestratorToolsFor(orc.id)!
+      const reports = () => adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Centralu]'))
+      const finish = async () => {
+        adapter.handleOf(worker.id)!.finishTurn()
+        await new Promise((r) => setTimeout(r, 0))
+      }
+      return { made, worker, tools, reports, finish }
+    }
+
+    it('tells the orchestrator once when that first turn ends', async () => {
+      const { made, worker, reports, finish } = await created({ firstMessage: 'do the work' })
+      expect(made.text).toContain('you are told when its turn ends')
+      expect(adapter.handleOf(worker.id)!.sent).toEqual(['do the work'])
+      await finish()
+      await finish()
+      expect(reports()).toHaveLength(1)
+      expect(reports()[0]).toContain(worker.id)
+    })
+
+    it('with reportBack false tells it nothing, and the turn is still its own: more words go in without a busy answer', async () => {
+      const { made, worker, tools, reports, finish } = await created({ firstMessage: 'do the work', reportBack: false })
+      expect(made.text).not.toContain('you are told')
+      expect(await tools.sendToSession(worker.id, 'and this too')).toMatchObject({ ok: true, busy: { state: 'noted' } })
+      expect(adapter.handleOf(worker.id)!.sent).toEqual(['do the work', 'and this too'])
+      await finish()
+      expect(reports()).toEqual([])
+    })
+
+    it('a note without reportBack into that turn does not cancel its report', async () => {
+      const { worker, tools, reports, finish } = await created({ firstMessage: 'do the work' })
+      await tools.sendToSession(worker.id, 'use the staging database')
+      await tools.sendToSession(worker.id, 'and keep the logs')
+      await finish()
+      expect(reports()).toHaveLength(1)
+    })
+  })
+
+  // #1233: a note joins the work and leaves the report asked for in place (#166 clears it for a new instruction only)
+  it('send_to_session with reportBack, then a bare note into that turn: the report still arrives', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const orc = await mgr.orchestrator()
+    const tools = adapter.lastOrchestratorTools!
+    await tools.sendToSession(a.id, 'let me know when it is done', true)
+    expect(await tools.sendToSession(a.id, 'one more thing')).toMatchObject({ ok: true, busy: { state: 'noted' } })
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Centralu]'))).toHaveLength(1)
+  })
+
   /**
    * There is no project boundary in its sight. This is a property that must remain after the
    * project stage was removed, and reintroducing a boundary would get caught here — the manager's

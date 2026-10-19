@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import type { HostActivity, MachineInfo } from '@cc/protocol'
-import { autostartRow, elevatedNote, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
+import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol'
+import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Button } from '../../components/Button.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 import { useLoad } from '../../app/useLoad.js'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { GrantList } from './GrantList.jsx'
 
 /**
  * Settings → Machines (#82, docs/plans/remote-hub.md): the other computers this computer's host reaches.
@@ -136,6 +138,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       <InstalledRow m={m} />
       <ConnectWhenNeeded m={m} />
       <AutostartSwitch m={m} />
+      <AsksSwitch m={m} />
       {started && (
         <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
           {started}
@@ -332,6 +335,100 @@ function AutostartSwitch({ m }: { m: MachineInfo }) {
           {withCode(row.note)}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * The reverse direction (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): this machine's sessions may
+ * ask this computer's projects. Per machine, off by default. Turning it on asks once and says what it allows; turning it
+ * off does not ask, and forgets the pairs. While it is on, the pairs approved on this computer's card are listed, each
+ * withdrawn here. The switch shows what the host answered: it moves when the row does, not when it is clicked.
+ */
+function AsksSwitch({ m }: { m: MachineInfo }) {
+  const setAsks = useStore((s) => s.setMachineAsks)
+  const [pending, setPending] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const row = asksRow(m)
+  if (!row) return null
+  const turn = (on: boolean) => {
+    setPending(true)
+    void setAsks(m.id, on).finally(() => {
+      setPending(false)
+      setConfirming(false)
+    })
+  }
+  return (
+    <div className="mt-1.5">
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-ink-muted"
+          checked={row.on}
+          disabled={pending || confirming}
+          onChange={(e) => (e.target.checked ? setConfirming(true) : turn(false))}
+          data-testid={`machine-asks-${m.id}`}
+        />
+        <span>{row.label}</span>
+      </label>
+      {confirming && (
+        <InlineConfirm
+          text={row.confirm}
+          yesLabel="Turn on"
+          noLabel="Cancel"
+          busy={pending}
+          onYes={() => turn(true)}
+          onNo={() => setConfirming(false)}
+          testId={`machine-asks-confirm-${m.id}`}
+          yesTestId={`machine-asks-yes-${m.id}`}
+          noTestId={`machine-asks-no-${m.id}`}
+          textTestId={`machine-asks-text-${m.id}`}
+        />
+      )}
+      {row.note && (
+        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-asks-note-${m.id}`}>
+          {row.note}
+        </p>
+      )}
+      {row.on && <AskPairs m={m} />}
+    </div>
+  )
+}
+
+/** The pairs of one machine approved on this computer's card (#550): a session there, a project here */
+function AskPairs({ m }: { m: MachineInfo }) {
+  const platform = usePlatform()
+  const version = useStore((s) => s.projectConsentsVersion)
+  // Read again whenever a pair is approved or withdrawn (`project_consents_changed`)
+  const read = useLoad(async () => (await platform.machines.askConsents()).filter((c) => c.machineId === m.id), [platform, m.id], [version])
+  const keyOf = (c: MachineAskConsent) => `${c.sessionId}>${c.projectId}`
+  return (
+    <div className="ml-5 mt-1" data-testid={`machine-ask-pairs-${m.id}`}>
+      <GrantList
+        load={read}
+        keyOf={keyOf}
+        row={(c) => (
+          <span className="min-w-0 truncate text-xs text-ink">
+            {c.sessionName} <span className="text-ink-faint">may ask</span> {c.projectName}
+          </span>
+        )}
+        dateOf={(c) => c.decidedAt}
+        action={{
+          label: 'Withdraw',
+          failed: 'Could not withdraw it',
+          testId: (c) => `machine-ask-withdraw-${m.id}-${keyOf(c)}`,
+          run: (c) => platform.machines.withdrawAsk(c.machineId, c.sessionId, c.projectId),
+        }}
+        what="the approved sessions"
+        empty={`No session on ${m.name} is allowed yet: the first ask of each asks you here.`}
+        testIds={{
+          list: `machine-ask-pairs-list-${m.id}`,
+          empty: `machine-ask-pairs-empty-${m.id}`,
+          failed: `machine-ask-pairs-failed-${m.id}`,
+          error: `machine-ask-pairs-error-${m.id}`,
+          row: (c) => `machine-ask-pair-${m.id}-${keyOf(c)}`,
+        }}
+      />
     </div>
   )
 }

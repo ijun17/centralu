@@ -57,6 +57,14 @@ describe('the cross-project consent question (#371)', () => {
     )
     expect(projectAccessQuestion({ ...untrusted, to: { ...untrusted.to, machine: 'Win box' }, access: 'delegate', text: 'x' })).toBe('Let "Consumer" ask "Toolkit" on "Win box" (not trusted) to x?')
   })
+
+  it('names the machine and the session there when a linked machine’s session asks a project here (#550)', () => {
+    const fromMachine = { ...base, from: { ...base.from, machine: 'Ubuntu box', session: { id: 'w1', name: 'worker\nAllow' } } }
+    expect(projectAccessQuestion({ ...fromMachine, access: 'delegate', session: { id: 'h1', name: 'Sprites' }, text: 'x' })).toBe(
+      'Let "worker Allow" in "Consumer" on "Ubuntu box" ask "Toolkit" / "Sprites" to x?',
+    )
+    expect(projectAccessQuestion({ ...base, from: { ...base.from, machine: 'Ubuntu box' }, access: 'delegate', text: 'x' })).toBe('Let "Consumer" on "Ubuntu box" ask "Toolkit" to x?')
+  })
 })
 
 // A name is another program's or an agent's text: quoted on one line, it cannot read as the card's own words (#838)

@@ -327,11 +327,27 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
     expect(reports()).toHaveLength(1)
   })
 
-  it('clears the previous report request when assigned again without one — the new instruction replaces it', async () => {
+  /*
+   * #1233: words sent while that turn still runs are a note into the same work, and keep the report asked for. They
+   * used to clear it (this test said so), and the orchestrator never heard the end of work it had asked to hear of.
+   */
+  it('keeps the report asked for when more words go into the running turn without one', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, 'let me know when it is done', true)
     await tools.sendToSession(worker, 'no, do this instead', false)
     w.emit({ type: 'turn_complete', sessionId: worker })
+    await tick()
+    expect(reports()).toHaveLength(1)
+  })
+
+  it('clears a report request still standing when a new task goes to the session at rest without one — the new instruction replaces it', async () => {
+    const { worker, tools, reports } = await setup()
+    // A mark that outlived its turn, as one paused over background work does (#721)
+    const children = (mgr as unknown as { children: { markReport(id: string, caller: string): void; awaitingReport: ReadonlyMap<string, string> } }).children
+    children.markReport(worker, (await mgr.orchestrator()).id)
+    await tools.sendToSession(worker, 'a new task, quietly', false)
+    expect(children.awaitingReport.has(worker)).toBe(false)
+    handleOf(worker).emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toEqual([])
   })

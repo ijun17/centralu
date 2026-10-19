@@ -52,6 +52,42 @@ export class StepsV58 extends MigrationRange {
           if (cols.size > 0 && !cols.has('connect')) this.db.exec(`ALTER TABLE linked_machines ADD COLUMN connect TEXT`)
         },
       },
+      {
+        to: 60,
+        breaksOlderReaders: false,
+        /**
+         * The reverse direction of linked machines (#550, docs/plans/remote-hub.md §12.7): a linked machine's sessions
+         * asking this computer's projects.
+         *
+         *   linked_machines.asks  the per-machine switch in Settings → Machines, off (0) by default. On the machine's
+         *                         row, so removing the machine removes it, and a machine linked again under the same
+         *                         name starts with it off
+         *   machine_ask_consents  one row per pair the person approved on this computer's card: a session of that
+         *                         machine (its own id there, and its name when approved, for Settings) and a project of
+         *                         this computer. Later asks in the pair need no card until the person withdraws it.
+         *                         Both ends are foreign keys with CASCADE: removing the machine (by any build, an older
+         *                         one included) or the project takes the pair with it
+         *
+         * **Expand only (#292's rule).** A defaulted column and a new table. An older host's insert does not name the
+         * column and gets the switch off; it never reads the table, and its `DELETE FROM linked_machines` cascades.
+         */
+        run: () => {
+          const cols = this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]
+          if (cols.length > 0 && !cols.some((c) => c.name === 'asks')) {
+            this.db.exec(`ALTER TABLE linked_machines ADD COLUMN asks INTEGER NOT NULL DEFAULT 0`)
+          }
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_ask_consents (
+              machine_id   TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,
+              session_id   TEXT NOT NULL,
+              session_name TEXT NOT NULL,
+              project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+              decided_at   INTEGER NOT NULL,
+              PRIMARY KEY (machine_id, session_id, project_id)
+            )
+          `)
+        },
+      },
     ]
   }
 }

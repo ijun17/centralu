@@ -29,7 +29,11 @@
 //   code        anything but documents: the UI scenarios in Chromium and the UX tasks
 //
 // Each is `true` or `false` on a full run (`false` runs the job's stand-in, which reports its checks
-// as passed), and `off` on a quick one (neither runs). `full` is `true` on a full run: the jobs every
+// as passed), and `off` on a quick one (neither runs). `fail_fast` (2026-10-19, the owner's decision) is `true` on a
+// manual run alone, the merge queue's batches: there a failed `verify` cancels the rest of the run (build.yml's
+// `fail fast` job), since no other job can make that run land. `false` on every other run, and on a manual run that
+// changes the version's source (a release bump's run is never cut short, docs/releasing.md), or that is on main, or
+// whose files are not known. `full` is `true` on a full run: the jobs every
 // full run has (the WebKit UI scenarios, the Windows lint and types, the `full tier` job), and `off`
 // on a quick one. `quick` is `true` on both: `verify` and the Windows unit tests; `off`, with every
 // other answer, for a draft.
@@ -123,6 +127,14 @@ export function outputs(tier, needs) {
   return { quick: tier === 'none' ? 'off' : 'true', full: full ? 'true' : 'off', ...Object.fromEntries(GROUPS.map((g) => [g, full ? String(needs[g]) : 'off'])) }
 }
 
+/**
+ * Whether a failed `verify` cancels the rest of the run (see the header): a manual run (`dispatch`) off main whose
+ * files are known and do not include the version's source. Everything else keeps every job running to its end.
+ */
+export function failFastOf({ files, onMain = false, dispatch = false }) {
+  return dispatch && !onMain && files !== null && !files.includes(VERSION_SOURCE)
+}
+
 /** Whether the event that started the run is a draft pull request's ($GITHUB_EVENT_PATH). Unreadable: not a draft. */
 export function draftOf(eventPath) {
   if (!eventPath) return false
@@ -168,8 +180,10 @@ function main() {
   const { tier, why } = tierOf({ files: changed.files, onMain: changed.onMain === true, dispatch, draft: !dispatch && draftOf(process.env.GITHUB_EVENT_PATH) })
   // A manual run builds everything unless it asks otherwise (`everything` unticked)
   const files = process.env.EVERYTHING === 'true' ? null : changed.files
-  const lines = Object.entries(outputs(tier, classify(files))).map(([k, v]) => `${k}=${v}`)
+  const failFast = failFastOf({ files: changed.files, onMain: changed.onMain === true, dispatch })
+  const lines = [...Object.entries(outputs(tier, classify(files))).map(([k, v]) => `${k}=${v}`), `fail_fast=${failFast}`]
   console.log(`The ${tier} tier: ${why}.`)
+  if (failFast) console.log('A failed verify cancels the rest of this run (a manual run, not a release bump).')
   if (tier === 'full') console.log(files === null ? `Every job runs: ${process.env.EVERYTHING === 'true' ? 'a manual run asked for everything' : changed.why}.` : `${files.length} changed file(s), ${changed.why}:\n${files.map((f) => `  ${f}`).join('\n')}`)
   console.log(lines.join('\n'))
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`)

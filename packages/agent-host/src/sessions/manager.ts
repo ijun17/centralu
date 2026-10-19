@@ -35,6 +35,7 @@ import type {
   Attachment,
   ApprovalScope,
   GridPanel,
+  MachineInfo,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -45,6 +46,7 @@ import type {
   ToolName,
   SettingsApplied,
   FsResolvePurpose,
+  MachineAskConsent,
 } from '@cc/protocol'
 import {
   applyBackgroundTasks,
@@ -118,6 +120,8 @@ import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import type { AppMessageSource, AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
+import { MachineAsks } from './machine-asks.js'
+import type { HubsReader } from './ask-project-flow.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -214,6 +218,10 @@ export class SessionManager {
   private readonly handoffNotes: HandoffNotes
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
+  /** A linked machine's sessions asking this computer's projects (#550) */
+  private readonly machineAsks: MachineAsks
+  /** This computer's name as a linked machine's session reads it (#550); main.ts gives the host name */
+  private hubName: () => string = () => 'this computer'
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
   private readonly externals: ExternalConversations
   /** What a session's events leave in the store: streamed messages, rows, images (session-record.ts) */
@@ -329,6 +337,7 @@ export class SessionManager {
     this.delegationFlow = new DelegationFlow(this.parts())
     this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.parts())
+    this.machineAsks = new MachineAsks(this.parts(), () => this.hubName())
     this.externals = new ExternalConversations(this.parts())
     this.record = new SessionRecord(this.parts())
     this.toolQueries = new ToolQueries(this.parts())
@@ -472,6 +481,18 @@ export class SessionManager {
    */
   async createWorktreeManager(_projectId: string, _baseBranch: string): Promise<SessionInfo> {
     throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
+  }
+
+  /** `ProjectCreation.inspectFolder` (project-creation.ts): `projects.inspect` (#1220) */
+  inspectFolder(...a: Parameters<ProjectCreation['inspectFolder']>): ReturnType<ProjectCreation['inspectFolder']> {
+    return this.projectCreation.inspectFolder(...a)
+  }
+
+  /** The linked machines as `machines.list` answers (#1220), for the orchestrator's list_machines; none until wired */
+  private machineList: () => MachineInfo[] = () => []
+
+  useMachineList(list: () => MachineInfo[]): void {
+    this.machineList = list
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -862,6 +883,49 @@ export class SessionManager {
 
   useLinkedReader(reader: LinkedSessions): void {
     this.linkedReader = reader
+  }
+
+  /** The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts) */
+  useLinkedHubs(hubs: HubsReader): void {
+    this.askProjectFlow.hubs = hubs
+  }
+
+  /** This computer's name, as a linked machine's session reads it in an answer or a refusal (#550) */
+  useHubName(name: () => string): void {
+    this.hubName = name
+  }
+
+  /**
+   * A linked machine's session asks a project of this computer (#550, the reverse direction, `hub.askProject`): this
+   * computer's card for the pair, then the task in an existing ordinary session here (sessions/machine-asks.ts)
+   */
+  askFromMachine(...a: Parameters<MachineAsks['ask']>): ReturnType<MachineAsks['ask']> {
+    return this.machineAsks.ask(...a)
+  }
+
+  /** The projects a linked machine's session may name (`hub.projects`, #550) */
+  projectsForMachines(): ReturnType<MachineAsks['projects']> {
+    return this.machineAsks.projects()
+  }
+
+  /** Every approved pair of the reverse direction, with the names as they are now (#550, Settings → Machines) */
+  machineAskConsents(machineName: (id: string) => string | undefined): MachineAskConsent[] {
+    const names = new Map(this.store.projects.listProjects().map((p) => [p.id, p.name]))
+    return this.store.machines.listMachineAskConsents().map((c) => ({
+      ...c,
+      machineName: machineName(c.machineId) ?? c.machineId,
+      projectName: names.get(c.projectId) ?? '(project no longer exists)',
+    }))
+  }
+
+  /** Closes the cards standing for a machine's asks (#550 review): its switch went off, or it was removed */
+  closeMachineAskCards(machineId: string): void {
+    this.machineAsks.closeCards(machineId)
+  }
+
+  /** Withdraws one approved pair (#550): that session's next ask into that project raises the card again */
+  withdrawMachineAsk(machineId: string, sessionId: string, projectId: string): void {
+    if (this.store.machines.forgetMachineAskConsent(machineId, sessionId, projectId)) this.emit({ type: 'project_consents_changed' })
   }
 
   /**
@@ -2434,6 +2498,9 @@ export class SessionManager {
       createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
       askAppProject: (sessionId, spec, signal) => this.projectCreation.askAppProject(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),
+      addFolderAsked: (sessionId, path, signal) => this.projectCreation.addFolderAsked(sessionId, path, signal),
+      addFolderOnMachine: (sessionId, reader, machine, path, signal) => this.projectCreation.addFolderOnMachine(sessionId, reader, machine, path, signal),
+      machineList: () => this.machineList(),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),

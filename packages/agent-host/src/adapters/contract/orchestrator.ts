@@ -3,6 +3,8 @@ import type {
   BackgroundTask,
   GitSource,
   Interruption,
+  MachineInfo,
+  RpcResult,
   ApprovalDetail,
   Question,
   QuestionAnswer,
@@ -138,6 +140,13 @@ export type LinkedSessions = {
   previewProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ name: string; path: string }>>
   createProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ projectId: string; name: string; path: string }>>
   /**
+   * What a folder on that machine is, as its host reads it (`projects.inspect` there, #1220). A machine on a Centralu
+   * from before it is named as too old
+   */
+  inspectFolder(machineId: string, path: string): Promise<Outcome<{ facts: RpcResult<'projects.inspect'> }>>
+  /** Registers an existing folder there as a project: that machine's `projects.add`, as its group's Add project calls it (#1220) */
+  addProject(machineId: string, path: string): Promise<Outcome<{ projectId: string; name: string; path: string }>>
+  /**
    * What an ordinary session's reader view needs of a machine's session (#984), from the headers mirror: whether it is
    * an app's (its builder or an agent an app asked for, never shown to a reader) and whether its project is trusted
    * there. Null when the mirror does not hold it, which the reader treats as not readable.
@@ -180,7 +189,8 @@ export type RoutedCard = {
  * requester chooses, by calling again with `ifBusy`; nothing was sent.
  *
  *   note       add it to the running turn as a mid-turn note (#594/#606/#653): only an `auto` requester, on a CLI that
- *              takes input mid-turn; the turn's answer stays its owner's, the note's reply comes to the requester
+ *              takes input mid-turn; the turn and its answer stay its owner's. The requester hears the turn's end only
+ *              when it asks for a report (`reportBack`, #1233) and nobody else is owed it
  *   queue      hold it and deliver it as a new turn when the running one ends; the requester is told when that ends
  *   fork       a sub-session started from a copy of the session's conversation now, linked to the requester, in a
  *              worktree of its own (`fork_read`: read-only work, in the session's folder, under at most `safe`)
@@ -191,7 +201,8 @@ export type BusyAnswer =
   | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[] }
   /** `lowMemory` (#686): queued instead of the fork asked for, since memory was low; what was read */
   | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number; lowMemory?: string }
-  | { state: 'noted'; sessionId: string; sessionName: string }
+  /** `reportTaken` (#1233): a report was asked for, but another session is owed that turn's end, so it stays theirs */
+  | { state: 'noted'; sessionId: string; sessionName: string; reportTaken?: true }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
@@ -367,6 +378,11 @@ export type OrchestratorTools = {
    * With `reportBack`, the orchestrator is notified once when that session's turn ends. Off by
    * default, because waking it up on every turn end would create a loop where they wake each
    * other, and would also double the turn cost.
+   *
+   * A note (a send into a turn already running, #1233) never drops a report someone is owed, its own included:
+   * without `reportBack` it leaves the marks as they are; with it, it adds this orchestrator's, unless another
+   * session is owed that turn's end (`reportTaken`). A new instruction to a session at rest without `reportBack`
+   * still replaces this orchestrator's earlier request (#166).
    */
   sendToSession(
     sessionId: string,
@@ -428,8 +444,16 @@ export type OrchestratorTools = {
     tool?: ToolName
     /** The session name. If given, the automatic name does not override it */
     name?: string
-    /** The first instruction to send right after creation */
+    /**
+     * The first instruction to send right after creation. Its turn is the orchestrator's (#1233), as a send to a
+     * session at rest is: its cards come to the orchestrator, and its later words go in as notes with no busy answer
+     */
     firstMessage?: string
+    /**
+     * Whether the orchestrator is told once when that first turn ends (#1233). On unless false: work it hands out is
+     * work it hears the end of, as start_agent's is. Means nothing without `firstMessage`
+     */
+    reportBack?: boolean
   }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
   /**
    * Changes a session's performance settings (#30).
@@ -509,6 +533,18 @@ export type OrchestratorTools = {
     spec: { name: string; parent?: string; source?: { git: string; branch?: string }; machine?: string },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
+  /**
+   * Adds a folder that already exists as a project, on this computer or a linked machine (#1220, the add_project
+   * command), **only once the person allows the card it raises**, which shows the folder's facts as its machine read
+   * them. A path that is missing, a file or already a project is refused before any card. Absent on seats that cannot.
+   */
+  addProject?(
+    /** `machine`: a linked machine by name or id; this computer when absent */
+    spec: { path: string; machine?: string },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
+  /** The linked machines as `machines.list` answers (#1220, the list_machines command); absent on seats that cannot */
+  listMachines?(): MachineInfo[]
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

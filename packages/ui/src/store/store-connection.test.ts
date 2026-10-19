@@ -501,7 +501,7 @@ describe('a message sent at the instant of disconnect (#173)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, connect: 'at_start', ...over,
+    error: null, versions: null, lastConnectedAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, connect: 'at_start', ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {
