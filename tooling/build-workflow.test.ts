@@ -143,6 +143,13 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
   })
 
+  // #1259: changes land after the fast tier, so every push to main needs its full run to the end; a pull request's are superseded
+  it("never cancels a run on main for a newer push, and still supersedes a branch's or pull request's run", () => {
+    const block = /^concurrency:\n((?: {2}.*\n)+)/m.exec(workflow)?.[1] ?? ''
+    expect(block).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}")
+    expect(block).toMatch(/^ {2}group: build-\$\{\{ github\.ref \}\}/m)
+  })
+
   // 2026-10-19 (owner): a failed verify was heard only after every e2e shard had finished, about 10 minutes later
   it('cancels the rest of a manual run once verify has failed, from a job of its own, as `changes` says', () => {
     const ff = job('fail-fast').body
