@@ -1354,6 +1354,105 @@ a target that is no ssh target or that `ssh -G` cannot read, a name already link
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 
+**Preferences** (#1219, with the trash). `get_preferences` and `set_preferences` are rare commands of the central orchestrator
+(`PreferencesFlow`, `sessions/preferences-flow.ts`). They make the window's own calls through the router
+(`SessionManager.useWindowRpc`, wired in main.ts to `router.handle`; `callWindow` in `sessions/window-rpc.ts` checks
+the params with the method's schema and reads the answer with its result schema, and only the methods named in
+`WINDOW_METHODS` are callable), so the host checks them as it checks the window.
+
+- `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
+  and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
+  It also lists what no command changes (send key, session tools, agent ceiling and depth) and says the notification
+  switches are not reachable yet (they live in the window's workspace snapshot, §1.4).
+- `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
+  `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
+  `moveIdleSessionsToNewAgentCli`. The arguments are strict: a field it does not have (`sessionTools`, `agentCeiling`,
+  `themeMode`) is refused by name. A theme names one preset (`THEME_PRESETS`, now in the protocol) or a theme file that
+  reads cleanly; it sets the side of the theme's base and the stored mode to that same base, so the mode stays `dark` or
+  `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
+  schema refusal comes before any write; a service the host lacks (no update service in a test) is reported next to the
+  changes that did happen.
+- Turning **on** "apply updates when idle" asks first, in every preset, and so does turning **on** checking for updates
+  while apply is on (it is the other half of the same thing: `UpdateService.setAuto(true)` checks at once and installs what it
+  finds when apply is on). With both on, a newer Centralu installs by itself and the desktop window relaunches into it when
+  nothing is busy, so code arrives with no later question. One card covers whichever change completes the pair; it is an
+  `other` card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves the pair
+  as it was and the call's other changes still happen. Turning either off, or leaving them as they are, asks nothing; neither
+  does any other field.
+
+**The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
+`delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
+preferences) are the Trash screen's calls. `what` is `session` (the default) or `steps`.
+
+- `list_trash` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
+  sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the trashed subagent
+  steps, and the sessions whose steps could be moved there. Rows beyond 25 are counted.
+- `restore_trashed`, `trash_subagent_steps`: `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and
+  ask nothing, with one exception: restoring a session whose project was deleted registers the project's folder again (as
+  the window's Restore does), which is what `add_project` asks about, so that restore raises a card naming the folder. A
+  session not in the trash is refused before any call.
+- `delete_trashed` and `empty_trash` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
+  A session or steps that are not in the trash are refused before the card, so a live session cannot be deleted this way.
+  The card names the session (or the counts, the size and up to ten names), what goes with it (the tool's conversation
+  file, a worktree marked for removal) and that it cannot be undone. After Allow the trash is read again and the host
+  deletes exactly what the card named and is still there, one `trash.purge` / `trash.purgeSubagentSteps` (with the `upTo`
+  the card listed) / `trash.purgeRuns` (one call per machine) at a time, as the window's Empty trash does; `trash.empty` is
+  not used, because it takes everything in the trash, also what arrived after the card. A session restored or deleted while the card
+  stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
+  with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
+
+### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
+
+The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
+host checks; consequential or trust-changing actions raise a card the person answers, reading and reversible ones do not.
+This is the list that principle is applied to: every RPC method of `packages/protocol/src/commands/methods/` (the
+window's channel), grouped, and for each group one of three states.
+
+- **Has it**: reachable by the orchestrator today, as a tool or a rare command behind `centralu_run`.
+- **Should**: the orchestrator should reach it. *This change* is preferences and the trash; *next* is a
+  later slice, with the card it needs.
+- **Person**: stays with the person, with the reason. A method here may still be *read* by the orchestrator when the
+  group says so.
+
+| Group (methods) | State | Notes |
+|---|---|---|
+| Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
+| Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
+| Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
+| Deleting a session. `agents.deleteSession` | Has it for its own children (`agent_session delete`); *next* for the rest | It only moves to the trash (reversible), so a card is not what protects it; the children rule (#637) is |
+| Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
+| Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
+| MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools`, `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
+| Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
+| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
+| Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
+| Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
+| Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312; #1306) |
+| The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
+| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
+| Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
+| Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
+| `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
+| Project trust and commands. `projects.setTrusted`, `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Trusting a project lets its agents and apps run; commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
+| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
+| Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
+| App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
+| App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
+| App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
+| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
+| `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.acceptVersions`, `machines.sshHosts`, `machines.activity` | Should: *next* | Disconnect acts at once; rollback, uninstall and accepting differing versions behind a card |
+| What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk`, `machines.need` | **Person** | It widens what code on another computer may do here (#550) |
+| Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
+| Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
+| The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
+
+The linked machines came first (#1238). This change is the preferences above and the trash. *Next*, in the order the owner's
+errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
+app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
+calls stay out of every slice unless the owner says otherwise.
+
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
 ```ts
@@ -2168,7 +2267,8 @@ methods as the window. In the commands tier it is discovered and run through `ce
 and `centralu_run`; an ordinary session gets a minimal definition, deferred behind Claude's tool search
 like `app_guide` because updates are rare (Codex is offered it without a deferral flag). Its first call raises a consent card:
 allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
-cannot change the person's automatic-apply preference. An install starts the normal host install; the window still
+cannot change the person's automatic-apply preference with it. (The orchestrator's `set_preferences` can turn it on, behind a
+card in every preset, §1.4.) An install starts the normal host install; the window still
 performs its own safe relaunch/switch step.
 
 **Applying for an agent (#665).** `update_centralu(action: "apply")` is the window's "Apply now" asked for by an agent.

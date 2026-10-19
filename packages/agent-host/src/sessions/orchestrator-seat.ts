@@ -8,6 +8,8 @@ import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { FolderAdded } from './project-creation.js'
 import type { MachineAnswer, MachineRequest } from './machine-flow.js'
+import type { PreferencesAnswer, PreferencesRequest } from './preferences-flow.js'
+import type { TrashAnswer, TrashRequest } from './trash-flow.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { LINE_WINDOW_CHARS, lineText, sessionLines } from './session-lines.js'
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
@@ -79,6 +81,10 @@ export type OrchestratorSeatHost = {
   machineList(): MachineInfo[]
   /** The machine commands (#1219): `MachineFlow.run`, with the orchestrator as the session its cards stand in */
   machineRequest(sessionId: string, req: MachineRequest, signal?: AbortSignal): Promise<MachineAnswer>
+  /** The preference commands (#1219): `PreferencesFlow.run`, with the orchestrator as the session its card stands in */
+  preferencesRequest(sessionId: string, req: PreferencesRequest, signal?: AbortSignal): Promise<PreferencesAnswer>
+  /** The trash commands (#1219): `TrashFlow.run`, with the orchestrator as the session its cards stand in */
+  trashRequest(sessionId: string, req: TrashRequest, signal?: AbortSignal): Promise<TrashAnswer>
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -675,6 +681,12 @@ export function orchestratorToolsFor(
 
     // Changes to the linked machines (#1219), behind the person's card where they change a machine or this computer's reach
     machine: async (req, signal) => (central ? host.machineRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes linked machines' }),
+
+    // The preferences (#1219): the central orchestrator's alone, through the window's own calls
+    preferences: async (req, signal) => (central ? host.preferencesRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes preferences' }),
+
+    // The trash (#1219): the central orchestrator's alone; deleting for good waits for the person's card
+    trash: async (req, signal) => (central ? host.trashRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator manages the trash' }),
 
     /*
      * A handoff (#694): the central orchestrator's alone (the profile gives it no other seat; checked here too, as this

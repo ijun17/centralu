@@ -368,3 +368,16 @@ export const MACHINE_CHANGE = 'machine_change'
 export function isMachineChange(d: ApprovalDetail): boolean {
   return d.kind === 'other' && d.about === MACHINE_CHANGE
 }
+
+/**
+ * The `about` of the orchestrator's card for a change to its settings or the trash that the person must allow (#1219:
+ * turning on "apply updates when idle", deleting from the trash for good, emptying it), on an `other`
+ * detail like `MACHINE_CHANGE`: the question is whole in `raw`, so a window of any build reads it. Allow or deny only,
+ * and the host remembers nothing for one.
+ */
+export const ORCHESTRATOR_CHANGE = 'orchestrator_change'
+
+/** The orchestrator's card for a change to its settings or the trash (#1219) */
+export function isOrchestratorChange(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === ORCHESTRATOR_CHANGE
+}

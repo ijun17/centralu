@@ -441,8 +441,9 @@ export const sessionMethods = {
     result: z.object({ loggedIn: z.boolean().nullable(), fingerprint: z.string().nullable() }),
   },
   /**
-   * The trash (#204). Only the person reaches these: the RPC is the UI's channel, and neither the agents' tools nor
-   * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
+   * The trash (#204). The person reaches these: the RPC is the UI's channel, and the central orchestrator's trash
+   * commands make the same calls (#1219), its deletes for good only after the person's card. No other agent tool and
+   * not the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
    *
    * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own. `runs` are
    * the records of deleted app-agent sessions (#378), which `bytes` counts too, each on the machine its app ran on
