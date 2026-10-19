@@ -876,9 +876,15 @@ ride in a request; Codex loads them.
 Characters are of the definitions alone; about four make a token (§8: `find_apps`, 294 characters, measured 75
 tokens), so ten such apps cost a Codex orchestrator about 2,000 tokens in every request before, and none after. The
 orchestrator now attaches a root app when it needs one: `find_apps`, `attach_app` and `detach_app` joined its rare
-commands, so their 874 characters ride in none of its requests; one line of its instructions (+113 characters) names
-`find_apps`. Its resident cost (`residentCost`): 9,229 → 9,342 on Claude, 9,281 → 9,394 on Codex, against a ceiling of
-9,500. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
+commands, so their 874 characters ride in none of its requests; one line of its instructions (+144 characters) names
+"the find_apps command (centralu_run)", as the others name theirs, so the first call is not a refused bare name. Its
+resident cost (`residentCost`): 9,229 → 9,373 on Claude, 9,281 → 9,425 on Codex, against a ceiling of 9,500. An app it
+attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
+
+An orchestrator that had root apps attached before this build reads one line before its first turn by it ("Project
+apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you
+need."), once, in the turn's input only: never stored or shown (`SessionAppWiring.rootAppsNotice`, marked
+`orchestrator_apps_notice:<session id>`). It costs that one turn about 30 tokens.
 
 Not measured live: whether the orchestrator, asked about a project's app by its name, reaches for the `find_apps`
 command before answering without it, on Claude and on Codex; the instructions' line is the one prompt for it.

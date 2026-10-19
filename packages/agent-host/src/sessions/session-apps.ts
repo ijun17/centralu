@@ -477,7 +477,9 @@ export class SessionAppsHub {
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     // A root app the orchestrator has not attached (#1205): it attaches it itself, with nothing for the person to do
     const selfServed = !!session && !own && session.kind === 'orchestrator' && app.root === true && !!this.opts.onDemand
-    if (!session || (!givesApp(session, app) && !onDemand && !selfServed)) return { reachable: false, reason: 'other-project' }
+    // One it attached whose project has since lost trust: the person is told to trust the project, not that it is another's
+    const lostTrust = !!own && app.status === 'untrusted'
+    if (!session || (!givesApp(session, app) && !onDemand && !selfServed && !lostTrust)) return { reachable: false, reason: 'other-project' }
     // An untrusted project's apps attach nowhere, auto included (owner, #1141)
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }

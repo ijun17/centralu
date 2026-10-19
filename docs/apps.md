@@ -614,7 +614,7 @@ live agent:
 | `reason` | When | The line says |
 |---|---|---|
 | `other-project` | Another project's app, a user-folder app outside the orchestrator, or a session an app stood up | Ask in a session of that project (or: only the orchestrator can use your apps) |
-| `untrusted` | The app's project, which is this session's, is not trusted | Trust the project |
+| `untrusted` | The app's project, which is this session's or that of an app it attached, is not trusted | Trust the project |
 | `app-unusable` | The app is `invalid`, `unconfirmed` or `failed` (`status`) | Fix the manifest, turn it on, or restart it |
 | `restart` | A Codex thread started before the app was attached: Codex keeps the servers a thread started with (§9.2). The adapter answers from the servers it configured (`appAttachment`) | Restart the session |
 | `bridge-failed` | Codex reported the app's bridge failed to start (`mcpServer/startupStatus/updated`), until it reports it ready | Restart the session |
@@ -783,7 +783,7 @@ is bounded by things the person set up for that session: its own project's apps,
 builder, and for the orchestrator the user folder, where an MCP server the person approved for it lands
 (A-7). Measured with the app `create_app` makes (two agent tools and the host's `run_status`), with 0, 3
 and 10 trusted root apps: before, Codex 6,800 / 9,179 / 14,733 characters and 11 / 20 / 41 tools, Claude
-6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 113 characters of
+6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 144 characters of
 instructions once (`sessions/orchestrator-app-cost.test.ts`, [tool-cost.md](tool-cost.md) §12).
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
@@ -889,7 +889,10 @@ name `find_apps` in one line. Each answer names the next call in the form the se
 (`centralu_run(command="attach_app", …)`). The attachment is kept per session like any other, so it
 lasts across restarts until `detach_app`; a Codex orchestrator's thread restarts when the turn ends,
 as a project session's does. `apps.reach` answers `reachable` for a root app it could attach and has
-not: its agent attaches it with nothing for the person to do. A user-folder app the orchestrator had
+not: its agent attaches it with nothing for the person to do; and `untrusted` for one it attached whose
+project has since lost trust (so for a project session's too), since trusting the project again is the fix.
+An orchestrator that had root apps attached before #1205 reads, once, before its first turn since, that
+they are no longer attached by default and how to find them (`rootAppsNotice`, [tool-cost.md](tool-cost.md) §12). A user-folder app the orchestrator had
 seen, when its folder becomes a project in place (#1141), stays attached to it as an attachment of its
 own, under the name it called it by (`UserAppAdoptionRecords.carry`).
 

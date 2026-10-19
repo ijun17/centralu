@@ -60,7 +60,7 @@ const ORCH: AppSessionKey = { id: 'orc', kind: 'orchestrator', projectId: null }
 const CLAUDE: ToolServingCapabilities = { toolDeferral: true, instructionChannel: 'server' }
 const CODEX: ToolServingCapabilities = { toolDeferral: false, instructionChannel: 'developer' }
 
-type World = { hub: SessionAppsHub; access: AppAccess; projects: { id: string; name: string; trusted: boolean }[] }
+type World = { hub: SessionAppsHub; access: AppAccess; apps: FakeApp[]; projects: { id: string; name: string; trusted: boolean }[] }
 let worlds: World[] = []
 
 /** A hub and AppAccess over `rootApps` trusted projects that are apps, plus `extra` apps as given */
@@ -86,7 +86,7 @@ function world(rootApps: number, extra: FakeApp[] = []): World {
       return 'now'
     },
   }))
-  const w = { hub, access, projects }
+  const w = { hub, access, apps, projects }
   worlds.push(w)
   return w
 }
@@ -151,6 +151,17 @@ describe("the orchestrator's tool list as root apps are trusted (#1205)", () => 
     expect(live.current()).toEqual([])
     expect((await live.call('app-app9', 'show', {})).isError).toBe(true)
     expect(hub.reach(ORCH, { projectId: 'p9', appId: 'app9' })).toMatchObject({ reachable: false, reason: 'untrusted' })
+  })
+
+  // Review of #1252: the reason names what the person can fix, trusting the project again
+  it("says a root app it attached is untrusted once its project loses trust, and refuses its calls", async () => {
+    const { hub, access, apps } = world(3)
+    const live = hub.attach(ORCH)
+    expect(await access.attach(ORCH.id, 'Project p2/app2')).toMatchObject({ ok: true, server: 'app-app2' })
+    apps[1]!.status = 'untrusted'
+    expect(hub.reach(ORCH, { projectId: 'p2', appId: 'app2' })).toEqual({ reachable: false, reason: 'untrusted' })
+    expect(live.current()).toEqual([])
+    expect((await live.call('app-app2', 'show', {})).isError).toBe(true)
   })
 
   it("never offers the orchestrator a project's inner app, shared or not: its scope is the user folder and the root apps", () => {

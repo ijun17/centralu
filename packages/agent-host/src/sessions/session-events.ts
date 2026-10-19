@@ -465,10 +465,13 @@ export class SessionEvents {
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
+    // An orchestrator that had root apps attached reads once why their names are gone (#1205); never stored or shown
+    const notice = this.host.apps.rootAppsNotice(sessionId)
+    const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, adapterText)
-    else h.send(adapterText)
+    if (sendInput) sendInput(h, input)
+    else h.send(input)
   }
 
   /**

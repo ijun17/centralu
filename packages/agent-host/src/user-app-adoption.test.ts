@@ -120,6 +120,9 @@ beforeEach(async () => {
   const hub = (mgr as unknown as { apps: { appsHub: { attach(k: AppSessionKey): { current(): { server: string }[] } } } }).apps.appsHub
   liveBuilder = hub.attach({ id: 'builder', kind: 'worker', projectId: null, builderOf: { projectId: null, appId: 'notes' } })
   expect(liveBuilder.current().map((x) => x.server)).toEqual(['app-notes'])
+  // A running host has read the sessions' attachments already: what the adoption carries must not be hidden behind that read
+  const access = (mgr as unknown as { apps: { appAccess: { attached(id: string): unknown[] } } }).apps.appAccess
+  expect(access.attached('orch')).toEqual([])
   expect(await adoption.run()).toBe(2)
 })
 
