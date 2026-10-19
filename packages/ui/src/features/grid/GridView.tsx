@@ -15,7 +15,7 @@ import {
   type GridSpanSource,
 } from '@cc/core'
 import { gridAppViewKey, useStore } from '../../store/store.js'
-import { buildCatalog } from '../../store/app-catalog.js'
+import { catalogByKey } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -62,10 +62,7 @@ export function GridView() {
   const sessions = useStore((s) => s.sessions)
   const externalApps = useStore((s) => s.externalApps)
   // The app list, keyed the way a dragged app row names its app (`externalAppKey`)
-  const appsByKey = useMemo(
-    () => new Map(buildCatalog(externalApps).external.map((a) => [a.key, a] as const)),
-    [externalApps],
-  )
+  const appsByKey = useMemo(() => catalogByKey(externalApps), [externalApps])
   const ensureGridAppView = useStore((s) => s.ensureGridAppView)
   const openApp = useStore((s) => s.openApp)
   /*

@@ -751,6 +751,12 @@ export async function createPr(repo, { title, head, base, body, draft }) {
   return { number: pr.number, url: pr.html_url ?? null }
 }
 
+/** Adds labels to an issue or pull request; GitHub makes a label that does not exist yet. */
+export async function addLabels(repo, number, labels) {
+  checkRepo(repo)
+  await restWrite('POST', `repos/${repo}/issues/${number}/labels`, { labels }, `the labels of #${number}`)
+}
+
 /** Files an issue; answers its number and address. */
 export async function createIssue(repo, { title, body, labels }) {
   checkRepo(repo)

@@ -365,6 +365,8 @@ jobs:
           DRY_RUN: ${{ needs.guard.outputs.dry_run }}
           ALSO_LATEST: ${{ needs.guard.outputs.also_latest }}
           SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}
+          # pnpm verify's styles.test.ts: main's bundle comparison is build.yml's verify job's (#1181)
+          CC_BUNDLE_COMPARED_BY: build.yml verify
         # In a rehearsal this prints a yellow warning that the platform packages are not on
         # the registry at this version, and carries on. That is the truth: the rehearsal
         # published none of them.

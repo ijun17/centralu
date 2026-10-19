@@ -57,6 +57,7 @@ describe('single-instance lock for the host', () => {
     expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8'))).toEqual({
       pid: process.pid,
       started: processStartTime(process.pid),
+      at: expect.any(Number),
     })
     if (r.ok) r.release()
   })
@@ -82,6 +83,64 @@ describe('single-instance lock for the host', () => {
 
   it('never blocks an in-memory database, since it can never be shared', () => {
     expect(acquireInstanceLock(':memory:').ok).toBe(true)
+  })
+})
+
+/*
+ * #1223: a desktop window on a linked Windows machine was refused with "close the running window first" while the
+ * folder was held by the host a hub's link had started there, and the person had no window to close. host.lock now
+ * says who started the host and from where (additive fields), and the refusal names it.
+ */
+describe('who holds the folder, said in the refusal (#1223)', () => {
+  const at = Date.UTC(2026, 9, 18, 3, 9, 38)
+
+  it('writes who started the host, from where and when, and a second taker reads it back', () => {
+    const db = dbIn()
+    const first = acquireInstanceLock(db, () => null, { by: 'serve', from: { hub: 'Mac-mini', ssh: '192.168.0.5' } }, () => at)
+    expect(first.ok).toBe(true)
+    expect(JSON.parse(readFileSync(join(db, '..', 'host.lock'), 'utf8'))).toEqual({
+      pid: process.pid,
+      started: null,
+      at,
+      by: 'serve',
+      from: { hub: 'Mac-mini', ssh: '192.168.0.5' },
+    })
+    const second = acquireInstanceLock(db)
+    expect(second).toMatchObject({ ok: false, heldByPid: process.pid, holder: { by: 'serve', at, from: { hub: 'Mac-mini' } } })
+    if (first.ok) first.release()
+  })
+
+  it('names the link a serve host runs for, with what stopping it costs; and an ssh session without a hub', () => {
+    const lockPath = '/d/host.lock'
+    const serve = lockConflictMessage({ pid: 4072, started: null, at, by: 'serve', from: { hub: 'Mac-mini', ssh: '192.168.0.5' } }, lockPath)
+    expect(serve).toContain(
+      'Another Centralu is already using this data: the host `centralu serve` runs for the link from Mac-mini (asked for over ssh from 192.168.0.5) (pid 4072, since 2026-10-18T03:09:38Z).',
+    )
+    expect(serve).toContain('run `centralu serve --stop` here: the link from Mac-mini loses this computer until it reconnects.')
+    expect(serve).not.toContain('Close the running window')
+    expect(serve).toContain(`Lock file: ${lockPath}`)
+    const bare = lockConflictMessage({ pid: 9, started: null, by: 'serve', from: { ssh: '10.0.0.2' } }, lockPath)
+    expect(bare).toContain('the host `centralu serve` runs (asked for over ssh from 10.0.0.2) (pid 9)')
+    expect(bare).toContain('a hub linked to this computer loses this computer')
+  })
+
+  it('names the window’s and the keeper’s hosts, and keeps the old words for a holder that says nothing', () => {
+    expect(lockConflictMessage({ pid: 1, started: null, by: 'app' }, 'l')).toContain('the host of the Centralu window on this computer (pid 1)')
+    expect(lockConflictMessage({ pid: 1, started: null, by: 'keeper' }, 'l')).toContain('Quit Centralu completely first')
+    const old = lockConflictMessage(77, 'l')
+    expect(old).toContain('Another Centralu is already using this data: another host (pid 77).')
+    expect(old).toContain('Close the running window first')
+    expect(lockConflictMessage(null, 'l')).toContain('(pid unknown)')
+  })
+
+  it('reads a description it cannot trust as absent: a name that could break the sentence, a by it does not know', () => {
+    const db = dbIn()
+    const first = acquireInstanceLock(db)
+    writeFileSync(join(db, '..', 'host.lock'), JSON.stringify({ pid: process.pid, started: null, at: 'soon', by: 'robot', from: { hub: 'a b\nc', ssh: 7 } }))
+    const second = acquireInstanceLock(db)
+    expect(second).toMatchObject({ ok: false, holder: { pid: process.pid, started: null } })
+    expect(second.ok ? null : second.holder).toEqual({ pid: process.pid, started: null })
+    if (first.ok) first.release()
   })
 })
 
@@ -166,7 +225,7 @@ setTimeout(() => process.exit(0), ${holdMs})
       rmSync(join(db, '..', 'host.lock'))
       const r = acquireInstanceLock(db)
       expect(r).toMatchObject({ ok: false, heldByPid: null })
-      expect(lockConflictMessage(null, join(db, '..', 'host.lock'))).toContain('already using this data (pid unknown)')
+      expect(lockConflictMessage(null, join(db, '..', 'host.lock'))).toContain('already using this data: another host (pid unknown)')
     } finally {
       owner.kill()
       await owner.exited

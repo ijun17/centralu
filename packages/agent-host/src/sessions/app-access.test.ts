@@ -322,9 +322,9 @@ describe('how long an attachment lasts', () => {
 })
 
 /**
- * A project that is an app (#1141) takes the user-folder app's place: the orchestrator gets it, another project's
- * session finds and attaches it without a share switch or a card, and its own project's sessions get it with the rest of
- * their project's apps.
+ * A project that is an app (#1141) takes the user-folder app's place: the orchestrator and another project's session
+ * find and attach it without a share switch or a card (the orchestrator since #1205; it was given every one before), and
+ * its own project's sessions get it with the rest of their project's apps.
  */
 describe('a project that is an app (#1141)', () => {
   it("another project's root app is found and attached without a share switch or a card, as a user-folder app is, and its tools work", async () => {
@@ -358,28 +358,43 @@ describe('a project that is an app (#1141)', () => {
     expect(refs('w1')).toEqual(['helper'])
     expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
     const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', orchestrator)
+    expect(refs('o')).toEqual([])
+    expect(await access.attach('o', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
     expect(hub.refsFor(orchestrator).map((h) => h.server)).toEqual(['app-helper'])
     expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
     expect(hub.refsFor(session('w2', 'p2')).map((h) => h.server)).toEqual([])
     expect(hub.reach(session('w2', 'p2'), { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
   })
 
-  it("the orchestrator gets every root app and no project's inner app; its own project's sessions get it; two of one id are named apart", () => {
+  it("the orchestrator is given the user-folder apps and attaches a root app itself, never a project's inner app; its own project's sessions get it; two of one id are named apart", async () => {
     w.plant('user', 'kit')
     w.plantRoot('p1', 'kit')
     w.plantRoot('p2', 'kit')
     w.rt.refresh()
     const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', orchestrator)
+    // No root app until it attaches one (#1205): its tool list does not grow with every project that is an app
     expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
       ['app-helper', null],
       ['app-kit', null],
-      ['app-kit-p1', 'p1'],
-      ['app-kit-p2', 'p2'],
     ])
+    // Its agent attaches one itself, with nothing for the person to do
+    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
+    expect(refs('o')).toEqual(['Alpha/kit', 'Beta/kit'])
+    expect(await access.attach('o', 'Alpha/kit')).toMatchObject({ ok: true, server: 'app-kit-2' })
+    expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit-3' })
+    expect(asks).toEqual([])
+    expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
+      ['app-helper', null],
+      ['app-kit', null],
+      ['app-kit-2', 'p1'],
+      ['app-kit-3', 'p2'],
+    ])
+    // A project's inner app, shared or not, is that project's
+    expect(await access.attach('o', 'Beta/board')).toMatchObject({ ok: false, error: expect.stringContaining('send_to_session') })
     // A session of p1 gets its project's apps, its root app among them, under their own names
     expect(hub.refsFor(session('w1', 'p1')).map((h) => h.server)).toEqual(['app-kit', 'app-notes'])
-    // The name a session's app answers to is the one it is listed under
-    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
   })
 })
 
@@ -388,34 +403,35 @@ describe('a project that is an app (#1141)', () => {
  * of one id, the second sorting first, used to take `app-kit` from the first.
  */
 describe('stable app names (#1141)', () => {
-  it('a name a session has seen stays with its app: a later app of the same id, sorting first, gets a name of its own', () => {
+  it('a name a session has seen stays with its app: a later app of the same id, sorting first, gets a name of its own', async () => {
     // Remembered across the hub's own life too, as the store keeps them
     const kept = new Map<string, Record<string, string>>()
     const names = { load: (id: string) => ({ ...(kept.get(id) ?? {}) }), save: (id: string, book: Record<string, string>) => void kept.set(id, { ...book }) }
+    const projectName = (id: string) => projects.find((p) => p.id === id)?.name
     access.dispose()
     hub.dispose()
     hub = new SessionAppsHub(w.rt, {
       toolListWaitMs: 10_000,
       callJoinWaitMs: 300,
       names,
-      projectName: (id) => projects.find((p) => p.id === id)?.name,
+      projectName,
       onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) },
     })
     access = newAccess()
     const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', orchestrator)
     w.plantRoot('p2', 'kit')
     w.rt.refresh()
-    const before = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
-    expect(before['app-kit']).toBe('p2')
-    // p1 sorts before p2, and gets its own kit now
-    w.plantRoot('p1', 'kit')
+    expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit' })
+    // Detached for a while, the name stays with it: the user folder's own kit, given by the rule and sorting first, is named apart
+    expect(access.detach('o', 'Beta/kit')).toMatchObject({ ok: true })
+    w.plant('user', 'kit')
     w.rt.refresh()
-    const after = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
-    expect({ before: before['app-kit'], after: after['app-kit'] }).toEqual({ before: 'p2', after: 'p2' })
-    expect(after['app-kit-alpha']).toBe('p1')
+    expect(Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit-user': null })
+    expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit' })
     // A new hub (a host restart, a swap) reads the same names back
-    const next = new SessionAppsHub(w.rt, { names, projectName: (id) => projects.find((p) => p.id === id)?.name })
-    expect(Object.fromEntries(next.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toMatchObject({ 'app-kit': 'p2', 'app-kit-alpha': 'p1' })
+    const next = new SessionAppsHub(w.rt, { names, projectName, onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) } })
+    expect(Object.fromEntries(next.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit': 'p2', 'app-kit-user': null })
     next.dispose()
   })
 
@@ -423,32 +439,41 @@ describe('stable app names (#1141)', () => {
    * #1141, third review: a tool reads `mcp__<server>__<tool>`, capped at 64 characters. A name qualified by a project's
    * name (`app-<id>-<project>`) could take 61 of them before the tool; none is longer than a plain `app-<id>` now
    */
-  it('a qualified name is never longer than the longest plain name, and stays unique by its number', () => {
+  it('a qualified name is never longer than the longest plain name, and stays unique by its number', async () => {
     const id = 'quarterly-planning-board-for-tea'
     expect(id).toHaveLength(32)
     projects[1]!.name = 'A project whose name goes on and on'
     access.dispose()
     hub.dispose()
-    hub = new SessionAppsHub(w.rt, { projectName: (pid) => projects.find((p) => p.id === pid)?.name })
+    hub = new SessionAppsHub(w.rt, {
+      projectName: (pid) => projects.find((p) => p.id === pid)?.name,
+      onDemand: { attached: (sid) => access.attached(sid), allowed: (s, a) => access.allowed(s, a) },
+    })
     access = newAccess()
     try {
-      // The longest id: a user-folder app holds the plain name, and each project's is numbered within the cap
+      // The longest id: a user-folder app holds the plain name, and each root app the orchestrator attaches is numbered within the cap
       w.plant('user', id)
       w.plantRoot('p1', id)
       w.plantRoot('p2', id)
       w.rt.refresh()
       const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+      sessions.set('o', orchestrator)
+      expect(await access.attach('o', `Alpha/${id}`)).toMatchObject({ ok: true })
+      expect(await access.attach('o', `A project whose name goes on and on/${id}`)).toMatchObject({ ok: true })
       const longest = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
       expect(longest).toEqual({ 'app-helper': null, [`app-${id}`]: null, [`app-${id.slice(0, 30)}-2`]: 'p1', [`app-${id.slice(0, 30)}-3`]: 'p2' })
-      // A shorter id: a long project name is cut
+      // A shorter id, given by the rule to a session that already holds its plain name: a long project name is cut
       const shorter = 'kit-for-team'
       w.plant('user', shorter)
+      w.rt.refresh()
+      const own = session('w2', 'p2')
+      expect(await access.attach('w2', shorter)).toMatchObject({ ok: true, server: `app-${shorter}` })
       w.plantRoot('p2', shorter)
       w.rt.refresh()
-      const names = hub.refsFor(orchestrator).map((h) => h.server)
-      expect(names).toContain('app-kit-for-team-a-project-whose-nam')
-      expect(new Set(names).size).toBe(names.length)
-      for (const server of names) {
+      const mine = hub.refsFor(own).map((h) => h.server)
+      expect(mine).toContain('app-kit-for-team-a-project-whose-nam')
+      expect(new Set(mine).size).toBe(mine.length)
+      for (const server of [...mine, ...Object.keys(longest)]) {
         expect(server.length).toBeLessThanOrEqual(SERVER_NAME_MAX)
         expect(`mcp__${server}__${'t'.repeat(21)}`.length).toBeLessThanOrEqual(64)
       }
@@ -457,4 +482,3 @@ describe('stable app names (#1141)', () => {
     }
   })
 })
-

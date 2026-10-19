@@ -369,9 +369,9 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `ask_project` | — | — | — | yes | — |
 | `start_agent` | yes | — | — | yes | — |
 | `agent_session` | yes | — | — | yes | — |
-| `find_apps` | — | — | — | yes | — |
-| `attach_app` | — | — | — | yes | — |
-| `detach_app` | — | — | — | yes | — |
+| `find_apps` | yes | — | — | yes | — |
+| `attach_app` | yes | — | — | yes | — |
+| `detach_app` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
@@ -459,9 +459,10 @@ defers them behind Claude's tool search, which changes nothing here. The measure
 [tool-cost.md](tool-cost.md) §9.
 
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
-user-folder apps and the root apps of trusted projects (#1141: a project whose folder holds the manifest
-is an app, and its trust is the project's), a project's sessions that project's apps, and a builder its
-own app (`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An
+user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
+`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the orchestrator adds the
+root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and
+its trust is the project's; #1205: as commands behind `centralu_run`, and never a project's inner app). An
 agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,
 #1141): its root app and the apps inside it, to no session, its own project's included, under every
 preset, `auto` too; #603's opening no longer applies to apps, and the runtime refuses them for every
@@ -528,6 +529,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
+| `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
 | Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
@@ -968,6 +970,11 @@ A host started with `centralu serve` on another machine is reached by the app th
   (`hello_ok.elevated`, from the token's integrity level) and the machine's row in Settings → Machines says it in one
   sentence with the way out: link the machine through a standard account with its own ssh key. A host running as root
   on Linux or macOS is reported the same way.
+- **A host started over ssh on Windows has no access to the person's saved sign-ins** (#1224). A key login is a network
+  logon without the password, so DPAPI cannot unlock the user's master key and Credential Manager reads as empty
+  (measured: `cmdkey /list` printed `* NONE *` there while the profile held 46 saved credentials). Git Credential
+  Manager can neither use nor save a sign-in. Centralu does not work around it (no plaintext store, no token carried
+  through Centralu): the host says which logon it runs in (`hello_ok.logon`) and the machine's row says what that means.
 - **A dev build on a linked machine** (`pnpm remote-dev`, #1036; [plans/remote-hub.md](plans/remote-hub.md) §10.11)
   sends nothing new across the link (no file travels but the installer every update sends), but it does run what is
   on that machine: the working copy there, by its own bundler on the pinned Node, at a commit the hub named in full and
@@ -1482,9 +1489,28 @@ Limits:
 - Hardlinks in a source folder are copied as the files they are; pathname checks cannot tell where
   an inode came from (the same limit as "Project files and native handoff"). Same-user races
   between checking a file and opening it remain.
-- If `app-imports.json` cannot be read, it is moved aside and the marks are lost: imported apps
-  are then treated as the user's own until they are imported again. The host logs this. The same
-  holds for `app-secrets.json`, whose values then stay in the moved-aside copy. Only a file that
+- If `app-imports.json` cannot be read, the marks cannot be used, and the file is also the only
+  record of which apps were imported (#1172). When it is gone and a moved-aside copy
+  (`app-imports.json.unreadable-<ms>`) is in the data folder, every app then in the user folder, the
+  person's own apps too, gets a mark (`lost`) in a new file written at once, and asks once before it
+  runs again, with a reason naming both files: an app asks once more rather than running unasked. The
+  new file is the record from then on, so an app made later is not held and removing the copy is
+  safe; a mended copy put back is read as soon as the file changes. The new file goes in place by a
+  hard link, which never replaces a file: one put back, or written by the other host of a swap, in
+  the moment before wins. While the file cannot be read at all, the data folder cannot be listed, or
+  the new file cannot be written (a data folder on a disk without hard links), every app without a
+  mark is held instead (`ImportBook.doubt`), tried again once a second. The host logs it
+  (`imports.test.ts` "a marks file that cannot be read holds the apps instead of running them").
+- **Only the apps in the user folder at that moment are held.** An import whose folder is not there
+  when the loss is found (moved out of the user folder for a while, or the whole `apps` folder
+  missing) gets no `lost` mark, and runs as the person's own when it comes back.
+- **An older build ignores the copy.** A build before #1172 (a rollback, or the older host still
+  serving during a swap) reads a missing `app-imports.json` as no imports and runs every imported app
+  unasked, as it always did. Once this build has written the file of `lost` marks, an older build
+  reads them as imports not yet enabled and holds those apps too. A file an older build writes in
+  the meantime, from its empty view of the marks, is taken as the record.
+- An unreadable `app-secrets.json` is moved aside the same way, and its values stay in the
+  moved-aside copy. For both files, only a file that
   does not parse, or parses to the wrong shape, is moved aside; one that cannot be read at all (no
   permission, too many open files, held by a scan on Windows) is left in place, reads as empty, and
   writes to it are refused until a read succeeds, as they are while a damaged file cannot be moved.

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { externalAppKey, useStore } from '../../store/store.js'
+import { useStore } from '../../store/store.js'
+import { catalogByKey } from '../../store/app-catalog.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
 
 /**
@@ -60,7 +61,7 @@ export function GridButton() {
           const panel = droppedGridPanel(
             (type) => e.dataTransfer.getData(type),
             new Set(Object.keys(st.sessions)),
-            new Map(st.externalApps.map((a) => [externalAppKey(a.projectId, a.appId), a] as const)),
+            catalogByKey(st.externalApps),
           )
           if (!panel) return
           e.preventDefault()

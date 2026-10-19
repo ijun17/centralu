@@ -183,13 +183,18 @@ export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
   return startOf(holder.pid) === holder.started
 }
 
-/** host.lock's `{ pid, started }`; a bare pid (an older host) has no start time */
+/**
+ * host.lock's `{ pid, started, by? }`; a bare pid (an older host) has no start time. `by` (#1223, additive) is who
+ * started the host: `app`, `keeper` or `serve` (`instance-lock.ts`), absent when the host did not say
+ */
 function parseLockHolder(text) {
   const t = text.trim()
   if (/^\d+$/.test(t)) return Number(t) > 0 ? { pid: Number(t), started: null } : null
   try {
     const v = JSON.parse(t)
-    return Number.isInteger(v?.pid) && v.pid > 0 ? { pid: v.pid, started: typeof v.started === 'string' ? v.started : null } : null
+    if (!Number.isInteger(v?.pid) || v.pid <= 0) return null
+    const by = v.by === 'app' || v.by === 'keeper' || v.by === 'serve' ? v.by : null
+    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(by ? { by } : {}) }
   } catch {
     return null
   }
@@ -203,6 +208,15 @@ export function processStartTime(pid) {
   if (process.platform === 'win32') return null
   try {
     return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null
+  } catch {
+    return null
+  }
+}
+
+/** Who `host.lock` names as the data folder's owner, `{ pid, started, by? }`, or null */
+export function lockHolder(dataDir) {
+  try {
+    return parseLockHolder(readFileSync(join(dataDir, 'host.lock'), 'utf8'))
   } catch {
     return null
   }

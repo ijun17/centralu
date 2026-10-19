@@ -72,7 +72,7 @@ export class AppsMock {
     // Like the host, carries the time of the most recent error bundle (M4 C-6) — a test supplies the mock's bundles (appErrors)
     list: async (): Promise<ExternalAppInfo[]> =>
       structuredClone(this.registry.externalAppList).map((a) => {
-        const at = this.registry.appErrors.get(appKeyOf(a.projectId, a.appId))?.[0]?.at
+        const at = this.registry.appErrors.get(appKeyOf(a.projectId, a.appId, a.machine))?.[0]?.at
         return at === undefined ? a : { ...a, lastErrorAt: at }
       }),
     /**

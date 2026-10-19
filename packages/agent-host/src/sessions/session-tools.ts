@@ -70,10 +70,23 @@ export class SessionTools {
   /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
   private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined {
     return toolBundleFor(profile, m.scopeSessionIds, {
-      orchestrator: () => this.host.orchestratorToolsFor(sessionId),
+      orchestrator: () => this.orchestratorToolsFor(sessionId),
       scoped: (ids) => this.host.orchestratorToolsFor(sessionId, ids),
       reader: () => this.readerToolsFor(sessionId),
     })
+  }
+
+  /**
+   * The central orchestrator's set, with the root apps it attaches on demand (#1205): `find_apps`, `attach_app` and
+   * `detach_app`, which it runs as commands. AppAccess holds it to the user folder's and trusted projects' root apps.
+   */
+  private orchestratorToolsFor(sessionId: string): OrchestratorTools {
+    return {
+      ...this.host.orchestratorToolsFor(sessionId),
+      findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
+      attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
+      detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+    }
   }
 
   /**

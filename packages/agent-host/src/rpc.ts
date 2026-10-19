@@ -21,6 +21,7 @@ import type { UpdateService } from './updates.js'
 import type { UpdateApplyBroker } from './update-apply.js'
 import type { AgentVersionService } from './agent-versions.js'
 import type { SessionSleeper } from './sessions/sleep.js'
+import type { StopGate } from './lifecycle/stop-gate.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
@@ -31,6 +32,7 @@ import type { InlineViews } from './inline-views.js'
 import type {
   GridPanel,
   HostActivity,
+  HostHandover,
   HubOffer,
   MachineAutostartResult,
   MachineConnect,
@@ -80,6 +82,10 @@ export type RpcServices = {
    * start it again: the call is refused there
    */
   stopHost?: () => void
+  /** `host.stop {ifIdle}`'s check and refusal of new work (#1224, lifecycle/stop-gate.ts); without it `ifIdle` is refused */
+  stopGate?: StopGate
+  /** Where `host.handover` is kept and said (#1224) */
+  handover?: (h: HostHandover | null) => void
   /** What would stop if this host stopped now (`host.activity`, idle.ts `activityCounts`) */
   activity?: () => HostActivity
   /** The windows' answers to an agent's "Apply now" (#665, update-apply.ts) */
@@ -125,7 +131,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity, updateApply, hubs }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -932,12 +938,25 @@ export function createRpcHandler(
       if (updateApply && ctx) updateApply.report(ctx.client, r)
       return {}
     },
-    'host.stop': async () => {
+    'host.stop': async (p) => {
       if (!stopHost) {
         throw rpcError('This host runs under the Centralu app, which stops it: quit the app instead')
       }
+      const { ifIdle } = RpcMethods['host.stop'].params.parse(p ?? {})
+      if (ifIdle) {
+        if (!stopGate) throw rpcError('This host cannot tell whether it is idle')
+        // No await from the check to the refusal: nothing can start in between (lifecycle/stop-gate.ts)
+        const running = stopGate.busy()
+        if (running) return { ok: false as const, ...running }
+        stopGate.refuse()
+      }
       // After this answer has been written: the shutdown closes the socket it travels on
       setTimeout(stopHost, 50)
+      return { ok: true as const }
+    },
+    'host.handover': async (p) => {
+      const { handover: h } = RpcMethods['host.handover'].params.parse(p)
+      handover?.(h)
       return { ok: true as const }
     },
   }

@@ -19,7 +19,7 @@ export class AppBuilderMock {
   /** Sent bundle → time sent — only once, like the host */
   private readonly errorsSent = new Map<string, number>()
   /** "Send to builder" calls that reached the host — empty before a click, one after */
-  readonly errorSends: { appId: string; projectId: string | null; at: number }[] = []
+  readonly errorSends: { appId: string; projectId: string | null; at: number; machine?: string }[] = []
   /** How many times a bundle has been read — tests check it is re-read when "changed" arrives */
   errorReads = 0
   /** If set, sendError waits on this — lets a test check the screen while a send is in progress */
@@ -208,9 +208,9 @@ export class AppBuilderMock {
       return { sessionId: builderId }
     },
     /** Error bundles (M4 C-6) — a test fills `appErrors` (most recent first). A sent bundle carries `sentAt`, like the host */
-    errors: async (appId: string, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
+    errors: async (appId: string, projectId: string | null, machine?: string): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
       this.errorReads++
-      const key = appKeyOf(projectId, appId)
+      const key = appKeyOf(projectId, appId, machine)
       const recent = (this.registry.appErrors.get(key) ?? []).map((b) => ({ ...structuredClone(b), sentAt: this.errorsSent.get(`${key}\n${b.kind}\n${b.at}`) ?? null }))
       return { latest: recent[0] ?? null, recent }
     },
@@ -245,8 +245,8 @@ export class AppBuilderMock {
      * (recording comes first), and builds the shape sent to the agent with **the same
      * function** (`builderErrorFrame`).
      */
-    sendError: async (appId: string, projectId: string | null, at: number): Promise<{ sessionId: string }> => {
-      this.errorSends.push({ appId, projectId, at })
+    sendError: async (appId: string, projectId: string | null, at: number, machine?: string): Promise<{ sessionId: string }> => {
+      this.errorSends.push(machine ? { appId, projectId, at, machine } : { appId, projectId, at })
       // So a test can hold "sending" open — checking meanwhile whether the screen accepts a second click
       if (this.sendErrorGate) await this.sendErrorGate
       const key = appKeyOf(projectId, appId)
@@ -254,9 +254,10 @@ export class AppBuilderMock {
       if (!info) throw new Error('This app no longer exists')
       const builderId = this.registry.appBuilders.get(key)
       if (!builderId || !this.store.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then send the error')
-      const bundle = (this.registry.appErrors.get(key) ?? []).find((b) => b.at === at)
+      const errorKey = appKeyOf(projectId, appId, machine)
+      const bundle = (this.registry.appErrors.get(errorKey) ?? []).find((b) => b.at === at)
       if (!bundle) throw new Error('This error is no longer kept. If it happens again, send the new one')
-      const sentKey = `${key}\n${bundle.kind}\n${bundle.at}`
+      const sentKey = `${errorKey}\n${bundle.kind}\n${bundle.at}`
       if (this.errorsSent.has(sentKey)) throw new Error('This error was already sent to the builder')
       this.errorsSent.set(sentKey, this.clock.now())
       this.deliverToBuilder(builderId, builderErrorFrame({ appId, name: info.name ?? appId }, bundle.text))
