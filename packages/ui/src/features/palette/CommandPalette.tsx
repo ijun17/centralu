@@ -115,7 +115,7 @@ export function CommandPalette() {
       // room by a floor plan it no longer has (issue #7)
       sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
-      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · Git · files`, run: () => togglePanel() },
+      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · changes · files`, run: () => togglePanel() },
       /*
         The two waiting-list shortcuts are here because they stopped being printed on the
         top bar (issue #33). The bar advertised them next to the count, which is the one

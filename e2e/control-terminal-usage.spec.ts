@@ -119,7 +119,7 @@ test('A terminal that could not be opened says so until the next one opens', asy
 
   await page.evaluate(() => ((window as any).__mock.terminalCreateError = 'no more ptys'))
   await page.getByTestId('terminal-add').click()
-  await expect(page.getByTestId('terminal-error')).toContainText('Could not open terminal — no more ptys')
+  await expect(page.getByTestId('terminal-error')).toContainText('Could not read the terminal: no more ptys')
 
   await page.evaluate(() => ((window as any).__mock.terminalCreateError = null))
   await page.getByTestId('terminal-add').click()

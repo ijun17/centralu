@@ -357,11 +357,14 @@ test('a running command shows as a terminal in the terminal panel — and goes d
   })
   await expect(page.getByTestId('cmd-term-pnpm dev')).toContainText('5173')
 
-  // Collapsing the panel does not collapse "it is running" — clicking the dot reopens it
+  // Collapsing the panel leaves the expand button alone on the rail, with no running dot (owner, 2026-10-19: the rail
+  // is that button and nothing else); the command keeps running behind it and its terminal is back on expanding
   await page.getByTestId('evidence-close').click()
-  await expect(page.getByTestId('evidence-rail-running')).toBeVisible()
-  await page.getByTestId('evidence-rail-running').click()
+  await expect(page.getByTestId('evidence-rail').locator('button')).toHaveCount(1)
+  await expect(page.getByTestId('evidence-rail-running')).toHaveCount(0)
+  await page.getByTestId('evidence-open').click()
   await expect(page.getByTestId('cmd-term-pnpm dev')).toBeVisible()
+  await expect(page.getByTestId('terminal-tab-running')).toBeVisible()
 
   // A crash — the terminal goes down and the badge clears too. The log survives in the run dialog
   await page.evaluate(() => {
