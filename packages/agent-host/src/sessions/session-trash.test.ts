@@ -212,6 +212,8 @@ describe('restoring a session', () => {
         projects: { listProjects: () => [] },
         trash: { trashedSession: () => ({ session: base, record: { projectId: null } }), restoreSession: async () => base },
         sessions: { orchestratorId: () => orchestratorId, upsertSession: (s: SessionInfo) => upserted.push(s) },
+        // A session started from a linked computer keeps its mark here (#1273); none of these was
+        settings: { appSetting: () => null },
       },
     }
     return { trash: trashWith(host as unknown as Partial<SessionTrashHost>), upserted, meta }

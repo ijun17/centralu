@@ -25,6 +25,7 @@ export function ProjectMenu({
   onToggleTrust,
   trustListsApps,
   onOpenInVsCode,
+  onAgentInstructions,
   onDelete,
 }: {
   project: ProjectInfo
@@ -40,6 +41,8 @@ export function ProjectMenu({
   trustListsApps?: boolean
   /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
   onOpenInVsCode?: () => void
+  /** The instructions every agent started in the project reads after its task (#1161 item 2) */
+  onAgentInstructions: () => void
   onDelete: () => void
 }) {
   const pick = (fn: () => void) => () => {
@@ -83,6 +86,15 @@ export function ProjectMenu({
         label={project.trusted ? 'Stop trusting this project' : trustListsApps ? 'Trust this project…' : 'Trust this project'}
         onClick={pick(onToggleTrust)}
         testId={`toggle-trust-${project.name}`}
+      />
+      {/*
+        The project's own setting for the agents its sessions start (#1161 item 2). Beside trust, which is the other
+        setting of the project as a whole; a dialog, since it is a text to read and edit, not a toggle.
+      */}
+      <ActionRow
+        label="Instructions for agents…"
+        onClick={pick(onAgentInstructions)}
+        testId={`agent-instructions-${project.name}`}
       />
       <div className="my-1 border-t border-line" />
       <ActionRow

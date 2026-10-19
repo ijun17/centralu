@@ -55,7 +55,7 @@ type NormalizedEvent =
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: 도구가 받은 입력 그대로 (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: 결과 글 전체 (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
-  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303)
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303); `after`가 있으면 알고 있던 context 수치를 그 값으로 옮긴다, 추정치로 (#1282)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: 도구가 새 대화를 시작했다(Claude의 /clear). 마커이며 게이지가 비워진다
   | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
       from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: 도구가 읽히길 바라는 글, 한 줄. #342: 읽기 쉽게
@@ -153,7 +153,7 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
   프레임을 해석하지 못해 통째로 버린다). 오케스트레이터의 호출은 연결된 기계에도 RPC에 `by: 'orchestrator'`를 실어 보내고, 변경은
   오케스트레이터의 것으로 방송되므로 토스트가 남는다.
 - RPC로 저장한 프로젝트별 설정은 `projects_changed`로 알린다(#719): `projects.setTrusted`, `projects.setCommands`,
-  `projects.setWorktreeSetup`, `worktrees.setTrunk`, 그리고 세션이 기록하는 기본 도구와 도구별 모델·노력. 모든 창이 프로젝트 목록을
+  `projects.setWorktreeSetup`, `projects.setAgentInstructions`(#1161), `worktrees.setTrunk`, 그리고 세션이 기록하는 기본 도구와 도구별 모델·노력. 모든 창이 프로젝트 목록을
   다시 읽어 이 필드들은 호스트의 값을 받으므로(목록의 행은 자리와 `git`을 그대로 둔다) ⋯ 메뉴, 신뢰 표시, 프로젝트의 앱이 호스트와
   일치한다. 허브는 연결된 머신의 이 이벤트를 전달한다. 저장된 값이 바뀐 경우에만 보내며, 창은 자기 쓰기가 진행 중인 프로젝트는 건드리지 않고 끝난 뒤 다시 읽고, 목록은 한 번에 하나씩 읽는다.
 

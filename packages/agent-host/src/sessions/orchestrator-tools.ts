@@ -4,6 +4,8 @@ import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
+import type { PreferencesRequest } from './preferences-flow.js'
+import type { TrashRequest } from './trash-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
@@ -226,6 +228,7 @@ const HANDLERS: ToolHandlers = {
     const r = await tools.readSession(args.sessionId ?? '', args.limit, {
       around: args.around,
       tools: args.tools === true,
+      ...(args.offset !== undefined ? { offset: args.offset } : {}),
     })
     if (!r.ok) return { text: `Could not read it — ${r.error}`, isError: true }
     /*
@@ -310,6 +313,20 @@ const HANDLERS: ToolHandlers = {
   reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
   set_machine_connect: ({ machine, connect }, call) => machineCommand({ action: 'connect', machine, connect }, call),
   set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
+
+  // The trash (#1219): the flow writes each answer; deleting for good waits for the person's card there
+  list_trash: (_args, call) => trashCommand({ action: 'list' }, call),
+  restore_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'restore', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
+  trash_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'trash_steps', sessionId: sessionId.trim() }, call),
+  delete_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
+  empty_trash: (_args, call) => trashCommand({ action: 'empty' }, call),
+
+  // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
+  get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
+  set_preferences: (changes, call) =>
+    Object.values(changes).some((v) => v !== undefined)
+      ? preferencesCommand({ action: 'set', changes }, call)
+      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, checkForUpdates, applyUpdatesWhenIdle, moveIdleSessionsToNewAgentCli.', isError: true },
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
@@ -626,5 +643,19 @@ function logRun(caller: ToolCaller, command: string, outcome: 'ran' | 'wrong arg
 async function machineCommand(req: MachineRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
   if (!tools.machine) return { text: 'This session cannot change linked machines.', isError: true }
   const r = await tools.machine(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One preference command (#1219), through the seat's `preferences`; a seat without it is told so */
+async function preferencesCommand(req: PreferencesRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.preferences) return { text: 'This session cannot change preferences.', isError: true }
+  const r = await tools.preferences(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One trash command (#1219), through the seat's `trash`; a seat without it is told so */
+async function trashCommand(req: TrashRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.trash) return { text: 'This session cannot manage the trash.', isError: true }
+  const r = await tools.trash(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }

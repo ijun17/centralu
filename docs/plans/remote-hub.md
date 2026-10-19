@@ -1133,8 +1133,10 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   link aborts the call's work.
 - **The pair's card** (the owner's addition). The card is the hub's, raised in the hub's session that would get the
   task, so only the hub's windows can answer it. It is raised whatever that session's preset: `auto` there does not
-  answer it (`alwaysAsk`, as start_agent on another computer, #1038), since `auto` is that session's own, not a
-  consent for another machine to reach it. Turning the switch off closes a card still standing. It names the machine and the asking session there (`ProjectAccess.from
+  answer it (`alwaysAsk`), since `auto` is that session's own, not a consent for another machine to reach it. (start_agent
+  on another computer asked the same way until #1273, where an `auto` caller's start goes unasked to a machine that
+  takes `auto` from it: that is this computer's session acting on another computer, not another machine reaching this
+  one.) Turning the switch off closes a card still standing. It names the machine and the asking session there (`ProjectAccess.from
   .machine`, `.session`, additive). Approving it is remembered for the pair (that session of that machine, this
   project; `machine_ask_consents`, store v60) until withdrawn in Settings → Machines, the switch going off, or the
   machine or project being removed; a remembered pair passes with no card. Deny is not remembered. The switch and the

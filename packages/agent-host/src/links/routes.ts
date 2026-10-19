@@ -102,6 +102,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.stopBackgroundTask': session(),
   'agents.clearBackgroundTasks': session(),
   'agents.deleteSession': session(),
+  'agents.deleteAgentChild': session(),
   'agents.exportHandoffRecord': session(),
   'agents.exportHandoffNote': session(),
   'agents.worktreeStatus': session(),
@@ -140,6 +141,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.setTrusted': project(),
   'projects.setCommands': project(),
   'projects.setWorktreeSetup': project(),
+  'projects.setAgentInstructions': project(),
   'projects.gitStatus': project(projectInfo),
   // A remote address, nothing of this machine's ids in it
   'projects.origin': project(),
@@ -314,6 +316,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.uninstall': HUB,
   'machines.autostart': HUB,
   'machines.activity': HUB,
+  'machines.hubAuto': HUB,
   // The reverse direction's switch and pairs are this computer's own (#550)
   'machines.setAsks': HUB,
   'machines.askConsents': HUB,
@@ -326,7 +329,10 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.sessions': HUB,
   'host.readSession': HUB,
   'host.recall': HUB,
+  'host.lastAnswer': HUB,
   'host.send': HUB,
+  'host.hubAuto': HUB,
+  'host.setHubAuto': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
