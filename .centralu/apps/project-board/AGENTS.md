@@ -489,7 +489,17 @@ own quick run, then its batch's run of the quick tier on what lands (the batch's
 `tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
 No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
 rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
-run and the full tier's check is not asked for.
+run and the full tier's check is not asked for. That run is judged as a pull request's own quick run is
+(`quickGreen`): every run finished, nothing it reported failed or is pending, the full tier's check
+skipped; and more strictly, since it decides a landing (`quickLanded`), every run concluded well and
+**each check named in `ci.quickChecks`** (this repository's: `changes`, `verify`, `windows tests (vitest
+*)`; `*` for any run of characters) was reported and succeeded, every check its name matches: a quick
+check never reported (a renamed job, one a broken `changes` switched off, a shard GitHub never created)
+or skipped does not land, it is left to `decideRun` (missing-check). The list is checked at start: with
+`landTier` "quick" and no names, the app does not start (an error, not "anything goes"). The required set is the whole workflow's, whose full-tier jobs a quick run never reports (a
+matrix job left out reports no check of its name at all), so those are not missing: without this the
+green batch queue/batch-98 stopped with "never reported" (2026-10-19). The main guard does not read
+the required set: it judges main's runs and its probes by their conclusion, and both are full runs.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run

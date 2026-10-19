@@ -39,7 +39,7 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX, supersededSuites } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, quickLanded, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
@@ -316,7 +316,17 @@ async function runCi(b, ctx) {
   const n = `Batch ${b.branch}`
   // Why a finished run failed: a real failure is split at once, only an infrastructure one rerun
   const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, b.failures) : {}
-  const d = decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
+  /*
+   * Landing after the fast tier (`ci.landTier: quick`, #1259): the batch's run is the quick tier, judged as a pull
+   * request's own quick run is (`quickGreen`): every run finished, nothing it reported failed or is pending, the full
+   * tier's check skipped. The required set is read from the whole workflow, whose full-tier jobs a quick run never
+   * reports (a matrix job left out reports no check of its name at all): without this, those counted as missing and
+   * the green batch stopped with "never reported" (queue/batch-98, 2026-10-19). A quick-tier failure still fails;
+   * a run with no full tier check at all, one that concluded badly, or one where a check named in ci.quickChecks
+   * was not reported or did not succeed, is left to decideRun (`quickLanded`).
+   */
+  const quickLanding = TIERS && CI.landTier === 'quick' && quickLanded(checks, runs, CI.fullTier, CI.quickChecks)
+  const d = quickLanding ? { state: 'green' } : decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
     save((fq, fb) => Object.assign(fb, { required, failures, reruns: d.patch.reruns }))

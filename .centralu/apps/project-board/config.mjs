@@ -15,6 +15,12 @@ for (const key of ['owner', 'number', 'repository', 'fields', 'decisionStatus'])
     process.exit(1)
   }
 }
+/** A list of non-empty names, or null when it is not one (then landing after the fast tier refuses to start) */
+function quickChecksOf(v) {
+  if (v === undefined || v === null) return []
+  return Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim()) ? v.map((x) => x.trim()) : null
+}
+
 function fullTierOf(v) {
   return typeof v === 'string' && v ? v : null
 }
@@ -37,6 +43,16 @@ export const CI = {
   // what breaks it); `full` (the default), nothing lands without a full run on what lands.
   // PROJECT_BOARD_CI_LAND_TIER: for the tests only
   landTier: (process.env.PROJECT_BOARD_CI_LAND_TIER ?? config.ci?.landTier) === 'quick' ? 'quick' : 'full',
+  // The quick tier, named (#1259 review): with `landTier` "quick", a batch lands only when each of these checks was
+  // reported and succeeded on its run (a name, or `*` for any run of characters: "windows tests (vitest *)"). Not
+  // whatever the run happened to report: a renamed job, or one a broken `changes` switched off, reports nothing, and
+  // that must not land. PROJECT_BOARD_CI_QUICK_CHECKS (the list as JSON): for the tests only
+  quickChecks: quickChecksOf(process.env.PROJECT_BOARD_CI_QUICK_CHECKS ? JSON.parse(process.env.PROJECT_BOARD_CI_QUICK_CHECKS) : config.ci?.quickChecks),
+}
+// Landing after the fast tier with no quick check named would land whatever ran: an error, not "anything goes"
+if (CI.landTier === 'quick' && CI.fullTier && !CI.quickChecks?.length) {
+  console.error('project.json: ci.landTier is "quick", so ci.quickChecks must name the quick tier\'s checks (a non-empty list of names; `*` for any run of characters).')
+  process.exit(1)
 }
 
 // The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items
