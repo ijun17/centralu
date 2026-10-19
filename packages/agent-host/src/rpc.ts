@@ -56,7 +56,7 @@ export type RpcServices = {
    * A project was deleted or sessions left the trash for good: a deleted project that a user-folder app had become gives
    * that folder back once nothing in the trash can restore it (#1204, `UserAppAdoption.settle`)
    */
-  settleDeletedProjects?: () => void
+  settleDeletedProjects?: () => Promise<void>
   terminals?: TerminalService
   updates?: UpdateService
   commands?: CommandRunner
@@ -672,7 +672,7 @@ export function createRpcHandler(
       }
       externalApps?.refresh()
       // After the refresh, which stops its apps: a folder an app works in does not move on Windows
-      settleDeletedProjects?.()
+      void settleDeletedProjects?.()
       return { ok: true as const }
     },
     'projects.setTrusted': async (p) => {
@@ -827,12 +827,12 @@ export function createRpcHandler(
     },
     'trash.purge': async (p) => {
       await mgr.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
-      settleDeletedProjects?.()
+      void settleDeletedProjects?.()
       return { ok: true as const }
     },
     'trash.empty': async () => {
       const r = await mgr.emptyTrash()
-      settleDeletedProjects?.()
+      void settleDeletedProjects?.()
       return r
     },
     // The records of deleted app-agent sessions (#378), the person's like the rest of the trash

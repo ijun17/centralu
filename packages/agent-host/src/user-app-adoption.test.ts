@@ -11,6 +11,7 @@ import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
 import type { AppSessionKey } from './sessions/session-apps.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
+import { SLOW } from '../../../tooling/test-timing.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 
 /**
@@ -303,16 +304,19 @@ describe('a deleted project gives its folder back', () => {
   const trashed = () => (existsSync(join(dataRoot, 'app-trash')) ? readdirSync(join(dataRoot, 'app-trash')) : [])
   const helperDir = () => join(dataRoot, 'apps', 'helper')
   const helperProject = () => store.projects.listProjects().find((p) => p.path === helperDir())!.id
+  /** The doors that delete a project and empty the trash, as main.ts wires them; `settling` is the give-back they started */
+  let settling: Promise<void> = Promise.resolve()
+  const door = (name: string, params: unknown) =>
+    createRpcHandler(mgr, new Map(), { externalApps: rt, settleDeletedProjects: () => (settling = adoption.settle()) })(name as never, params)
 
   it('keeps it while a session of the project is in the trash, so a restore finds it; gives it back, with its data, once none is', async () => {
     const pid = project()!.id
     // What the app wrote as the project's app, after its state was carried from the old key
     writeFileSync(join(dataRoot, 'app-data', pid, 'notes', 'state.json'), '{"count":9}')
     writeFileSync(join(dataRoot, 'app-logs', pid, 'notes.log'), 'project log\n')
-    await mgr.deleteProject(pid)
-    rt.refresh()
+    await door('projects.delete', { projectId: pid })
+    await settling
     // The builder went to the trash with the project: restoring it needs the folder where it was
-    expect(await adoption.run()).toBe(0)
     expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)
     expect(adopted().notes).toBeDefined()
     expect(trashed()).toEqual([])
@@ -321,11 +325,11 @@ describe('a deleted project gives its folder back', () => {
     expect(back).toMatchObject({ id: pid, path: appDir() })
     rt.refresh()
     expect(rt.list().find((a) => a.appId === 'notes')).toMatchObject({ projectId: pid, root: true })
-    await mgr.deleteProject(pid)
-    rt.refresh()
+    await door('projects.delete', { projectId: pid })
+    await settling
 
-    await mgr.purgeSession('builder')
-    expect(await adoption.run()).toBe(0)
+    await door('trash.purge', { sessionId: 'builder' })
+    await settling
     expect(existsSync(appDir())).toBe(false)
     const [entry, ...more] = trashed()
     expect(more).toEqual([])
@@ -347,33 +351,72 @@ describe('a deleted project gives its folder back', () => {
     expect(readFileSync(join(dataRoot, 'app-data', project()!.id, 'notes', 'state.json'), 'utf8')).toBe('{"count":9}')
   })
 
-  it('a project with nothing in the trash gives it back when deleted, through the door that deletes it', async () => {
-    const handle = createRpcHandler(mgr, new Map(), { externalApps: rt, settleDeletedProjects: () => adoption.settle() })
+  it('a project with nothing in the trash gives it back when deleted; nothing comes back', async () => {
     const pid = helperProject()
-    await handle('projects.delete', { projectId: pid })
-    await expect.poll(() => existsSync(helperDir())).toBe(false)
+    await door('projects.delete', { projectId: pid })
+    await settling
+    expect(existsSync(helperDir())).toBe(false)
     expect(trashed().filter((n) => n.startsWith('helper-'))).toHaveLength(1)
-    await expect.poll(() => adopted().helper).toBeUndefined()
-    // Nothing comes back, nor is registered again
+    expect(adopted().helper).toBeUndefined()
     expect(await adoption.run()).toBe(0)
     expect(store.projects.listProjects().find((p) => p.id === pid || p.path === helperDir())).toBeUndefined()
   })
 
-  it('never moves a folder that is not the one the project was made from', async () => {
+  it('keeps a folder the person added again as a project when the trash is emptied, and gives it back once that project goes too', async () => {
+    const pid = project()!.id
+    await door('projects.delete', { projectId: pid })
+    await settling
+    // The person adds the folder again: a new project, at the same path
+    store.projects.addProject({ id: 'again', path: appDir(), name: 'notes' })
+    await door('trash.empty', {})
+    await settling
+    expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)
+    expect(adopted().notes).toBeDefined()
+    expect(readFileSync(join(dataRoot, 'app-data', '_user', 'notes', 'state.json'), 'utf8')).toBe('{"count":7}')
+    expect(trashed()).toEqual([])
+    // That project deleted too, with nothing of either in the trash: the folder is given back
+    rt.refresh()
+    await door('projects.delete', { projectId: 'again' })
+    await settling
+    expect(existsSync(appDir())).toBe(false)
+    expect(trashed().filter((n) => n.startsWith('notes-'))).toHaveLength(1)
+  })
+
+  it('never touches a folder that is not the one the project was made from, nor what is kept for it', async () => {
     const pid = helperProject()
+    mkdirSync(join(dataRoot, 'app-data', pid, 'helper'), { recursive: true })
+    writeFileSync(join(dataRoot, 'app-data', pid, 'helper', 'state.json'), 'project data')
     await mgr.deleteProject(pid)
     rt.refresh()
-    // Another folder of the same name, made by hand meanwhile: it carries no mark of the adoption
+    // Another folder of the same name, made by hand meanwhile, with data of its own: it carries no mark of the adoption
     rmSync(helperDir(), { recursive: true })
     plantUserApp('helper')
     writeFileSync(join(helperDir(), 'mine.txt'), 'keep me')
+    mkdirSync(join(dataRoot, 'app-data', '_user', 'helper'), { recursive: true })
+    writeFileSync(join(dataRoot, 'app-data', '_user', 'helper', 'state.json'), 'hand-made data')
     rt.refresh()
     expect(await adoption.run()).toBe(1)
     expect(readFileSync(join(helperDir(), 'mine.txt'), 'utf8')).toBe('keep me')
+    expect(readFileSync(join(dataRoot, 'app-data', '_user', 'helper', 'state.json'), 'utf8')).toBe('hand-made data')
+    expect(readFileSync(join(dataRoot, 'app-data', pid, 'helper', 'state.json'), 'utf8')).toBe('project data')
     expect(trashed()).toEqual([])
-    // It became a project of its own, and the deleted one's record is gone
+    // It became a project of its own
     expect(adopted().helper).toMatchObject({ projectId: helperProject() })
     expect(helperProject()).not.toBe(pid)
+  })
+
+  it('a give-back that fails is tried again while the host runs', async () => {
+    const retrying = new UserAppAdoption({ rt, store, sessionsMoved: () => {}, changed: () => {}, retryMs: 20 })
+    // The trash folder cannot be made (a file holds its name): the folder cannot move, as one in use on Windows cannot
+    writeFileSync(join(dataRoot, 'app-trash'), 'in the way')
+    await mgr.deleteProject(helperProject())
+    rt.refresh()
+    expect(await retrying.run()).toBe(0)
+    expect(existsSync(join(helperDir(), MANIFEST_FILE))).toBe(true)
+    expect(adopted().helper).toBeDefined()
+    rmSync(join(dataRoot, 'app-trash'))
+    await expect.poll(() => existsSync(helperDir()), { timeout: 5000 * SLOW }).toBe(false)
+    expect(adopted().helper).toBeUndefined()
   })
 
   it('does nothing before the host is ready; its first run, once ready, gives back what is waiting', async () => {
@@ -381,9 +424,7 @@ describe('a deleted project gives its folder back', () => {
     const early = new UserAppAdoption({ rt, store, sessionsMoved: () => {}, changed: () => {} })
     await mgr.deleteProject(helperProject())
     rt.refresh()
-    // Not started at all: it would run now, and none is under way
-    early.settle()
-    expect((early as unknown as { running: unknown }).running).toBeNull()
+    await early.settle()
     expect(existsSync(join(helperDir(), MANIFEST_FILE))).toBe(true)
     expect(adopted().helper).toBeDefined()
     // Ready: a project deleted before this build, or while the host was down, is given back by the first run

@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
+import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
 
 /**
  * User-folder apps become projects (#1141, docs/plans/root-apps.md §4). Each `<data>/apps/<id>/` whose manifest is
@@ -29,7 +30,8 @@ import type { Store } from './dev-services/store.js'
  * It stays in the user folder with its reason, and the log says so once.
  *
  * **A project the person deletes gives its folder back** (#1204), once nothing in the trash could bring it back: no
- * session of it is left there (restoring one registers the project again, at the same path, under the same id). Until
+ * session of it is left there (restoring one registers the project again, at the same path, under the same id) and no
+ * project is registered at the folder (the person may have added it again). Until
  * then the folder stays where it is, adopted, so a restore finds it. After, it goes to `<data>/app-trash/` as a
  * removed user-folder app's does, what the project kept for it returns to the user-folder key, and the record goes: a
  * person who moves the folder back into the user folder gets it as a new project, with its data. Left in place, it was
@@ -49,7 +51,13 @@ export type AdoptionDeps = {
   sessionsMoved(sessionIds: readonly string[], projectId: string): void
   /** The project list changed — the windows re-read it */
   changed(): void
+  /** How long a give-back that failed waits before it is tried again (tests shorten it) */
+  retryMs?: number
 }
+
+/** A give-back that failed is tried again this many times while the host runs, then at the next start */
+const GIVE_BACK_RETRIES = 5
+const GIVE_BACK_RETRY_MS = 3000
 
 /**
  * Where an adopted folder keeps its mark: in Centralu's own folder inside the project (`.centralu`, where a project's
@@ -95,6 +103,8 @@ export class UserAppAdoption {
   private swept = false
   /** Set by the first run, once the host is ready: `settle` does nothing before, as nothing may move while a swap can still hand back */
   private ready = false
+  /** Give-backs that failed, by app id, and how many times */
+  private readonly retries = new Map<string, number>()
 
   constructor(private readonly deps: AdoptionDeps) {}
 
@@ -119,8 +129,12 @@ export class UserAppAdoption {
    * A project was deleted, or sessions left the trash for good (#1204): gives back the folders of deleted projects that
    * nothing in the trash can restore any more. Only once the host is ready (the first `run`); that run checks too
    */
-  settle(): void {
-    if (this.ready) void this.run().catch((e: Error) => console.error(`[apps] giving back the folders of deleted projects failed: ${e.message}`))
+  settle(): Promise<void> {
+    if (!this.ready) return Promise.resolve()
+    return this.run().then(
+      () => undefined,
+      (e: Error) => console.error(`[apps] giving back the folders of deleted projects failed: ${e.message}`),
+    )
   }
 
   /** Adopts what appears later (an approved MCP server written to the user folder). Returns the unsubscribe */
@@ -169,18 +183,48 @@ export class UserAppAdoption {
     return adopted
   }
 
+  /**
+   * Whether the folder this record names is free to give back: its project is gone, no other project is registered at
+   * the folder (the person may have added it again), and nothing in the trash would register one there
+   */
+  private released(record: AdoptedRecord, dir: string): boolean {
+    const path = spelled(dir)
+    if (this.deps.store.projects.listProjects().some((p) => p.id === record.projectId || p.path === path)) return false
+    return !this.deps.store.trash.holdsProject(record.projectId, path)
+  }
+
   /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */
   private async giveBack(): Promise<void> {
-    const projects = new Set(this.deps.store.projects.listProjects().map((p) => p.id))
-    for (const [appId, record] of Object.entries(this.deps.store.adoption.adopted())) {
-      if (projects.has(record.projectId) || this.deps.store.trash.holdsProject(record.projectId)) continue
+    let records: [string, AdoptedRecord][] = []
+    try {
+      records = Object.entries(this.deps.store.adoption.adopted())
+    } catch (e) {
+      console.error(`[apps] could not read which folders became projects: ${(e as Error).message}`)
+      return
+    }
+    for (const [appId, record] of records) {
+      const dir = this.deps.rt.userAppDir(appId)
       try {
-        const to = await this.deps.rt.returnAdoptedApp(record.projectId, appId, (dir) => adoptionMark(dir) === record.mark)
+        if (!this.released(record, dir)) continue
+        await this.deps.rt.projectStopped(record.projectId)
+        /*
+         * Checked again with nothing awaited from here to the move: a session restored, or the folder added as a
+         * project, while its apps stopped keeps it. A folder there that is not the one the project was made from
+         * (no mark, or another) is someone else's: nothing of it is touched, and its own adoption follows
+         */
+        if (!this.released(record, dir)) continue
+        if (existsSync(dir) && adoptionMark(dir) !== record.mark) continue
+        const to = this.deps.rt.returnAdoptedApp(record.projectId, appId)
         this.deps.store.adoption.forget(appId, record.mark)
+        this.retries.delete(appId)
         console.error(`[apps] deleted project ${record.projectId} gave back user-folder app ${appId}${to ? `: its folder is in ${to}` : ''}`)
       } catch (e) {
-        // Kept, and tried again at the next start or deletion: a folder a process still works in does not move on Windows
-        console.error(`[apps] deleted project ${record.projectId} could not give back user-folder app ${appId} yet: ${(e as Error).message}`)
+        // Kept as it was; tried again shortly (a folder a process still works in does not move on Windows), then at the next start
+        const tries = (this.retries.get(appId) ?? 0) + 1
+        this.retries.set(appId, tries)
+        const again = tries <= GIVE_BACK_RETRIES
+        console.error(`[apps] deleted project ${record.projectId} could not give back user-folder app ${appId} yet${again ? '' : ' (tried again at the next start)'}: ${(e as Error).message}`)
+        if (again) setTimeout(() => void this.settle(), this.deps.retryMs ?? GIVE_BACK_RETRY_MS).unref()
       }
     }
   }

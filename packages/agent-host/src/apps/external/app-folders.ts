@@ -235,6 +235,19 @@ export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, ta
 }
 
 /**
+ * Where a user-folder app's folder goes when it leaves (`<data folder>/app-trash/<id>-<ms>`): removed from Settings, or
+ * given back by a deleted project it had become (#1204). Moved, never deleted: it may be a hand-made app, and a person
+ * brings it back by moving it into the user folder again. Returns where it went
+ */
+export function moveToAppTrash(dataRoot: string, dir: string, appId: string): string {
+  const trash = join(dataRoot, 'app-trash')
+  mkdirSync(trash, { recursive: true })
+  const to = join(trash, `${appId}-${Date.now()}`)
+  renameSync(dir, to)
+  return to
+}
+
+/**
  * Removes a user-folder app (M4 A-7) — the path for withdrawing an approved MCP server from the
  * list (a path that did not exist in the old registry).
  *
@@ -251,19 +264,6 @@ export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, ta
  * tool name until its next thread, but calling it is refused with "not an attached app"
  * (attaching to a session re-checks on every call).
  */
-/**
- * Where a user-folder app's folder goes when it leaves (`<data folder>/app-trash/<id>-<ms>`): removed from Settings, or
- * given back by a deleted project it had become (#1204). Moved, never deleted: it may be a hand-made app, and a person
- * brings it back by moving it into the user folder again. Returns where it went
- */
-export function moveToAppTrash(dataRoot: string, dir: string, appId: string): string {
-  const trash = join(dataRoot, 'app-trash')
-  mkdirSync(trash, { recursive: true })
-  const to = join(trash, `${appId}-${Date.now()}`)
-  renameSync(dir, to)
-  return to
-}
-
 export async function removeUserApp(host: FoldersHost, ref: AppRef): Promise<void> {
   if (ref.projectId !== null) {
     throw new AppUnavailableError("A project app is part of the project's repository — remove it there")

@@ -39,7 +39,8 @@ nothing inherited.
   (`deleteProject` already does this for every app of the project), and now its apps' **secrets** go
   too (§5). Data, logs and kept versions stay on disk, as they do for an inner app today.
   A project that was a user-folder app gives its folder back once nothing in the trash can restore the
-  project (#1204): the folder to `<data>/app-trash/`, its data, logs and kept versions back to `_user/<id>`.
+  project (#1204): the folder to `<data>/app-trash/`, its data, logs and kept versions back to `_user/<id>`,
+  in place of the old key's copy (§4), which is that app's `_user` copy gone before the later release's step.
 
 ## 3. Creating and importing
 

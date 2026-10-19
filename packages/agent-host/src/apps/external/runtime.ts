@@ -644,23 +644,37 @@ export class ExternalApps {
     this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
   }
 
+  /** Where the user folder keeps the app of this id (`<data folder>/apps/<id>`) */
+  userAppDir(appId: string): string {
+    return join(this.deps.dataRoot, USER_APPS_REL, appId)
+  }
+
+  /**
+   * Settles once the apps of a project just removed have stopped (`dropScope`): Windows does not move a folder a
+   * process works in (#14), so a folder the project gives back waits for this (#1204)
+   */
+  async projectStopped(projectId: string): Promise<void> {
+    const stopping = this.stopping.get(projectId)
+    if (!stopping) return
+    await stopping
+    if (this.stopping.get(projectId) === stopping) this.stopping.delete(projectId)
+  }
+
   /**
    * A deleted project that a user-folder app had become (#1204) gives that app back: its folder goes to `app-trash/` as
    * a removed user-folder app's does, and what it kept under the project's key returns to the user-folder key, where a
-   * folder put back into the user folder finds it (`returnAppFiles`). The adoption decides when (`UserAppAdoption`):
-   * once nothing in the trash could bring the project back.
-   *
-   * Only the very folder the project was made from moves (`theAdoptedFolder`: it carries the adoption's mark). Any other
-   * folder of that name, or none, is left as it is. Refused while the project is still registered here, and its apps are
-   * waited for first: Windows does not move a folder a process works in (#14). Returns where the folder went, or null
+   * folder put back into the user folder finds it (`returnAppFiles`). The adoption decides when and checks that the
+   * folder is the one the project was made from (`UserAppAdoption`); this does the moving, in one synchronous step.
+   * Refused while the project is still registered here. Returns where the folder went, or null when it was not there
    */
-  async returnAdoptedApp(projectId: string, appId: string, theAdoptedFolder: (dir: string) => boolean): Promise<string | null> {
+  returnAdoptedApp(projectId: string, appId: string): string | null {
     if (this.scopes.has(projectId)) throw new Error(`project ${projectId} is still registered`)
-    await this.stopping.get(projectId)
-    this.stopping.delete(projectId)
-    const dir = join(this.deps.dataRoot, USER_APPS_REL, appId)
-    const trashed = existsSync(dir) && theAdoptedFolder(dir) ? moveToAppTrash(this.deps.dataRoot, dir, appId) : null
-    returnAppFiles(this.deps.dataRoot, this.startEnv.appKey({ projectId, appId }), this.startEnv.appKey({ projectId: null, appId }))
+    // The keys first: a key that cannot be made must stop this before anything moves
+    const from = this.startEnv.appKey({ projectId, appId })
+    const to = this.startEnv.appKey({ projectId: null, appId })
+    const dir = this.userAppDir(appId)
+    const trashed = existsSync(dir) ? moveToAppTrash(this.deps.dataRoot, dir, appId) : null
+    returnAppFiles(this.deps.dataRoot, from, to)
     return trashed
   }
 
@@ -1058,7 +1072,7 @@ export class ExternalApps {
       halts.push(this.lifecycle.halt(e, 'project removed', { awaitTree: true }).catch(() => {}))
       this.forgetErrors(e.ref)
     }
-    // Waited for before its folder moves, when the project gave back a user-folder app (`returnAdoptedApp`)
+    // Waited for before its folder moves, when the project gives back a user-folder app (`projectStopped`)
     if (halts.length) this.stopping.set(key, Promise.all(halts))
     if (held?.apps.size) this.appsChanged()
   }
