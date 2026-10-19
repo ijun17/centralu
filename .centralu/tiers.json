@@ -1,0 +1,149 @@
+{
+  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a change takes the highest tier of its files. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either.",
+  "tiers": ["auto", "light", "deep", "person"],
+  "fallback": "light",
+  "rules": [
+    {
+      "id": "docs",
+      "tier": "auto",
+      "paths": [
+        "docs/**",
+        "README.md",
+        "README.ko.md",
+        "CODE_OF_CONDUCT.md",
+        "packaging/npm/*/README.md",
+        "packages/agent-host/scripts/README.md"
+      ],
+      "except": ["docs/security-boundaries.md"],
+      "why": "documents nothing runs; AGENTS.md, CLAUDE.md and CONTRIBUTING.md are left light, since every agent session follows them"
+    },
+    {
+      "id": "tests",
+      "tier": "auto",
+      "paths": [
+        "**/*.{test,spec}.{ts,tsx,mts,cts,js,mjs,cjs}",
+        "**/*.test-helpers.{ts,tsx,mts,js,mjs}",
+        "**/{fixtures,__tests__,tests}/**",
+        "**/*-fixtures/**",
+        "**/tests.rs",
+        "e2e/**",
+        "packages/agent-host/src/dev-services/store-migrations*.golden.json"
+      ],
+      "why": "tests and the data they read change no shipped behaviour; a test under a deep path stays deep, as it guards that boundary"
+    },
+    {
+      "id": "ui-styles",
+      "tier": "auto",
+      "paths": ["packages/ui/src/**/*.css", "packages/ui/src/assets/**"],
+      "why": "how the UI looks, not what it does; copy inside .tsx is light, since a path cannot tell copy from logic"
+    },
+    {
+      "id": "store",
+      "tier": "deep",
+      "paths": ["packages/agent-host/src/dev-services/store.ts", "packages/agent-host/src/dev-services/store/**"],
+      "why": "the store and its migrations: a step runs once on every person's data, and must not break the build still serving during a swap"
+    },
+    {
+      "id": "security-doc",
+      "tier": "deep",
+      "paths": ["docs/security-boundaries.md", "SECURITY.md"],
+      "why": "the trust boundaries as written: later trust decisions are checked against this text"
+    },
+    {
+      "id": "trust",
+      "tier": "deep",
+      "paths": [
+        "packages/agent-host/src/sessions/tool-profiles.ts",
+        "packages/agent-host/src/sessions/orchestrator-tools.ts",
+        "packages/agent-host/src/sessions/*-consents.ts",
+        "packages/agent-host/src/sessions/app-access.ts",
+        "packages/agent-host/src/sessions/agent-start-gates.ts",
+        "packages/agent-host/src/adapters/always-allow.ts",
+        "packages/agent-host/src/adapters/claude/permissions.ts",
+        "packages/agent-host/src/adapters/codex/launch-config.ts",
+        "packages/agent-host/src/app-permission-book.ts",
+        "packages/agent-host/src/dev-services/path-guard.ts",
+        "packages/agent-host/src/apps/external/{secrets,capabilities,broker}.ts",
+        "apps/desktop/src-tauri/src/path_safety.rs"
+      ],
+      "why": "which tools a session has, when the person is asked, project trust, app secrets and capabilities, and path containment (docs/security-boundaries.md)"
+    },
+    {
+      "id": "transport",
+      "tier": "deep",
+      "paths": ["packages/agent-host/src/transport/**", "packages/agent-host/src/views/csp.ts"],
+      "why": "who may talk to the host (tokens, proofs, origins) and what an app view may load"
+    },
+    {
+      "id": "desktop-permissions",
+      "tier": "deep",
+      "paths": [
+        "apps/desktop/src-tauri/capabilities/**",
+        "apps/desktop/src-tauri/permissions/**",
+        "apps/desktop/src-tauri/tauri*.conf.json",
+        "tooling/desktop-permissions.test.ts",
+        "tooling/desktop-csp.test.ts"
+      ],
+      "why": "the desktop commands the webview may call and its CSP, with the guards that hold them"
+    },
+    {
+      "id": "processes",
+      "tier": "deep",
+      "paths": [
+        "packages/agent-host/src/links/**",
+        "packages/agent-host/src/keeper/**",
+        "packages/agent-host/src/keeper-link.ts",
+        "packages/agent-host/src/swap-control.ts",
+        "packages/agent-host/src/lifecycle/**",
+        "apps/desktop/src-tauri/keeper/**",
+        "packaging/npm/centralu/bin/**",
+        "apps/desktop/src-tauri/src/sidecar/**",
+        "apps/desktop/src-tauri/src/shell/**",
+        "apps/desktop/src-tauri/shell/**",
+        "packages/agent-host/src/update-apply.ts"
+      ],
+      "why": "starting, keeping, swapping, updating and stopping hosts and agents, here and on linked machines (keeper, shell, centralu serve, links): bugs show only in the real environment"
+    },
+    {
+      "id": "release",
+      "tier": "deep",
+      "paths": [
+        "scripts/release-*.{mts,mjs}",
+        "scripts/{content-manifest,shell-bundle,bundle-stage,local-update}.mts",
+        "scripts/local-manifest.mjs",
+        "packaging/shell/**",
+        "packaging/remote-runtime.json",
+        "apps/desktop/content-verify/src/**",
+        "packages/agent-host/src/updates.ts"
+      ],
+      "why": "signed content, releases and updates: what reaches every person's machine, and how it is checked there"
+    },
+    {
+      "id": "protocol",
+      "tier": "deep",
+      "paths": ["packages/protocol/**"],
+      "why": "messages between UI, host and linked machines of different versions: additions only, and a mistake reaches every pair"
+    },
+    {
+      "id": "ci",
+      "tier": "deep",
+      "paths": [
+        ".github/workflows/**",
+        ".github/scripts/**",
+        "tooling/actions-pinned.test.ts",
+        "scripts/pre-pr.mjs",
+        ".centralu/apps/project-board/queue*.mjs",
+        ".centralu/apps/project-board/release*.mjs",
+        ".centralu/apps/project-board/wait-checks.mjs",
+        ".centralu/apps/project-board/bin/**"
+      ],
+      "why": "what CI runs and may skip, and the checks, merge queue and release tools that land and publish: a loosened gate lets every later change through"
+    },
+    {
+      "id": "tier-rules",
+      "tier": "deep",
+      "paths": [".centralu/tiers.json", "scripts/tier.mjs"],
+      "why": "these rules and the code that reads them decide how much review every later change gets"
+    }
+  ]
+}
