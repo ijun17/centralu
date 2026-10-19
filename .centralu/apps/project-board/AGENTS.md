@@ -221,8 +221,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   synchronously for each change, so it survives the server restarting. A file that does not read
   stops the driver, said once in the app's log, then tried again with a growing wait. Centralu stops an app with no
   open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
-  `uses.background`, and this server holds busy exactly while the queue has an active item or a batch with its end
-  to do (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
+  `uses.background`, and this server holds busy exactly while the queue has an item waiting or in CI, or a batch
+  with its end to do (not one needing attention: it waits on a session, and one forgotten would keep the app polling
+  for good) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
   items"), so the queue carries on overnight with nothing open (#1236). The queue has two drivers: this server, and
   the **watch command** a session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
   every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,

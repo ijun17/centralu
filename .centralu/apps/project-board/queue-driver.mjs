@@ -130,12 +130,14 @@ export function updateQueue(dir, fn) {
 }
 
 /**
- * What the server tells Centralu it is busy with (#1236), or null when the queue has no work: an item waiting, in
- * CI or needing attention (each still polled: a fix pushed is found that way), or a batch with its end still to do.
- * The row reads "Running: merge queue, 2 items".
+ * What the server tells Centralu it is busy with (#1236), or null when the queue has no work of its own: an item
+ * waiting or in CI, or a batch with its end still to do. An item needing attention is not: it waits on a session, and
+ * one forgotten would keep the app running and polling for good. It is still polled while the app runs for any other
+ * reason (a view, a call, other work), and queued again it is work again. The row reads "Running: merge queue, 2 items".
  */
+export const WORKING = new Set(['waiting', 'ci'])
 export function queueBusy(q) {
-  const active = q.items.filter((i) => ACTIVE.has(i.state)).length
+  const active = q.items.filter((i) => WORKING.has(i.state)).length
   if (active) return `merge queue, ${plural(active, 'item')}`
   return activeBatch(q) ? 'merge queue, a batch finishing' : null
 }

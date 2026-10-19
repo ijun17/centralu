@@ -942,11 +942,12 @@ async function morePolls(n = 2) {
 }
 
 describe('the merge queue keeps the board app running while it has work (#1236)', { timeout: 60_000 * SLOW }, () => {
-  it('is busy while an item waits, is in CI or needs attention, or a batch has its end to do; not once all of it ended', () => {
+  it('is busy while an item waits or is in CI, or a batch has its end to do; not for an item needing attention, nor once all of it ended', () => {
     const q = emptyQueue()
     expect(queueBusy(q)).toBe(null)
-    q.items.push({ ...fresh(), state: 'waiting' }, { ...fresh({ pr: 78 }), state: 'attention' })
+    q.items.push({ ...fresh(), state: 'waiting' }, { ...fresh({ pr: 78 }), state: 'ci' }, { ...fresh({ pr: 79 }), state: 'attention' })
     expect(queueBusy(q)).toBe('merge queue, 2 items')
+    // Only one needing attention left: it waits on a session, and does not keep the app running
     q.items[0].state = 'merged'
     q.items[1].state = 'closed'
     expect(queueBusy(q)).toBe(null)
@@ -967,6 +968,15 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
       s.runs[SHA] = [ghRun('success')]
     })
     await until((x) => stateOf(x) === 'merged' && busy() === undefined, 'the landing and the release')
+  })
+
+  it('lets the hold go when the only item left needs attention', async () => {
+    const cancelled = [ghCheck('verify', 'cancelled', 11), ghCheck('windows tests', 'success', 12)]
+    const r = runtime(ghState({ checks: { [SHA]: cancelled }, runs: { [SHA]: [ghRun('cancelled')] }, on: { 'rerun:900': { runs: { [SHA]: [ghRun('cancelled', 2)] } } } }))
+    const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => busy() === 'merge queue, 1 item', 'the hold')
+    await until((x) => stateOf(x) === 'attention' && busy() === undefined, 'attention and the release')
   })
 })
 
