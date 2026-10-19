@@ -44,9 +44,9 @@ export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: P
 /** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
 export type TrashRequest =
   | { action: 'list' }
-  | { action: 'restore'; sessionId: string; what: 'session' | 'subagent_steps' }
+  | { action: 'restore'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'trash_steps'; sessionId: string }
-  | { action: 'delete'; sessionId: string; what: 'session' | 'subagent_steps' }
+  | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
 
 export type OrchestratedSession = {

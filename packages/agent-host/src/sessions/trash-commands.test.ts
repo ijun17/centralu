@@ -153,7 +153,7 @@ describe('restore_trashed and trash_subagent_steps', () => {
     expect(moved.text).toMatch(/^Moved 4 subagent steps \(.+\) of .+ to the trash\. Its conversation and launch cards stay/)
     expect((await trash()).subagentSteps.map((t) => t.sessionId)).toEqual([busy.id])
 
-    const restored = await run(orc.id, 'restore_trashed', { sessionId: busy.id, what: 'subagent_steps' })
+    const restored = await run(orc.id, 'restore_trashed', { sessionId: busy.id, what: 'steps' })
     expect(restored.text).toContain('back under their launch cards')
     expect((await trash()).subagentSteps).toEqual([])
     expect(card(orc.id)).toBeUndefined()
@@ -290,7 +290,7 @@ describe('delete_trashed', () => {
     addSteps(s.id, 2)
     await rpc('subagents.trash', { sessionId: s.id })
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'delete_trashed', { sessionId: s.id, what: 'subagent_steps' }, 'allow', async () => {
+    const { question, r } = await answered(orc.id, 'delete_trashed', { sessionId: s.id, what: 'steps' }, 'allow', async () => {
       addSteps(s.id, 1, 'toolu_later')
       await rpc('subagents.trash', { sessionId: s.id })
     })
@@ -305,7 +305,7 @@ describe('delete_trashed', () => {
   it('refuses steps that are not in the trash, before any card', async () => {
     const s = await newSession('No steps')
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'delete_trashed', { sessionId: s.id, what: 'subagent_steps' })
+    const r = await run(orc.id, 'delete_trashed', { sessionId: s.id, what: 'steps' })
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/has no subagent steps in the trash/)
     expect(card(orc.id)).toBeUndefined()

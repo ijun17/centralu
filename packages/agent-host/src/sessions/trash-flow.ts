@@ -111,7 +111,7 @@ export class TrashFlow {
           return {
             ok: true,
             text: r.steps
-              ? `Moved ${plural(r.steps, 'subagent step')} (${bytesText(r.bytes)}) of ${req.sessionId} to the trash. Its conversation and launch cards stay; a subagent still running goes on writing its new steps under its card. restore_trashed with what "subagent_steps" puts them back.`
+              ? `Moved ${plural(r.steps, 'subagent step')} (${bytesText(r.bytes)}) of ${req.sessionId} to the trash. Its conversation and launch cards stay; a subagent still running goes on writing its new steps under its card. restore_trashed with what "steps" puts them back.`
               : `${req.sessionId} holds no subagent steps to move.`,
           }
         }
@@ -136,7 +136,7 @@ export class TrashFlow {
     if (trash.unreached.length) out.push(`Not listed: the trash on ${trash.unreached.map((m) => shown(m.name)).join(', ')}, which could not be reached just now.`)
     if (trash.sessions.length) out.push('Sessions (restore_trashed; delete_trashed deletes one for good):', ...rows(trash.sessions, sessionLine))
     if (trash.runs.length) out.push('Kept app runs (only empty_trash deletes these):', ...rows(trash.runs, runLine))
-    if (trash.steps.length) out.push('Subagent steps in the trash (restore_trashed what "subagent_steps"; delete_trashed what "subagent_steps"):', ...rows(trash.steps, stepsLine))
+    if (trash.steps.length) out.push('Subagent steps in the trash (restore_trashed what "steps"; delete_trashed what "steps"):', ...rows(trash.steps, stepsLine))
     if (held?.sessions.length) {
       out.push(
         'Sessions holding subagent steps that trash_subagent_steps can move to the trash:',
@@ -147,8 +147,8 @@ export class TrashFlow {
     return { ok: true, text: out.join('\n') }
   }
 
-  private async restore(rpc: WindowRpc, caller: string, id: string, what: 'session' | 'subagent_steps', signal?: AbortSignal): Promise<TrashAnswer> {
-    if (what === 'subagent_steps') {
+  private async restore(rpc: WindowRpc, caller: string, id: string, what: 'session' | 'steps', signal?: AbortSignal): Promise<TrashAnswer> {
+    if (what === 'steps') {
       await callWindow(rpc, 'trash.restoreSubagentSteps', { sessionId: id })
       return { ok: true, text: `Put the trashed subagent steps of ${id} back under their launch cards.` }
     }
@@ -170,9 +170,9 @@ export class TrashFlow {
     return { ok: true, text: `Restored ${shown(r.session.name)} [${r.session.id}] from the trash.${project}` }
   }
 
-  private async delete(rpc: WindowRpc, caller: string, id: string, what: 'session' | 'subagent_steps', signal?: AbortSignal): Promise<TrashAnswer> {
+  private async delete(rpc: WindowRpc, caller: string, id: string, what: 'session' | 'steps', signal?: AbortSignal): Promise<TrashAnswer> {
     const trash = await this.read(rpc)
-    if (what === 'subagent_steps') {
+    if (what === 'steps') {
       const t = trash.steps.find((x) => x.sessionId === id)
       if (!t) return { ok: false, error: `${id} has no subagent steps in the trash; list_trash shows what is there. Nothing was deleted.` }
       const refused = await this.ask(

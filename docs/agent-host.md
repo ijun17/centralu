@@ -1376,7 +1376,7 @@ the params with the method's schema and reads the answer with its result schema,
 
 **The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
 `delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
-preferences) are the Trash screen's calls. `what` is `session` (the default) or `subagent_steps`.
+preferences) are the Trash screen's calls. `what` is `session` (the default) or `steps`.
 
 - `list_trash` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
   sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the trashed subagent

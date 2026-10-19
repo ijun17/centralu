@@ -233,8 +233,8 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'restore_trashed',
-    description: 'Brings a session back from the trash, or (what "subagent_steps") puts its trashed subagent steps back under their cards. No card.',
-    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'subagent_steps']).optional() }),
+    description: 'Brings a session back from the trash, or (what "steps") puts its trashed subagent steps back under their cards. No card.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
   },
   {
     name: 'trash_subagent_steps',
@@ -243,8 +243,8 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'delete_trashed',
-    description: 'Deletes one trashed session, or (what "subagent_steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
-    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'subagent_steps']).optional() }),
+    description: 'Deletes one trashed session, or (what "steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
   },
   {
     name: 'empty_trash',
