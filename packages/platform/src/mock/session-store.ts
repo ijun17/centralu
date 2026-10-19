@@ -95,7 +95,7 @@ export class SessionStore {
      * fresh conversation empties the gauge until the tool reports again (#304), and a compaction that says its size
      * moves it there (#1282).
      *
-     * While the mock was only emitting this, the gauge reverted to `—` on every path that re-fetches the list (app
+     * While the mock only emitted the reading, the gauge reverted to `—` on every path that re-fetches the list (app
      * restart, reconnect) — the real thing holds onto the value, so if this spot is left empty, e2e passes a state the
      * real thing could never produce as normal.
      */

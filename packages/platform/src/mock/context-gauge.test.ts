@@ -11,7 +11,7 @@ describe('the mock context gauge', () => {
     const mock = createMockPlatform()
     try {
       const p = await mock.projects.add('/tmp/context-gauge')
-      const s = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: p.defaultTool, permissionPreset: 'normal' })
+      const s = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
       const context = async () => (await mock.agents.listSessions()).find((x) => x.id === s.id)!.context
 
       mock.emit({ type: 'compaction', sessionId: s.id, failed: false, before: 964_000, after: 8_800 })
