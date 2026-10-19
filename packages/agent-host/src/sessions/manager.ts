@@ -130,7 +130,8 @@ const HOST_RECALL_MAX_HITS = 50
  */
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
-  private meta = new Map<string, SessionInfo>()
+  /** Every session this host knows, in sidebar order; never replaced, so a module may read it through `parts()` */
+  private readonly meta = new Map<string, SessionInfo>()
   /**
    * **The configuration the currently running process actually holds.**
    *
@@ -663,10 +664,11 @@ export class SessionManager {
     const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
     this.store.sessions.setSessionOrder(globalOrder)
     // Reorder the in-memory copy too — saving alone leaves it out of sync with the screen until the next
-    // launch
+    // launch. Sorted in place (#1143): the map stays the one every module reads, so none is left on an old copy
     const rank = new Map(globalOrder.map((id, i) => [id, i]))
     const sorted = [...this.meta.entries()].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))
-    this.meta = new Map(sorted)
+    this.meta.clear()
+    for (const [id, m] of sorted) this.meta.set(id, m)
     return this.listSessions()
   }
 
@@ -1949,7 +1951,8 @@ export class SessionManager {
    * What the modules moved out of this manager reach of it (#428), one object for all of them, made once on first use.
    * Each module's own host type (`HandoffFlowHost`, `HostCardsHost`, `DelegationHost`, …) picks what it may use; this
    * is the one place that says how each name reaches the manager. Its fields are getters, read when used and never
-   * kept: `reorderSessions` replaces `meta`, and a kept map would leave a module on the old one (#757 review). Each
+   * kept: `emit` is re-wrapped in the constructor, and a kept value would leave a module on the old one (#757 review:
+   * `reorderSessions` used to replace `meta`; it sorts it in place since #1143). Each
    * module used to get an object of its own, twelve of them repeating the same getters.
    */
   private parts(): ManagerParts {
@@ -2233,7 +2236,8 @@ export class SessionManager {
   private seatHost: OrchestratorSeatHost | undefined
   /**
    * What the orchestrator tools reach of this manager (#428), made once on first use. Its fields are read when a tool
-   * runs, never kept: `reorderSessions` replaces `meta`, and a kept map would leave the tools on the old one (#757 review).
+   * runs, never kept: a kept value would leave the tools on an old one (#757 review, when `reorderSessions` still replaced
+   * `meta`; it sorts it in place since #1143).
    */
   private seat(): OrchestratorSeatHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used

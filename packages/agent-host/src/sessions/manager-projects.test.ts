@@ -290,6 +290,21 @@ describe('reordering within a project does not disturb the global order', () => 
     // The storage matches the same order — it must not fall out of sync with the screen after a restart.
     expect(store.sessions.listSessions().map((s) => s.id)).toEqual([a2, b1, a1, b2])
   })
+
+  it('sorts the sessions in place, so a module that holds the map reads the new order (#1143)', async () => {
+    const p1 = (await rpc('projects.add', { path: projectDir('cc-p1-') })) as { id: string; path: string }
+    const mk = async () =>
+      ((await rpc('agents.createSession', { projectId: p1.id, cwd: p1.path, tool: 'claude' })) as { id: string }).id
+    const a1 = await mk()
+    const a2 = await mk()
+    // What a module reaching the manager's sessions holds, taken before the reorder
+    const held = (mgr as unknown as { meta: Map<string, SessionInfo> }).meta
+
+    mgr.reorderSessions(p1.id, [a2, a1])
+
+    expect([...held.keys()]).toEqual([a2, a1])
+    expect((mgr as unknown as { meta: Map<string, SessionInfo> }).meta).toBe(held)
+  })
 })
 
 /**

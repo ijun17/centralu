@@ -17,7 +17,7 @@ import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from '.
  * tools stay one function over a narrow surface rather than a method that sees the whole class.
  */
 export type OrchestratorSeatHost = {
-  /** Read when a tool runs, as every field here: the manager may replace what it holds (`reorderSessions` and `meta`) */
+  /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
   readonly children: ChildOwnership
