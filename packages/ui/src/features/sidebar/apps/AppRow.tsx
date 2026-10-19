@@ -68,14 +68,12 @@ export function AppRow({
   const asking = useStore(
     (s) => !remote && s.appQuestions.some((q) => q.origin.appId === app.appId && (q.origin.projectId ?? null) === app.projectId),
   )
-  const sessionWaiting = useStore(
-    (s) =>
-      !remote &&
-      appSessionsNeedAttention(
-        Object.values(s.sessions).filter((session) => session.projectId === app.projectId && session.appId === app.appId),
-      ),
-  )
-  const waitsForYou = asking || sessionWaiting
+  /*
+   * The sessions the row was given are the app's own, picked by whoever draws the row: by project for a project app, and by
+   * machine as well for a user-folder app, where two machines can have one id (#82). Not picked again here from all sessions,
+   * where a machine-less filter takes another machine's session for this computer's.
+   */
+  const waitsForYou = asking || appSessionsNeedAttention(sessions)
   /*
    * An app keeping itself running for background work (#1236) says what it is doing, and has Stop right on its row: a
    * process that stays with nothing open is something the person should see and be able to end, an app with no view

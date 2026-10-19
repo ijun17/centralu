@@ -21,8 +21,10 @@ spike/**/out/
 # (.centralu/handoff/<session id>.md, #104) and the like. Not for the repository.
 # The exception is project apps (.centralu/apps/<id>/, docs/apps.md §2): they are code the
 # team shares by committing them. Their data and secrets live in the data folder, never here.
+# So are the risk tier rules (.centralu/tiers.json, scripts/tier.mjs, #1259).
 .centralu/*
 !.centralu/apps/
+!.centralu/tiers.json
 
 # 로컬 도구·로그
 .omc/

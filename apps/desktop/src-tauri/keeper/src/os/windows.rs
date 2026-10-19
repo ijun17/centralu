@@ -2,7 +2,21 @@
 //! closing its stdin and ended with `taskkill /T`, no console windows. There is no keeper here yet
 //! (`start_plan`; docs/plans/runtime-unification.md step 9), so none of the keeper's operations.
 
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+
+/// The `centralu` launcher `centralu serve` keeps in this window's data folder (#1223): the managed one an install
+/// over ssh made (`<data>/remote/bin/centralu.cmd`), else the one an npm install keeps (`<data>/bin/centralu.cmd`).
+/// Its presence says a linked hub's `serve` may hold this folder, so the window attaches to that host
+/// (`start_plan::Host::Serve`) rather than starting one the lock would refuse. The folder is the host's own default:
+/// `CC_DATA_DIR`, or `.centralu` in the user's profile.
+pub fn serve_launcher() -> Option<PathBuf> {
+    let data = match std::env::var("CC_DATA_DIR") {
+        Ok(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => PathBuf::from(std::env::var_os("USERPROFILE")?).join(".centralu"),
+    };
+    [data.join("remote").join("bin").join("centralu.cmd"), data.join("bin").join("centralu.cmd")].into_iter().find(|p| p.is_file())
+}
 
 /// Windows has no TERM: closing the host's stdin is the request to stop. The host runs with
 /// `--watch-parent`, so EOF runs the same `shutdown()` a TERM does (`stop_pid_gracefully`).

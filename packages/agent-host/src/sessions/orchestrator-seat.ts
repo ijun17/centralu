@@ -7,6 +7,7 @@ import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { FolderAdded } from './project-creation.js'
+import type { MachineAnswer, MachineRequest } from './machine-flow.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
@@ -75,6 +76,8 @@ export type OrchestratorSeatHost = {
   addFolderOnMachine(sessionId: string, reader: LinkedSessions, machine: { id: string; name: string }, path: string, signal?: AbortSignal): Promise<FolderAdded>
   /** The linked machines as `machines.list` answers them (#1220), once wired (`useMachineList`); empty without links */
   machineList(): MachineInfo[]
+  /** The machine commands (#1219): `MachineFlow.run`, with the orchestrator as the session its cards stand in */
+  machineRequest(sessionId: string, req: MachineRequest, signal?: AbortSignal): Promise<MachineAnswer>
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -689,6 +692,9 @@ export function orchestratorToolsFor(
     // The linked machines (#1220): the list Settings shows, read only; the central orchestrator's alone
     listMachines: () => (central ? host.machineList() : []),
 
+    // Changes to the linked machines (#1219), behind the person's card where they change a machine or this computer's reach
+    machine: async (req, signal) => (central ? host.machineRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes linked machines' }),
+
     /*
      * A handoff (#694): the central orchestrator's alone (the profile gives it no other seat; checked here too, as this
      * object also serves a lead's and a reader's view), a session of this computer in its view. The rest of the rule
@@ -760,7 +766,8 @@ export function orchestratorToolsFor(
       }
     },
 
-    // On-demand app attachment is a project session's (#371 part A, readerToolsFor) — no profile here exposes it
+    // On-demand app attachment: a project session's (#371 part A, readerToolsFor) and the central orchestrator's (#1205,
+    // SessionTools.orchestratorToolsFor); a coordinator's scope has none
     findApps: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     attachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     detachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),

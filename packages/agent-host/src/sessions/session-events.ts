@@ -385,6 +385,11 @@ export class SessionEvents {
      */
     fromAppVia: AppMessageVia = 'inline',
     sendInput?: (handle: SessionHandle, text: string) => void,
+    /**
+     * What the message rests on, read once the session is awake and before anything is written: a reason refuses it.
+     * A wake or a restart waited out here takes seconds, and the trust a task was let through on can go meanwhile.
+     */
+    stillAllowed?: () => string | null,
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
@@ -402,6 +407,8 @@ export class SessionEvents {
         throw rpcError(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`, 'session_not_found')
       }
     }
+    const refused = stillAllowed?.()
+    if (refused) throw rpcError(refused)
 
     this.host.notBeingRemoved(sessionId)
     const h = this.host.requireHandle(sessionId)
@@ -465,10 +472,13 @@ export class SessionEvents {
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
+    // An orchestrator that had root apps attached reads once why their names are gone (#1205); never stored or shown
+    const notice = this.host.apps.rootAppsNotice(sessionId)
+    const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, adapterText)
-    else h.send(adapterText)
+    if (sendInput) sendInput(h, input)
+    else h.send(input)
   }
 
   /**

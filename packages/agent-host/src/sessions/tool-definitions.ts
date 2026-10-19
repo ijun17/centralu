@@ -150,6 +150,50 @@ export const ORCHESTRATOR_TOOLS = [
     description: 'Lists the linked machines: name, status, OS and shell, and whether each connects at start or when needed.',
     schema: z.object({}),
   },
+  /*
+   * #1219: the linked machines, as the Machines screen manages them. Rare commands (RARE_COMMANDS). A change to a
+   * machine or to this computer's reach waits for the person's card; reconnecting and the connect mode do not.
+   */
+  {
+    name: 'add_machine',
+    description:
+      'Links another computer this one reaches over ssh. It is probed first (one ssh, nothing changed there); the person approves a card ' +
+      'naming the target, what runs there and what linking does. Nothing is installed.',
+    schema: z.object({
+      sshTarget: z.string().describe("A host alias from this computer's ~/.ssh/config, or user@host."),
+      name: z.string().optional().describe('What to call it; the host name if omitted.'),
+      wslDistro: z.string().optional().describe('On a Windows machine, a WSL distro to link instead of Windows itself.'),
+    }),
+  },
+  {
+    name: 'install_machine',
+    description:
+      "Installs this computer's Centralu version on a linked machine, or updates it (stopping and restarting the Centralu there). The person approves a card first.",
+    schema: z.object({
+      machine: z.string().describe('The machine, by the name list_machines gives.'),
+      action: z.enum(['install', 'update']).optional().describe('install (the default) or update.'),
+    }),
+  },
+  {
+    name: 'remove_machine',
+    description: "Unlinks a machine after the person's card: its sessions and projects leave this computer's lists. Nothing on the machine changes.",
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'reconnect_machine',
+    description: 'Tries the link to a machine again now, or connects a disconnected one. No card.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'set_machine_connect',
+    description: 'Sets when this computer connects to a machine: at start, or only when something here needs it. No card.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), connect: z.enum(['at_start', 'when_needed']) }),
+  },
+  {
+    name: 'set_machine_autostart',
+    description: 'Turns on or off a machine starting Centralu when it boots. The person approves a card first.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
+  },
   {
     name: 'create_session',
     description:
@@ -594,7 +638,10 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
+  'Commands for linked machines: add_machine, install_machine, remove_machine, reconnect_machine, set_machine_connect, set_machine_autostart.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
+  // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
+  'Projects that are apps attach on demand: the find_apps command lists them.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
   'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',

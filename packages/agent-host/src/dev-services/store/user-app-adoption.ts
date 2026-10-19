@@ -127,6 +127,21 @@ export class UserAppAdoptionRecords {
         delete book[from]
         this.settings.setAppSetting(row.key, JSON.stringify(book))
       }
+      /*
+       * The orchestrator was given it as a user-folder app; a root app it attaches when it needs one (#1205). One it has
+       * seen keeps it attached, under the name it called it by: an attachment of its own, as attach_app writes one
+       */
+      const orchestrators = this.db.prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all() as { id: string }[]
+      for (const { id } of orchestrators) {
+        const book = parseJson(this.settings.appSetting(`session_app_names:${id}`))
+        const server = isObj(book) ? book[to] : undefined
+        if (typeof server !== 'string' || !server.startsWith('app-')) continue
+        const raw = parseJson(this.settings.appSetting(`${ATTACHED_PREFIX}${id}`))
+        const list: unknown[] = Array.isArray(raw) ? raw : []
+        if (list.some((r) => isObj(r) && r.projectId === projectId && r.appId === appId)) continue
+        list.push({ projectId, appId, server, consent: 'none', at: Date.now() })
+        this.settings.setAppSetting(`${ATTACHED_PREFIX}${id}`, JSON.stringify(list))
+      }
       // The window's own memory of the app (its span on the grid, the app it had open), kept in the workspace snapshot
       const layout = this.settings.loadWorkspace<Record<string, unknown>>()
       if (isObj(layout)) {

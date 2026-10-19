@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
+import { hostname } from 'node:os'
 import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, type SshRunResult } from './ssh-run.js'
@@ -34,6 +35,12 @@ export type ConnectionLine = {
    * owner decision 4). Absent from a remote that predates it
    */
   autostart?: RemoteAutostart
+  /**
+   * The options that remote's `serve` takes that an older one refuses (#1223): `from`, the hub's name on `--detach`,
+   * which the host there writes to its `host.lock` so a second Centralu on that folder can say whose link holds it.
+   * Absent from a remote that predates it, which is never sent one
+   */
+  takes?: string[]
   /**
    * The running host answered a `prove` (#838), so the hub asks it to prove it holds the token before sending it
    * (`RemoteClientOptions.proveHost`). Absent from a remote that predates it, which gets the hello as before
@@ -133,10 +140,27 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         ...(install ? { install } : {}),
         ...(autostart ? { autostart } : {}),
         ...((o as { proof?: unknown }).proof === true ? { proof: true } : {}),
+        ...takesOf((o as { takes?: unknown }).takes),
       }
     }
   }
   throw new Error('The remote did not print a connection line; its Centralu may predate `centralu serve` (update it there: npm i -g centralu)')
+}
+
+/** The `takes` field: the names in it that are words, or nothing */
+function takesOf(raw: unknown): { takes?: string[] } {
+  if (!Array.isArray(raw)) return {}
+  const takes = raw.filter((t): t is string => typeof t === 'string' && /^[a-z-]{1,32}$/.test(t))
+  return takes.length ? { takes } : {}
+}
+
+/**
+ * This computer's name as a remote's `serve --detach --from` takes it (#1223): letters, digits, `.`, `_` and `-`, at
+ * most 64 of them, so it can go on any of the three remote shells' command lines unquoted. Null when nothing of it is left
+ */
+export function hubNameForRemote(name: string): string | null {
+  const clean = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
+  return clean || null
 }
 
 /** The `install` field, field by field; a field of the wrong shape is read as absent, never trusted */
@@ -351,9 +375,13 @@ export function connectionCommand(spec: RemoteSpec): string {
   return remoteCommand(spec, 'serve --connection')
 }
 
-/** `centralu serve --detach` there, found the same way (`SshTunnel.startHost`, plan §10.4) */
-export function detachCommand(spec: RemoteSpec): string {
-  return remoteCommand(spec, 'serve --detach')
+/**
+ * `centralu serve --detach` there, found the same way (`SshTunnel.startHost`, plan §10.4). `from` is this computer's
+ * name (`hubNameForRemote`), passed only to a remote whose connection line says it takes it (#1223)
+ */
+export function detachCommand(spec: RemoteSpec, from: string | null = null): string {
+  const name = from === null ? null : hubNameForRemote(from)
+  return remoteCommand(spec, name ? `serve --detach --from ${name}` : 'serve --detach')
 }
 
 /**
@@ -376,14 +404,23 @@ export function serveCommand(spec: RemoteSpec): string {
  * cmd.exe's line (`WINDOWS_INLINE_MAX`); the scheduled task's PowerShell, which is long, is built and
  * run there by `serve`, on a command line of its own
  */
-export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'status'): string {
+export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'remove' | 'status'): string {
   return remoteCommand(spec, `serve --autostart ${action}`)
 }
 
 /** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
 function remoteCommand(
   spec: RemoteSpec,
-  args: 'serve --connection' | 'serve --detach' | 'serve --stop' | 'serve' | 'serve --autostart on' | 'serve --autostart off' | 'serve --autostart status',
+  args:
+    | 'serve --connection'
+    | 'serve --detach'
+    | `serve --detach --from ${string}`
+    | 'serve --stop'
+    | 'serve'
+    | 'serve --autostart on'
+    | 'serve --autostart off'
+    | 'serve --autostart remove'
+    | 'serve --autostart status',
 ): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
@@ -447,6 +484,8 @@ export type SshTunnelOptions = {
   detachTimeoutMs?: number
   /** How long a step of the installer, updater or autostart (`exec`) may take: a download on a slow link is part of it */
   execTimeoutMs?: number
+  /** This computer's name, for `serve --detach --from` (#1223); the OS's host name when absent */
+  hubName?: string
   log?: (line: string) => void
 }
 
@@ -490,6 +529,8 @@ export class SshTunnel implements Tunnel {
   private readonly ended = new WeakSet<ChildProcess>()
   /** The remote cannot start a host outside a session (WMI blocked): the forward runs it (`startHost`) */
   private linkBound = false
+  /** The last connection line said its `serve --detach` takes `--from` (#1223) */
+  private takesFrom = false
 
   constructor(private readonly opts: SshTunnelOptions) {
     if (!opts.target.trim() || opts.target.startsWith('-')) throw new Error('Not an ssh target')
@@ -505,6 +546,7 @@ export class SshTunnel implements Tunnel {
       throw err
     })
     this.ifClosed()
+    this.takesFrom = line.takes?.includes('from') === true
     if (!line.hostRunning && !this.linkBound) {
       return { url: '', token: line.token, line, localPort: 0 }
     }
@@ -548,7 +590,7 @@ export class SshTunnel implements Tunnel {
   async startHost(): Promise<HostStart> {
     this.ifClosed()
     const remote = this.opts.remote ?? { shell: 'posix' }
-    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.takesFrom ? (this.opts.hubName ?? hostname()) : null)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {

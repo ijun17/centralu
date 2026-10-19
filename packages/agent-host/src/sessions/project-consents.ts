@@ -90,8 +90,9 @@ export class ProjectConsents {
   }
 
   /**
-   * Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish;
-   * an ask for the pair still queued is not delivered (`withdrawReaches`)
+   * Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish,
+   * and so is a queued ask being delivered at that moment (waking its session counts as running: the consent held when
+   * it went in); an ask for the pair still queued is not delivered (`withdrawReaches`)
    */
   revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     if (!this.host.store.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)) return

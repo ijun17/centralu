@@ -1,12 +1,12 @@
 import { z } from 'zod'
-import type { MachineInfo } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
+import { machineLine, type MachineRequest } from './machine-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
-import { AGENT_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type AgentToolName, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
-import { FILL, callForm, commandsFor, guideSeats, notAToolText, profileAllows } from './tool-seats.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
+import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
 /*
  * The orchestrator tools, in four modules (#850): the definitions (tool-definitions.ts), which seat is shown and
@@ -42,10 +42,10 @@ function issuesText(error: z.ZodError): string {
 
 /**
  * Tools only some seats have (profileAllows), checked here too since this runner is shared by every seat: ask_project a
- * reader's, start_agent's pair a reader's and the orchestrator's (#853), which reaches them as commands in the
- * `commands` tier (a direct call then is refused, naming centralu_run)
+ * reader's, start_agent's pair and the app-access three a reader's and the orchestrator's (#853, #1205), which reaches
+ * them as commands in the `commands` tier (a direct call then is refused, naming centralu_run)
  */
-const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session'])
+const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
 
 /**
  * Runs one tool and turns the result into **text for the model to read**.
@@ -302,6 +302,15 @@ const HANDLERS: ToolHandlers = {
     return { text: `${machines.map(machineLine).join('\n')}\nPass a machine's name as machine to create_project or add_project.` }
   },
 
+  // The machine commands (#1219): the flow writes each answer, with the machine as it is after the change
+  add_machine: ({ sshTarget, name, wslDistro }, call) =>
+    machineCommand({ action: 'add', sshTarget, ...(trimmed(name) ? { name: trimmed(name) } : {}), ...(trimmed(wslDistro) ? { wslDistro: trimmed(wslDistro) } : {}) }, call),
+  install_machine: ({ machine, action }, call) => machineCommand({ action: action ?? 'install', machine }, call),
+  remove_machine: ({ machine }, call) => machineCommand({ action: 'remove', machine }, call),
+  reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
+  set_machine_connect: ({ machine, connect }, call) => machineCommand({ action: 'connect', machine, connect }, call),
+  set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
+
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
     const waitFor = trimmed(args.waitFor)
@@ -392,17 +401,20 @@ const HANDLERS: ToolHandlers = {
    * The app-access tools' texts (#371 part A). Each result names what to do next, because the tools
    * are deferred: the model that found find_apps learns attach_app from its answer, and detach_app from
    * attach_app's. Names an app or a project chose are JSON-quoted, like a worker's text (#121): a
-   * description is the app author's words, not ours.
+   * description is the app author's words, not ours. The orchestrator runs them as commands (#1205), so each call they
+   * name is written in the form its seat makes it (`namedCall`).
    */
-  async find_apps(args, { tools }) {
+  async find_apps(args, { tools, caller }) {
     const query = args.query?.trim() ?? ''
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.apps.length === 0) {
       return {
         text: query
-          ? `No app matches ${trustedJsonText(query)}. Try find_apps with no query to see every app you can attach.`
-          : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
+          ? `No app matches ${trustedJsonText(query)}. Try ${namedCall(caller.profile, 'find_apps', {})} with no query to see every app you can attach.`
+          : caller.profile === 'orchestrator'
+            ? "No app can be attached: no trusted project is an app, and the person's own apps are attached already."
+            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
       }
     }
     return {
@@ -414,11 +426,11 @@ const HANDLERS: ToolHandlers = {
               `\n    ${trustedJsonText(a.name)}${a.description ? `: ${trustedJsonText(a.description)}` : ''}` +
               `\n    tools: ${a.tools ? a.tools.join(', ') || '(none)' : '(listed once attached)'}`,
           )
-          .join('\n') + '\nAttach one with attach_app(app="<the name before ·>").',
+          .join('\n') + `\nAttach one with ${namedCall(caller.profile, 'attach_app', { app: '<the name before ·>' })}.`,
     }
   },
 
-  async attach_app(args, { tools }) {
+  async attach_app(args, { tools, caller }) {
     const app = args.app.trim()
     if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
     const r = await tools.attachApp(app)
@@ -431,7 +443,7 @@ const HANDLERS: ToolHandlers = {
     return {
       text:
         `${r.already ? 'Already attached' : 'Attached'}: ${app} as the ${r.server} server. Tools: ${names}. ${when}\n` +
-        `When you no longer need it, call detach_app(app=${trustedJsonText(app)}) so its tools stop taking up context.`,
+        `When you no longer need it, call ${namedCall(caller.profile, 'detach_app', { app })} so its tools stop taking up context.`,
     }
   },
 
@@ -525,10 +537,10 @@ function commandLine(description: string): string {
 }
 
 function commandDef(name: string) {
-  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].find((t) => t.name === name)
+  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].find((t) => t.name === name)
 }
 
-function commandSchemaText(name: OrchestratorToolName | AgentToolName): string {
+function commandSchemaText(name: CommandName): string {
   return JSON.stringify(z.toJSONSchema(TOOL_ARGS[name].strict()))
 }
 
@@ -560,7 +572,7 @@ async function runCommandTool(c: { [N in CommandToolName]: { name: N; args: Orch
   }
 
   const command = c.args.command.trim()
-  const def = commands.includes(command as OrchestratorToolName) ? commandDef(command) : undefined
+  const def = commands.includes(command as CommandName) ? commandDef(command) : undefined
   if (!def) {
     if (name === 'centralu_run') logRun(caller, command, 'no such command')
     return { text: `No command ${trustedJsonText(command)} for this session. ${known}`, isError: true }
@@ -609,34 +621,10 @@ function logRun(caller: ToolCaller, command: string, outcome: 'ran' | 'wrong arg
   console.error(`[commands] ${caller.sessionId ?? '-'} centralu_run ${JSON.stringify(command.slice(0, 64))}: ${outcome}`)
 }
 
-/** A linked machine's status in words (#1220); a status this build does not name reads as itself */
-const MACHINE_STATUS: Record<string, string> = {
-  connected: 'connected',
-  connecting: 'connecting',
-  starting: 'connecting (starting Centralu there)',
-  updating: 'updating Centralu there',
-  unreachable: 'unreachable',
-  disconnected: 'disconnected',
-  not_running: 'unreachable (Centralu is not running there)',
-  versions_differ: 'not connected (waiting for the person to align versions)',
-  refused: 'not connected (it refused the link)',
-}
 
-/**
- * One linked machine for list_machines (#1220): its name as the person gave it (quoted, since it is theirs), status,
- * OS and shell, and when its link is opened. The OS follows from the shell the hub reaches it with: PowerShell is
- * Windows, WSL a Linux distro on Windows, a Unix shell macOS or Linux (Linux when it starts at boot with systemd).
- * `connect` is the person's choice (#1134).
- */
-function machineLine(m: MachineInfo): string {
-  const os =
-    m.shell === 'powershell'
-      ? 'Windows, PowerShell'
-      : m.shell === 'wsl'
-        ? `Linux in WSL${m.wslDistro ? ` (${m.wslDistro})` : ''} on Windows`
-        : m.autostart?.how === 'systemd'
-          ? 'Linux, Unix shell'
-          : 'macOS or Linux, Unix shell'
-  const connect = m.connect === 'when_needed' ? 'connects when needed' : 'connects at start'
-  return `- ${trustedJsonText(m.name)} [${m.id}]: ${MACHINE_STATUS[m.status] ?? m.status}; ${os}; ${connect}`
+/** One machine command (#1219), through the seat's `machine`; a seat without it is told so */
+async function machineCommand(req: MachineRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.machine) return { text: 'This session cannot change linked machines.', isError: true }
+  const r = await tools.machine(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
