@@ -63,7 +63,8 @@ export class MergeChecks {
     // worktrees created before a manager existed, and the baseline at that time is exactly what it meant back
     // then
     const trunk = this.host.trunkOf(projectId) ?? 'HEAD'
-    for (const m of this.host.meta.values()) {
+    // Over a copy: the loop waits on git and gh, and a reorder meanwhile refills the sessions in place (#1143)
+    for (const m of [...this.host.meta.values()]) {
       if (this.host.disposing || this.host.handingOver) return
       if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged) continue
       let merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)

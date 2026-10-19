@@ -22,13 +22,22 @@ on:
         description: Run every job, whatever the commit changes (unticked, the files leave out what they cannot affect)
         type: boolean
         default: true
+      # The merge queue's batches ask for the quick tier (#1259): a change lands after the fast tier, and
+      # the full tier runs on main once it has landed (.github/scripts/ci-changes.mjs)
+      tier:
+        description: Which tier a manual run is (quick is the merge queue's batch; a release bump or a commit on main still runs in full)
+        type: choice
+        options: [full, quick]
+        default: full
 
-# Ordinary pushes supersede earlier work. A release bump can be tagged while its build
-# still runs, so its commit gets a separate group: a later merge must not cancel the
-# build that publication will wait for (#633).
+# Ordinary pushes to a branch supersede earlier work. A release bump can be tagged while its
+# build still runs, so its commit gets a separate group: a later merge must not cancel the
+# build that publication will wait for (#633). A push to main is never cancelled by the next
+# (#1259): changes land after the fast tier, and each main commit's full run is how the merge
+# queue's main guard finds what broke main; the queue holds landing while too many are unfinished.
 concurrency:
   group: build-${{ github.ref }}${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(release):') && format('-release-{0}', github.sha) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # Which jobs a run needs: its tier, then the files it adds to main (.github/scripts/ci-changes.mjs,
@@ -77,6 +86,7 @@ jobs:
         env:
           # Empty on a push or a pull request; set (true by default) on a manual run, which is the full tier
           EVERYTHING: ${{ inputs.everything }}
+          DISPATCH_TIER: ${{ inputs.tier }}
         run: node .github/scripts/ci-changes.mjs
 
   # Passes on a full run only, and is skipped on a quick one: how the merge queue and the release tell a
