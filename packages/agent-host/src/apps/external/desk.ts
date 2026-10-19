@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
 import { z } from 'zod'
-import { NOTICE_TOOL, type BrokerCall, type BrokerToolName } from './broker.js'
+import { NOTICE_TOOL, WATCH_TOOL, type BrokerCall, type BrokerToolName, type SessionsAnswer } from './broker.js'
 import { NOTICE_MAX_CHARS, NOTICES_PER_MINUTE } from './notices.js'
 import {
   HOST_CAPABILITIES,
   capabilityKey,
   hostCapabilityText,
+  sessionCapabilityText,
   isHostCapability,
   usesStamp,
   type Capability,
@@ -183,6 +184,11 @@ export type BrokerHost = {
    * the app reads when it cannot be delivered now (the session is gone, Centralu is restarting).
    */
   appNotice?(sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }): Promise<void>
+  /**
+   * One poll for the changes of a project's sessions (`watch_sessions`): answers when something changed after `cursor`,
+   * or empty after `waitMs`, or at once with every session when the cursor cannot be followed.
+   */
+  watchSessions?(projectId: string, cursor: string | undefined, waitMs: number, signal: AbortSignal): Promise<SessionsAnswer>
 }
 
 /**
@@ -220,6 +226,11 @@ export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
  * app immediately, with a reason — the app can wait for the first one to finish and ask again.
  */
 export const CHAIN_DEPTH_MAX = 3
+/** A session poll waits at most this long (the app's client gives up after 60 s of silence), by default this long */
+export const WATCH_WAIT_MAX_MS = 25_000
+export const WATCH_WAIT_DEFAULT_MS = 20_000
+/** Polls an app may begin in a minute: waiting 20 s each it makes 3, a burst of changes a few more; a loop that does not wait is stopped here */
+export const WATCH_ANSWERS_PER_MINUTE = 120
 export const AGENT_RUNS_PER_WINDOW = 5
 
 const CallAppArgs = z.object({
@@ -260,7 +271,7 @@ const RunAgentArgs = z.object({
 export type CapabilityDecisionListed = { capability: string; text: string; decision: 'allow' | 'deny'; decidedAt: number; current: boolean }
 
 /** The text of a denial — this goes both into the app's result and its stderr. Also states how to reverse it */
-function deniedText(tool: BrokerToolName, appName: string, text: string): string {
+function deniedText(tool: BrokerToolName | typeof WATCH_TOOL, appName: string, text: string): string {
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
 
@@ -481,6 +492,50 @@ export class BrokerDesk {
     return null
   }
 
+  /** Apps with a poll open (`watch`): one each */
+  private watching = new Set<string>()
+  /** When each app's recent polls began, for `WATCH_ANSWERS_PER_MINUTE` */
+  private watchTimes = new Map<string, number[]>()
+
+  /**
+   * An app hears of its project's sessions (`watch_sessions`): the third request without a run id, after `busy` and
+   * `notify`. Only with `"sessions": ["observe"]` in `uses`, only for a project app (the sessions are its project's),
+   * one poll open at a time, and at most `WATCH_ANSWERS_PER_MINUTE` begun in a minute so a loop that does not wait is
+   * stopped. Asked once like every capability (`permit`): the answer is kept until the manifest's `uses` changes, so an
+   * update that adds `observe` asks the person again. No run started the poll, so the question stands on the app's pinned
+   * view. Answers the refusal, or what changed. No run row: see `WATCH_TOOL`.
+   */
+  async watch(app: DeskApp, args: { after?: string; waitMs?: number }, signal: AbortSignal, progress: (message?: string) => void = () => {}): Promise<{ refused: string } | { answer: SessionsAnswer }> {
+    const refuse = (why: string) => ({ refused: `watch_sessions refused: ${why}` })
+    if (!(app.manifest.uses.sessions ?? []).includes('observe')) {
+      return refuse('this app does not declare "uses": { "sessions": ["observe"] } in centralu.app.json')
+    }
+    const projectId = app.ref.projectId
+    if (projectId === null) return refuse('an app of the user folder has no project, so it has no sessions of its project to hear of')
+    const host = this.host
+    if (!host?.watchSessions) return refuse('this Centralu has no sessions to observe')
+    const key = slotOf(app.ref)
+    if (this.watching.has(key)) return refuse('a poll is already open for this app; wait for its answer before asking again')
+    const now = Date.now()
+    const recent = (this.watchTimes.get(key) ?? []).filter((t) => now - t < 60_000)
+    if (recent.length >= WATCH_ANSWERS_PER_MINUTE) {
+      this.watchTimes.set(key, recent)
+      return refuse(`${WATCH_ANSWERS_PER_MINUTE} polls in the last minute; wait for a change with waitMs instead of asking again at once`)
+    }
+    this.watchTimes.set(key, [...recent, now])
+    const waitMs = Math.min(WATCH_WAIT_MAX_MS, Math.max(0, args.waitMs ?? WATCH_WAIT_DEFAULT_MS))
+    this.watching.add(key)
+    try {
+      const denied = await this.permit(WATCH_TOOL, app, { kind: 'sessions', name: 'observe' }, sessionCapabilityText('observe'), { parentRunId: '', signal, progress })
+      if (denied) return { refused: firstText(denied.result) }
+      return { answer: await host.watchSessions(projectId, args.after, waitMs, signal) }
+    } catch (e) {
+      return refuse((e as Error).message)
+    } finally {
+      this.watching.delete(key)
+    }
+  }
+
   /**
    * `host_data` (D-3) — only a name from the closed list, and only one the manifest listed in
    * `uses.host`. Both default to refusal: a name outside the list is not a capability at all, and one
@@ -672,7 +727,7 @@ export class BrokerDesk {
    * denial, but **remembers nothing** — that is not an answer. It asks again the next time this is
    * used.
    */
-  private async permit(tool: BrokerToolName, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
+  private async permit(tool: BrokerToolName | typeof WATCH_TOOL, app: DeskApp, capability: Capability, text: string, call: BrokerCall): Promise<Answer | null> {
     const key = capabilityKey(capability)
     const stamp = usesStamp(app.manifest.uses)
     const known = this.book.get(app.ref, key)

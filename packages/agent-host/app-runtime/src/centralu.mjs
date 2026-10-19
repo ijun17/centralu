@@ -13,6 +13,8 @@
  *   centralu.busy(reason) / centralu.busy(false)   keep running with nothing open while busy (uses.background)
  *   centralu.noticeAddress()                       the calling session's address, for a notice later (uses.notices)
  *   centralu.notify(address, text)                 post a notice into that session, from anywhere (over fd 3)
+ *   centralu.watchSessions({ after })              one poll for changes of this project's sessions (uses.sessions: ["observe"])
+ *   centralu.observeSessions(onChange)             hear of them for as long as the app runs; returns stop()
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
  */
@@ -259,6 +261,71 @@ export const centralu = {
     } catch (e) {
       console.error(`[centralu] centralu.notify: Centralu did not take it: ${e?.message ?? e}`)
       return false
+    }
+  },
+
+  /**
+   * One poll for the changes of this project's sessions: resolves with `{ cursor, full, sessions, gone }` when a session
+   * changed after `after` (the `cursor` of the last answer), or with nothing in it after `waitMs` (20 s by default, 25 s
+   * at most). With no `after`, or one Centralu cannot follow (a new host, a poll left too long), `full` is true and
+   * `sessions` is every session of the project: compare it with what you remember. A row carries state and counters,
+   * never a conversation: `{ id, name, kind, tool, state, live, waitingSince, lastSeq, activeAt, parentId, askedBy,
+   * pending: { approvals, questions }, createdAt, machine, appId }`. Callable anywhere, a timer included. The manifest
+   * must declare "uses": { "sessions": ["observe"] }, and the person is asked once (on the app's screen) whether it may. Throws a CentraluError that says why Centralu refused. One poll
+   * at a time per app: use `observeSessions` for a loop.
+   */
+  async watchSessions({ after, waitMs, signal } = {}) {
+    const args = { ...(after ? { after } : {}), ...(waitMs !== undefined ? { waitMs } : {}) }
+    let r
+    try {
+      r = await callBroker('watch_sessions', args, undefined, signal)
+    } catch (e) {
+      throw new BrokerError(`centralu.watchSessions failed: ${e.message}`)
+    }
+    if (r?.isError) throw new BrokerError(`centralu.watchSessions failed: ${textOf(r) || 'Centralu returned an error with no text'}`)
+    return r.structuredContent ?? JSON.parse(textOf(r))
+  },
+
+  /**
+   * Hears of this project's sessions for as long as the app runs: calls `onChange({ full, sessions, gone })` for the first
+   * answer (every session, `full: true`) and then for each change, in order, one at a time. A failure (Centralu
+   * restarting, a lost pipe) is said on stderr and tried again after 1 s, doubling to 30 s; a refusal that will not go
+   * away (no declaration, not a project app, an older Centralu) is said once and ends the loop. Returns `stop()`.
+   * `onChange` that throws is logged and the loop goes on. Hold `centralu.busy()` if the app has to keep running.
+   */
+  observeSessions(onChange, { waitMs } = {}) {
+    let stopped = false
+    const abort = new AbortController()
+    // The last is an older Centralu, which has no such request: the MCP server answers "Tool … not found"
+    const permanent = /does not declare|has no project|has no sessions to observe|the person did not allow|Tool watch_sessions not found|Method not found/
+    void (async () => {
+      let cursor
+      let delay = 1000
+      while (!stopped) {
+        let answer
+        try {
+          answer = await centralu.watchSessions({ after: cursor, waitMs, signal: abort.signal })
+          delay = 1000
+        } catch (e) {
+          if (stopped) return
+          console.error(`[centralu] centralu.observeSessions: ${e.message}`)
+          if (permanent.test(e.message)) return
+          await new Promise((resolve) => setTimeout(resolve, delay))
+          delay = Math.min(delay * 2, 30_000)
+          continue
+        }
+        cursor = answer.cursor
+        if (!answer.full && !answer.sessions.length && !answer.gone.length) continue
+        try {
+          await onChange({ full: answer.full, sessions: answer.sessions, gone: answer.gone, ...(answer.truncated ? { truncated: true } : {}) })
+        } catch (e) {
+          console.error(`[${APP_ID}] observeSessions handler threw:`, e)
+        }
+      }
+    })()
+    return () => {
+      stopped = true
+      abort.abort()
     }
   },
 

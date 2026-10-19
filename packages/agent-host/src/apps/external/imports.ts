@@ -473,6 +473,7 @@ export function reviewOf(
       ...(manifest.uses.host ? { host: manifest.uses.host } : {}),
       ...(manifest.uses.background ? { background: manifest.uses.background } : {}),
       ...(manifest.uses.notices !== undefined ? { notices: manifest.uses.notices } : {}),
+      ...(manifest.uses.sessions?.length ? { sessions: manifest.uses.sessions } : {}),
     },
     secrets: manifest.secrets ?? [],
     home: manifest.home ?? null,

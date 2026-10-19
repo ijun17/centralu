@@ -63,6 +63,7 @@ export type { AppCheckReport, CheckFinding } from './check.js'
 /** The shape of an error bundle (C-6) */
 export type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 /** The part of the broker's body the host's core fills in (D) — the manager supplies it via `attachBrokerHost` */
+export type { ObservedSession, SessionsAnswer } from './broker.js'
 export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityOrigin, CapabilityQuestion, CapabilityDecisionListed } from './desk.js'
 /** Where a capability approval's answer is stored (D-4) — the host fills it in with the store (`app-permission-book.ts`) */
 export type { CapabilityBook, CapabilityDecision } from './capabilities.js'
@@ -921,7 +922,7 @@ export class ExternalApps {
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141)
-      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background || m.uses.notices) ? { uses: m.uses } : {}),
+      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background || m.uses.notices || m.uses.sessions?.length) ? { uses: m.uses } : {}),
       // Holding its process for background work now (#1236): the row says so, in the app's words
       ...(this.lifecycle.busyReason(e) !== null ? { busy: this.lifecycle.busyReason(e)! } : {}),
     }
