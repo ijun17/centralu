@@ -152,7 +152,8 @@ export const ORCHESTRATOR_TOOLS = [
   },
   /*
    * #1219: the linked machines, as the Machines screen manages them. Rare commands (RARE_COMMANDS). A change to a
-   * machine or to this computer's reach waits for the person's card; reconnecting and the connect mode do not.
+   * machine or to this computer's reach waits for the person's card; reconnecting and the connect mode do not, except
+   * that starting Centralu where it is stopped does (#1143).
    */
   {
     name: 'add_machine',
@@ -181,7 +182,7 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'reconnect_machine',
-    description: 'Tries the link to a machine again now, or connects a disconnected one. No card.',
+    description: 'Tries the link to a machine again now, or connects a disconnected one. No card, except to start Centralu on a machine where it is stopped.',
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
   },
   {

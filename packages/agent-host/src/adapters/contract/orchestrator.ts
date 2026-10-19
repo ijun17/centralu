@@ -92,6 +92,14 @@ export type RecallHit = {
 /** Why a machine that is not connected cannot be asked, in the words every tool uses for it */
 export const NOT_REACHABLE = 'not reachable right now'
 
+/**
+ * A machine that cannot be asked (`LinkedProject.away`), as the verb phrase after its name: the words a model reads for
+ * not reachable, its plain cause for any other
+ */
+export function awayPhrase(why: string): string {
+  return why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`
+}
+
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
 export type LinkedProject = {
   id: string
@@ -126,7 +134,10 @@ export type LinkedSessions = {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null },
   ): Promise<Outcome<{ info: SessionInfo & { applied?: string } }>>
-  /** The reachable machines' projects whose name or qualified id is `ref` */
+  /**
+   * The projects of `projects()` whose name or qualified id is `ref`, under the same per-machine bound: one on a machine
+   * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing
+   */
   findProjects(ref: string): Promise<LinkedProject[]>
   /**
    * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers

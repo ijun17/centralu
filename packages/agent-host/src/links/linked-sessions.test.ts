@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
@@ -345,6 +346,62 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
       ['slow.p-old', 'Slow box', 'did not answer within 30 ms'],
       ['m1.p1', 'Box', undefined],
     ])
+  })
+
+  /*
+   * #1143 L1: finding a project by name had no bound while listing them had one. create_session looks the name up on
+   * every machine even for a project on this computer, so a stalled link held it up to the link's call timeout; and a
+   * machine that did not answer was dropped, so a name on it and on this computer started the work here unasked.
+   */
+  describe('create_session by name while a link has stalled', () => {
+    async function seat() {
+      const store = new Store()
+      store.sessions.upsertSession({
+        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+        state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+        serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
+        roleAppend: null, appId: null, ...sessionLiveDefaults(),
+      })
+      store.projects.addProject({ id: 'p-here', path: tmpdir(), name: 'site' })
+      const asked: string[] = []
+      const stalled: RoutedMachine = {
+        ...machine({}, { mirror: { projects: [{ id: 'p-far', name: 'site', path: '/srv/site', defaultTool: 'claude' }, { id: 'p-only', name: 'far', path: '/srv/far', defaultTool: 'claude' }] } }),
+        name: 'Slow box',
+        // Connected, and never answers
+        call: (method) => {
+          asked.push(method)
+          return new Promise(() => {})
+        },
+      }
+      const mgr = new SessionManager(store, scriptedAdapters(), () => {})
+      mgr.useLinkedReader(linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 }))
+      cleanupSeat.push(() => mgr.disposeAll())
+      return { mgr, asked }
+    }
+    const cleanupSeat: (() => Promise<void>)[] = []
+    afterEach(async () => {
+      await Promise.all(cleanupSeat.splice(0).map((c) => c()))
+    })
+
+    it('waits no longer than the lookup bound, and refuses a name that is also on the machine that did not answer', async () => {
+      const { mgr, asked } = await seat()
+      const t0 = Date.now()
+      const r = await mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })
+      expect(Date.now() - t0).toBeLessThan(2000)
+      expect(r.isError).toBe(true)
+      expect(r.text).toContain('More than one project is called that; give its id: site [p-here] on this computer; site [m1.p-far] on Slow box (which could not be asked just now (did not answer within 30 ms))')
+      // Its id settles it, and this computer's own id asks no machine at all
+      const before = asked.length
+      expect(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'p-here' })).toMatchObject({ isError: false })
+      expect(asked).toHaveLength(before)
+    })
+
+    it('names the machine that did not answer for a project only there, and sends it no create', async () => {
+      const { mgr, asked } = await seat()
+      const r = await mgr.runOrchestratorTool('orch', 'create_session', { project: 'far' })
+      expect(r).toMatchObject({ isError: true, text: 'Could not create it — far [m1.p-only] is on Slow box, which could not be asked just now (did not answer within 30 ms). Try again once its link is back.' })
+      expect(asked).toEqual(['projects.list'])
+    })
   })
 
   it('keeps trust as the machine said it, and says nothing when an older machine does not (absent is not "not trusted", #382)', async () => {

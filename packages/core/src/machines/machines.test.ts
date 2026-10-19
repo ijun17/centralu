@@ -300,6 +300,16 @@ describe('a machine that connects when needed (#1134)', () => {
     expect(machinesInUse({ session: { machine: 'gone' } }, machines)).toEqual([])
   })
 
+  // #1143: stopped there, by the person or after its hosts kept stopping; the host's sentence says which, and Start fixes it
+  it('says stopped, in the host’s words, with Start as the fix', () => {
+    expect(MACHINE_STATUS_LABEL.stopped).toBe('stopped')
+    expect(machineProblem(machine({ status: 'stopped', error: 'Centralu was stopped on Box by quitting Centralu there' }))).toEqual({
+      title: 'Centralu was stopped on Box by quitting Centralu there',
+      fix: 'Press Start to start it there',
+    })
+    expect(machineProblem(machine({ status: 'stopped', error: null }))?.title).toBe('Centralu is stopped on Box')
+  })
+
   it('is disconnected without a problem to fix, and the row says so', () => {
     expect(machineProblem(machine({ status: 'disconnected' }))).toBeNull()
     expect(MACHINE_STATUS_LABEL.disconnected).toBe('disconnected')

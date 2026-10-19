@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -14,7 +15,7 @@ import { Links, type LinkDeps } from './links.js'
 import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
-import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
+import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -552,6 +553,9 @@ describe('a hub linked to another host (#82)', () => {
     const u = await ui(hub.port)
     await expect(u.call('machines.add', { name: 'x', sshTarget: '-oProxyCommand=evil' })).rejects.toThrow(/Not an ssh target/)
     await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl' })).rejects.toThrow(/distro/)
+    // A name WSL would not take is refused at add, by the rule its commands apply, not stored to fail every connect
+    await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl', wslDistro: 'Ubuntu 22.04' })).rejects.toThrow(/Not a WSL distro name: Ubuntu 22.04/)
+    expect(await u.call('machines.list')).toEqual([])
     const added: MachineInfo = await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
     expect(added).toMatchObject({ id: 'remote-box', shell: 'posix' })
     await eventually(() => status(hub) === 'connected')
@@ -697,6 +701,278 @@ describe('a hub linked to another host (#82)', () => {
       await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.links.list()[0]!.hostStarted).toMatchObject({ how: 'link_bound', note: /through WMI/ })
       expect(l.logs.join('\n')).toMatch(/its host runs only while this link is up: Windows did not start Centralu through WMI/)
+    })
+
+    /*
+     * #1143 L5: the client redialled the same forward for good, and only the link's own retry reads the connection line
+     * and runs `serve --detach`. A detached host that died while `ssh -N` stayed up was never started again.
+     */
+    it('starts a host again when the detached one died behind a forward that stayed up', async () => {
+      let host = await remoteHost()
+      let starts = 0
+      let alive = true
+      // The forward never goes down: only the host behind it does
+      const tunnel = Object.assign(new DirectTunnel(() => lineFor(host.port, { hostRunning: alive })), {
+        startHost: async (): Promise<HostStart> => {
+          starts++
+          host = await remoteHost()
+          alive = true
+          return { how: 'detached', note: null }
+        },
+      })
+      const store = new Store()
+      const registry = storeRegistry(store)
+      registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+      const statuses: string[] = []
+      const links = new Links({
+        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        broadcast: (e) => {
+          if (e.type === 'machine_status') statuses.push(e.machine.status)
+        },
+        terminal: () => {},
+        mirror: storeMirror(store),
+        registry,
+        tunnelFor: () => tunnel,
+        retryMs: [50, 200],
+        client: { maxBackoffMs: 100 },
+      })
+      cleanups.push(() => links.stop())
+      links.start()
+      await eventually(() => links.list()[0]!.status === 'connected')
+      expect(starts).toBe(0)
+      statuses.length = 0
+      alive = false
+      await host.close()
+      await eventually(() => starts === 1 && links.list()[0]!.status === 'connected')
+      expect(statuses).toEqual(expect.arrayContaining(['unreachable', 'starting', 'connected']))
+    })
+
+    /**
+     * A link over a forward that stays up, to a machine whose hosts the test controls: `startHost` starts one, which
+     * the line then says runs; `stopped` is the line's mark of the person's stop. Each start and each time the link gave
+     * up on its client is timed (`performance.now()`), and every status kept
+     */
+    async function restartable(
+      o: {
+        dieAfterHello?: boolean
+        stopped?: () => ConnectionLine['stopped'] | undefined
+        /** The port of a host started there by someone else, when one runs */
+        running?: () => number | null
+        /** A start goes through, and its host stops before it answers */
+        neverUp?: boolean
+        /** `serve --detach` says the host it started exited before it answered: one that crashes at boot */
+        crashAtBoot?: boolean
+        /** The machine cannot be reached just now (asleep): asking for the line fails */
+        asleep?: () => boolean
+        extra?: Partial<LinkDeps>
+      } = {},
+    ) {
+      let host: Awaited<ReturnType<typeof remoteHost>> | null = null
+      let asks = 0
+      // Every host that starts there removes the person's mark, as the host does once it holds the folder's lock
+      let markCleared = false
+      const starts: number[] = []
+      const gaveUp: number[] = []
+      const statuses: string[] = []
+      const tunnel = Object.assign(
+        new DirectTunnel(() => {
+          if (o.asleep?.()) throw new Error('ssh: connect to host box port 22: Operation timed out')
+          asks++
+          const port = host?.port ?? o.running?.() ?? null
+          const stopped = port === null && !markCleared ? o.stopped?.() : undefined
+          return lineFor(port ?? 1, { hostRunning: port !== null, ...(stopped ? { stopped } : {}) })
+        }),
+        {
+          startHost: async (): Promise<HostStart> => {
+            starts.push(performance.now())
+            markCleared = true
+            if (o.crashAtBoot) throw new StartedNotServing('centralu serve exited (1) before its host answered')
+            if (!o.neverUp) host = await remoteHost()
+            return { how: 'detached', note: null }
+          },
+        },
+      )
+      const store = new Store()
+      const registry = storeRegistry(store)
+      registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+      const links: Links = new Links({
+        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        broadcast: (e) => {
+          if (e.type !== 'machine_status') return
+          statuses.push(e.machine.status)
+          // The host there stops right after it answered: a crash in its first minute
+          if (o.dieAfterHello && e.machine.status === 'connected' && host) {
+            const h = host
+            host = null
+            void h.close()
+          }
+        },
+        terminal: () => {},
+        mirror: storeMirror(store),
+        registry,
+        tunnelFor: () => tunnel,
+        log: (l) => void (l.includes('asking the machine again') && gaveUp.push(performance.now())),
+        retryMs: [50, 1_000],
+        client: { maxBackoffMs: 5 },
+        ...o.extra,
+      })
+      cleanups.push(() => links.stop())
+      links.start()
+      return { links, starts, gaveUp, statuses, asks: () => asks, row: () => links.list()[0]! }
+    }
+
+    /*
+     * #1143 review: a host that said hello and then stopped reset the backoff at every hello, and was started again
+     * about every 10 s for good, each start moving the first failure's serve.log away
+     */
+    it('starts a host that keeps stopping right after its hello at most three times, then says stopped and starts none until Start', async () => {
+      const l = await restartable({ dieAfterHello: true })
+      await eventually(() => l.row().status === 'stopped')
+      expect(l.starts).toHaveLength(3)
+      expect(l.row().error).toBe(
+        'The Centralu hosts this computer started on Remote box did not stay up (3 starts within 10 minutes), so it starts no more by itself; serve.log and host.log in its data folder there say why. Start tries again',
+      )
+      // Asked again on the backoff, and still nothing started
+      const asked = l.asks()
+      await eventually(() => l.asks() > asked)
+      expect(l.starts).toHaveLength(3)
+      expect(l.row().status).toBe('stopped')
+      // The person's Start starts one, past the limit
+      l.links.reconnect('m1')
+      await eventually(() => l.starts.length === 4)
+    })
+
+    it('stays stopped past the ten minutes: the limit holds until the person’s Start, not until the starts age out', async () => {
+      const l = await restartable({ dieAfterHello: true, extra: { restarts: { max: 3, windowMs: 1_500 } } })
+      await eventually(() => l.row().status === 'stopped')
+      const at = performance.now()
+      const asked = l.asks()
+      // Asked twice more on the backoff, the second well past the window
+      await eventually(() => l.asks() >= asked + 2 && performance.now() - at > 1_700)
+      expect(l.starts).toHaveLength(3)
+      expect(l.row().status).toBe('stopped')
+    })
+
+    it('counts a start at the person’s Start too: one whose hosts never answer is not started at every step for good', async () => {
+      const l = await restartable({ stopped: () => ({ by: 'stop', at: 1 }), neverUp: true })
+      await eventually(() => l.row().status === 'stopped')
+      l.links.reconnect('m1')
+      await eventually(() => /did not stay up \(3 starts/.test(l.row().error ?? ''))
+      const asked = l.asks()
+      await eventually(() => l.asks() > asked)
+      expect(l.starts).toHaveLength(3)
+    })
+
+    it('counts a host that crashes at boot, before it ever answers, against the same limit', async () => {
+      const l = await restartable({ crashAtBoot: true })
+      await eventually(() => l.row().status === 'stopped')
+      expect(l.starts).toHaveLength(3)
+      expect(l.row().error).toMatch(/did not stay up \(3 starts within 10 minutes\)/)
+    })
+
+    /*
+     * #1293 re-review: the row flipped to `connecting` at every reading of the line, and to `unreachable` while the
+     * machine slept, and the orchestrator's card was gated on that status: it could start what the person stopped
+     */
+    it('stays stopped while it reads the line again and while the machine sleeps, and the orchestrator’s plain reconnect starts nothing', async () => {
+      let asleep = false
+      const l = await restartable({ stopped: () => ({ by: 'stop', at: 1 }), asleep: () => asleep })
+      await eventually(() => l.row().status === 'stopped')
+      const from = l.statuses.length
+      const asked = l.asks()
+      await eventually(() => l.asks() >= asked + 2)
+      expect(l.statuses.slice(from)).not.toContain('connecting')
+      asleep = true
+      await eventually(() => l.row().status === 'unreachable')
+      expect(l.links.startHeldBack('m1')).toMatch(/^Centralu was stopped on Remote box with `centralu serve --stop`/)
+      // The orchestrator's reconnect without its card, then the machine wakes: still held back, nothing started
+      l.links.reconnect('m1', { start: false })
+      asleep = false
+      await eventually(() => l.row().status === 'stopped')
+      expect(l.starts).toEqual([])
+      expect(l.links.startHeldBack('m1')).not.toBeNull()
+      // A Start pressed while the machine sleeps is spent, not kept for when it wakes (it may have been stopped since)
+      asleep = true
+      await eventually(() => l.row().status === 'unreachable')
+      l.links.reconnect('m1')
+      const tried = l.statuses.length
+      await eventually(() => l.statuses.length > tried && l.row().status === 'unreachable')
+      asleep = false
+      await eventually(() => l.row().status === 'stopped')
+      expect(l.starts).toEqual([])
+      // The person's Start is a start, and once it went through nothing is held back
+      l.links.reconnect('m1')
+      await eventually(() => l.row().status === 'connected')
+      expect(l.starts).toHaveLength(1)
+      expect(l.links.startHeldBack('m1')).toBeNull()
+    })
+
+    it('starts the backoff over only once a host has stayed up a while, not at its hello', async () => {
+      const l = await restartable({ dieAfterHello: true, extra: { restarts: { max: 10, windowMs: 60_000 } } })
+      await eventually(() => l.starts.length >= 4)
+      // From giving up on each host to starting the next: the retry's 50 ms doubling, which a hello used to reset to 50
+      const waits = [1, 2].map((k) => l.starts[k + 1]! - l.gaveUp[k]!)
+      // A timer may fire a ms early
+      expect(waits[0]).toBeGreaterThanOrEqual(95)
+      expect(waits[1]).toBeGreaterThanOrEqual(190)
+    })
+
+    it('starts no host where the person stopped it, says so, and starts one at the person’s Start', async () => {
+      let mark: ConnectionLine['stopped'] | undefined = { by: 'stop', at: 1 }
+      const l = await restartable({ stopped: () => mark })
+      await eventually(() => l.row().status === 'stopped')
+      expect(l.row().error).toBe('Centralu was stopped on Remote box with `centralu serve --stop`, so this computer does not start it by itself. Start starts it there')
+      mark = { by: 'quit', at: null }
+      await eventually(() => /by quitting Centralu there/.test(l.row().error ?? ''))
+      expect(l.starts).toEqual([])
+      // The link's own reconnect (after an update, say) is no Start
+      const asked = l.asks()
+      l.links.get('m1')!.reconnect()
+      await eventually(() => l.asks() > asked)
+      expect(l.starts).toEqual([])
+      l.links.reconnect('m1')
+      await eventually(() => l.row().status === 'connected')
+      expect(l.starts).toHaveLength(1)
+    })
+
+    it('a host the person started there again themselves is connected to, with no start of its own', async () => {
+      let own: number | null = null
+      const l = await restartable({ stopped: () => ({ by: 'stop', at: 1 }), running: () => own })
+      await eventually(() => l.row().status === 'stopped')
+      // The person runs `centralu serve` there: the line says it runs, and the backoff's next ask finds it
+      own = (await remoteHost()).port
+      await eventually(() => l.row().status === 'connected')
+      expect(l.starts).toEqual([])
+    })
+
+    it('a host that was there all along replays what it sent while the forward was dead, after the link read its line again', async () => {
+      const remote = await remoteHost()
+      // The forward: passes through, or, blocked, takes no connection and cuts the ones it held
+      let blocked = false
+      const held = new Set<Socket>()
+      const forward = createServer((c) => {
+        if (blocked) return c.destroy()
+        const r = connect(remote.port, '127.0.0.1')
+        c.pipe(r)
+        r.pipe(c)
+        held.add(c)
+        c.on('close', () => held.delete(c))
+        c.on('error', () => r.destroy())
+        r.on('error', () => c.destroy())
+      })
+      await new Promise<void>((r) => forward.listen(0, '127.0.0.1', () => r()))
+      cleanups.push(() => new Promise<void>((r) => forward.close(() => r())))
+      const hub = await hubHost(() => lineFor((forward.address() as AddressInfo).port))
+      await eventually(() => status(hub) === 'connected')
+      const u = await ui(hub.port)
+      blocked = true
+      for (const c of held) c.destroy()
+      // Past its redials the link asks the machine again; the line says the host runs, and the forward is still dead
+      await eventually(() => /asking the machine again/.test(hub.links.list()[0]!.error ?? ''))
+      remote.server.broadcast({ type: 'projects_changed' })
+      blocked = false
+      await eventually(() => status(hub) === 'connected')
+      await eventually(() => u.events().some((e) => e.type === 'projects_changed'))
     })
 
     it('reports a start that failed as not running, with the reason, and tries again later', async () => {
@@ -872,9 +1148,12 @@ describe('a machine whose Node is below the floor (#699)', () => {
       },
     })
     await eventually(() => l.calls.length >= 2 && l.row().status === 'not_running')
+    expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
+    // Its hosts keep crashing at start: past the limit of starts (#1143) the row says so, with the crash's own words
+    await eventually(() => l.row().status === 'stopped')
     await l.retried()
     expect(l.runs).toHaveLength(3)
-    expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
+    expect(l.row().error).toMatch(/did not stay up \(3 starts within 10 minutes\).*\(the last start: centralu serve exited \(3221225477\) before its host answered\)\. Start tries again$/)
   })
 
   it('tries a failing install once, not at every retry (each one is a download)', async () => {

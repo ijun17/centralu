@@ -15,7 +15,10 @@ export type MachineOps = {
   probe(sshTarget: string): Promise<MachineProbe>
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null }): MachineInfo
   remove(id: string): Promise<void>
-  reconnect(id: string): MachineInfo
+  /** `start: false`: opens the link and starts no host the link itself would not (#1143); the person's Start otherwise */
+  reconnect(id: string, opts?: { start?: boolean }): MachineInfo
+  /** Why no host is started on the machine just now (the person stopped it there, or the link's limit), or null */
+  startHeldBack(id: string): string | null
   setConnect(id: string, connect: MachineConnect): MachineInfo
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   update(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
@@ -42,6 +45,7 @@ const MACHINE_STATUS: Record<string, string> = {
   not_running: 'unreachable (Centralu is not running there)',
   versions_differ: 'not connected (waiting for the person to align versions)',
   refused: 'not connected (it refused the link)',
+  stopped: 'not connected (Centralu is stopped there; reconnecting starts it, with a card)',
 }
 
 /** The OS and shell the hub reaches a machine with, in words: PowerShell is Windows, WSL a distro on Windows */
@@ -81,7 +85,8 @@ function targetError(target: string): string | null {
  * The orchestrator's commands for linked machines (#1219): add (probed first), install or update Centralu there,
  * remove, reconnect, when it connects, and whether it starts at boot. Each is the call the window's Machines screen
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
- * person's card, in every preset; reconnecting and the connect mode do not, as the row's buttons do not ask. Every
+ * person's card, in every preset; reconnecting and the connect mode do not, as the row's buttons do not ask, except
+ * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143). Every
  * refusal that can be known first (no such machine, a target that is no ssh target or does not answer, a build that
  * cannot install) comes before any card.
  */
@@ -102,8 +107,24 @@ export class MachineFlow {
       const m = this.named(ops, req.machine)
       if (typeof m === 'string') return { ok: false, error: m }
       switch (req.action) {
-        case 'reconnect':
-          return done(`Reconnecting ${m.name}.`, ops.reconnect(m.id))
+        case 'reconnect': {
+          /*
+           * Held back there (#1143): stopped by the person, or after the hosts this computer started kept stopping.
+           * Starting one is the person's to allow, so it is asked whatever the row says just now (it reads the line again,
+           * or the machine is asleep); without the card the link is only opened, and starts nothing it would not
+           */
+          const held = ops.startHeldBack(m.id)
+          if (held) {
+            const refused = await this.ask(
+              sessionId,
+              `Start Centralu on ${m.name} (${m.sshTarget})? ${held} It runs there in the background until it is stopped again.`,
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+            return done(`Starting Centralu on ${m.name}.`, ops.reconnect(m.id))
+          }
+          return done(`Reconnecting ${m.name}.`, ops.reconnect(m.id, { start: false }))
+        }
         case 'connect':
           return done(
             req.connect === 'when_needed' ? `${m.name} now connects only when something needs it.` : `${m.name} now connects when Centralu starts.`,

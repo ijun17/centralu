@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
-import { answerLine, isAlive, renameRetrying, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState } from './serve-files.mjs'
+import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -141,16 +141,10 @@ export async function runDetach({
 
   const log = join(dataDir, SERVE_LOG_FILE)
   /*
-   * One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows. So a log
-   * that cannot be moved aside (a reader holds `serve.log.1`) is removed rather than left to read as a start
+   * One start per log: the earlier ones are kept beside it, three of them (`rotateServeLog`, #1143), and its absence is
+   * how a start that never ran shows. So a log that cannot be moved aside is removed rather than left to read as a start
    */
-  const freshLog = () => {
-    try {
-      renameRetrying(log, `${log}.1`)
-    } catch (e) {
-      if (e?.code !== 'ENOENT') rmSync(log, { force: true, maxRetries: 5 })
-    }
-  }
+  const freshLog = () => rotateServeLog(log)
 
   /*
    * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
@@ -273,6 +267,10 @@ export async function runDetachedChild({ spec, ...opts }) {
  * socket, and waited for (`stopServedHost` in serve-handover.mjs, which the hand-over into the sign-in shares, #1224).
  *
  * stdout: one line, `{ v: 1, stop: { ok, wasRunning, how?, message? } }`.
+ *
+ * A stop that went through is remembered in the data folder (`markStopped`, #1143), so a linked hub does not start the
+ * host again by itself; the next host that starts here removes the mark. Not for a hub's own stop, which starts the
+ * host again itself (an update, a rollback): the hub runs it with `CENTRALU_STOP_BY=hub` (links/tunnel.ts `stopCommand`)
  */
 export async function runStop({
   env,
@@ -285,5 +283,7 @@ export async function runStop({
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
-  return answerLine(write, 'stop', await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill }))
+  const stopped = await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill })
+  if (stopped.ok && env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, 'stop')
+  return answerLine(write, 'stop', stopped)
 }

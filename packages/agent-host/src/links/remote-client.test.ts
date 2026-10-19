@@ -112,6 +112,38 @@ describe('the link client (#82)', () => {
     expect(seen.hellos[1]).toMatchObject({ resync: true, newLifetime: true })
   })
 
+  it('stops dialling after `redials` tries that reach no host, and says so once (#1143)', async () => {
+    const first = await host()
+    const { opened, Counted } = counted()
+    const gaveUp: string[] = []
+    const c = new RemoteClient({ url: `ws://127.0.0.1:${first.port}`, token: TOKEN, maxBackoffMs: 20, redials: 2, WebSocketImpl: Counted }, { gaveUp: (r) => gaveUp.push(r) })
+    cleanups.push(() => c.close())
+    c.connect()
+    await eventually(() => c.connected)
+    await first.server.close()
+    await eventually(() => gaveUp.length === 1)
+    // The first socket, then two redials, and no more
+    expect(opened.n).toBe(3)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(opened.n).toBe(3)
+    expect(gaveUp).toHaveLength(1)
+  })
+
+  it('a client closed while it redials never says it gave up: the link closed it on purpose', async () => {
+    const gone = await host()
+    const { opened, Counted } = counted()
+    const gaveUp: string[] = []
+    const c = new RemoteClient({ url: `ws://127.0.0.1:${gone.port}`, token: TOKEN, maxBackoffMs: 20, redials: 3, WebSocketImpl: Counted }, { gaveUp: (r) => gaveUp.push(r) })
+    cleanups.push(() => c.close())
+    c.connect()
+    await eventually(() => c.connected)
+    await gone.server.close()
+    await eventually(() => opened.n >= 2)
+    c.close()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(gaveUp).toEqual([])
+  })
+
   it('a call fails at once while the link is down, instead of waiting for it', async () => {
     const { port } = await host()
     const { c } = client(port, { callTimeoutMs: 60_000 })

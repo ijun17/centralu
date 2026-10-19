@@ -2,7 +2,7 @@ import type { Delegation } from './child-ownership.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
-import { NOT_REACHABLE } from '../adapters/contract.js'
+import { awayPhrase } from '../adapters/contract.js'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
@@ -10,9 +10,6 @@ import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
-
-/** A machine that cannot be asked, as the verb phrase after its name: its plain cause, or the words a model reads for any other */
-const awayPhrase = (why: string): string => (why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`)
 
 /**
  * An ask_project call's task in a session of a linked machine, while its turn runs there (#700). The hub cannot see

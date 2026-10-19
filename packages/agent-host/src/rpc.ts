@@ -107,7 +107,7 @@ export type MachinesPort = {
   list(): MachineInfo[]
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
   remove(id: string): Promise<void>
-  reconnect(id: string): MachineInfo
+  reconnect(id: string, opts?: { start?: boolean }): MachineInfo
   /** Closes the link until it is connected or needed again (#1134) */
   disconnect(id: string): Promise<MachineInfo>
   setConnect(id: string, connect: MachineConnect): MachineInfo

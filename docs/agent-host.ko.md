@@ -1614,7 +1614,7 @@ cmd.exe는 그때 이미 줄 전체를 읽었고, Ctrl+C로 배치 작업이 끝
 | 127.0.0.1에만 바인드하고 SSH 로컬 포워드로 닿는다 | SSH가 이미 사람을 인증하고 연결을 암호화한다. 공개 포트라면 TLS와 우리만의 로그인이 필요하고, 인터넷의 모든 스캐너가 그것을 찾는다 |
 | 토큰은 `<데이터 폴더>/serve.json`에, 첫 바이트부터 0600으로, 어긋나면 다시 좁혀 둔다 | 그 머신의 모든 RPC의 열쇠다. 찍는 것은 `--connection`뿐이다: 토큰을 실은 호스트의 준비 줄은 런처가 읽고 아무 데도 넘기지 않는다 |
 | 토큰은 `--token`도 `CC_HOST_TOKEN`도 아니라 호스트 stdin의 첫 줄로 간다 (#538) | 머신의 아무 사용자나 남의 명령줄을 읽을 수 있고(`ps`), 같은 사용자의 모든 프로세스는 다른 프로세스가 시작할 때 받은 환경을 그 프로세스가 도는 동안 읽을 수 있다. 지워도 마찬가지다(#502). 호스트의 stdin은 어차피 런처로 가는 파이프다(`--watch-parent`) |
-| 토큰과 포트는 한 번 만들고 둔다 | 클라이언트는 그것을 저장해 두고 SSH 왕복 없이 다시 붙는다; hello가 거절될 때만 `--connection`을 다시 돌린다 |
+| 토큰과 포트는 한 번 만들고 둔다 | 클라이언트는 그것을 저장해 두고 SSH 왕복 없이 다시 붙는다; hello가 거절될 때, 또는 같은 포워드로 다섯 번(약 6초) 다시 걸어도 호스트가 답하지 않을 때 `--connection`을 다시 돌린다: 분리되어 돌던 호스트가 죽어도 `ssh -N`은 살아 있고, 호스트를 다시 띄우라고 말해 주는 것은 연결 줄뿐이다(`LINK_REDIALS`, #1143) |
 | 기본 포트 17175 | 모든 OS의 임시 포트 범위보다, 그리고 호스트의 앱별 뷰 origin(20000–32767, `views/origin-ports.ts`)보다 아래 |
 | 호스트는 자기 프로세스 그룹과 `--watch-parent`를 갖는다 | Ctrl+C는 런처에 닿고, 런처가 호스트 하나에만 SIGINT를 한 번 넘기며, 호스트가 에이전트를 순서대로 멈춘다. 런처를 죽이면(SIGKILL이라도) 호스트의 stdin이 닫혀 함께 내려간다: 감독 없이 남겨지는 일이 없다 (`tooling/launcher-serve.test.ts`) |
 | 시작하는 동안 온 시그널은 호스트가 내려갈 수 있을 때까지 쥐고 있는다 | 호스트가 핸들러를 달기 전에는 커널 기본 동작이 적용되어 그 자리에서 끝난다. 측정: 준비 줄을 읽자마자 넘긴 SIGINT가 매번 호스트를 죽였다. 이제는 시작이 끝나면 깨끗이 내려간다; 시작하는 동안 두 번째 시그널이 오면 바로 끝난다 (`main.ts`, `pendingSignal`) |
@@ -1666,8 +1666,8 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 
 | 셸 | 연결 명령 | 잰 곳 |
 |---|---|---|
-| `posix` | `sh -c 'if command -v centralu …; then exec centralu serve --connection; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | `tunnel.test.ts`의 가짜 ssh |
-| `powershell` | 같은 찾기(`Get-Command centralu.cmd`, 다음 `%USERPROFILE%\.centralu\bin\centralu.cmd`)를 `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>`로 | Windows 11, OpenSSH, PowerShell 5.1 |
+| `posix` | `sh -c 'd="${CC_DATA_DIR:-$HOME/.centralu}"; m="$d/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$d/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | `tunnel.test.ts`의 가짜 ssh |
+| `powershell` | 같은 찾기(`<data>\remote\bin\centralu.cmd`, 다음 `Get-Command centralu.cmd`, 다음 `serve`가 두는 실행기 `<data>\bin\centralu.cmd`. `<data>`는 그쪽의 `CC_DATA_DIR`, 없으면 `%USERPROFILE%\.centralu`)를 `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>`로 | Windows 11, OpenSSH, PowerShell 5.1 |
 | `wsl` | 같은 PowerShell 감싸기 안에 `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`. 스크립트는 PATH에서 `/mnt/*`를 뺀 POSIX 찾기 | 그 노트북의 WSL2 Ubuntu 24.04 |
 
 기기마다 `centralu` 대신 돌릴 명령을 적을 수 있다(`MachineInfo.command`): 소스 체크아웃, `~/.centralu`가 아닌 데이터
@@ -1690,7 +1690,31 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 띄우는 중. 묻지 않는다, 계획 문서 §10.9 결정 7. WMI가 막힌 기기에서는 포워드의 ssh 세션이 호스트를 돌리고 링크와 함께 끝난다);
 `not_running`(Centralu는 답하지만 `centralu serve`가 돌지 않고, 띄우기도 실패했다. `error`가 까닭. 다시 시도); `versions_differ`; `refused`(토큰이 연달아 두 번 거절됨. 연결 줄은 바로 한 번 다시 읽는다.
 `--rotate-token`은 토큰을 바꾸지만 돌고 있는 serve는 재시작할 때까지 이전 것을 쓰기 때문이다); `disconnected`(#1134: 일부러
-닫았고 다시 시도하지 않는다, 아래).
+닫았고 다시 시도하지 않는다, 아래); `stopped`(#1143: 아래).
+
+**링크가 스스로 띄우지 않는 것**(#1143, 소유자 결정 2026-10-19). 기기를 추가한 것은 죽었거나 없는 호스트를 띄워도 된다는
+동의이지, 사람이 멈춘 호스트를 다시 띄워도 된다는 동의가 아니다.
+
+- **사람이 멈춘 것은 그쪽에 기억된다.** `centralu serve --stop`은 `<data>/stopped.json`(`by: stop`)을 쓰고, 사람이 그 기기에서
+  Centralu를 끝낼 때(완전히 종료, 또는 백그라운드 모드가 꺼진 채 마지막 창을 닫을 때) 데스크톱 앱의 keeper가 호스트를 아주
+  멈추면 그 호스트도 쓴다(`by: quit`, `lifecycle/stopped-mark.ts`). 데스크톱 앱은 `serve`와 데이터 폴더를 함께 쓴다
+  (`dataRoot()`). Windows에서는 창이 폴더의 serve 호스트를 쓰고(`--window`) 창을 닫아도 그 호스트는 남으므로 표시할 종료가
+  없다. 폴더에서 호스트가 시작되면 누가 띄웠든 표시를 지운다. `--connection`은 호스트가 돌지 않는 동안 그것을
+  `stopped: { by, at }`로 알린다. 허브 자신의 멈춤(업데이트, 되돌리기, 제거)은 `CENTRALU_STOP_BY=hub`로 `serve --stop`을
+  돌리고 표시를 남기지 않는다.
+- **링크가 그쪽에 띄우는 호스트는 10분에 세 번까지이고**(`RESTARTS`), 그 뒤로는 얼마나 기다리든 사람의 Start 전에는 띄우지
+  않는다. 한도는 기억해 두며, 띄운 기록이 시간이 지나 빠진다고 다시 풀리지 않는다. 사람의 Start로 띄운 것도 세므로, 답하기 전에
+  멈추는 호스트를 Start가 끝없이 되풀이하지 않는다. 띄웠지만 한 번도 답하지 않은 호스트(`serve --detach`가 `exited`나
+  `timeout`이라고 하는 것, 부팅 중에 죽는 호스트)도 센다. 아무것도 띄우지 못한 시작(ssh, 그쪽에 Centralu 없음, WMI 거부)은 세지
+  않는다: 예전처럼 까닭과 함께 `not_running`이고 backoff대로 다시 한다. hello에 답하고 곧바로 다시 멈추는 호스트는 hello마다 backoff를 되돌려서 약 10초마다 끝없이 다시 띄워졌다.
+  이제 backoff와 한도는 호스트가 60초 버틴 뒤에만 처음부터 다시 센다(`STABLE_MS`).
+- **어느 쪽이든 행은 `stopped`이고** `error`가 어느 쪽인지 말한다. 사람의 Start(행의 버튼, `machines.reconnect`)나 오케스트레이터의
+  `reconnect_machine`(사람의 카드를 거친 것) 전에는 아무것도 띄우지 않는다. 연결 줄은 backoff대로 계속 읽으므로 사람이
+  그쪽에서 띄운 호스트에는 붙는다. 그동안 행은 `stopped`로 남고, 기기에 닿지 못하는 동안에도 까닭은 기억해 둔다
+  (`startHeldBack`, 그쪽에서 호스트가 돌거나 시작이 이루어질 때까지). 카드는 그 순간 행의 상태가 아니라 이 까닭을 보고 묻고,
+  카드 없이 오케스트레이터가 다시 연결하면 링크만 연다(`reconnect { start: false }`). 기기에 닿지 못할 때 누른 Start는 그때
+  쓰고 끝나며, 기기가 돌아올 때까지 남겨 두지 않는다. 한도에 닿은 뒤의 `stopped` 문장은 마지막 시작이 호스트가 답하지 않았을
+  때 한 말로 끝난다. 표시를 모르는 이전 Centralu는 `stopped`를 말하지 않고, 같은 한도 안에서 예전처럼 띄워진다.
 
 **링크를 여는 때**(#1134, 소유자 결정 2026-10-18; `MachineInfo.connect`, `linked_machines.connect` 열, v59). 기본값 `at_start`는
 예전부터 모든 기기가 하던 대로다: 허브가 시작할 때 연결하고 끊길 때마다 다시 시도해, 그 기기로 일하는 오케스트레이터가 보고와

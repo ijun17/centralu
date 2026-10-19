@@ -34,7 +34,7 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof }) {
+export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
    * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
@@ -54,6 +54,8 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
     ...(detach ? { detach } : {}),
     // The running host proves it holds the token before the hub sends it (#838); absent: the hub sends hello as before
     ...(proof ? { proof: true } : {}),
+    // The person stopped the host here, and when (#1143, `readStopped`); absent: an older serve, or no such stop
+    ...(stopped ? { stopped } : {}),
     takes,
   })
 }

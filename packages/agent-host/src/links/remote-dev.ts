@@ -83,7 +83,7 @@ export async function resolveCommit(ref: string, cwd: string): Promise<string> {
 async function lineThere(tunnel: SshTunnel, spec: RemoteSpec, target: string): Promise<ConnectionLine> {
   const r = await tunnel.exec(connectionCommand(spec))
   if (r.stdout.includes(NOT_FOUND)) throw new Error(`Centralu is not installed on ${target}`)
-  return parseConnectionLine(r.stdout)
+  return parseConnectionLine(r.stdout, spec)
 }
 
 /** Builds `ref` there and swaps to it (dev-build.ts); rejects with one sentence, the machine as it was */

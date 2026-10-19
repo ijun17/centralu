@@ -46,7 +46,16 @@ export type ConnectionLine = {
    * (`RemoteClientOptions.proveHost`). Absent from a remote that predates it, which gets the hello as before
    */
   proof?: boolean
+  /**
+   * The person stopped Centralu there (#1143): `centralu serve --stop` (`stop`) or quitting Centralu there (`quit`), at
+   * `at` when the mark says. Said only while no host runs. The hub then starts none by itself, until the person's
+   * Start. Absent from a remote that predates it, which is started as before
+   */
+  stopped?: RemoteStop
 }
+
+/** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
+export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
 
 /**
  * The `autostart` field of the connection line, as `serve.mjs`'s `autostartInfo` writes it, and the
@@ -111,8 +120,11 @@ export interface Tunnel {
   close(): Promise<void>
 }
 
-/** Reads the one JSON line `--connection` prints; anything else on stdout is not ours */
-export function parseConnectionLine(stdout: string): ConnectionLine {
+/**
+ * Reads the one JSON line `--connection` prints; anything else on stdout is not ours. `spec` is the remote's, for the
+ * words of the update to tell the person when there is no line (`npmInstall`)
+ */
+export function parseConnectionLine(stdout: string, spec?: RemoteSpec): ConnectionLine {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
     let raw: unknown
@@ -140,11 +152,19 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         ...(install ? { install } : {}),
         ...(autostart ? { autostart } : {}),
         ...((o as { proof?: unknown }).proof === true ? { proof: true } : {}),
+        ...stoppedOf((o as { stopped?: unknown }).stopped),
         ...takesOf((o as { takes?: unknown }).takes),
       }
     }
   }
-  throw new Error('The remote did not print a connection line; its Centralu may predate `centralu serve` (update it there: npm i -g centralu)')
+  throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
+}
+
+/** The `stopped` field, field by field: any object there is a stop; its `by` and `at` only as the words they can be */
+function stoppedOf(raw: unknown): { stopped?: RemoteStop } {
+  if (!raw || typeof raw !== 'object') return {}
+  const o = raw as { by?: unknown; at?: unknown }
+  return { stopped: { by: o.by === 'quit' ? 'quit' : 'stop', at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : null } }
 }
 
 /** The `takes` field: the names in it that are words, or nothing */
@@ -191,6 +211,18 @@ export function parseAutostart(raw: unknown): RemoteAutostart | null {
 export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
   | { ok: false; reason: string; message: string; node?: string }
+
+/**
+ * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
+ * (#1143 review). The link counts it against its limit of starts, as one that answered and then stopped; a start where
+ * nothing could be started (ssh, no Centralu there, WMI refusing) is not this
+ */
+export class StartedNotServing extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StartedNotServing'
+  }
+}
 
 /** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
 export function parseDetachLine(stdout: string): DetachAnswer {
@@ -257,6 +289,21 @@ export type RemoteSpec = {
 export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
 
 /**
+ * Why WSL would not take `name` as a distro name, or null when it would. The one rule for it: `machines.add` refuses
+ * such a name in these words, and so does every command built for a WSL remote, where the name goes on the line unquoted
+ */
+export function wslDistroError(name: string | null | undefined): string | null {
+  return WSL_DISTRO_RE.test(name ?? '') ? null : `Not a WSL distro name: ${name || '(none)'}`
+}
+
+/** The spec's distro, checked by `wslDistroError` */
+function distroOf(spec: RemoteSpec): string {
+  const why = wslDistroError(spec.wslDistro)
+  if (why) throw new Error(why)
+  return spec.wslDistro!
+}
+
+/**
  * What every PowerShell script sent to a Windows remote starts with. The first line makes its output UTF-8.
  * The second gives it the machine's module path: a Windows PowerShell started from PowerShell 7 (pwsh)
  * inherits pwsh's `PSModulePath`, whose first folder holds 7.x copies of the built-in modules that 5.1
@@ -319,16 +366,16 @@ function powershellScript(script: string): RemoteCommand {
  */
 export function wslKeepAlive(spec: RemoteSpec | undefined): string | null {
   if (spec?.shell !== 'wsl') return null
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   return `wsl.exe -d ${distro} --exec sleep infinity`
 }
 
 /**
- * `$m`, the managed launcher's path (plan §10.1), in each shell: under `CC_DATA_DIR` when the ssh
- * session has it, else under `~/.centralu`, as `serve` and the installer resolve the data folder
+ * `$d`, the data folder, and `$m`, the managed launcher's path in it (plan §10.1), in each shell: `CC_DATA_DIR` when
+ * the ssh session has it, else `~/.centralu`, as `serve` and the installer resolve the data folder. The launcher
+ * `serve` keeps is looked for in the same `$d` (`<data>/bin/`, serve-install.mjs), not at a path of its own
  */
-export const MANAGED_SH = 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"'
+export const MANAGED_SH = 'd="${CC_DATA_DIR:-$HOME/.centralu}"; m="$d/remote/bin/centralu"'
 export const MANAGED_PS =
   "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $m = Join-Path $d 'remote\\bin\\centralu.cmd'"
 
@@ -340,6 +387,16 @@ export function shimNames(spec: RemoteSpec | undefined): { npm: string; centralu
   return spec?.shell === 'powershell' ? { npm: 'npm.cmd', centralu: 'centralu.cmd' } : { npm: 'npm', centralu: 'centralu' }
 }
 
+/** The command to tell a person to install or update Centralu from npm there, in its shell's terms (`shimNames`) */
+export function npmInstall(spec: RemoteSpec | undefined): string {
+  return `${shimNames(spec).npm} i -g centralu`
+}
+
+/** Centralu is not found there: what the person types to install it and start it once */
+function notInstalled(where: string, spec: RemoteSpec): Error {
+  return new Error(`Centralu is not installed ${where} (run \`${npmInstall(spec)}\` there, then \`${shimNames(spec).centralu} serve\` once)`)
+}
+
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
 export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
 
@@ -347,7 +404,7 @@ export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
  * The remote command that prints the connection line (docs/agent-host.md §4.7), in the remote
  * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
  * `centralu.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu` on the PATH an ssh
- * command gets, else the launcher `serve` keeps (`~/.centralu/bin/centralu`), else `NOT_FOUND` on
+ * command gets, else the launcher `serve` keeps (`<data>/bin/centralu`), else `NOT_FOUND` on
  * stdout. The managed launcher comes first, so a machine with both an npm install and one the hub
  * made runs the version the hub installed. `<data>` is `CC_DATA_DIR` there, else `~/.centralu`:
  * the rule `serve` and the installer (install.ts) use.
@@ -386,10 +443,15 @@ export function detachCommand(spec: RemoteSpec, from: string | null = null): str
 
 /**
  * `centralu serve --stop` there, found the same way (plan §10.4, S10): the running host stops in
- * order, asked over its own socket. The update, rollback and uninstall run it (update.ts)
+ * order, asked over its own socket. The update, rollback and uninstall run it (update.ts).
+ *
+ * As the hub's own stop (`CENTRALU_STOP_BY=hub`, #1143): `serve --stop` then leaves no mark of the person's stop, and
+ * the hub's next start (the update's) is not refused as one. An older serve ignores the variable and marks nothing
+ * anyway. A command of the person's own runs as given, in a shell this cannot know, so it gets no variable; the hub
+ * installs and updates nothing on such a machine
  */
 export function stopCommand(spec: RemoteSpec): string {
-  return remoteCommand(spec, 'serve --stop')
+  return remoteCommand(spec, 'serve --stop', true)
 }
 
 /** `centralu serve` in the foreground, found the same way: a host bound to the forward's own ssh session */
@@ -421,25 +483,26 @@ function remoteCommand(
     | 'serve --autostart off'
     | 'serve --autostart remove'
     | 'serve --autostart status',
+  /** The hub's own stop (`stopCommand`): said to `serve` as `CENTRALU_STOP_BY=hub` */
+  hubStop = false,
 ): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
-        "else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'; " +
+        "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
-    `elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" ${args}; ` +
+    `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
   if (spec.shell === 'posix') return custom ? `${custom} ${args}` : `sh -c '${lookup}'`
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   const script = custom
     ? `${custom} ${args}`
     : `PATH=$(printf %s "$PATH" | tr : '\\n' | grep -v '^/mnt/' | paste -sd: -); ${lookup}`
@@ -456,8 +519,7 @@ export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string 
   if (spec.shell === 'powershell') return powershellScript(script.ps)
   const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
   if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
   if (inline.length <= WINDOWS_INLINE_MAX) return inline
   // Too long for cmd.exe's line: the script on stdin, passed through to the distro (`-i`: PowerShell adds CRLF)
@@ -498,7 +560,7 @@ export type SshTunnelOptions = {
  *
  * - `BatchMode=yes` everywhere: a password or host-key prompt nobody can answer would hang the hub
  *   forever. The person's keys, agent and `~/.ssh/config` are used as they are.
- * - The first command falls back to `~/.centralu/bin/centralu` on exit 127: an SSH shell is not
+ * - The first command falls back to `<data>/bin/centralu`, decided on the remote: an SSH shell is not
  *   interactive, and nvm, fnm, volta and `~/.npm-global` put npm's global folder on PATH only in
  *   interactive shells (§4.7 of agent-host.md, which is why `serve` keeps that launcher).
  * - The forward binds 127.0.0.1 on both ends, explicitly: never 0.0.0.0 and never `GatewayPorts`,
@@ -593,17 +655,13 @@ export class SshTunnel implements Tunnel {
     const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.takesFrom ? (this.opts.hubName ?? hostname()) : null)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      const n = shimNames(remote)
-      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
-    }
+    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     let answer: DetachAnswer
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
       if (/unknown option for serve: --detach/.test(r.stderr)) {
-        const n = shimNames(remote)
-        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${n.centralu} serve\` there, or update it (${n.npm} i -g centralu)`)
+        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${shimNames(remote).centralu} serve\` there, or update it (${npmInstall(remote)})`)
       }
       const why = lastLine(r.stderr)
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
@@ -619,6 +677,7 @@ export class SshTunnel implements Tunnel {
     // The launcher refused a Node below the floor, or its host crashed the way one crashes (#699)
     if (answer.reason === 'node_too_old') throw new NodeTooOld(answer.message, 'refused', answer.node ?? null)
     if (answer.reason === 'exited' && isHostCrash(answer.message)) throw new NodeTooOld(answer.message, 'crashed', null)
+    if (answer.reason === 'exited' || answer.reason === 'timeout') throw new StartedNotServing(answer.message)
     throw new Error(answer.message)
   }
 
@@ -689,12 +748,9 @@ export class SshTunnel implements Tunnel {
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
     const r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      const n = shimNames(remote)
-      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
-    }
+    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
-      return parseConnectionLine(r.stdout)
+      return parseConnectionLine(r.stdout, remote)
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)

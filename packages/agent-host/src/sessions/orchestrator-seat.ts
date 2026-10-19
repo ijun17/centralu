@@ -1,4 +1,5 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { awayPhrase } from '../adapters/contract.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -329,17 +330,23 @@ export function orchestratorToolsFor(
     createSession: async (opts) => {
       const all = host.store.projects.listProjects()
       const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
-      // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist
+      // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist, and not for
+      // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
-      const remote = reader && opts.project ? await reader.findProjects(opts.project) : []
+      const exactHere = all.some((p) => p.id === opts.project)
+      const remote = reader && opts.project && !exactHere ? await reader.findProjects(opts.project) : []
       if (local.length + remote.length > 1) {
-        // One name on two machines: guessing would start the work on the wrong disk
+        // One name on two machines: guessing would start the work on the wrong disk. A machine that cannot be asked just
+        // now counts too (`away`): its project may be the one meant, and dropping it used to start the work here instead
         const named = [
           ...local.map((p) => `${p.name} [${p.id}] on this computer`),
-          ...remote.map((p) => `${p.name} [${p.id}] on ${p.machine}`),
+          ...remote.map((p) => `${p.name} [${p.id}] on ${p.machine}${p.away ? ` (which ${awayPhrase(p.away)})` : ''}`),
         ]
         return { ok: false, error: `More than one project is called that; give its id: ${named.join('; ')}` }
       }
+      // Found only from the mirror: refused now, rather than a create sent over a link that did not answer a list
+      const away = remote[0]?.away
+      if (away) return { ok: false, error: `${remote[0]!.name} [${remote[0]!.id}] is on ${remote[0]!.machine}, which ${awayPhrase(away)}. Try again once its link is back.` }
       /*
        * The new session never runs with more than this seat's own permissions, and its first message is this seat's,
        * not the person's (#838). It used to be `normal` whatever the seat ran under and stored as if the person had

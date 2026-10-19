@@ -334,7 +334,7 @@ where it used to come back as an empty answer. It runs on that machine with its 
 | The card names the machine, and "always" is not offered (`ProjectAccess.to.machine`) | A remembered consent is a row tied to two projects of this computer (foreign keys on `projects`); a machine's project has no row. The plan (§12.5, question 4) recommended the pair's card with the machine named; it asks each time until the owner wants a remembered form |
 | Paths in the answer are listed under "outside", none opened | They name the machine's files, not this computer's |
 | A session busy with a turn, or `ifBusy`, is refused with a reason; the machine's sessions are read again after the card is answered, and nothing is sent if the session left or started a turn meanwhile. The caller's trust and depth are read again after the card and right before the send (`askGateError`), and the caller's project losing trust withdraws a card still standing | A note or a queue into a session on another machine needs the machine to take them; not built. The card can stand for minutes, and a task sent into a turn the person started there would join it and end the call with their turn |
-| A machine's project list is waited for 4 s (`LOOKUP_MS`); one that does not answer is counted as away | The name is looked up on every call, so one half-open link must not hold up the asks that name something else. The name that is on this computer and on a machine is still refused as ambiguous when the machine answers; when it does not, the call goes on with what was heard |
+| A machine's project list is waited for 4 s (`LOOKUP_MS`); one that does not answer is counted as away | The name is looked up on every call, so one half-open link must not hold up the asks that name something else. The name that is on this computer and on a machine is still refused as ambiguous when the machine answers; when it does not, the call goes on with what was heard. `create_session` finds a machine's project through the same list (`findProjects`, #1143): it was unbounded, and dropped a machine that did not answer, so a stalled link held up a create in a project on this computer and a name also on that machine started the work here. A name it finds only in a mirror is refused as away, and one also here is refused as ambiguous |
 | The turn's end is read by `linkedTurnEnd` (`sessions/linked-turn-end.ts`), the same reading the orchestrator's report from that machine uses (`LinkedReports`): an approval or a question there is a running turn (as is a working state, `isInTurn`), an error or a usage limit ends the call as not finished, an interruption does once the turn was seen running (before then it ended the turn the task joined, not the task's), and so does the session being deleted there (#428) | A local agent's run reads an interrupted turn as not finished (`AgentRunWait`, #698); the two copies had drifted, so an interrupted turn there answered as done and a deleted session left the call waiting |
 | A link that is no longer connected ends the tasks asked of its sessions (`observeLinkLoss`, on `machine_status`) | Their events stop reaching the hub, so the end of the turn would never be seen. The sentence says the task was delivered and may still be running there |
 | `trusted` is carried only when the machine says it | An older machine's absence is "not saying" (`ProjectAccess.to.trusted`), not "not trusted" |
@@ -2651,14 +2651,14 @@ skip the restore.
 | Bound to 127.0.0.1 only, reached through an SSH local forward | SSH already authenticates the person and encrypts the link. A public port would need TLS and a login of our own, and every scanner on the internet would find it |
 | The token lives in `<data folder>/serve.json`, mode 0600 from the first byte, narrowed back if it drifts | It is the key to every RPC on that machine. `--connection` prints it and nothing else does: the host's ready line, which carries it, is read by the launcher and never passed on |
 | The token reaches the host as the first line on its stdin (#538), not `--token` and not `CC_HOST_TOKEN` | Any user on the machine can read another's command line (`ps`), and every process of the same user can read a process's start environment for as long as it runs, deleted or not (#502). The host's stdin is a pipe to the launcher anyway (`--watch-parent`) |
-| Token and port are generated once and kept | The client stores them and reconnects without an SSH round trip; it runs `--connection` again only when a hello is refused |
+| Token and port are generated once and kept | The client stores them and reconnects without an SSH round trip; it runs `--connection` again when a hello is refused, or when five redials of the same forward (about 6 s) reach no host: a detached host that died leaves `ssh -N` up, and only the connection line says to start one again (`LINK_REDIALS`, #1143) |
 | Default port 17175 | Below every OS's ephemeral range and below the host's per-app view origins (20000–32767, `views/origin-ports.ts`) |
 | A recorded or default port another program holds moves to the next free one above it (up to 19 more, below 20000) and is recorded; `--port` is used as given | One Windows laptop linked twice, its Windows side and a WSL distro, had both hosts on 17175: WSL2 relays the distro's loopback ports to Windows (`wslrelay.exe`), so the second could not start (#482). Inside WSL, the ports Windows listens on count as taken too (`netstat.exe` through interop): a host there on such a port would be unreachable, because the hub's forward ends on Windows' loopback. `--connection` reports the port the host got |
 | The host gets its own process group and `--watch-parent` | Ctrl+C reaches the launcher, which passes one SIGINT to the host alone, and the host stops its agents in order. Killing the launcher, even with SIGKILL, closes the host's stdin and takes it down: it is never left running unsupervised (`tooling/launcher-serve.test.ts`) |
 | A signal during startup is held until the host can shut down | Before the host attaches its handlers the kernel's default applies and ends it on the spot. Measured: a SIGINT passed on as soon as the ready line was read killed the host every time. Now it shuts down cleanly once started; a second signal while starting exits at once (`lifecycle/endings.ts`, `holdSignals`) |
 | A second signal forces the exit only when it comes 1 s or more after the first; SIGHUP shuts down like SIGINT and SIGTERM | A person pressing Ctrl+C again, while starting or while shutting down, gets the host gone at once (exit 1); a shutdown is also bounded at 10 s (`lifecycle/shutdown.ts`). One request often arrives as two: Ctrl+C reaches the launcher, which forwards a SIGINT, and the terminal may deliver its own; a closing terminal sends SIGHUP right after SIGINT. Within `REPEAT_AFTER_MS` (1 s, `lifecycle/endings.ts`) the second is the same request and changes nothing, so it cannot cut the shutdown it asked for short (owner, 2026-10-12, #504). Without a listener SIGHUP's default ended the host with no shutdown at all |
 | A second `serve`, or any other host on the same data folder, is refused | The ownership lock (`instance-lock.ts`) is the authority. `serve` first asks the port it recorded, so a serve already up is named with its port; for any other owner the host's lock message is followed by a line naming the pid and, when `host.lock` says, who started it. The host's own message names a serve host's link and what stopping it costs (#1223): on a linked Windows machine the desktop window used to be told to close a window that did not exist |
-| Except on Windows, where a `serve` in the person's sign-in takes the folder over from a host in a network logon, once that host has nothing running (#1224) | The host the hub's ssh started before anyone signed in cannot open the user's Credential Manager vault. The sign-in task's `serve` (at sign-in, or from `--detach`) asks it `host.stop { ifIdle: true }` every 30 s: the host checks its own idle rule (no turn, approval, question, background work, terminal or command) and the calls in flight, and stops in the same step, taking no new call from its yes on, so a turn cannot slip in between. Then this serve starts its own host on the same port and token; the hub's link drops and reconnects by its backoff. It waits 30 minutes at most, and says `waiting`, then `gave_up`, to the host (`host.handover`), which the hub's row shows. A host that does not say its logon (older) is never moved |
+| Except on Windows, where a `serve` in the person's sign-in takes the folder over from a host in a network logon, once that host has nothing running (#1224) | The host the hub's ssh started before anyone signed in cannot open the user's Credential Manager vault. The sign-in task's `serve` (at sign-in, or from `--detach`) asks it `host.stop { ifIdle: true }` every 30 s: the host checks its own idle rule (no turn, approval, question, background work, terminal or command) and the calls in flight, and stops in the same step, taking no new call from its yes on, so a turn cannot slip in between. Then this serve starts its own host on the same port and token; the hub's link drops and reconnects by its backoff; past its redials (about 6 s) it reads the connection line, and a `serve --detach` it runs then is kept by the folder's lock from making a second host on it (`serve-detach.mjs`). It waits 30 minutes at most, and says `waiting`, then `gave_up`, to the host (`host.handover`), which the hub's row shows. A host that does not say its logon (older) is never moved |
 | No `DISPLAY` / `WAYLAND_DISPLAY` in the host's environment | Nothing it starts can open a window or a keyring dialog nobody would see; a tool that would ask falls back to its file store or fails with a message in the log |
 | Windows: no own group, no forwarding | `detached` means a new console there; the host shares the launcher's console and gets Ctrl+C itself. Not exercised yet |
 
@@ -2679,7 +2679,8 @@ A process WMI creates gets the account's default environment, not the session's,
 `CC_DATA_DIR`, `CENTRALU_HOST_ENTRY` and `CENTRALU_MANAGED` when set, and `CENTRALU_STARTED_FROM` (the `--from` hub and the
 ssh client's address the `--detach` saw, for `host.lock`, #1223). Never the token, which stays in `serve.json`.
 The launcher writes `<data>/serve.log` (its own lines and the host's stderr until the host is ready; `host.log` has
-the rest, so it stops growing; the previous start's is kept as `serve.log.1`) and `<data>/serve.pid`
+the rest, so it stops growing; the three earlier starts' are kept as `serve.log.1` to `serve.log.3`, so the log of
+the first of the at most three starts a hub makes by itself is still there, #1143) and `<data>/serve.pid`
 (`{ pid, hostPid, port }`, removed when it exits). Its first line says how it was started and, on Windows, why not in
 the sign-in (`started in the background through WMI: no Windows sign-in of this user was found (none of the 2 Explorers
 in desktop sessions is this account's)`, or `the sign-in task failed: <reason>`, or that the task's host did not answer);
@@ -2806,6 +2807,35 @@ instead of `-N`, and the link reads the connection line until that host answers.
 says so. A start that fails (Centralu too old for `--detach`, the host exiting while it starts) is `not_running`
 with the reason, retried with the backoff.
 
+**What the link does not start by itself** (#1143, owner decision 2026-10-19). Adding the machine is consent to start a
+host that crashed or is missing, not one the person stopped:
+
+- **The person's stop is remembered there.** `centralu serve --stop` writes `<data>/stopped.json` (`by: stop`), and
+  so does a host that the desktop app's keeper stops for good when the person quits Centralu on that machine (Quit
+  completely, or the last window closing with background mode off: `by: quit`, `lifecycle/stopped-mark.ts`). The
+  desktop app shares the data folder with `serve` (`dataRoot()`); on Windows its window uses the folder's serve host
+  (`--window`), which closing the window leaves running, so there is no quit to mark there. Every host that starts in
+  the folder removes the mark: a start, by whoever, is the person's again. `--connection` reports it as
+  `stopped: { by, at }` while no host runs. The hub's own stop (an update, a rollback, an uninstall) runs `serve --stop`
+  with `CENTRALU_STOP_BY=hub` and leaves no mark.
+- **The link starts at most three hosts there within 10 minutes** (`RESTARTS`), and then none until the person's Start,
+  however long it waits: the limit is kept, not read off the starts again as they age out. A start at the person's
+  Start counts too, so a Start whose hosts stop before they answer is not repeated for good, and so does a host that
+  was started and never answered (`serve --detach` says `exited` or `timeout`: one that crashes at boot). A start
+  where nothing could be started (ssh, no Centralu there, WMI refusing) is not counted: it is `not_running` with its
+  reason, on the backoff, as before. A host that answered its hello and
+  then stopped again at once used to reset the backoff at every hello and was started again about every 10 s for
+  good. Now the backoff, and the limit, start over only once a host has stayed up 60 s (`STABLE_MS`).
+- **Either way the row is `stopped`**, with `error` saying which, and the link starts nothing until the person's Start
+  (the row's button, `machines.reconnect`) or the orchestrator's `reconnect_machine` with the person's card. It still
+  reads the line on its backoff, so a host the person starts there is connected to; the row stays `stopped` while it
+  does, and the reason is kept while the machine cannot be reached (`startHeldBack`, until a host runs there or a
+  start goes through). The card is asked on that reason, not on the row's status of the moment, and without it the
+  orchestrator's reconnect only opens the link (`reconnect { start: false }`). A Start pressed while the machine cannot
+  be reached is spent, not kept for whenever it comes back. The `stopped` sentence after the limit ends with what the
+  last start said when its host never answered. A machine whose Centralu predates the
+  mark says no `stopped`, and is started as before, within the same limit.
+
 **A machine whose Node is below the floor is switched to the hub's own** (#699). Before it starts a host, the link
 reads `install.node` from the connection line; a machine that is not on a managed install and runs a Node below the
 floor (§4.7) is installed on first, with the same `machines.install` path as a person's click: the pinned Node of
@@ -2823,8 +2853,8 @@ command to whatever login shell the remote account has:
 
 | Shell | The connection command | Measured on |
 |---|---|---|
-| `posix` | `sh -c 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts`; the order by a real `sh` there |
-| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu.cmd` (the `.cmd` shim, never the bare name: PowerShell would pick the `.ps1`, which the default `Restricted` execution policy blocks, #688), then `%USERPROFILE%\.centralu\bin\centralu.cmd`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
+| `posix` | `sh -c 'd="${CC_DATA_DIR:-$HOME/.centralu}"; m="$d/remote/bin/centralu"; if [ -x "$m" ]; then exec "$m" serve --connection; elif command -v centralu …; then exec centralu …; elif [ -x "$d/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | the fake ssh of `tunnel.test.ts`; the order by a real `sh` there |
+| `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu.cmd` (the `.cmd` shim, never the bare name: PowerShell would pick the `.ps1`, which the default `Restricted` execution policy blocks, #688), then `<data>\bin\centralu.cmd`, the launcher `serve` keeps; `<data>` is `CC_DATA_DIR` there, else `%USERPROFILE%\.centralu`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
 | `wsl` | The same PowerShell wrapper around `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`, the script being the POSIX lookup with `/mnt/*` taken off PATH | Ubuntu 24.04 in WSL2 on that laptop |
 
 The managed launcher the installer writes (below) comes first, so a machine with both an npm install and one the hub
@@ -2937,7 +2967,8 @@ sessions resume on the new host through their stored ids, as after any restart.
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
-it restarts); `disconnected` (#1134: closed on purpose and not tried, below).
+it restarts); `disconnected` (#1134: closed on purpose and not tried, below); `stopped` (#1143: the person stopped
+Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, above).
 
 **When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
 column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again

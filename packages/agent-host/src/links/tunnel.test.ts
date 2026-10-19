@@ -206,7 +206,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(ep.line).toMatchObject({ port: remotePort, version: '0.1.0-beta.11', hostRunning: true })
     const [ask, forward] = (logged() as unknown[]).filter((x): x is string[] => Array.isArray(x))
     expect(ask!.slice(0, -1)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', 'box'])
-    expect(ask!.at(-1)).toMatch(/^sh -c 'm=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
+    expect(ask!.at(-1)).toMatch(/^sh -c 'd=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
     expect(forward).toContain('-N')
     for (const opt of ['BatchMode=yes', 'ExitOnForwardFailure=yes', 'ServerAliveInterval=15', 'GatewayPorts=no']) expect(forward).toContain(opt)
     const spec = forward![forward!.indexOf('-L') + 1]!
@@ -431,6 +431,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect((logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))).toEqual([])
   })
 
+  it('tells the person to update a Centralu that prints no connection line with the npm their shell runs (#688)', async () => {
+    // A Centralu there from before `serve`: it answers, with no line of ours
+    const old = { FAKE_SSH_LINE: '{}', FAKE_SSH_HAS: 'centralu' }
+    await expect(tunnel(old, { shell: 'powershell' }).open()).rejects.toThrow('may predate `centralu.cmd serve` (update it there: npm.cmd i -g centralu)')
+    await expect(tunnel(old).open()).rejects.toThrow('may predate `centralu serve` (update it there: npm i -g centralu)')
+  })
+
   it('a forward ssh refuses fails the open with ssh’s reason', async () => {
     await expect(tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }), FAKE_SSH_FORWARD_FAIL: '1' }).open()).rejects.toThrow(/Address already in use/)
   })
@@ -440,10 +447,10 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()
     const runs = (logged() as { shell?: string; run?: string }[]).filter((x) => x.shell)
     expect(runs[0]!.shell).toBe('powershell')
-    expect(runs[0]!.run).toContain("elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd serve --connection } else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'")
+    expect(runs[0]!.run).toContain("elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd serve --connection } else { $l = Join-Path $d 'bin\\centralu.cmd'")
     expect(runs[1]!.shell).toBe('wsl:Ubuntu-24.04')
     // Windows' drives are off PATH inside the distro: its npm shim must not answer for the distro
-    expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
+    expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); d=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
     // The WSL forward holds a process in the distro, so WSL does not stop it under the link
     const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
     expect(forwards[0]).toContain('-N')
@@ -475,7 +482,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       }
       const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
       expect(detaches.map((r) => r.shell)).toEqual(['posix', 'powershell', 'wsl:Ubuntu-24.04'])
-      expect(detaches[0]!.run).toMatch(/^sh -c .m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach; elif command -v centralu .*then exec centralu serve --detach; elif .* exec "\$HOME\/.centralu\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
+      expect(detaches[0]!.run).toMatch(/^sh -c .d=.*; m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach; elif command -v centralu .*then exec centralu serve --detach; elif .* exec "\$d\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
       expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach }')
       // A detached host needs nothing from the forward: a plain -N (and the distro keep-alive for WSL)
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
@@ -589,12 +596,30 @@ describe('the remote command per shell (#82)', () => {
     }
   })
 
+  it.skipIf(process.platform === 'win32')('looks for the launcher serve keeps under CC_DATA_DIR too, where serve writes it, not only under ~/.centralu', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cc-lookup-'))
+    try {
+      // `centralu` only on an interactive PATH (nvm): the ssh command finds serve's launcher alone, in the data folder
+      const file = join(home, 'data', 'bin', 'centralu')
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, '#!/bin/sh\necho serve-data "$@"\n')
+      chmodSync(file, 0o755)
+      const out = execFileSync('/bin/sh', ['-c', connectionCommand({ shell: 'posix' })], { env: { HOME: home, PATH: '/usr/bin:/bin', CC_DATA_DIR: join(home, 'data') }, encoding: 'utf8' }).trim()
+      expect(out).toBe('serve-data serve --connection')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('a Windows remote tries the managed launcher before centralu on PATH too', () => {
     const ps = decode(connectionCommand({ shell: 'powershell' }))
     const managed = ps.indexOf("$m = Join-Path $d 'remote\\bin\\centralu.cmd'; if (Test-Path $m) { & $m serve --connection }")
     expect(managed).toBeGreaterThan(-1)
     expect(ps.indexOf('elseif (Get-Command centralu.cmd')).toBeGreaterThan(managed)
     expect(ps).toContain("$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }")
+    // The launcher serve keeps is in the same data folder (serve-install.mjs), CC_DATA_DIR included
+    expect(ps).toContain("$l = Join-Path $d 'bin\\centralu.cmd'")
+    expect(ps).not.toContain("'.centralu\\bin")
   })
 
   it('a Windows remote never runs a bare centralu: PowerShell would resolve it to the .ps1 shim a default execution policy blocks (#688)', () => {
@@ -627,6 +652,29 @@ describe('the remote command per shell (#82)', () => {
   it('refuses a WSL distro name that could break out of its quotes', () => {
     expect(() => connectionCommand({ shell: 'wsl', wslDistro: "x'; rm -rf ~" })).toThrow(/Not a WSL distro name/)
     expect(() => connectionCommand({ shell: 'wsl' })).toThrow(/Not a WSL distro name/)
+  })
+
+  // #1143: the person's stop there, which keeps the hub from starting a host by itself; an older serve says nothing
+  it('reads the person’s stop from the line, as words it can be, and nothing from a line without it', () => {
+    const base = { v: 1, port: 17175, token: 't', protocolVersion: 1, hostRunning: false }
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: { by: 'quit', at: 5 } })).stopped).toEqual({ by: 'quit', at: 5 })
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: { by: '`rm -rf`', at: 'soon' } })).stopped).toEqual({ by: 'stop', at: null })
+    expect(parseConnectionLine(JSON.stringify(base))).not.toHaveProperty('stopped')
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: true }))).not.toHaveProperty('stopped')
+  })
+
+  it('says it is the hub’s own stop to serve --stop in every shell, so serve leaves no mark of the person’s stop', () => {
+    const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
+    expect(stopCommand({ shell: 'posix' })).toMatch(/^sh -c 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=/)
+    expect(decode(stopCommand({ shell: 'powershell' }))).toContain("$env:CENTRALU_STOP_BY = 'hub'; $d = ")
+    const wsl = decode(stopCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }))
+    const script = Buffer.from(/echo ([A-Za-z0-9+/=]+) \| base64/.exec(wsl)![1]!, 'base64').toString('utf8')
+    expect(script).toContain('; CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=')
+    // Only the stop says it
+    for (const cmd of [connectionCommand, detachCommand, serveCommand]) {
+      expect(cmd({ shell: 'posix' })).not.toContain('CENTRALU_STOP_BY')
+      expect(decode(cmd({ shell: 'powershell' }))).not.toContain('CENTRALU_STOP_BY')
+    }
   })
 
   it('reads the connection line past anything else the remote shell printed', () => {

@@ -7,7 +7,7 @@ import { LinkedMachineConnection } from './linked-machine-connection.js'
 import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './node-floor.js'
 import { installVersion, type InstallVersion } from './registry.js'
 import { RemoteClient } from './remote-client.js'
-import { shimNames, type RemoteCommand, type RemoteRun } from './tunnel.js'
+import { npmInstall, type RemoteCommand, type RemoteRun } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -240,7 +240,7 @@ export class LinkedMachine extends LinkedMachineConnection {
   operationRefusal(kind: MachineOperation['kind']): string | null {
     if (!this.deps.installer || !this.tunnel.exec) return `This computer cannot install on ${this.name}`
     if (this.deps.hub.dev && (kind === 'install' || kind === 'update')) {
-      return `A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${shimNames(this.record.remote).npm} i -g centralu)`
+      return `A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${npmInstall(this.record.remote)})`
     }
     if (this.record.remote.command) return `${this.name} runs a command of its own in place of centralu; clear it to use an installed one`
     return null

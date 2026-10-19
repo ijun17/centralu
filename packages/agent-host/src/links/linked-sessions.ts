@@ -229,6 +229,36 @@ export function linkedSessions(
     return out
   }
 
+  /**
+   * Every machine's projects, each machine asked within `lookupMs` (#700). One that cannot be asked gives what the headers
+   * mirror last held, each project marked `away` with why. Looking a name up (`findProjects`) goes through this too, so
+   * a stalled link holds it up no longer than it holds the list, and a project there is found as away, never as missing
+   */
+  const everyProject: LinkedSessions['projects'] = async () => {
+    const away: { machine: string; machineId: string; why: string }[] = []
+    const perMachine = await Promise.all(
+      [...machines()].map(async (m): Promise<LinkedProject[]> => {
+        /** What the headers mirror last held of the machine's projects, each marked with why it could not be asked */
+        const mirrored = (why: string): LinkedProject[] => {
+          away.push({ machine: m.name, machineId: m.id, why })
+          return lastProjects(m).map((p) => ({ ...p, away: why }))
+        }
+        // Not away (#1134): its projects stand as last listed, and what is asked of one connects the machine; looking a
+        // name up is no need to connect it
+        if (!m.reachable && m.onDemand) return lastProjects(m)
+        if (!m.reachable) return mirrored(NOT_REACHABLE)
+        try {
+          const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
+          if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
+          return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
+        } catch (err) {
+          return mirrored(cause(m, err))
+        }
+      }),
+    )
+    return { projects: perMachine.flat(), away }
+  }
+
   return {
     async send(sessionId, text, fromName, ask) {
       const m = owner(sessionId)
@@ -247,47 +277,10 @@ export function linkedSessions(
 
     async findProjects(ref) {
       const wanted = ref.trim()
-      const found = await Promise.all(
-        [...machines()].map(async (m) => {
-          // Matched on what it last listed (#1134): looking a name up is no need to connect, acting on the project is
-          if (!m.reachable && m.onDemand) return lastProjects(m).filter((p) => p.id === wanted || p.name === wanted)
-          if (!m.reachable) return []
-          try {
-            const list = await m.call('projects.list', {})
-            return (Array.isArray(list) ? list : [])
-              .map((raw) => projectOf(m, raw))
-              .filter((p): p is LinkedProject => p !== null && (p.id === wanted || p.name === wanted))
-          } catch {
-            return []
-          }
-        }),
-      )
-      return found.flat()
+      return (await everyProject()).projects.filter((p) => p.id === wanted || p.name === wanted)
     },
 
-    async projects() {
-      const away: { machine: string; machineId: string; why: string }[] = []
-      const perMachine = await Promise.all(
-        [...machines()].map(async (m): Promise<LinkedProject[]> => {
-          /** What the headers mirror last held of the machine's projects, each marked with why it could not be asked */
-          const mirrored = (why: string): LinkedProject[] => {
-            away.push({ machine: m.name, machineId: m.id, why })
-            return (m.lastKnown('projects') ?? []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null).map((p) => ({ ...p, away: why }))
-          }
-          // Not away (#1134): its projects stand as last listed, and what is asked of one connects the machine
-          if (!m.reachable && m.onDemand) return lastProjects(m)
-          if (!m.reachable) return mirrored(NOT_REACHABLE)
-          try {
-            const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
-            if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
-            return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
-          } catch (err) {
-            return mirrored(cause(m, err))
-          }
-        }),
-      )
-      return { projects: perMachine.flat(), away }
-    },
+    projects: everyProject,
 
     async projectSessions(project) {
       const m = owner(project.id)
