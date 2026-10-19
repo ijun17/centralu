@@ -325,6 +325,32 @@ export function linkedSessions(
       })
     },
 
+    async deleteAgentChild(sessionId, branch) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
+          if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
+          const { worktree, path, branch: on, why, note } = answer.data
+          // The machine's words, each on one line, as every text from it the hub puts in an answer
+          return {
+            worktree,
+            ...(path ? { path: onePath(path) } : {}),
+            ...(on ? { branch: oneLine(on) } : {}),
+            // A sentence, not a label: longer, and still one line
+            ...(why ? { why: oneLine(why, 1_000) } : {}),
+            ...(note ? { note: oneLine(note, 1_000) } : {}),
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: agents.deleteAgentChild')) older = true
+          throw err
+        }
+      })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1161`, olderBuild: true } : r
+    },
+
     async lastUserMessage(sessionId) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }

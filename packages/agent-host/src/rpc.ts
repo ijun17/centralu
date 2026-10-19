@@ -210,6 +210,11 @@ export function createRpcHandler(
       await mgr.trashSession(sessionId, deleteWorktree, deleteExternal)
       return { ok: true as const }
     },
+    // A hub's start_agent child deleted with the worktree made for it, when nothing would be lost (#1161 item 3)
+    'agents.deleteAgentChild': async (p) => {
+      const { sessionId, worktreeBranch } = RpcMethods['agents.deleteAgentChild'].params.parse(p)
+      return mgr.deleteHubChild(sessionId, worktreeBranch)
+    },
     'agents.exportHandoffRecord': async (p) => {
       const { sessionId, toTool } = RpcMethods['agents.exportHandoffRecord'].params.parse(p)
       return mgr.exportHandoffRecord(sessionId, toTool)

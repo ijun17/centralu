@@ -76,6 +76,25 @@ const withoutOwed = (r: RemoteAgent): RemoteAgent => {
 const bare = (error: string): string => error.trim().replace(/\.+$/, '')
 
 /**
+ * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
+ * trash": removed, left and why, or left because the machine's build predates the cleanup. Nothing for a child started
+ * without a worktree.
+ */
+function remoteWorktreeLine(
+  rec: RemoteAgent,
+  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | 'older' | undefined,
+): string {
+  if (!rec.worktree) return ''
+  if (done === 'older' || !done) {
+    return `; its worktree there, on ${rec.worktree}, stays${done === 'older' ? `: ${rec.machine} runs a Centralu from before #1161, which does not remove it` : ''}. The person deletes it on that machine`
+  }
+  const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
+  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed${done.note ? ` (${bare(done.note)})` : ''}`
+  if (done.worktree === 'none') return `; it had no worktree of its own there any more`
+  return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
+}
+
+/**
  * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
  * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
  */
@@ -536,12 +555,22 @@ export class RemoteAgents {
             return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
           }
         }
-        const r = await reader.deleteSession(rec.sessionId)
-        if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        /*
+         * The worktree made for it there goes with it when nothing would be lost (#1161 item 3): the machine decides, as
+         * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
+         * branch this hub asked for, and a child started without a worktree is deleted as before
+         */
+        const withWorktree = rec.worktree ? await reader.deleteAgentChild(rec.sessionId, rec.worktree) : undefined
+        const older = withWorktree && !withWorktree.ok && 'olderBuild' in withWorktree
+        if (withWorktree && !withWorktree.ok && !older) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(withWorktree.error)}.` }
+        if (!withWorktree?.ok) {
+          const r = await reader.deleteSession(rec.sessionId)
+          if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        }
         this.forget(rec.sessionId)
         return {
           ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
-          notice: `It went to ${rec.machine}'s trash${rec.worktree ? `; its worktree there, on ${rec.worktree}, stays until the person deletes it on that machine` : ''}.`,
+          notice: `It went to ${rec.machine}'s trash${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
         }
       }
     }

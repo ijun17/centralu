@@ -102,6 +102,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.stopBackgroundTask': session(),
   'agents.clearBackgroundTasks': session(),
   'agents.deleteSession': session(),
+  'agents.deleteAgentChild': session(),
   'agents.exportHandoffRecord': session(),
   'agents.exportHandoffNote': session(),
   'agents.worktreeStatus': session(),

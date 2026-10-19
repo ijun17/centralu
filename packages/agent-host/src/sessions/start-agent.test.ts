@@ -1509,6 +1509,25 @@ describe('starting another agent in the same project', () => {
       git(w.caller.path, 'commit', '-qm', 'init')
     }
 
+    // #1161 item 3: a hub's delete takes only the worktree made for that session, on the branch the hub asked for
+    it("a hub's delete leaves a worktree that is not the one made for the session on that branch, and trashes the session", async () => {
+      repo()
+      allowProject()
+      const s = await session()
+      await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/made', wait: false })
+      const c = childrenOf(s)[0]!
+      handleOf(c.id)!.answer('done')
+      await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
+      expect(await w.mgr.deleteHubChild(c.id, 'feat/other')).toEqual({
+        worktree: 'kept', path: c.worktree!.path, branch: 'feat/made', why: 'it is not the worktree Centralu made for this session on feat/other',
+      })
+      expect([existsSync(c.worktree!.path), w.store.trash.trashedSession(c.id) !== null]).toEqual([true, true])
+      // A session in the project's own folder has no worktree to take
+      const plain = await session()
+      expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
+      expect(existsSync(w.caller.path)).toBe(true)
+    })
+
     it('keeps a missing worktree distinct from a same-folder child, including after reload', async () => {
       repo()
       allowProject()

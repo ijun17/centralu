@@ -1795,6 +1795,11 @@ export class SessionManager {
     return [...this.store.projects.listProjects().map((p) => p.path), this.worktreeRoot]
   }
 
+  /** `WorktreeSessions.deleteHubChild` (worktree-sessions.ts, #1161 item 3): `agents.deleteAgentChild` */
+  deleteHubChild(...a: Parameters<WorktreeSessions['deleteHubChild']>): ReturnType<WorktreeSessions['deleteHubChild']> {
+    return this.worktrees.deleteHubChild(...a)
+  }
+
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
    */
   async worktreeStatus(

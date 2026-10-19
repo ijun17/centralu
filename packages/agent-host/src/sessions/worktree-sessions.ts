@@ -31,6 +31,8 @@ import {
   gitWorktreePaths,
   gitWorktreeList,
   gitBranchAhead,
+  gitUnpublishedCommits,
+  gitWorktreeDirty,
 } from '../dev-services/git-worktree.js'
 import {
   copyTree,
@@ -41,7 +43,13 @@ import {
 import { canonicalPath, isInside, isMissingPathError } from '../dev-services/path-guard.js'
 import { prepareWorktreeDependencies } from '../dev-services/worktree-dependencies.js'
 import { RestartPolicy } from './restart-policy.js'
-import { rpcError } from '../rpc-error.js'
+import { rpcError, sessionNotFound } from '../rpc-error.js'
+
+/**
+ * How long deleting a hub's child waits for a turn the hub just stopped to end (#1161 item 3): an interrupt reaches the
+ * tool at once, and its turn's end comes a moment later. Past it the worktree stays, said as such.
+ */
+export const STOPPING_WAIT_MS = 10_000
 
 /** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
 function pathKey(path: string): string {
@@ -477,6 +485,65 @@ export class WorktreeSessions {
     } finally {
       this.worktreeCleanup.delete(target.id)
     }
+  }
+
+  /**
+   * agent_session delete of a child a hub started here with a worktree (#1161 item 3, `agents.deleteAgentChild`): the
+   * session goes to the trash, and the worktree made for it goes too when nothing would be lost by it. Only that one:
+   * a worktree Centralu made (`base`) on the branch the hub asked for, so never the project's own folder or a worktree
+   * the person opened a session in. Only when nothing is lost: nothing uncommitted, and every commit of its own on a
+   * remote or the trunk (`gitUnpublishedCommits`). Otherwise, or when the cleanup refuses (work still running there,
+   * another session in its folder), the session still goes to the trash, the worktree stays, and the answer says why.
+   *
+   * The hub stops a running turn before it asks: a turn just stopped is waited out for a few seconds
+   * (`STOPPING_WAIT_MS`), since the cleanup refuses a session still in its turn.
+   */
+  async deleteHubChild(
+    sessionId: string,
+    branch: string,
+  ): Promise<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> {
+    let m = this.host.meta.get(sessionId)
+    if (!m) throw sessionNotFound(sessionId)
+    const plain = async () => {
+      await this.host.trashSession(sessionId)
+    }
+    const wt = m.worktree
+    if (!wt) {
+      await plain()
+      return { worktree: 'none' }
+    }
+    const kept = async (why: string) => {
+      await plain()
+      return { worktree: 'kept' as const, path: wt.path, branch: wt.branch, why }
+    }
+    const projectId = m.projectId
+    if (!wt.base || wt.branch !== branch || !projectId) return kept(`it is not the worktree Centralu made for this session on ${branch}`)
+    for (const until = Date.now() + STOPPING_WAIT_MS; inTurn(m.state) && Date.now() < until; ) {
+      await new Promise((r) => setTimeout(r, 100))
+      m = this.host.meta.get(sessionId)
+      if (!m) throw sessionNotFound(sessionId)
+    }
+    const folder = worktreeFolderState(wt.path)
+    if (typeof folder === 'object') return kept(`its folder cannot be read (${folder.unreachable})`)
+    if (folder === 'present') {
+      const state = await gitWorktreeDirty(wt.path, this.host.gitTrust(projectId))
+      if (state.unknown) return kept('whether it holds uncommitted changes could not be told')
+      if (state.dirty) return kept(`it holds ${state.changedFiles}${state.more ? '+' : ''} uncommitted file${state.changedFiles === 1 ? '' : 's'}`)
+      const cwd = this.host.cwdOf(projectId)
+      const head = await gitRevParse(wt.path, 'HEAD')
+      const unpublished = head ? await gitUnpublishedCommits(cwd, head, wt.branch, this.host.trunkOf(projectId) ?? 'HEAD') : null
+      if (unpublished === null) return kept('whether its commits are pushed could not be told')
+      if (unpublished > 0) return kept(`it has ${unpublished} commit${unpublished === 1 ? '' : 's'} that no remote and not the trunk has: push ${wt.branch}, then delete it there`)
+    }
+    const r = await this.cleanUpWorktreeChild(m)
+    if (!r.ok) {
+      // Refused before anything was touched: the session goes as a plain delete would take it
+      if (this.host.meta.has(sessionId)) return kept(r.error.replace(/\.+$/, ''))
+      return { worktree: 'kept', path: wt.path, branch: wt.branch, why: r.error.replace(/\.+$/, '') }
+    }
+    // Trashed, but the worktree or its branch stayed behind (`warning`), or the folder was gone already (`note`)
+    if (r.warning) return { worktree: 'kept', path: wt.path, branch: wt.branch, why: r.warning.replace(/\.+$/, '') }
+    return { worktree: 'removed', path: wt.path, branch: wt.branch, ...(r.note ? { note: r.note } : {}) }
   }
 
   /**

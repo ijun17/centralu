@@ -110,6 +110,22 @@ export const sessionMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * agent_session delete of a child a hub's session started here with a worktree (#1161 item 3): the session goes to the
+   * trash, and the worktree Centralu made for it on `worktreeBranch` goes too when nothing would be lost (nothing
+   * uncommitted, every commit of its own on a remote or the trunk). `kept` says why it stayed; `none`, the session had
+   * no worktree. A build from before it answers "Unknown method", and the hub deletes the session as `agents.deleteSession`.
+   */
+  'agents.deleteAgentChild': {
+    params: z.object({ sessionId: SessionId, worktreeBranch: z.string().min(1) }),
+    result: z.object({
+      worktree: z.enum(['removed', 'kept', 'none']),
+      path: z.string().optional(),
+      branch: z.string().optional(),
+      why: z.string().optional(),
+      note: z.string().optional(),
+    }),
+  },
+  /**
    * The material needed to judge whether a worktree can be deleted. The UI asks this right
    * before deleting. `null` means this is not a worktree session — there is nothing to ask.
    */

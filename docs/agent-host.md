@@ -597,8 +597,21 @@ caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so 
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
 works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
-(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash, its worktree left there), `answer`,
-and `list` names its machine. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
+(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash), `answer`,
+and `list` names its machine. **`delete` takes the worktree made for it there too** (#1161 item 3,
+`agents.deleteAgentChild` on that machine, `WorktreeSessions.deleteHubChild`), when nothing would be lost by it. Only
+that one: a worktree Centralu made for the session (`worktree.base`) on the branch the hub's record names, so never the
+project's own folder, a worktree the person opened a session in, or one a child started without a worktree.
+Only when nothing is lost: nothing uncommitted in it, and every commit of its own (its checkout's `HEAD` and the branch
+made for it, which the agent may have left) on a remote-tracking ref or the trunk (`gitUnpublishedCommits`); a branch
+pushed from there passes, a commit only there does not. Then it goes as a local child's does (`cleanUpWorktreeChild`:
+its recovery snapshot in the trash, the worktree and the branch removed). Otherwise the session still goes to the trash,
+the worktree stays, and the answer says what was left and why ("it holds 2 uncommitted files", "it has 1 commit that no
+remote and not the trunk has: push …", work still running there, another session in its folder). A turn the hub just
+stopped is waited out for up to 10 s first (`STOPPING_WAIT_MS`), as the cleanup refuses a session still in its turn. A
+machine whose build predates it answers "Unknown method": the hub deletes the session there as before and says the
+worktree stays because of that build. A local child's worktree was already removed by `delete` (#608); that is
+unchanged. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
 wait returns them (`asking`), `status` reads them from the machine (`LinkedSessions.cards`), and a card raised while
 no call waits is told once (`cardNotice`); each card's handle names that turn (`RemoteAgent.turn`, new with each start
 or send at rest). `answer` takes a question card's answer to the machine (`agents.answerQuestion` there). An approval
