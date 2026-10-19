@@ -14,7 +14,7 @@
 // branch). An item whose quick tier passed waits for a batch; one that cannot be batched, or whose
 // batch of one ended without landing it, needs its session.
 import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
-import { CAUSE_TEXT } from './run-failure.mjs'
+import { CAUSE_TEXT, onFlakyList } from './run-failure.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -449,12 +449,22 @@ export function lowerFailureCounts(run, provedAt) {
 /**
  * Whether a batch's run lands under `ci.landTier: quick` (#1259): its quick tier passed as a pull request's own
  * does (`quickGreen`), and more strictly, since this decides a landing: the full tier's check reported, skipped (a
- * run with no such check at all is not known to be the quick tier), and every run concluded well (a run that failed
- * on a check outside the required rows does not land).
+ * run with no such check at all is not known to be the quick tier), every run concluded well (a run that failed on a
+ * check outside the required rows does not land), and **each named quick check** (`quickChecks`, project.json
+ * `ci.quickChecks`, `*` for any run of characters) reported and succeeded, every check its name matches: one never
+ * reported (a renamed job, one a broken `changes` switched off, a Windows shard GitHub never created) or skipped does
+ * not land (#1259 review). No names, nothing lands from a quick run.
  */
-export function quickLanded(checks, runs, fullTier) {
+export function quickLanded(checks, runs, fullTier, quickChecks = []) {
+  if (!quickChecks?.length) return false
   if (!quickGreen(checks, runs, fullTier) || ranTier(checks, fullTier) !== 'quick') return false
-  return runs.every((r) => OK_CONCLUSIONS.has(r.conclusion))
+  if (!runs.every((r) => OK_CONCLUSIONS.has(r.conclusion))) return false
+  const all = [...checks.rows, ...(checks.others ?? [])]
+  const succeeded = (r) => !!r.check && (r.check.kind === 'status' ? r.check.state === 'success' : r.check.status === 'completed' && r.check.conclusion === 'success')
+  return quickChecks.every((pattern) => {
+    const named = all.filter((r) => onFlakyList(r.name, [pattern]))
+    return named.length > 0 && named.every(succeeded)
+  })
 }
 
 export function quickGreen(checks, runs, fullTier) {

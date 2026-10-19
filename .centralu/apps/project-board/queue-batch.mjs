@@ -322,9 +322,10 @@ async function runCi(b, ctx) {
    * tier's check skipped. The required set is read from the whole workflow, whose full-tier jobs a quick run never
    * reports (a matrix job left out reports no check of its name at all): without this, those counted as missing and
    * the green batch stopped with "never reported" (queue/batch-98, 2026-10-19). A quick-tier failure still fails;
-   * a run with no full tier check at all, or one that concluded badly, is left to decideRun (`quickLanded`).
+   * a run with no full tier check at all, one that concluded badly, or one where a check named in ci.quickChecks
+   * was not reported or did not succeed, is left to decideRun (`quickLanded`).
    */
-  const quickLanding = TIERS && CI.landTier === 'quick' && quickLanded(checks, runs, CI.fullTier)
+  const quickLanding = TIERS && CI.landTier === 'quick' && quickLanded(checks, runs, CI.fullTier, CI.quickChecks)
   const d = quickLanding ? { state: 'green' } : decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }

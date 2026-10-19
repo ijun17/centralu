@@ -15,7 +15,8 @@
     "waitMinutes": 40,
     "pollSeconds": 30,
     "fullTier": "full tier",
-    "landTier": "quick"
+    "landTier": "quick",
+    "quickChecks": ["changes", "verify", "windows tests (vitest *)"]
   },
   "queue": {
     "batch": { "min": 1, "max": 4 },

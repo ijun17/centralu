@@ -930,7 +930,9 @@ const NO_TIERS = { PROJECT_BOARD_CI_FULL_TIER: '' }
 /** Two tiers, landing only from a full run (`ci.landTier: full`), as before #1259 */
 const TIERS = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'full' }
 /** Two tiers, landing after the fast tier (#1259, this repository's project.json) */
-const FAST_LAND = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'quick' }
+const FAST_LAND = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'quick', PROJECT_BOARD_CI_QUICK_CHECKS: '["verify","windows tests"]' }
+/** Two tiers, landing after the fast tier with this repository's own quick checks (project.json ci.quickChecks) */
+const REAL_QUICK = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LAND_TIER: 'quick' }
 /**
  * No checkout to merge a conflicting pull request in unless a test gives one (#1182): the queue would otherwise
  * merge in the checkout this app is committed in, whose remote is the real GitHub.
@@ -2435,23 +2437,35 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
    */
   const FULL_WORKFLOW = [
     'jobs:',
+    '  changes:',
+    '    name: changes',
     '  full-tier:',
     '    name: full tier',
     '  verify:',
     '    name: verify',
-    '  windows-tests:',
-    '    name: windows tests',
+    '  windows-unit-1:',
+    '    name: windows tests (vitest 1/2)',
+    '  windows-unit-2:',
+    '    name: windows tests (vitest 2/2)',
     '  keeper:',
     '    name: keeper e2e',
     '  host-remote:',
     '    name: host tests, remote Node',
     '',
   ].join('\n')
+  /** What a batch's quick run reports: the quick tier's checks (this repository's names), the full tier's skipped */
+  const realQuick = (suite: number, verify = 'success') => [
+    suiteCheck('changes', 'success', suite * 10 + 5, suite),
+    suiteCheck('full tier', 'skipped', suite * 10, suite),
+    suiteCheck('verify', verify, suite * 10 + 1, suite),
+    suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
+    suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
+  ]
 
   it("lands a batch whose quick run passed while the full tier's jobs never reported, under ci.landTier quick", async () => {
     runtime(
-      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000, 'success', 'skipped') } } } }),
-      FAST_LAND,
+      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: realQuick(6000) } } } }),
+      REAL_QUICK,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
@@ -2463,24 +2477,51 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     const checks = (rows: Row[]) => evaluateChecks({ required: ['full tier', 'verify', 'windows tests', 'keeper e2e'], reported: rows })
     const quickRows = [check('full tier', 'skipped'), check('verify', 'success'), check('windows tests', 'success')]
     const ok = [{ status: 'completed', conclusion: 'success' }]
-    expect(quickLanded(checks(quickRows), ok, 'full tier')).toBe(true)
+    const named = ['verify', 'windows tests']
+    expect(quickLanded(checks(quickRows), ok, 'full tier', named)).toBe(true)
     // No full tier check at all: not known to be the quick tier
-    expect(quickLanded(checks(quickRows.slice(1)), ok, 'full tier')).toBe(false)
+    expect(quickLanded(checks(quickRows.slice(1)), ok, 'full tier', named)).toBe(false)
     // A run that concluded badly on a check outside the required rows
-    expect(quickLanded(checks(quickRows), [{ status: 'completed', conclusion: 'failure' }], 'full tier')).toBe(false)
+    expect(quickLanded(checks(quickRows), [{ status: 'completed', conclusion: 'failure' }], 'full tier', named)).toBe(false)
     // A quick-tier failure, or a run still going
-    expect(quickLanded(checks([check('full tier', 'skipped'), check('verify', 'failure'), check('windows tests', 'success')]), ok, 'full tier')).toBe(false)
-    expect(quickLanded(checks(quickRows), [{ status: 'in_progress', conclusion: null }], 'full tier')).toBe(false)
+    expect(quickLanded(checks([check('full tier', 'skipped'), check('verify', 'failure'), check('windows tests', 'success')]), ok, 'full tier', named)).toBe(false)
+    expect(quickLanded(checks(quickRows), [{ status: 'in_progress', conclusion: null }], 'full tier', named)).toBe(false)
+    // No quick check named: nothing lands from a quick run
+    expect(quickLanded(checks(quickRows), ok, 'full tier', [])).toBe(false)
+  })
+
+  // RVAP review of #1311: quickGreen ignores a check that never reported, so a quick tier that did not run would land
+  it("lands a quick batch run only when each of the quick tier's named checks reported and succeeded", () => {
+    const required = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'linux-x64', 'e2e (webkit 1/5)', 'keeper e2e']
+    const named = ['changes', 'verify', 'windows tests (vitest *)']
+    const ok = [{ status: 'completed', conclusion: 'success' }]
+    const all = [check('changes', 'success'), check('full tier', 'skipped'), check('verify', 'success'), check('windows tests (vitest 1/2)', 'success'), check('windows tests (vitest 2/2)', 'success')]
+    const lands = (rows: Row[]) => quickLanded(evaluateChecks({ required, reported: rows }), ok, 'full tier', named)
+    // batch-98: every quick check passed, the full tier's jobs never reported
+    expect(lands(all)).toBe(true)
+    // verify never reported
+    expect(lands(all.filter((c) => c.name !== 'verify'))).toBe(false)
+    // one Windows shard never reported
+    expect(lands(all.filter((c) => c.name !== 'windows tests (vitest 2/2)'))).toBe(false)
+    // only changes, and the full tier skipped
+    expect(lands([check('changes', 'success'), check('full tier', 'skipped')])).toBe(false)
+    // a quick check skipped: not a pass for a landing
+    expect(lands(all.map((c) => (c.name === 'verify' ? check('verify', 'skipped') : c)))).toBe(false)
   })
 
   it("lands nothing from a batch whose quick run failed, the full tier's jobs unreported as well", async () => {
     runtime(
-      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure', 'skipped') } } } }),
-      FAST_LAND,
+      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: realQuick(6000, 'failure') } } } }),
+      REAL_QUICK,
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
     expect(writes().map(short2)).not.toContain('merge 77')
+  })
+
+  it('refuses to start landing after the fast tier with no quick check named (an empty ci.quickChecks)', async () => {
+    runtime(tieredState(), { ...REAL_QUICK, PROJECT_BOARD_CI_QUICK_CHECKS: '[]' })
+    await expect(call('merge_queue')).rejects.toThrow(/ci\.quickChecks must name the quick tier/)
   })
 
   it('still lands nothing from a red batch on the fast tier', async () => {
