@@ -153,7 +153,7 @@ test.describe('secret fields (E)', () => {
     const slot = panel.getByTestId('secret-API_KEY')
     await slot.getByTestId('secret-input').fill(VALUE)
     await expect(slot.getByTestId('secret-save')).toBeDisabled()
-    await expect(slot.getByTestId('secret-save')).toHaveAttribute('title', `The saved secrets file cannot be read (${reason}), so nothing is saved until it is fixed or removed`)
+    await expect(slot.getByTestId('secret-save')).toHaveAttribute('title', `The saved secrets file cannot be read: ${reason}. Nothing is saved until it is fixed or removed`)
     expect(await secretWrites(page)).toEqual([])
   })
 })

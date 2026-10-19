@@ -129,11 +129,9 @@ app wrote there while running would reach the whole team.
   not read it (EACCES)", never anything the file holds) on every app that declares secrets, and the
   Secrets section shows one line above the fields; while the file is stuck, Save is disabled and says
   why. The reason is known to the host that met the file: a copy found after a restart is named
-  without one. The line goes for an app once
-  that app has a value again (one file holds every app's values), or once a stuck file reads again;
-  a moved-aside copy is found in the data folder, so a restart says it again until the copy is
-  removed or each app's values are back. An
-  app receives only the names it declares, as environment variables. Values of 4 characters or more
+  without one. The line goes for an app once that app has a value again (one file holds every app's
+  values), or once a stuck file reads again; a moved-aside copy is found in the data folder, so a
+  restart says it again until the copy is removed or each app's values are back. An app receives only the names it declares, as environment variables. Values of 4 characters or more
   are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, and in the text of a failed start
   (the list, a check, a caller's refusal), and in what a check report and a screen read quote of the app's own errors
   (a failed `resources/read`, a failed second tool list; also the tool and screen names the report prints), also where JSON

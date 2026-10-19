@@ -182,6 +182,20 @@ describe('why a file could not be used, without its contents', () => {
     expect(new SecretStore(dataRoot).trouble('p1/keys')).toEqual({ movedTo: null, at: expect.any(Number), reason: 'it is a folder (EISDIR)' })
   })
 
+  it('a file that stays stuck for another reason says the current one', () => {
+    const path = join(dataRoot, SECRETS_FILE)
+    mkdirSync(path)
+    const store = new SecretStore(dataRoot)
+    const first = store.trouble('p1/keys')
+    expect(first).toMatchObject({ movedTo: null, reason: 'it is a folder (EISDIR)' })
+    // Now a damaged file whose copy name is taken by a folder: still stuck, for another reason
+    rmSync(path, { recursive: true })
+    writeFileSync(path, DAMAGED)
+    vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
+    mkdirSync(join(dataRoot, `${SECRETS_FILE}.unreadable-1700000000000`, 'held'), { recursive: true })
+    expect(store.trouble('p1/keys')).toEqual({ movedTo: null, at: first!.at, reason: expect.stringMatching(/^it is not valid JSON, and it could not be moved aside/) })
+  })
+
   it('a damaged file that cannot be moved aside says both', () => {
     writeFileSync(join(dataRoot, SECRETS_FILE), DAMAGED)
     vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
@@ -192,7 +206,9 @@ describe('why a file could not be used, without its contents', () => {
 
   it('the import marks: an app held because the file cannot be read says why', () => {
     mkdirSync(join(dataRoot, IMPORTS_FILE))
-    expect(new ImportBook(dataRoot).doubt()).toBe(`${join(dataRoot, IMPORTS_FILE)} could not be read (it is a folder (EISDIR)), so whether this app was imported is not known. It stays off until that file can be read again`)
+    expect(new ImportBook(dataRoot).doubt()).toBe(
+      `${join(dataRoot, IMPORTS_FILE)} could not be read: it is a folder (EISDIR). Whether this app was imported is not known, so it stays off until that file can be read again`,
+    )
   })
 
   it('the import marks: an app held because a damaged file was moved aside says what was wrong with it', () => {

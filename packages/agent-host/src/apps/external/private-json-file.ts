@@ -163,6 +163,8 @@ export class PrivateJsonFile<T> {
     // Said once, not on every read: the secrets file is read for every list broadcast
     if (!this.standIn) console.error(`[apps] ${this.opts.label} ${what} (${reason}); it is left as it is and not written until it can be read. ${this.opts.lost}`)
     if (!this.standIn) this.lastTrouble = { movedTo: null, at: Date.now(), reason }
+    // Still stuck, for another reason now (held open, then damaged and held): the screen says the current one
+    else if (this.lastTrouble) this.lastTrouble = { ...this.lastTrouble, reason }
     this.standIn = true
     return this.opts.empty()
   }
@@ -188,14 +190,15 @@ function readFailure(e: unknown): string {
   const code = errorCode(e)
   const words: Record<string, string> = {
     EACCES: 'Centralu may not read it',
-    EPERM: 'Centralu may not read it',
+    // On Windows also what a file another program holds (an antivirus scan) answers
+    EPERM: 'access to it was refused',
     EBUSY: 'another program holds it open',
     EISDIR: 'it is a folder',
     EMFILE: 'too many files are open',
     ENFILE: 'too many files are open',
     EIO: 'the disk could not read it',
   }
-  return words[code] ? `${words[code]} (${code})` : `reading it failed (${code})`
+  return Object.hasOwn(words, code) ? `${words[code]} (${code})` : `reading it failed (${code})`
 }
 
 /** How old a temp file of a live host has to be before it counts as left behind. A write takes milliseconds */

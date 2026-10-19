@@ -46,7 +46,10 @@ describe('the Secrets section when the saved secrets could not be read (#944)', 
     expect(moved).toContain('The saved secrets could not be read (it is not valid JSON) and were moved to')
     const stuck = render(app({ secretsUnreadable: { movedTo: null, at: 1, reason: 'Centralu may not read it (EACCES)' } }))
     expect(stuck).toContain('cannot be read: Centralu may not read it (EACCES). Nothing can be saved until it is fixed or removed')
-    expect(stuck).toMatch(/title="The saved secrets file cannot be read \(Centralu may not read it \(EACCES\)\), so nothing is saved until it is fixed or removed"[^>]*data-testid="secret-save"/)
+    // The Save button's own title, whatever order its attributes come in
+    const save = /<button[^>]*data-testid="secret-save"[^>]*>/.exec(stuck)?.[0] ?? ''
+    expect(save).toContain('disabled=""')
+    expect(save).toContain('title="The saved secrets file cannot be read: Centralu may not read it (EACCES). Nothing is saved until it is fixed or removed"')
   })
 
   it('says a file still in place blocks saving, and the Save button says why', () => {

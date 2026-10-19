@@ -25,7 +25,11 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   if (slots.length === 0) return null
   // Still in place and unreadable: nothing can be saved over it, and the Save button says why instead of failing
   const stuck =
-    trouble?.movedTo === null ? `The saved secrets file cannot be read${trouble.reason ? ` (${trouble.reason})` : ''}, so nothing is saved until it is fixed or removed` : null
+    trouble?.movedTo !== null
+      ? null
+      : trouble.reason
+        ? `The saved secrets file cannot be read: ${trouble.reason}. Nothing is saved until it is fixed or removed`
+        : 'The saved secrets file cannot be read, so nothing is saved until it is fixed or removed'
   return (
     <div data-testid="app-secrets">
       {trouble && <SecretsUnreadable movedTo={trouble.movedTo} reason={trouble.reason} />}

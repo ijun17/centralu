@@ -207,8 +207,9 @@ export class ImportBook {
     const met = this.file.trouble
     if (met?.movedTo && met.reason) this.whyMoved.set(met.movedTo, met.reason)
     if (this.file.unreadable) {
-      const why = met?.reason ? ` (${met.reason})` : ''
-      this.doubtReason = `${this.file.path} could not be read${why}, so whether this app was imported is not known. It stays off until that file can be read again`
+      this.doubtReason = met?.reason
+        ? `${this.file.path} could not be read: ${met.reason}. Whether this app was imported is not known, so it stays off until that file can be read again`
+        : `${this.file.path} could not be read, so whether this app was imported is not known. It stays off until that file can be read again`
     } else if (stat(this.file.path) === null) {
       this.afterLoss()
     }
