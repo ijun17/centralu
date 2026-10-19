@@ -2497,6 +2497,7 @@ describe('agents find the board tool for the gh command they would type', { time
     const expected: Record<string, string> = {
       merge_when_green: 'Instead of gh pr merge',
       queue_merge: 'gh pr merge and gh run rerun',
+      integrate: 'Instead of open_pr and queue_merge (gh pr create, gh pr merge)',
       merge_queue: 'Instead of gh pr list / gh run list',
       rebase_stack: 'Instead of git rebase --onto',
       ci_status: 'Instead of gh pr checks',
@@ -2514,6 +2515,8 @@ describe('agents find the board tool for the gh command they would type', { time
     const names = new Set(tools.map((t) => t.name))
     expect([...named].filter((n) => !names.has(n))).toEqual([])
     for (const n of ['merge_when_green', 'queue_merge', 'rebase_stack', 'ci_status', 'read_failed_job', 'open_pr', 'comment', 'file_issue', 'release']) expect(named.has(n), n).toBe(true)
+    // An auto-tier change goes to integrate, by its name (#1259 step 3)
+    expect(first.text).toContain('hand it over with integrate')
   })
 })
 
