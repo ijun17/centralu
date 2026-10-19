@@ -1,6 +1,6 @@
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo } from '@cc/protocol'
-import { applyBackgroundTasks, applySessionState, nextStateFor } from '@cc/protocol'
+import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -290,14 +290,16 @@ export class SessionEvents {
         if (e.request) this.host.cacheLedger.record(m.tool, m.id, e.request)
         break
       case 'context_update':
-        m.context = { used: e.used, window: e.window, exactness: e.exactness }
+        m.context = nextContext(m.context, e)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
-        m.context = null
+        m.context = nextContext(m.context, e)
         this.host.cacheLedger.note(m.id, 'compaction')
         break
       case 'compaction':
+        // The size it came out at, until the tool's next reading (#1282); stored with the session like any reading
+        m.context = nextContext(m.context, e)
         // The conversation the next request sends begins with a summary the cache has never seen (§6.1)
         this.host.cacheLedger.note(m.id, 'compaction')
         break

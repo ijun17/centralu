@@ -695,6 +695,41 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(listed.context).toBeNull()
   })
 
+  /*
+   * A compaction that says its size moves the gauge there (#1282). Seen: the marker said "964k → 8.8k" and the gauge
+   * kept "Context 96%", for good once the next turn failed and no turn-end reading came.
+   */
+  describe('a compaction and the context gauge (#1282)', () => {
+    const listed = async (id: string) => ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === id)!
+
+    it('one that reports its size sets that, as an estimate in the window already known, and it survives a restart', async () => {
+      const { s, h } = await start()
+      h.emitContext(964_000, 1_000_000)
+      h.emitEvent({ type: 'compaction', sessionId: s.id, failed: false, before: 964_000, after: 8_800 })
+
+      const want = { used: 8_800, window: 1_000_000, exactness: 'estimate' }
+      expect((await listed(s.id)).context).toEqual(want)
+      // Stored with the session, as a turn-end reading is: the next host reads it back
+      expect(store.sessions.listSessions().find((x) => x.id === s.id)!.context).toEqual(want)
+    })
+
+    it('a failed one, or one with no size, leaves the reading as it was', async () => {
+      const { s, h } = await start()
+      h.emitContext(964_000, 1_000_000)
+      h.emitEvent({ type: 'compaction', sessionId: s.id, failed: true, reason: 'Not enough messages to compact.' })
+      h.emitEvent({ type: 'compaction', sessionId: s.id, failed: false })
+
+      expect((await listed(s.id)).context).toEqual({ used: 964_000, window: 1_000_000, exactness: 'exact' })
+    })
+
+    it('with no reading yet the window is unknown, so the gauge stays empty', async () => {
+      const { s, h } = await start()
+      h.emitEvent({ type: 'compaction', sessionId: s.id, failed: false, before: 964_000, after: 8_800 })
+
+      expect((await listed(s.id)).context).toBeNull()
+    })
+  })
+
   it('a notice is a marker, and one marked once per session is kept once, even across restarts', async () => {
     const { s, h } = await start()
     const warning = 'Codex is ignoring 2 unrecognized configuration settings. Check for typos or deprecated settings.'
