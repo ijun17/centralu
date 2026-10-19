@@ -2428,6 +2428,47 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(writes().map(short2)).toContain('merge 77')
   })
 
+  /*
+   * queue/batch-98, 2026-10-19: under ci.landTier quick the batch's run (the quick tier) passed, and the batch stopped
+   * with "required checks … never reported": the required set is the whole workflow's, and a quick run never reports
+   * the full tier's jobs (a matrix job left out reports no check of its name at all)
+   */
+  const FULL_WORKFLOW = [
+    'jobs:',
+    '  full-tier:',
+    '    name: full tier',
+    '  verify:',
+    '    name: verify',
+    '  windows-tests:',
+    '    name: windows tests',
+    '  keeper:',
+    '    name: keeper e2e',
+    '  host-remote:',
+    '    name: host tests, remote Node',
+    '',
+  ].join('\n')
+
+  it("lands a batch whose quick run passed while the full tier's jobs never reported, under ci.landTier quick", async () => {
+    runtime(
+      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('success')] }, checks: { [ONE]: fullChecks(6000, 'success', 'skipped') } } } }),
+      FAST_LAND,
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    expect(writes().map(short2)).toContain('merge 77')
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  it("lands nothing from a batch whose quick run failed, the full tier's jobs unreported as well", async () => {
+    runtime(
+      tieredState({ workflow: FULL_WORKFLOW, on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure', 'skipped') } } } }),
+      FAST_LAND,
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    expect(writes().map(short2)).not.toContain('merge 77')
+  })
+
   it('still lands nothing from a red batch on the fast tier', async () => {
     runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure', 'skipped') } } } }), FAST_LAND)
     await call('queue_merge', { pr: 77, owner: 'tester' })

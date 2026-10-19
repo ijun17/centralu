@@ -489,7 +489,12 @@ own quick run, then its batch's run of the quick tier on what lands (the batch's
 `tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
 No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
 rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
-run and the full tier's check is not asked for.
+run and the full tier's check is not asked for. That run is judged as a pull request's own quick run is
+(`quickGreen`): every run finished, nothing it reported failed or is pending, the full tier's check
+skipped. The required set is the whole workflow's, whose full-tier jobs a quick run never reports (a
+matrix job left out reports no check of its name at all), so those are not missing: without this the
+green batch queue/batch-98 stopped with "never reported" (2026-10-19). The main guard does not read
+the required set: it judges main's runs and its probes by their conclusion, and both are full runs.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
