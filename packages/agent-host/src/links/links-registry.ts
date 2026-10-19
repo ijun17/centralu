@@ -172,6 +172,13 @@ export class Links {
     return this.need(id).activity()
   }
 
+  /** The reverse direction's switch for one machine (#550) */
+  async setAsks(id: string, on: boolean): Promise<MachineInfo> {
+    const m = this.need(id)
+    await m.setAsks(on)
+    return m.info()
+  }
+
   private need(id: string): LinkedMachine {
     const m = this.machines.get(id)
     if (!m) throw rpcError(`No linked machine ${id}`)
@@ -193,6 +200,8 @@ export class Links {
     const m = this.machines.get(id)
     if (!m) throw rpcError(`No linked machine ${id}`)
     this.machines.delete(id)
+    // Its sessions stop seeing this hub at once, while the link can still say so (#550)
+    await m.withdrawOffer()
     await m.stop()
     this.deps.registry.remove(id)
     this.deps.mirror.forget(id)

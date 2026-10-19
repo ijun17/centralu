@@ -76,6 +76,19 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // The orchestrator's create_project card (#515)
   { type: 'approval_request', sessionId: 's1', requestId: 'mk-1', detail: { kind: 'project_create', name: 'shop', path: '/Users/me/Centralu/shop' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'mk-2', detail: { kind: 'project_create', name: 'app', path: '/Users/me/Centralu/app', source: { git: 'git@github.com:me/app.git', branch: 'dev' } } },
+  // The orchestrator's add_project card (#1220): a folder here, and one on a linked machine
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'mk-3',
+    detail: { kind: 'project_add', name: 'site', path: '/Users/me/code/site', exists: true, folder: true, git: true, origin: 'git@github.com:me/site.git', text: 'Add the existing folder /Users/me/code/site as the project site? It is a git repository (origin git@github.com:me/site.git).' },
+  },
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'mk-4',
+    detail: { kind: 'project_add', name: 'notes', path: 'C:\\Users\\me\\Desktop\\notes', machine: 'laptop', exists: true, folder: true, git: false, origin: null, text: 'Add the existing folder C:\\Users\\me\\Desktop\\notes on laptop as the project notes? It is not a git repository.' },
+  },
   // One project reaching another (#371), with the fields added since (#382, #700): a host of each age sends one of these
   {
     type: 'approval_request',
@@ -229,6 +242,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'orchestrator_proposals_changed' },
   { type: 'project_consents_changed' },
   { type: 'projects_changed' },
+  // A project the orchestrator added once the person allowed it (#1220)
+  { type: 'projects_changed', added: 'p9' },
   // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)
   {
     type: 'machine_status',
