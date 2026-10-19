@@ -30,7 +30,7 @@ state     ready | running | review | queued | blocked | done      (done is not i
 blockedBy { kind: issue|pr|decision|text, ref: number|null, text }
           issue    resolved when the issue is closed
           pr       resolved when merged (closed unmerged: stays blocked, shown "closed without merging")
-          decision resolved when the issue is closed or has a comment starting "Decision (owner" (#NNN, CONTRIBUTING)
+          decision resolved by a comment starting "Decision (owner" written by the repository's owner or a login in `github.deciders` (corrected after review: the first version took anyone's comment, or the issue closing)
           text     "Mac only": resolved only by a person
 Settings  responsible: { sessionId, address, label }|null   one per project
           quietMinutes (30), sweepMinutes (10), github: { on, repo }
@@ -197,6 +197,39 @@ restarts, delivered as a Centralu notice, listed and cancellable) and says it sh
   watches with its own authority; an app's access stays `uses` plus project trust. A session may watch only sessions it can
   already read.
 
+### 12. As built (the app, `.centralu/apps/task-ledger/`)
+
+Where the app differs from §1 to §5, and what it does not yet do:
+
+- **Tools.** Four for agents and the panel: `ledger_list`, `ledger_add`, `ledger_update`, `ledger_take_charge`. Assigning
+  is `ledger_update` with `assignee` (a session id or `"me"`), removing is `remove: true`, "seen" is `seen: true`; there is
+  no separate `ledger_assign` (fewer tools resident in every session). The panel alone has `show`, `ledger_settings`,
+  `ledger_adopt` and `ledger_sweep` ("Check now").
+- **What the app moves by itself:** a blocked task whose blockers all resolved becomes ready (trigger 3), and a ready task
+  given a session starts running. A linked task takes its title from its issue; a linked issue closing closes the task, and
+  the issue reopening reopens only a task the issue closed.
+- **Triggers 2 and 4 look only at a `running` task's assignee.** A task in review, queued or blocked has a session that may
+  answer follow-ups; telling about each would be noise.
+- **A task stays on the panel's "Needs you" list until somebody looks** (any change to it, or "Seen"), also after the
+  responsible session was told once.
+- **The responsible session is one that called the ledger** (`ledger_take_charge`, or any tool: its address is kept, and
+  the person picks among those in the panel). Naming any other session is piece 3.
+- **The panel asks again every 30 seconds while it is seen.** A session's state changes with no tool being called, and an
+  app cannot tell its open views to read again (only a call that changed something does, `docs/apps.md` §6.3). That is
+  a run record of the panel's `show` every 30 seconds while the panel is on screen; a way for an app to say "my view
+  changed" would remove it. Not built.
+- **Not built:** the board app's `ledger_poke` calls (§7), pieces 2 and 3, observing a linked machine's sessions. After
+  the app crashes nothing restarts it until something calls it or the panel is opened (piece 2 is the fix).
+- **A session is not watched for its own task when it is the responsible one.** Each message makes it answer, and that
+  answer would be a new reason to tell it. (A review of the app found this loop.)
+- **GitHub off reads nothing.** The sweep asks `gh` for no issue, pull request or decision while `github.on` is false, and
+  the panel says that blockers on GitHub wait for it to be turned on. On, at most ten decisions are read in a sweep.
+  `gh` is read outside the chain of changes, so a slow `gh` never holds up a tool call.
+- **An old key is kept until the sessions are known.** What a session's state caused is forgotten only after the whole
+  project has been heard, otherwise a restart a day after a message would tell it again.
+- **A ledger file from a newer version is read and never written** (a rollback cannot damage it); the panel says so.
+- **Known gap:** when the manifest changes, Centralu stops the old process only after its calls finish, so for a moment two
+  processes may hold the same `ledger.json`; the last write wins. Not guarded.
 ### 13. Corrections after review
 
 A review of the three pull requests found two constraints the issue itself names that the first design did not meet, and a trust
@@ -252,3 +285,11 @@ this is done. Where a linked machine's session state enters the feed, as the nex
   `machine_resync`. This is the part that needs real linked machines to test.
 - Limits, scope and the card are unchanged (the app's own project; it already says "state and counters").
 - #1324's session-state watches read the same feed, so a watch on a child that runs on a linked machine works the same way.
+- **A decision blocker is resolved only by who wrote it** (second review): a comment starting "Decision (owner" whose
+  GitHub `authorAssociation` is `OWNER`, or whose author is a login in the setting `github.deciders` (for an organisation's
+  maintainers, who are not `OWNER`). Anyone can write those words on a public repository, and what a decision unblocks may
+  be acted on. A decision issue being closed decides nothing (its author can close it). Left: an `issue` blocker closes
+  with the issue and a `pr` blocker with the merge (a merge needs a maintainer; an issue can be closed by its author), so a
+  stranger's issue used as a blocker can be closed by its author.
+- **What agents read is quoted.** `ledger_list` and the other tools quote each title, next step, blocker text and name on one
+  line, as the message to the responsible session does, so none can pass for a line of the ledger.
