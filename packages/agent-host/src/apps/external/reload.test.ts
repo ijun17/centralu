@@ -87,6 +87,16 @@ const status = () => rt.list().find((a) => a.appId === ID)?.status
 const reloads = () => (readFileSync(join(dataRoot, 'app-logs', 'p1', `${ID}.log`), 'utf8').match(/reloading: /g) ?? []).length
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/*
+ * What the runtime has scheduled or running to reflect a change (the reflector's quiet and turn-end timers, a reload in
+ * progress). A test that says "nothing happens" waits until this is empty instead of for a stretch of the clock: a
+ * wrongly scheduled reload shows here, and the assertion after it sees its result however slow the machine is (#845).
+ */
+type ReflectorState = { turnEndTimers: Map<string, unknown>; quietTimers: Map<string, unknown>; reloading: Map<string, unknown> }
+const reflector = () => (rt as unknown as { reflector: ReflectorState }).reflector
+const reflectPending = () => reflector().turnEndTimers.size + reflector().quietTimers.size + reflector().reloading.size
+const reflectDone = () => until(reflectPending, (n) => n === 0, 10_000)
+
 describe('restarts when the building session\'s turn ends', () => {
   it('stays the same mid-turn even if the folder changes — restarts once, with the new code, once the turn ends', async () => {
     plant()
@@ -96,7 +106,7 @@ describe('restarts when the building session\'s turn ends', () => {
     busy = true
     addTool('added')
     rt.refresh() // the scan watching would trigger
-    await sleep(700) // even past going quiet (400ms)
+    await reflectDone() // a quiet timer started anyway would run out (and reload) here
     expect(await pid()).toBe(before)
     expect(known()).not.toContain('added')
 
@@ -107,7 +117,7 @@ describe('restarts when the building session\'s turn ends', () => {
     rt.builderTurnEnded(ref)
     await until(known, (names) => names.includes('added'))
     expect(await pid()).not.toBe(before)
-    await sleep(300)
+    await reflectDone() // what the turn-end and quiet paths hold is done; a second restart from them would show in reloads()
     expect(reloads()).toBe(1)
     expect(status()).toBe('running')
   })
@@ -121,8 +131,10 @@ describe('restarts when the building session\'s turn ends', () => {
     await until(() => (rt as unknown as { calls: { openRuns: Map<string, unknown> } }).calls.openRuns.size, (n) => n === 1)
     addTool('added')
     rt.builderTurnEnded(ref)
-    await sleep(500)
-    expect(known()).not.toContain('added') // still the old process — a call is in progress
+    // The reload has begun and waits for the call: it is in the reflector's list of reloads in progress
+    await until(() => reflector().reloading.size, (n) => n === 1, 10_000)
+    // The call is what the reload waits for: dropping that wait cuts the call off, and the assertions after the gate fail
+    expect(known()).not.toContain('added')
     writeFileSync(gate(), '')
     const out = await held
     expect({ status: out.status, error: out.error }).toEqual({ status: 'ok', error: null })
@@ -139,7 +151,7 @@ describe('restarts when the building session\'s turn ends', () => {
     // Writing the same content again is not a change (an editor's save, or checking out the same content)
     writeFileSync(serverFile(), readFileSync(serverFile(), 'utf8'))
     rt.builderTurnEnded(ref)
-    await sleep(400)
+    await reflectDone() // the turn-end timer has run and found nothing changed
     expect(await pid()).toBe(before)
   })
 
@@ -185,7 +197,7 @@ describe('restarts after going quiet when there is no building session', () => {
     const before = await pid()
     addTool('one')
     rt.refresh()
-    await sleep(300)
+    await sleep(quietMs * 0.3) // a delay, shorter than the quiet: the second change comes later than the first
     addTool('two')
     const last = Date.now()
     rt.refresh() // resets the count — the quiet starts from here
@@ -216,8 +228,8 @@ describe('restarts after going quiet when there is no building session', () => {
     await rt.restart(ref)
     addTool('added')
     rt.refresh()
-    // Several multiples of going quiet (400ms) — watching could also see this edit and reset its own timer (300ms flush)
-    await sleep(1_500)
+    // The quiet timer runs out and finds the app not running (watching could also see this edit and reset it)
+    await reflectDone()
     expect(status()).toBe('stopped')
   })
 })
@@ -234,7 +246,9 @@ describe('a call in progress runs to completion even if the manifest changes', (
     writeFileSync(mf, readFileSync(mf, 'utf8').replace('"description": "counter"', '"description": "counter, renamed"'))
     rt.refresh()
     expect(rt.list().find((a) => a.appId === ID)!.description).toBe('counter, renamed')
-    await sleep(300)
+    // A new call goes to the new manifest's process, started after the change: had the old process been cut off, it
+    // would have been by now. The held call is still waiting for the gate
+    expect(await pid()).not.toBe(before)
     writeFileSync(gate(), '')
     const out = await held
     expect({ status: out.status, error: out.error }).toEqual({ status: 'ok', error: null })
@@ -264,7 +278,7 @@ describe('a manifest change mid-turn still happens once, at turn end', () => {
     const mf = join(projRoot, '.centralu', 'apps', ID, 'centralu.app.json')
     writeFileSync(mf, readFileSync(mf, 'utf8').replace('"description": "counter"', '"description": "counter, renamed"'))
     rt.refresh() // the scan watching would trigger
-    await sleep(700) // even past going quiet (400ms)
+    await reflectDone()
     expect(await pid()).toBe(before)
     expect(description()).toBe('counter')
     expect(count(/stopping: manifest changed/g)).toBe(0)
@@ -277,7 +291,7 @@ describe('a manifest change mid-turn still happens once, at turn end', () => {
     // starts without being called — this moves the building session's tool list to the app under the new manifest
     await until(status, (s) => s === 'running')
     expect(await pid()).not.toBe(before)
-    await sleep(300)
+    await reflectDone()
     expect(count(/stopping: manifest changed/g)).toBe(1)
     expect(count(/starting: /g)).toBe(2)
   })
