@@ -216,7 +216,8 @@ async function build(b, ctx) {
     })
   if (!renew()) return { yielded: true }
   try {
-    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch)
+    // Landing after the fast tier (#1259): the batch runs the quick tier on what lands
+    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, TIERS && CI.landTier === 'quick' ? { tier: 'quick' } : undefined)
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why
@@ -332,8 +333,8 @@ async function runCi(b, ctx) {
     save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
-  if (d.state === 'green' && TIERS && ranTier(checks, CI.fullTier) !== 'full') {
-    // Green without the full tier: nothing lands from less (two tiers). A check still to come waits
+  if (d.state === 'green' && TIERS && CI.landTier !== 'quick' && ranTier(checks, CI.fullTier) !== 'full') {
+    // Green without the full tier, where nothing lands from less (`ci.landTier: full`). A check still to come waits
     if (ranTier(checks, CI.fullTier) === null && runs.some((r) => r.status !== 'completed')) {
       save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
       return { state: 'ci' }

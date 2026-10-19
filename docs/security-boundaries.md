@@ -8,7 +8,12 @@ process ("App servers"); an app's screen is sandboxed ("App views"). The app mod
 ## Inter-agent content
 
 Worker reports retain their provenance in stored history and the UI. Reports from
-workers to directing sessions become host-authored notifications; ordinary
+workers to directing sessions become host-authored notifications: the receiver's model reads only what Centralu wrote
+(how the work ended, the session's id, the kind of its tool's error, how to go on, and the `read_session` call that
+shows the last response and the error as data), never the last response, an error's words (a CLI's error can carry a
+hook's output, a linked machine's is whatever it sends), a session's or project's name or a task's description (#1186;
+`ChildReports.tellSession`'s `forModel`, `errorKind`). A notice that could not be delivered is kept in memory, dropped
+with its session, and delivered when the session next takes a message; ordinary
 orchestrator/manager/coordinator instructions retain their content and attachments. A worker
 holding the read-only `reader` set (#320) is still a worker here: the gate asks whether the
 source directs sessions, not whether it has tools. Worker-originated records are excluded from
