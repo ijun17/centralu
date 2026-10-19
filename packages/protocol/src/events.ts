@@ -761,6 +761,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('themes_changed') }),
   /**
+   * The screen preferences changed (#1306): a window saved a setting, or the orchestrator did. As coarse as the others:
+   * it carries nothing, and the receiving side reads `prefs.get` again. A window from before it keeps what it loaded
+   * until it reloads.
+   */
+  z.object({ ...appScoped, type: z.literal('prefs_changed') }),
+  /**
    * A capability question from a chain that started from a screen was raised or closed (M4 D-4).
    * The same coarseness: this carries nothing, and the receiving side refetches
    * `apps.questions`. A question from a chain that started from a session arrives as that

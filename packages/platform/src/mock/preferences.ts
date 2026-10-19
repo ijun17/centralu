@@ -1,9 +1,12 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { parseUiPreferences, textSizeFromLegacyStep } from '@cc/protocol'
+import { parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
+import type { Emit } from './event-bus.js'
 
 /** The workspace snapshot and the screen preferences, both kept in localStorage when the page has one */
 export class PreferencesMock {
+  constructor(private readonly emit: Emit) {}
+
   /** Public so tests can look inside */
   workspaceSnapshot: WorkspaceSnapshot | null = null
 
@@ -64,21 +67,34 @@ export class PreferencesMock {
       const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
       if (!hasTextSize) {
         const legacy = textSizeFromLegacyStep(((await this.workspace.load()) as { textScale?: unknown } | null)?.textScale)
-        if (legacy !== null) await this.prefs.save({ textSize: legacy })
+        if (legacy !== null) this.write({ textSize: legacy })
+      }
+      // And the notification switches (#1306): a record with none takes the snapshot's, or the defaults, once
+      if (this.uiPrefs.notifyPolicy === undefined) {
+        const carried = readNotifyPolicy(((await this.workspace.load()) as { notifyPolicy?: unknown } | null)?.notifyPolicy)
+        this.write({ notifyPolicy: carried })
       }
       return { ...this.uiPrefs }
     },
     // The same rule as the real thing: leaves an unwritten field untouched, and returns the whole thing after it was recorded
     save: async (patch: UiPreferencesPatch) => {
-      // Read through the schema as the host's `prefs.set` does, so a text size lands on a step here too
-      this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch })
-      this.uiPrefsStored = true
-      try {
-        localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
-      } catch {
-        /* node, or storage denied — the in-memory copy still works */
-      }
+      this.write(patch)
+      // Every window hears a change (#1306), the one that made it too
+      if (Object.keys(patch).length) this.emit({ type: 'prefs_changed' })
       return { ...this.uiPrefs }
     },
+  }
+
+  /** The record after a patch, as the host writes it: through the schema, the notification switches merged one by one (#1306) */
+  private write(patch: UiPreferencesPatch): void {
+    // Read through the schema as the host's `prefs.set` does, so a text size lands on a step here too
+    const notifyPolicy = patch.notifyPolicy ? { ...(this.uiPrefs.notifyPolicy ?? readNotifyPolicy(undefined)), ...patch.notifyPolicy } : undefined
+    this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch, ...(notifyPolicy ? { notifyPolicy } : {}) })
+    this.uiPrefsStored = true
+    try {
+      localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
+    } catch {
+      /* node, or storage denied — the in-memory copy still works */
+    }
   }
 }

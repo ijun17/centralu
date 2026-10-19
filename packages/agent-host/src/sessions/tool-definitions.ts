@@ -200,7 +200,7 @@ export const ORCHESTRATOR_TOOLS = [
    */
   {
     name: 'get_preferences',
-    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, idle sleep, the update switches.",
+    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, the notification switches, idle sleep, the update switches.",
     schema: z.object({}),
   },
   {
@@ -219,6 +219,18 @@ export const ORCHESTRATOR_TOOLS = [
         checkForUpdates: z.boolean().optional(),
         applyUpdatesWhenIdle: z.boolean().optional(),
         moveIdleSessionsToNewAgentCli: z.boolean().optional(),
+        notifications: z
+          .object({
+            approval: z.boolean().optional().describe('Notify when an agent is blocked on an approval.'),
+            error: z.boolean().optional(),
+            done: z.boolean().optional().describe('Notify when a session finishes out of sight.'),
+            allDone: z.boolean().optional().describe('Notify once when every session has finished.'),
+            whenFocused: z.boolean().optional().describe('Notify even while the app is focused.'),
+            sound: z.boolean().optional(),
+          })
+          .strict()
+          .optional()
+          .describe('The notification switches to change; the rest stay.'),
       })
       .strict(),
   },

@@ -284,7 +284,7 @@ export class Qualifier {
    * One event of this machine in the hub's terms, or null for one the hub does not pass on.
    *
    * Dropped: what is about the remote host itself rather than its sessions and projects. The hub
-   * has its own update, themes, agent CLIs and screen questions (and a host of v0.1.0-beta.10 or
+   * has its own update, themes, preferences, agent CLIs and screen questions (and a host of v0.1.0-beta.10 or
    * before still sends `app_state_changed` for its control app), and an app-wide
    * error from another machine is not this UI's to show (§5). An event of a type this build does
    * not know is passed when it names a session (qualified), dropped otherwise.
@@ -299,6 +299,7 @@ export class Qualifier {
       case 'update_apply_request':
       case 'update_apply_go':
       case 'themes_changed':
+      case 'prefs_changed':
       case 'app_state_changed':
       case 'agent_versions':
       case 'external_app_questions_changed':

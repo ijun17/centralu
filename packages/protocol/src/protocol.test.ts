@@ -237,6 +237,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'external_apps_changed' },
   // A file in the themes folder changed (#312) — the screen refetches the list
   { type: 'themes_changed' },
+  // The screen preferences changed (#1306) — carries nothing, the screen reads prefs.get again
+  { type: 'prefs_changed' },
   { type: 'external_app_questions_changed' },
   // An orchestrator proposal list changed (#703): carries nothing, the screen refetches both lists
   { type: 'orchestrator_proposals_changed' },

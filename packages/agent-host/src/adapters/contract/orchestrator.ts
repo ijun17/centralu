@@ -36,6 +36,8 @@ export type PreferenceChanges = {
   checkForUpdates?: boolean
   applyUpdatesWhenIdle?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
+  /** The notification switches (#1306), the ones to change; reversible, no card */
+  notifications?: { approval?: boolean; error?: boolean; done?: boolean; allDone?: boolean; whenFocused?: boolean; sound?: boolean }
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
