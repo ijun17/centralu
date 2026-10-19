@@ -325,6 +325,7 @@ type AppActions = Pick<
   | 'releasePinnedView'
   | 'closeApp'
   | 'restartApp'
+  | 'stopApp'
   | 'reloadPinnedView'
   | 'reloadInlineView'
   | 'createApp'
@@ -617,6 +618,20 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
+    }
+  },
+
+  async stopApp(key) {
+    const platform = get().platform
+    const pv = get().pinnedViews.find((p) => p.key === key)
+    if (!platform || !pv) return
+    const { appId, projectId, machine } = pv
+    // Closed first: an open view holds its app, and reopening it would start the app again
+    get().closeApp(key)
+    try {
+      await platform.apps.restart(appId, projectId, machine ?? undefined)
+    } catch (e) {
+      set({ toast: `Could not stop ${appId}: ${(e as Error).message}` })
     }
   },
 

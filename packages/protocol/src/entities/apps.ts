@@ -24,6 +24,11 @@ export const AppUses = z.object({
   agent: z.union([z.boolean(), z.array(z.string())]).optional(),
   apps: z.array(z.string()).optional(),
   host: z.array(z.string()).optional(),
+  /**
+   * The background work the app may keep its process running for with no view open and no call (#1236), in the
+   * manifest's words. Absent from an older host, and from an app that declares none.
+   */
+  background: z.string().optional(),
 })
 export type AppUses = z.infer<typeof AppUses>
 
@@ -113,6 +118,13 @@ export const ExternalAppInfo = z.object({
    * host.
    */
   uses: AppUses.optional(),
+  /**
+   * The app holds its process for background work now (#1236): what it said it is doing, in its own words. Only an app
+   * whose manifest declares `uses.background` can hold, and only while its process runs; the idle rule leaves it
+   * running meanwhile, and stopping it (`apps.restart`) ends the hold with the process. Absent when it holds nothing,
+   * and from an older host.
+   */
+  busy: z.string().optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 

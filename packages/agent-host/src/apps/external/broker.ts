@@ -67,6 +67,11 @@ export type BrokerAdmission = {
   openRun(runId: string): AbortSignal | null
   /** Records a denial in that app's own log — where the building agent reads why it was blocked */
   note(line: string): void
+  /**
+   * The app says it is busy with background work (`reason`), or no longer (`null`) (#1236, `BUSY_TOOL`). Answers why
+   * it is refused, or null once taken.
+   */
+  busy(reason: string | null): string | null
   /** Also records a request that was never admitted, in the run ledger (D-6) — a denial is a row too. This is where a person reads it, in the app's runs panel */
   refused(tool: BrokerToolName, args: Record<string, unknown>, why: string): void
 }
@@ -94,6 +99,15 @@ const schemas: Record<BrokerToolName, { description: string; input: z.ZodObject<
   },
 }
 
+/**
+ * The one broker request that needs no run id (#1236): the app tells the host about **itself**, that it is busy with
+ * background work or no longer, so the idle rule leaves its process running. It asks for nothing outside the app and
+ * reaches nothing but this pipe's own app, which is why waking up by itself is allowed here and nowhere else; the
+ * manifest has to declare `uses.background`, and the person sees the hold on the app's row and can stop the app.
+ * Not a run: it leaves no run record, only a line in the app's log when refused.
+ */
+export const BUSY_TOOL = 'busy'
+
 const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) })
 
 /**
@@ -112,6 +126,23 @@ export function serveBroker(
   const serve = serveStdio(
     () => {
       const server = new McpServer({ name: `${CLIENT_INFO.name}-broker`, version: CLIENT_INFO.version }, { capabilities: { tools: {} } })
+      server.registerTool(
+        BUSY_TOOL,
+        {
+          description:
+            'Say this app is busy with background work (busy: true, with what it is doing as reason) or no longer (busy: false), so Centralu keeps its process running meanwhile. Needs "uses": { "background": "…" } in the manifest; no run id',
+          inputSchema: z.object({ busy: z.boolean(), reason: z.string().max(200).optional() }),
+        },
+        async ({ busy, reason }) => {
+          const said = reason?.trim() || 'background work'
+          const refused = admission.busy(busy ? said : null)
+          if (refused) {
+            admission.note(`broker ${refused}`)
+            return text(refused, true)
+          }
+          return text(busy ? `busy: ${said}` : 'not busy')
+        },
+      )
       for (const tool of BROKER_TOOLS) {
         server.registerTool(tool, { description: schemas[tool].description, inputSchema: schemas[tool].input }, async (args, ctx) => {
           const presented = ctx.mcpReq._meta?.[RUN_META]

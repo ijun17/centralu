@@ -10,6 +10,7 @@
  *   centralu.agent(prompt, { schema, tool })       ask Centralu's agent (over fd 3)
  *   centralu.callApp(app, tool, args)              call another app's tool (over fd 3)
  *   centralu.host(name)                            read Centralu data declared in uses.host (over fd 3)
+ *   centralu.busy(reason) / centralu.busy(false)   keep running with nothing open while busy (uses.background)
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
  */
@@ -86,6 +87,40 @@ async function askBroker(what, tool, args) {
     throw err
   }
   return result
+}
+
+/*
+ * The busy state as last asked, and the chain of reports to Centralu: each waits for the one before, so Centralu hears
+ * them in the order they were made, and the last word wins. A refusal is said once on stderr, and the same report is
+ * not sent again after it (an older Centralu refuses every one): only a change is.
+ */
+let busyWanted = null
+let busySent = null
+let busyRefused = undefined
+let busyChain = Promise.resolve(true)
+let busySaid = null
+
+function sendBusy() {
+  busyChain = busyChain.then(async () => {
+    const want = busyWanted
+    if (want === busySent) return true
+    if (want === busyRefused) return false
+    try {
+      const r = await callBroker('busy', want === null ? { busy: false } : { busy: true, reason: want }, undefined)
+      if (r?.isError) throw new Error(textOf(r))
+      busySent = want
+      busyRefused = undefined
+      busySaid = null
+      return true
+    } catch (e) {
+      const why = String(e?.message ?? e)
+      if (why !== busySaid) console.error(`[centralu] centralu.busy: Centralu did not take it: ${why}`)
+      busySaid = why
+      busyRefused = want
+      return false
+    }
+  })
+  return busyChain
 }
 
 export const centralu = {
@@ -180,6 +215,21 @@ export const centralu = {
   async host(name) {
     const r = await askBroker(`centralu.host(${JSON.stringify(name)})`, 'host_data', { name })
     return r.structuredContent ?? JSON.parse(textOf(r))
+  },
+
+  /**
+   * Says this app is busy with background work (`reason`, what it is doing, shown on the app's row as "Running:
+   * <reason>"), or no longer (`false`), so Centralu keeps its process running meanwhile with no view open and no call:
+   * otherwise an app is stopped after 5 minutes of that. The manifest must declare it: "uses": { "background": "what
+   * the app does in the background" }. Callable anywhere, a timer included (unlike the helpers above); saying the
+   * same thing again sends nothing. Resolves true once Centralu took it, false when it did not (said on stderr once):
+   * no declaration, an older Centralu, or running outside Centralu. Hold it only while there is work: the person sees
+   * it and can stop the app, and a process that holds forever is what the idle rule exists to prevent.
+   */
+  busy(reason) {
+    const want = reason === false || reason === null || reason === undefined ? null : String(reason).trim().slice(0, 200) || 'background work'
+    busyWanted = want
+    return sendBusy()
   },
 
   /** Reads `<data folder>/<file>` as JSON, or `fallback` if the file does not exist yet. */

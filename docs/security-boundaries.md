@@ -1323,7 +1323,13 @@ then who may call it:
   `mediation.test.ts` "a broker call with no run id is refused (an app waking itself up on its
   own)", "a made-up id, a finished run's id, and another app's live id are all refused";
   `broker-records.test.ts`). Broker work is
-  cancelled with the call it serves, down to an agent session it started.
+  cancelled with the call it serves, down to an agent session it started. The one exception is
+  `busy` (#1236): an app says it is busy with background work, or no longer, without a run id. It
+  asks for nothing outside the app: it only keeps the app's own process from the idle rule, and only
+  when the manifest declares `uses.background` (in `uses`, so an imported app adding it is reviewed
+  again and the trust card lists it). The hold is the app's row ("Running: <reason>"), it ends with
+  the process, and the person stops it from the app's view (`app-lifecycle.ts` `setBusy`;
+  `busy.test.ts`).
 - What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
   each capability once (an agent tool, another app, a host data name), asked where the chain
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
@@ -1356,6 +1362,9 @@ Limits:
 
 - Nothing confines what a running app server does with the user's privileges. Trust is a decision
   about code, not a sandbox.
+- An app that declares `uses.background` decides when it is busy: one that never releases keeps
+  running until the person stops it or Centralu quits. The row shows the hold the whole time; nothing
+  limits how long it lasts.
 - The data folder is outside the repository so that runtime files are never committed. It is not
   an isolation boundary between apps: they all run as the same user.
 - Redaction is literal string replacement. Values shorter than 4 characters, and values the app

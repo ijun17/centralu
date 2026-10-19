@@ -353,7 +353,7 @@ describe('centralu.agent (D-1)', () => {
     })
     const fd3 = child.stdio[3] as Socket
     const slow: BrokerHandler = () => new Promise((resolve) => setTimeout(() => resolve({ content: [{ type: 'text', text: 'finally done' }] }), 1_200))
-    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {}, refused: () => {} }, slow, { keepaliveMs })
+    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {}, refused: () => {}, busy: () => null }, slow, { keepaliveMs })
     const relayed: unknown[] = []
     try {
       const c = new Client({ name: 'host', version: '0' }, { versionNegotiation: { mode: 'auto' } })
@@ -412,7 +412,7 @@ describe('the shutdown promise (S-5)', () => {
     const child = spawn('node', ['server.mjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'pipe', 'overlapped'], env: { PATH: process.env.PATH! } })
     const fd3 = child.stdio[3] as Socket
     // A real broker server on fd 3, playing the host's part — answers that any run id is open, and the desk answers with one line
-    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {}, refused: () => {} }, async () => ({
+    const closeBroker = serveBroker(fd3, { openRun: () => new AbortController().signal, note: () => {}, refused: () => {}, busy: () => null }, async () => ({
       content: [{ type: 'text', text: 'the agent answered' }],
     }))
     let exited = false

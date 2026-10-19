@@ -176,7 +176,7 @@ export class ExternalApps {
       this.deps.runs ?? null,
     )
     this.secrets = new SecretStore(deps.dataRoot)
-    this.startEnv = new AppStartEnv(this.deps, this.timing, this.secrets, this.calls, this.desk)
+    this.startEnv = new AppStartEnv(this.deps, this.timing, this.secrets, this.calls, this.desk, this.lifecycle)
     this.resources = new AppResources(this.timing, this.lifecycle, (ref) => this.require(ref))
     this.watchers = new DirWatchers((key) => this.rescan(key), deps.watchFlushMs)
     /*
@@ -840,7 +840,9 @@ export class ExternalApps {
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141)
-      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length) ? { uses: m.uses } : {}),
+      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background) ? { uses: m.uses } : {}),
+      // Holding its process for background work now (#1236): the row says so, in the app's words
+      ...(this.lifecycle.busyReason(e) !== null ? { busy: this.lifecycle.busyReason(e)! } : {}),
     }
   }
 

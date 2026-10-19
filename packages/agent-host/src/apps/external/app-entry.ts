@@ -74,6 +74,12 @@ export type Life = {
    * run id never works on the new pipe.
    */
   pipeId: number
+  /**
+   * The app said it is busy with background work (#1236, `uses.background`): what it said, and the pipe of the
+   * process that said it. Honoured only while that process is the current one (`AppLifecycle.busyReason`), so a busy
+   * report from a process stopping or already replaced holds nothing; cleared when the process stops or dies.
+   */
+  busy: { pipeId: number; reason: string } | null
 }
 
 export type AppTool = { tool: Tool; visibility: Audience[] }
@@ -167,6 +173,7 @@ export function newEntry(scope: Scope, found: ScannedApp, reservedIds: readonly 
       toolWarnings: [],
       known: null,
       pipeId: 0,
+      busy: null,
     },
   }
 }

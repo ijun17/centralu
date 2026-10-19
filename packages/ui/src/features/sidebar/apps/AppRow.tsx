@@ -75,7 +75,12 @@ export function AppRow({
       ),
   )
   const waitsForYou = asking || sessionWaiting
-  const hint = waitsForYou ? 'asks you' : APP_HINT[app.info.status]
+  /*
+   * An app keeping itself running for background work (#1236) says what it is doing: a process that stays with nothing
+   * open is something the person should be able to see, and stop from its screen (PinnedApps' Stop)
+   */
+  const busy = app.info.status === 'running' && app.info.busy ? `Running: ${app.info.busy}` : null
+  const hint = waitsForYou ? 'asks you' : (busy ?? APP_HINT[app.info.status])
   const projectId = app.projectId
   // A linked machine's user-folder app keeps the dimming its machine's group gave it while that machine is not connected (#734)
   const away = useStore((s) => isAway({ machine }, s.machines))
@@ -149,9 +154,11 @@ export function AppRow({
         )}
         {hint && (
           <span
-            className={`readout ml-auto shrink-0 text-2xs ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
+            className={`readout ml-auto text-2xs ${busy && !waitsForYou ? 'min-w-0 max-w-[60%] truncate' : 'shrink-0'} ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
             data-testid="app-row-hint"
             data-asking={waitsForYou || undefined}
+            data-busy={(busy && !waitsForYou) || undefined}
+            title={busy && !waitsForYou ? busy : undefined}
           >
             {hint}
           </span>

@@ -282,6 +282,13 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     await frame.current?.teardown()
     await restart(pv.key)
   }
+  // An app keeping itself running for background work (#1236) is stopped from here: its view goes too, or it would hold the app
+  const stop = useStore((s) => s.stopApp)
+  const onStop = async () => {
+    await frame.current?.teardown()
+    await stop(pv.key)
+  }
+  const busy = app?.info.status === 'running' ? (app.info.busy ?? null) : null
 
   return (
     <section
@@ -314,6 +321,22 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
             <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="pinned-status">
               {app.status.label}
             </span>
+          )}
+          {busy && (
+            <>
+              <span className="min-w-0 truncate text-2xs text-ink-faint" data-testid="pinned-busy" title={`Running: ${busy}`}>
+                Running: {busy}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+                onClick={() => void onStop()}
+                title="The app keeps itself running for this work while nothing is open. Stop it and close this view; it starts again the next time something needs it"
+                data-testid="pinned-stop"
+              >
+                Stop
+              </button>
+            </>
           )}
           {/* Reopened with new code (C-4) — a brief note that appears momentarily. If it changed too often to reopen on its own, the person presses it */}
           {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}

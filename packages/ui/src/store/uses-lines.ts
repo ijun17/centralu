@@ -7,6 +7,8 @@ export function usesLines(uses: AppUses): string[] {
   else if (Array.isArray(uses.agent) && uses.agent.length) out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
   if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
   if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
+  // Kept running with nothing open while it says it is busy (#1236), in the app's own words
+  if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
   return out
 }
 

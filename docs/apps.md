@@ -47,6 +47,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
 | `uses.agent`, `uses.apps`, `uses.host` | What the app **declares** it will ask Centralu for (§10) | Optional. A declaration, not a permission. Absent means nothing |
+| `uses.background` | What the app does in the background, in words the person reads (§4, "Busy") | Optional, 1 to 200 characters. Without it the app cannot keep itself running. In `uses`, so an imported app adding it is reviewed again (§12) and the trust card lists it |
 | `secrets` | Names of the secrets the app needs | Optional. Environment-variable names; `CENTRALU_*` and `CC_*` are reserved |
 | `view.origin` | `opaque` (default) or `app` (§6.4) | An unknown value is refused, not read as the default |
 | `view.span` | The span, in grid cells, the app **recommends** for its panel on the grid (§6.2): `{ "cols": 2, "rows": 1 }` | Optional, and only a default: the person's choice for the placement and their setting for the app come first. Each side 1 to 4; a whole number outside is clamped, anything else ignored — both with a warning, never an error, since an app without one simply stands at 1 × 1 |
@@ -204,7 +205,8 @@ either to act.
 | Started means answering | Connected **and** `tools/list` answered. A server that stays up but fails every request is a failed start | Spike S-6: a broken server stayed alive, answered `-32603` to everything, and said nothing on stderr |
 | Protocol era | Probed once per app (`server/discover`, falling back to the 2025-11-25 `initialize`), then remembered | The SDK's own probe starts the process twice |
 | One instance | Per (project, app) | Worktrees share the root's app |
-| Idle | No open view and no call in progress for 5 minutes: stopped | A process nobody calls has no reason to run. An open view holds its app |
+| Idle | No open view, no call in progress and no busy hold for 5 minutes: stopped | A process nobody calls has no reason to run. An open view holds its app |
+| Busy | An app whose manifest declares `uses.background` may say it is busy with background work (`centralu.busy(reason)`, anywhere in the app, a timer included) and release it (`centralu.busy(false)`). While it holds, the idle rule leaves it running, as an open view does; on release the idle time starts. The hold belongs to the process that made it: a stop, a crash or a restart ends it, and a report from a process already replaced holds nothing. The app's row says "Running: <reason>" and its view has Stop, which closes the view and stops the process (`apps.restart`); the next need starts it again, and it may hold again (#1236) | Work that runs on its own clock (a merge queue landing pull requests overnight) stopped with the process when nobody looked at the app. The person sees what keeps it running and can stop it, and an app holds only what its manifest declares |
 | Crash | Nothing restarts it by itself; the next need does, not earlier than 1 s, then 2 s after. The third consecutive failure stops the app (`failed`) with its reason, until Restart, `check`, a changed manifest, or its builder's turn ending with the folder changed (§8). An app that ran 60 s before dying starts the count again | Retrying forever hides a broken app |
 | Stop | stdin and fd 3 closed together; after 2 s the whole process tree is terminated (SIGTERM, then SIGKILL). The app's process group is signalled even after a clean exit. Windows has neither groups nor signals: the app is not started detached (that would give it no console, and every console program it starts a window of its own), and its tree is ended with `taskkill /T /F` (#14). Once the app has ended there, by itself or stopped, what it left running is found by parent links (Windows keeps an orphan's parent id; creation times rule out a reused number) and ended the same way: a Node app's plain children already die with it in libuv's job, but a Python app's children and `detached` ones do not | Spike S-5: closing stdin alone left Node and Python apps running. On Windows the first test run showed a `detached` helper outliving its app |
 | Host shutdown | Every app stopped with a 1 s grace, without waiting for SIGKILL | Tauri gives the host 3 s |
@@ -944,6 +946,12 @@ gate happens in one place, the broker desk (`desk.ts`).
   broker call must carry the run id of a call **that app is handling now, on that same pipe**. A call
   without a run id (an app waking up by itself, out of scope), with an invented id, with a finished
   run's id or another app's id is refused, and the refusal goes to the app's log and its runs.
+- **`busy { busy, reason? }`, the one request without a run id (#1236).** The app tells the host
+  about itself (busy with background work, or no longer), so it asks for nothing outside the app and
+  reaches only its own lifecycle (§4, "Busy"). Refused unless the manifest declares
+  `uses.background`; a refusal goes to the app's log. Not a run: it leaves no run record. The
+  template's `centralu.busy(reason)` sends only changes, in order, and resolves false (said once on
+  stderr) when Centralu did not take it.
 - **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
   default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
   undeclared is refused before anything runs. Declaring is not permission.
@@ -1034,7 +1042,7 @@ The schemas are in `packages/protocol/src/commands/methods/apps.ts` (the `apps.*
 | `apps.questions`, `apps.answerQuestion` | Capability questions waiting on a pinned view (chains a view started); answer one |
 | `apps.permissions`, `apps.forgetPermission` | The answers kept for one app; forget one |
 | `apps.usage` | One app's agent use over the last day and 30 days |
-| `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
+| `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it; a view's Stop for a busy app, §4); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
 | `apps.setSecret` | Set, replace or clear one declared secret (§2); the value is never returned |
 | `apps.setShared` | Share a project app with the person's other projects, or stop (§9.4) |
