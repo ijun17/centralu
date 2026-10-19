@@ -434,15 +434,15 @@ describe('asks again if server or uses changes after being enabled', () => {
 })
 
 describe('what never gets brought in', () => {
-  it('refuses at prepare time if the user folder already has the same id, or at bringing-in time if it appeared in the meantime, leaving the original app untouched either way', async () => {
+  it('an id the user folder holds no longer stops a review (#1141: an import lands as a project of its own); bringing it into the user folder still refuses one that appeared meanwhile, leaving it untouched', async () => {
     make()
     const mine = join(dataRoot, 'apps', 'notes')
     mkdirSync(mine, { recursive: true })
     writeFileSync(join(mine, MANIFEST_FILE), JSON.stringify(manifest('notes', { name: 'Mine' })))
     rt.refresh()
-    expect(await refusal(rt.prepareImport(plantSource('notes-src', 'notes')))).toBe(
-      'An app with the id "notes" is already in your apps. Remove it first, or change the id in its manifest',
-    )
+    const notes = await rt.prepareImport(plantSource('notes-src', 'notes'))
+    expect(notes.review.appId).toBe('notes')
+    rt.cancelImport(notes.token)
     expect(info('notes')?.name).toBe('Mine')
     expect(stagingLeft()).toEqual([])
 
@@ -452,6 +452,26 @@ describe('what never gets brought in', () => {
     writeFileSync(join(late, MANIFEST_FILE), JSON.stringify(manifest('later', { name: 'Made meanwhile' })))
     expect(() => rt.commitImport(token, { enable: false })).toThrow('An app with the id "later" is already in your apps')
     expect(JSON.parse(readFileSync(join(late, MANIFEST_FILE), 'utf8')).name).toBe('Made meanwhile')
+  })
+
+  it('brought in as a project (#1141): the folder lands at the target with no import mark, and a target taken meanwhile is refused and left as it was', async () => {
+    make()
+    const home = join(root, 'Centralu')
+    const { token } = await rt.prepareImport(plantSource('timer-src', 'timer'))
+    expect(rt.stagedAppId(token)).toBe('timer')
+    expect(rt.commitImportAsProject(token, { enable: false }, { path: join(home, 'timer'), isDefault: true })).toBe('timer')
+    expect(JSON.parse(readFileSync(join(home, 'timer', MANIFEST_FILE), 'utf8')).id).toBe('timer')
+    expect(stagingLeft()).toEqual([])
+    expect(rt.stagedAppId(token)).toBeNull()
+    // The project's trust is what enables it: no mark in the user folder's book
+    expect(existsSync(join(dataRoot, 'app-imports.json')) ? readFileSync(join(dataRoot, 'app-imports.json'), 'utf8') : '').not.toContain('timer')
+
+    const again = await rt.prepareImport(plantSource('timer-src-2', 'timer'))
+    writeFileSync(join(home, 'timer', 'mine.txt'), 'the person wrote this')
+    expect(() => rt.commitImportAsProject(again.token, { enable: false }, { path: join(home, 'timer'), isDefault: true })).toThrow('Something is already at')
+    expect(readFileSync(join(home, 'timer', 'mine.txt'), 'utf8')).toBe('the person wrote this')
+    // "Import and enable" still has to carry the key of the review the person saw
+    expect(() => rt.commitImportAsProject(again.token, { enable: true, reviewKey: 'not-it' }, { path: join(home, 'other'), isDefault: true })).toThrow('What would be enabled is not what you reviewed')
   })
 
   it('an id follows the same rule as a new app — the app- prefix, the centralu prefix, a reserved id, an underscore', async () => {

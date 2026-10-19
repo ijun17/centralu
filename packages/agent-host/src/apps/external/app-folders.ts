@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, newAppIdProblem, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import type { AppLifecycle } from './app-lifecycle.js'
 import type { AppEntry } from './app-entry.js'
@@ -43,6 +45,8 @@ export type FoldersHost = {
 
 export type UserAppSpec = { id: string; name: string; description: string; server: { command: string; args: string[] } }
 export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string }
+/** Where a new app project goes (#1141): its folder, checked free by the caller, and whether its parent is the default one to make */
+export type AppProjectTarget = { path: string; isDefault: boolean }
 
 /**
  * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
@@ -157,11 +161,7 @@ export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAp
  */
 export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo {
   if (host.disposed()) throw new AppUnavailableError('The app runtime has shut down')
-  const idProblem = newAppIdProblem(spec.id, host.deps.reservedIds)
-  if (idProblem) throw new AppUnavailableError(`"${spec.id}" cannot be an app id — ${APP_ID_PROBLEM[idProblem]}`)
-  const name = oneLine(spec.name)
-  if (!name) throw new AppUnavailableError('The app needs a name')
-  const description = oneLine(spec.description ?? '') || `${name} (a Centralu app)`
+  const { name, description } = newAppText(host, spec)
 
   // Trust is read from the single source of truth (the store) every time this is called — never from the runtime's own copy of scope
   let root = host.deps.dataRoot
@@ -196,6 +196,49 @@ export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo 
   const made = host.find(ref)
   if (!made) throw new AppUnavailableError(`The app folder was made, but discovery did not find it: ${dir}`)
   return host.info(made)
+}
+
+/** The checks every new app passes before anything is written (C-1b): its id, its name; and the one-line texts it gets */
+function newAppText(host: Pick<FoldersHost, 'deps'>, spec: { id: string; name: string; description?: string }): { name: string; description: string } {
+  const idProblem = newAppIdProblem(spec.id, host.deps.reservedIds)
+  if (idProblem) throw new AppUnavailableError(`"${spec.id}" cannot be an app id — ${APP_ID_PROBLEM[idProblem]}`)
+  const name = oneLine(spec.name)
+  if (!name) throw new AppUnavailableError('The app needs a name')
+  return { name, description: oneLine(spec.description ?? '') || `${name} (a Centralu app)` }
+}
+
+/**
+ * Writes a new app project's folder (#1141): the template expanded at `target.path`, whose root is then the app. The
+ * caller registers it as a project afterwards; until then no scan reads it, and it is written in a dot-named sibling
+ * first and renamed into place anyway, so the folder never stands half made. The id and name are refused the same as
+ * any new app's, before anything is written; the default parent (`~/Centralu`) is made when missing, a parent the
+ * person chose is not. A name taken since the caller checked is refused, never written over. **This starts nothing.**
+ */
+export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, target: AppProjectTarget, spec: { id: string; name: string; description?: string }): void {
+  if (host.disposed()) throw new AppUnavailableError('The app runtime has shut down')
+  const { name, description } = newAppText(host, spec)
+  const parent = dirname(target.path)
+  if (target.isDefault) mkdirSync(parent, { recursive: true })
+  if (taken(target.path)) throw new AppUnavailableError(`Something is already at ${target.path} — choose another id or folder`)
+  const staging = join(parent, `.${spec.id}.${randomUUID()}`)
+  try {
+    scaffoldApp(host.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
+    if (taken(target.path)) throw new Error(`something appeared at ${target.path} meanwhile`)
+    renameSync(staging, target.path)
+  } catch (err) {
+    removeDataQuietly(staging, '[apps]')
+    throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
+  }
+}
+
+/** lstat, not exists: a broken link of that name is still a name taken */
+function taken(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

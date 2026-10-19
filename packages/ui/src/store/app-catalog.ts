@@ -176,3 +176,6 @@ export function useExternalApp(projectId: string | null, appId: string, machine?
     return info ? buildCatalog([info]).external[0] : undefined
   }, [external, projectId, appId, machine])
 }
+
+/** `uses` in plain words (`uses-lines.ts`, which imports nothing of the store) */
+export { usesLines } from './uses-lines.js'

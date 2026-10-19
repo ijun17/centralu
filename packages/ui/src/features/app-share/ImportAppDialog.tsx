@@ -68,7 +68,8 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       pending.current = null
       void refresh()
       close()
-      setToast(enable ? `Imported and enabled ${app.name ?? app.appId}` : `Imported ${app.name ?? app.appId}. It stays off until you enable it`)
+      // It lands as a project of its own (#1141): "Import" leaves that project untrusted, and trusting it is enabling it
+      setToast(enable ? `Imported and enabled ${app.name ?? app.appId}` : `Imported ${app.name ?? app.appId}. It stays off until you trust its project`)
       // Goes to the imported app — if it was enabled, the app itself; if not, the pre-enable confirmation stands
       openApp(app.projectId, app.appId)
     } catch (e) {
@@ -101,10 +102,10 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       <div className="flex max-h-[calc(80vh/var(--text-zoom))] w-[520px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)">
         <header className="shrink-0 border-b border-line px-4 py-2.5">
           <h2 className="text-md font-medium text-ink">
-            Import an app <span className="text-ink-faint">·</span> <span className="text-ink-muted">Your apps</span>
+            Import an app
           </h2>
           <p className="mt-1 text-xs leading-body text-ink-faint">
-            It arrives turned off. You see what it runs before you turn it on.
+            It becomes a project of its own, in a new folder in your Centralu folder. You see what it runs before it can run.
           </p>
         </header>
 

@@ -125,6 +125,13 @@ export class MockPlatform implements Platform {
 
   constructor(opts: MockOptions = {}) {
     if (opts.now) this.clock.now = opts.now
+    // An app made or imported without a project lands in a new project folder, as on the host (#1141)
+    this.appBuilderMock.makeProject = (name, parent) => this.projectsMock.projects.create(name, parent)
+    this.appImportsMock.makeProject = async (name, parent, trusted) => {
+      const made = await this.projectsMock.projects.create(name, parent)
+      if (!trusted) await this.projectsMock.projects.setTrusted(made.id, false)
+      return { ...made, trusted }
+    }
   }
 
   /*

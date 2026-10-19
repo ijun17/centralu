@@ -189,27 +189,32 @@ test.describe('C-1: new app', () => {
     await expect(dialog.getByTestId('new-app-untrusted')).toContainText('Apps only run in projects you trust.')
     await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
 
+    // The same card as the project's row (#1141), in the dialog: nothing is trusted on the first press
     await dialog.getByTestId('new-app-trust').click()
+    await expect(dialog.getByTestId('new-app-trust-card')).toContainText('Trust this project?')
+    expect(await trustCalls(page)).toEqual([])
+    await dialog.getByTestId('new-app-trust-card-yes').click()
     await expect.poll(() => trustCalls(page)).toEqual([{ projectId: pid, trusted: true }])
     await expect(dialog.getByTestId('new-app-untrusted')).toHaveCount(0)
     await dialog.getByTestId('new-app-create').click()
     await expect(page.getByTestId(`pinned-app-${pid}/daily-log`).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
   })
 
-  test('New app in the user folder: the group shows even with no apps, an unusable agent states the reason, and creating one places it in that group', async ({ page }) => {
+  test('New app without a project (#1141): made like a new project, in a folder of its own that it names; an unusable agent states the reason; the app stands as a project with its mark', async ({ page }) => {
     await addProject(page, '/tmp/alpha')
     // Codex is not logged in
     await page.evaluate(() => {
       const m = (window as any).__mock
       m.detected = m.detected.map((t: { name: string }) => (t.name === 'codex' ? { ...t, loggedIn: false } : t))
     })
-    const group = page.getByTestId('user-apps')
-    await expect(group).toContainText('Your apps')
-    await expect(group.getByTestId('user-apps-list')).toHaveCount(0)
-    await group.getByTestId('user-apps-new').click()
+    // There is no "Your apps" section any more: New app stands with the other ways a project comes to be
+    await expect(page.getByTestId('user-apps')).toHaveCount(0)
+    await page.getByTestId('create-app').click()
     const dialog = page.getByTestId('new-app-dialog')
-    await expect(dialog).toContainText('New app · Your apps')
+    await expect(dialog.locator('h2')).toHaveText('New app')
     await dialog.getByTestId('new-app-name').fill('Daily log')
+    // The folder it will make, before anything is made: ~/Centralu, by its id, as a new project's
+    await expect(dialog.getByTestId('new-app-path')).toHaveText('/Users/you/Centralu/daily-log')
     await dialog.getByTestId('new-app-tool-codex').click()
     await expect(dialog.getByTestId('new-app-tool-blocked')).toHaveText('Codex needs a login. Run codex login in a terminal, then open this again.')
     await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
@@ -217,10 +222,50 @@ test.describe('C-1: new app', () => {
     await dialog.getByTestId('new-app-tool-claude').click()
     await expect(dialog.getByTestId('new-app-tool-blocked')).toHaveCount(0)
     await dialog.getByTestId('new-app-create').click()
-    await expect(group.getByTestId('app-row-_user/daily-log')).toHaveText('Daily log')
-    await expect(page.getByTestId('pinned-app-_user/daily-log').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
-    expect(await sessionsOfApp(page, 'daily-log')).toEqual([{ id: expect.any(String), name: 'Daily log · builder', tool: 'claude', projectId: null }])
+    await expect(dialog).toHaveCount(0)
+    // A project of its own, marked as an app; its app is not a row under it
+    const block = page.getByTestId('project-daily-log')
+    await expect(block.getByTestId('project-app-mark-daily-log')).toBeVisible()
+    await expect(block.locator('[data-testid^="app-row-"]')).toHaveCount(0)
+    const pid = await page.evaluate(async () => ((await (window as any).__mock.projects.list()) as { id: string; name: string }[]).find((p) => p.name === 'daily-log')!.id)
+    await expect(page.getByTestId(`pinned-app-${pid}/daily-log`).getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    // Its builder works in that project, and stands among its sessions
+    expect(await sessionsOfApp(page, 'daily-log')).toEqual([{ id: expect.any(String), name: 'Daily log · builder', tool: 'claude', projectId: pid }])
+    await expect(block).toContainText('Daily log · builder')
     expect(await createdApps(page)).toEqual([{ projectId: null, id: 'daily-log', name: 'Daily log', tool: 'claude' }])
+  })
+
+  test('Enter before the folder preview has caught up with a changed id does not create: it waits for the answer for that id', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => (window as any).__mock.takenPaths.add('/Users/you/Centralu/notes-2'))
+    await page.getByTestId('create-app').click()
+    const dialog = page.getByTestId('new-app-dialog')
+    await dialog.getByTestId('new-app-name').fill('Notes')
+    await expect(dialog.getByTestId('new-app-path')).toHaveText('/Users/you/Centralu/notes')
+    // The id changes to one whose folder is taken, and Enter comes at once, before the preview for it lands
+    await dialog.getByTestId('new-app-id').fill('notes-2')
+    await dialog.getByTestId('new-app-id').press('Enter')
+    await expect(dialog.getByTestId('new-app-location-error')).toHaveText('Something named "notes-2" is already in /Users/you/Centralu — choose another name.')
+    expect(await createdApps(page)).toEqual([])
+    await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+  })
+
+  test('New app without a project goes in the parent the person chooses, and a name already there is refused before anything is made', async ({ page }) => {
+    await page.goto('/?mock=1')
+    await page.evaluate(() => (window as any).__mock.takenPaths.add('/Users/you/code/notes'))
+    await page.getByTestId('create-app').click()
+    const dialog = page.getByTestId('new-app-dialog')
+    await dialog.getByTestId('new-app-name').fill('Notes')
+    await expect(dialog.getByTestId('new-app-path')).toHaveText('/Users/you/Centralu/notes')
+    await dialog.getByTestId('new-app-change-parent').click()
+    await dialog.getByTestId('new-app-parent').fill('/Users/you/code')
+    await expect(dialog.getByTestId('new-app-location-error')).toHaveText('Something named "notes" is already in /Users/you/code — choose another name.')
+    await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+    await dialog.getByTestId('new-app-id').fill('notes-2')
+    await expect(dialog.getByTestId('new-app-path')).toHaveText('/Users/you/code/notes-2')
+    await dialog.getByTestId('new-app-create').click()
+    await expect(dialog).toHaveCount(0)
+    expect(await createdApps(page)).toEqual([{ projectId: null, id: 'notes-2', name: 'Notes', tool: expect.any(String), parent: '/Users/you/code' }])
   })
 })
 

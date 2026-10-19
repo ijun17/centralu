@@ -1,4 +1,4 @@
-import { appKeyOf, gridSessionIds, isProposalId } from '@cc/core'
+import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
 import { sidebarProjectOf } from '../sidebarTree.js'
@@ -39,7 +39,13 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
   openWaiting(id, opts) {
     // A proposal's card only stands on the orchestrator's own screen, so `preferGrid` does not apply to it
     if (isProposalId(id)) void get().openOrchestrator()
-    else get().focusSession(id, opts)
+    else if (isAppArrivalId(id)) {
+      // An app a trusted project gained (#1141): its screen, and the notice is read
+      const key = id.slice(APP_ARRIVAL_ID_PREFIX.length)
+      const arrival = get().appArrivals.find((a) => a.key === key)
+      if (arrival) get().openApp(arrival.projectId, arrival.appId)
+      get().dismissAppArrival(key)
+    } else get().focusSession(id, opts)
   },
 
   focusSession(id, opts) {

@@ -200,8 +200,14 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
     await rpc('projects.setTrusted', { projectId, trusted: true })
     return ((await rpc('apps.create', { projectId, id: 'notes', name: 'Notes', tool })) as Created).builder!.id
   },
-  'user-folder-app builder': async (tool) =>
-    ((await rpc('apps.create', { projectId: null, id: 'timer', name: 'Timer', tool })) as Created).builder!.id,
+  /*
+   * A new app without a project is a project of its own now (#1141), so a user-folder app is one still listed there (an
+   * approved MCP server before the host moves it, or one it could not move); its builder is stood up the same way
+   */
+  'user-folder-app builder': async (tool) => {
+    rt.installUserApp({ id: 'timer', name: 'Timer', description: 'a user-folder app', server: { command: 'node', args: ['server.mjs'] } })
+    return ((await rpc('apps.createBuilder', { appId: 'timer', projectId: null, tool })) as SessionInfo).id
+  },
   'project-app agent': (tool) => appAgent(tool, projectId, 'notes'),
   'user-folder-app agent': (tool) => appAgent(tool, null, 'timer'),
   'start_agent child': async (tool) => {

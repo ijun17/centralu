@@ -167,11 +167,21 @@ function review(over: Record<string, unknown> = {}) {
 
 const mockList = <T,>(page: Page, name: string) => page.evaluate((n) => (window as any).__mock[n] as T, name)
 
+/** The import dialog's door (#1141): with "Your apps" gone, it is in the New app dialog (and the command palette) */
+async function openImport(page: Page) {
+  await page.getByTestId('create-app').click()
+  await page.getByTestId('new-app-import').click()
+}
+
+/** The project an import landed as, by its folder name */
+const projectNamed = (page: Page, name: string) =>
+  page.evaluate(async (n) => ((await (window as any).__mock.projects.list()) as { id: string; name: string; trusted: boolean }[]).find((p) => p.name === n), name)
+
 test.describe('import (E-3)', () => {
   test('a picker the shell refuses says why in the dialog, for a folder and a .zip alike (#972)', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate(() => ((window as any).__mock.pickFails = 'dialog.open not allowed'))
-    await page.getByTestId('user-apps-import').click()
+    await openImport(page)
     const dialog = page.getByTestId('import-app-dialog')
     await dialog.getByTestId('import-pick-folder').click()
     await expect(dialog.getByTestId('import-error')).toHaveText('dialog.open not allowed')
@@ -183,7 +193,7 @@ test.describe('import (E-3)', () => {
   test('picking a source and clicking Review shows what it runs, what it uses, its secrets, and its files, and "Import and enable" brings it in, enables it, and opens the app', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
-    await page.getByTestId('user-apps-import').click()
+    await openImport(page)
     const dialog = page.getByTestId('import-app-dialog')
     await expect(dialog).toBeVisible()
     // Nothing reaches the host before Review is clicked
@@ -207,34 +217,38 @@ test.describe('import (E-3)', () => {
     await dialog.getByTestId('import-enable').click()
     await expect(dialog).toHaveCount(0)
     expect(await mockList<unknown[]>(page, 'importCommits')).toEqual([{ token: expect.any(String), enable: true, appId: 'notes' }])
+    // It lands as a project of its own (#1141), trusted since the person enabled it, marked as an app
+    const project = (await projectNamed(page, 'notes'))!
+    expect(project.trusted).toBe(true)
+    await expect(page.getByTestId('project-app-mark-notes')).toHaveAttribute('data-status', 'stopped')
     // Enabled it, so the app opens — the host calls home
-    await expect(page.getByTestId('pinned-app-_user/notes')).toBeVisible()
-    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: null }])
+    await expect(page.getByTestId(`pinned-app-${project.id}/notes`)).toBeVisible()
+    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: project.id }])
   })
 
-  test('"Import" brings it in disabled — the row says "not enabled" and the pinned view shows the review, and clicking Enable launches the app right there', async ({ page }) => {
+  test('"Import" brings it in as an untrusted project (#1141) — its mark says not trusted, its view asks for trust and calls nothing, and trusting the project launches the app right there', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
-    await page.getByTestId('user-apps-import').click()
+    await openImport(page)
     const dialog = page.getByTestId('import-app-dialog')
     await dialog.getByTestId('import-source').fill('/tmp/notes.zip')
     await dialog.getByTestId('import-review').click()
     await dialog.getByTestId('import-commit').click()
     await expect(dialog).toHaveCount(0)
 
-    await expect(page.getByTestId('app-row-_user/notes').getByTestId('app-row-hint')).toHaveText('not enabled')
-    const pinned = page.getByTestId('pinned-app-_user/notes')
-    const gate = pinned.getByTestId('pinned-review')
-    await expect(gate.getByTestId('pinned-review-title')).toHaveText('This app was imported. Review it before it runs.')
-    await expect(gate.getByTestId('review-command')).toHaveText('node server.mjs --port 3')
-    // Nothing is called before it is enabled — not even home
+    const project = (await projectNamed(page, 'notes'))!
+    expect(project.trusted).toBe(false)
+    await expect(page.getByTestId('project-app-mark-notes')).toHaveAttribute('data-status', 'untrusted')
+    const pinned = page.getByTestId(`pinned-app-${project.id}/notes`)
+    await expect(pinned.getByTestId('pinned-untrusted')).toBeVisible()
+    // Nothing is called before it is trusted — not even home
     expect(await mockList<unknown[]>(page, 'openedViews')).toEqual([])
 
-    await gate.getByTestId('pinned-enable').click()
-    await expect.poll(() => mockList<string[]>(page, 'enabledApps')).toEqual(['notes'])
-    await expect(pinned.getByTestId('pinned-review')).toHaveCount(0)
-    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: null }])
-    await expect(page.getByTestId('app-row-_user/notes').getByTestId('app-row-hint')).toHaveCount(0)
+    await pinned.getByTestId('pinned-trust').click()
+    await pinned.getByTestId('pinned-trust-card-yes').click()
+    await expect(pinned.getByTestId('pinned-untrusted')).toHaveCount(0)
+    await expect.poll(() => mockList<unknown[]>(page, 'openedViews')).toEqual([{ appId: 'notes', projectId: project.id }])
+    await expect(page.getByTestId('project-app-mark-notes')).toHaveAttribute('data-status', 'stopped')
   })
 
   test('a host refusal shows verbatim in the dialog with nothing imported, and closing the dialog clears the staging area', async ({ page }) => {
@@ -244,7 +258,7 @@ test.describe('import (E-3)', () => {
       m.importRefusals.set('/tmp/evil.zip', "An entry's path leaves the archive or is malformed: ../evil.txt")
     })
     await page.evaluate((r) => (window as any).__mock.importSources.set('/tmp/notes.zip', r), review())
-    await page.getByTestId('user-apps-import').click()
+    await openImport(page)
     const dialog = page.getByTestId('import-app-dialog')
     await dialog.getByTestId('import-source').fill('/tmp/evil.zip')
     await dialog.getByTestId('import-review').click()
@@ -385,7 +399,10 @@ test.describe('app links (E-4)', () => {
     await expect(dialog.getByTestId('review-source')).toHaveText(`From ${source}`)
     expect(await mockList<string[]>(page, 'importPrepares')).toEqual([source])
     await dialog.getByTestId('import-enable').click()
-    await expect(page.getByTestId('pinned-app-_user/notes')).toBeVisible()
+    // It lands as a project of its own (#1141), and its app opens
+    await expect(page.getByTestId('project-app-mark-notes')).toBeVisible()
+    const project = (await projectNamed(page, 'notes'))!
+    await expect(page.getByTestId(`pinned-app-${project.id}/notes`)).toBeVisible()
   })
 
   test('a malformed link does not open the dialog and states the reason in one line — http, a path, or a different destination', async ({ page }) => {

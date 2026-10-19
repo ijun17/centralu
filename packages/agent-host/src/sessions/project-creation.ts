@@ -250,6 +250,39 @@ export class ProjectCreation {
   }
 
   /**
+   * The folder a new app project would get (#1141): `<parent>/<id>`, in `~/Centralu` unless a parent is given — the
+   * same default, rules and refusals as a new project's folder (`projectFolderTarget`). Checked, nothing made.
+   */
+  appProjectTarget(id: string, parent?: string): ProjectFolderTarget {
+    return projectFolderTarget({ name: id, parent }, parent?.trim() ? null : this.projectsHome())
+  }
+
+  /**
+   * Registers a folder Centralu just made for a new app (#1141) and tells every window. Trusted by default, as an empty
+   * folder Centralu made is (#655): only Centralu's template is in it. An imported app's folder holds someone else's
+   * code, so it is trusted only when the person chose "Import and enable".
+   */
+  async registerMadeFolder(path: string, opts: { trusted?: boolean } = {}): Promise<ProjectInfo> {
+    const info = await this.addProject(path, { trusted: opts.trusted ?? true })
+    this.host.emit({ type: 'projects_changed' })
+    return info
+  }
+
+  /**
+   * The orchestrator's create_app without a project (#1141) makes a folder and a project, so it asks on create_project's
+   * card first, naming the folder; null once allowed, else why not (a refusal, a withdrawn card, a name taken).
+   */
+  async askAppProject(sessionId: string, spec: { id: string; parent?: string }, signal?: AbortSignal): Promise<string | null> {
+    let target: ProjectFolderTarget
+    try {
+      target = this.appProjectTarget(spec.id, spec.parent)
+    } catch (e) {
+      return (e as Error).message
+    }
+    return this.askProjectCreate(sessionId, { name: target.name, path: target.path }, undefined, target.path, signal)
+  }
+
+  /**
    * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path (and
    * the repository, for a clone) on it, and the folder is made only when the person allows it. Checked before the card
    * (a refusal costs the person nothing) and again after it (a folder of that name may have appeared while the card

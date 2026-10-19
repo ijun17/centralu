@@ -189,4 +189,12 @@ export type ExternalAppsDeps = {
    * (sessions/app-access.ts), and every call is checked there again.
    */
   shared?: (ref: AppRef) => boolean
+  /**
+   * Whether a folder in the user folder was registered as a project in place (#1141, `user-app-adoption.ts`): it is
+   * that project's root app now, so the user folder no longer lists it. Asked on every scan of the user folder, with
+   * the folder's path, which the record is bound to. Absent: nothing was.
+   */
+  adoptedUserApp?: (appId: string, dir: string) => boolean
+  /** The project a user-folder app of this id was registered as in place (#1141), for its old key (`ExternalApps.resolve`) */
+  adoptedProjectOf?: (appId: string) => string | undefined
 }

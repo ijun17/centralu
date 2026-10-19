@@ -164,7 +164,7 @@ test('the palette lists apps by name, only once something is typed, and opens on
   await expect(page.getByTestId('palette-item-session').first()).toBeVisible()
   await expect(page.getByTestId('palette-item-app')).toHaveCount(0)
   await page.getByTestId('palette-input').fill('ledg')
-  await expect(page.getByTestId('palette-item-app')).toHaveText(/Ledger.*Your apps/)
+  await expect(page.getByTestId('palette-item-app')).toHaveText(/Ledger.*Other apps/)
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('pinned-app-_user/ledger')).toBeVisible()
 })

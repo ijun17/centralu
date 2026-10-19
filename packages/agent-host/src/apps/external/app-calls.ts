@@ -17,9 +17,7 @@ export type CallsHost = {
   readonly lifecycle: AppLifecycle
   /** Where the run ledger is stored (A-6) — the runtime's, already announcing (`announcingLedger`); null records nothing */
   readonly runs: RunLedger | null
-  blocker(e: AppEntry, opts: { boundaryOpen?: boolean }): Blocker | null
-  /** Whether this session's boundary is open (`ExternalApps.setSessionBoundaryPolicy`) */
-  boundaryOpen(sessionId: string): boolean
+  blocker(e: AppEntry): Blocker | null
   masker(ref: AppRef): (text: string) => string
   recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc?: AppProcess | null): void
   emitChanged(ref: AppRef, cause?: AppCaller | null): void
@@ -172,8 +170,7 @@ export class AppCalls {
     }
 
     // Checks that end before anything is sent to the app — do not even need to start a process
-    const open = caller.kind === 'session' && this.host.boundaryOpen(caller.sessionId)
-    const blocked = this.host.blocker(e, { boundaryOpen: open })
+    const blocked = this.host.blocker(e)
     if (blocked) return done('rejected', null, blocked.reason)
     let parent: OpenRun | null = null
     if (caller.kind === 'app') {
@@ -243,7 +240,7 @@ export class AppCalls {
           abort.abort()
           for (const sig of upstream) sig.removeEventListener('abort', onUp)
         }
-      }, open)
+      })
     } catch (err) {
       // Failed to start (a failed startup, or changed while backing off) — never reached the app, but this is not a policy denial
       return done('error', null, (err as Error).message)

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { USER_APP_SCOPE, type AppReview, type ExternalAppInfo } from '@cc/protocol'
+import { dirname, join } from 'node:path'
+import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
 import {
@@ -76,7 +76,10 @@ const CHANGED = 'This app changed what it runs or what it uses since you enabled
 
 export class AppHandover {
   private book: ImportBook
-  /** Versions of an app outside git (a user-folder app) (E-1) */
+  /**
+   * Versions of an app outside git (E-1): a user-folder app, and a root app whose project is not a repository (#1141).
+   * Kept per app key (`<project id | _user>/<app id>`), so a user-folder app's stay where they always were
+   */
   private versions: AppVersions
   private staged = new Map<string, Staged>()
   private limits: ImportLimits
@@ -87,7 +90,7 @@ export class AppHandover {
     private opts: HandoverOptions = {},
   ) {
     this.book = new ImportBook(host.dataRoot)
-    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, USER_APP_SCOPE), opts.remove)
+    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL), opts.remove)
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
     // The staging area a previous host left behind — never brought in, so it is discarded (it can be imported again)
@@ -137,7 +140,10 @@ export class AppHandover {
         files = stageLocal(source.path, appDir, this.limits)
       }
       const { manifest, warnings } = readStagedManifest(appDir, this.host.reservedIds)
-      this.refuseTaken(manifest.id)
+      /*
+       * An import lands as a project of its own now (#1141, `commitTo`), whose folder is checked where it goes; an id
+       * the user folder holds is no reason to refuse it (a folder registered as a project in place stays there)
+       */
       const review = reviewOf(manifest, files, { source: source.label, warnings })
       const timer = setTimeout(() => this.cancel(token), this.opts.stagingMs ?? STAGING_MS)
       timer.unref()
@@ -181,9 +187,48 @@ export class AppHandover {
     }
     if (opts.enable) this.book.confirm(id, dir, manifest)
     // Captures the state it arrived in as the first version (E-1) — so even if a building session breaks it while editing, it can be restored to the imported version
-    this.snapshot(id, dir, 'imported')
+    this.snapshot(appKeyOf(null, id), dir, 'imported')
     this.cancel(token)
     this.host.rescanUser()
+    return id
+  }
+
+  /** The id of the app staged under this token, or null once it is gone */
+  stagedId(token: string): string | null {
+    return this.staged.get(token)?.review.appId ?? null
+  }
+
+  /**
+   * Brings a staged app in as a new project's folder (#1141): `target.path`, checked free by the caller and checked again
+   * here. The same checks as `commit` first (the key the person reviewed, the staged manifest read again). No import mark
+   * is written: the project's trust is what enables it, and the host registers it trusted only for "Import and enable".
+   * The staging area is in the data folder, so a parent on another volume gets a copy, not a rename.
+   * @returns the id of the app brought in
+   */
+  commitTo(token: string, opts: { enable: boolean; reviewKey?: string }, target: { path: string; isDefault: boolean }): string {
+    const s = this.staged.get(token)
+    if (!s) throw new ImportRefused('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
+    if (opts.enable && opts.reviewKey !== s.review.reviewKey) throw new ImportRefused('What would be enabled is not what you reviewed. Review it again')
+    const { manifest } = readStagedManifest(s.appDir, this.host.reservedIds)
+    if (reviewKey(manifest) !== s.review.reviewKey) throw new ImportRefused('The app changed while it was waiting. Review it again')
+    if (target.isDefault) mkdirSync(dirname(target.path), { recursive: true })
+    if (pathTaken(target.path)) throw new ImportRefused(`Something is already at ${target.path}. Choose another folder`)
+    try {
+      renameSync(s.appDir, target.path)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e
+      // Another volume: copied beside its place and renamed in, so it never stands half there
+      const tmp = join(dirname(target.path), `.${s.review.appId}.${randomUUID()}`)
+      try {
+        cpSync(s.appDir, tmp, { recursive: true, preserveTimestamps: true })
+        renameSync(tmp, target.path)
+      } catch (err) {
+        discard(tmp, this.opts.remove)
+        throw err
+      }
+    }
+    const id = s.review.appId
+    this.cancel(token)
     return id
   }
 
@@ -239,23 +284,23 @@ export class AppHandover {
   // ── versions (E-1) ──────────────────────────────────────────────────────────────────
 
   /**
-   * Captures a user-folder app's current code as a version — does nothing if a version with the same
-   * fingerprint already exists. **Never throws on failure**: failing to capture a version must never
-   * stop the app from starting. The reason is written to the host's log.
+   * Captures an app's current code as a version, under its app key (`appKeyOf`) — does nothing if a version with the
+   * same fingerprint already exists. **Never throws on failure**: failing to capture a version must never stop the app
+   * from starting. The reason is written to the host's log.
    */
-  snapshot(appId: string, dir: string, reason: string, stamp?: string): Snapshot | null {
+  snapshot(key: string, dir: string, reason: string, stamp?: string): Snapshot | null {
     try {
-      return this.versions.capture(appId, dir, reason, stamp)
+      return this.versions.capture(key, dir, reason, stamp)
     } catch (e) {
-      console.error(`[apps] could not keep a version of user/${appId}: ${(e as Error).message}`)
+      console.error(`[apps] could not keep a version of ${key}: ${(e as Error).message}`)
       return null
     }
   }
 
-  /** An app's versions, most recent first — the version matching the folder's current fingerprint has `current` set */
-  versionsOf(appId: string, dir: string): (Snapshot & { current: boolean })[] {
+  /** An app's versions by app key, most recent first — the version matching the folder's current fingerprint has `current` set */
+  versionsOf(key: string, dir: string): (Snapshot & { current: boolean })[] {
     const now = folderFingerprint(dir)
-    return this.versions.list(appId).map((s) => ({ ...s, current: s.stamp === now }))
+    return this.versions.list(key).map((s) => ({ ...s, current: s.stamp === now }))
   }
 
   /**
@@ -263,10 +308,20 @@ export class AppHandover {
    * folder as a version too (so a restore can itself be undone). Restarting the app is the caller's
    * job (the runtime): that is where the rules for in-progress calls and reflecting changes live.
    */
-  restore(appId: string, id: string, dir: string): Snapshot {
-    this.snapshot(appId, dir, 'before restore')
+  restore(key: string, id: string, dir: string, opts: { root?: boolean } = {}): Snapshot {
+    if (opts.root) {
+      /*
+       * A root app's folder is the person's whole project (#1141): the copy of the current files is the only way back
+       * from a restore, so a restore without it is refused rather than run. And nothing the version lacks is deleted
+       */
+      try {
+        this.versions.capture(key, dir, 'before restore')
+      } catch (e) {
+        throw new ImportRefused(`Could not keep a copy of the current files first (${(e as Error).message}), so nothing was restored`)
+      }
+    } else this.snapshot(key, dir, 'before restore')
     try {
-      return this.versions.restore(appId, id, dir)
+      return this.versions.restore(key, id, dir, { keepOthers: opts.root === true })
     } catch (e) {
       throw new ImportRefused((e as Error).message)
     }
@@ -287,5 +342,15 @@ export class AppHandover {
     if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, ...USER_APPS_PARTS, id))) {
       throw new ImportRefused(`An app with the id "${id}" is already in your apps. Remove it first, or change the id in its manifest`)
     }
+  }
+}
+
+/** lstat, not exists: a broken link of that name is still a name taken */
+function pathTaken(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
   }
 }

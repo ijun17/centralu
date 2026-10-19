@@ -7,6 +7,7 @@ import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownersh
 import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords, type LinkedMachineRow } from './store/linked-machines.js'
+import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords, type ReadOpts } from './store/messages.js'
 import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
 import { type MigrationStep } from './store/migrations/context.js'
@@ -86,6 +87,8 @@ export class Store extends MigrationRunner {
   readonly keptRuns: KeptRuns
   readonly children: ChildOwnershipRecords
   readonly machines: LinkedMachineRecords
+  /** User-folder apps registered as projects in place (#1141) */
+  readonly adoption: UserAppAdoptionRecords
 
   constructor(
     protected readonly dbPath = ':memory:',
@@ -107,6 +110,7 @@ export class Store extends MigrationRunner {
     this.keptRuns = new KeptRuns(this.db)
     this.children = new ChildOwnershipRecords(this.db)
     this.machines = new LinkedMachineRecords(this.db, this.settings)
+    this.adoption = new UserAppAdoptionRecords(this.db, this.settings)
     try {
       /*
        * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already

@@ -19,6 +19,14 @@ import { AppId } from './ids.js'
 export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'unconfirmed', 'stopped', 'starting', 'running', 'crashed', 'failed'])
 export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
 
+/** The manifest's `uses` — the capabilities the app declares it will use (M4 D). `agent` is either `true` (the person's default agent) or a list of tool names */
+export const AppUses = z.object({
+  agent: z.union([z.boolean(), z.array(z.string())]).optional(),
+  apps: z.array(z.string()).optional(),
+  host: z.array(z.string()).optional(),
+})
+export type AppUses = z.infer<typeof AppUses>
+
 /**
  * One discovered external app (M4 A-2). There is one instance per (project, id) — the same id
  * in two different projects means two different apps. `projectId: null` means a user-folder app.
@@ -92,6 +100,19 @@ export const ExternalAppInfo = z.object({
    * every project already). An older host never sends it, which reads as off: the safe default.
    */
   shared: z.boolean().optional(),
+  /**
+   * A root app (#1141): the manifest stands at its project's own root, so the project is the app — `dir` is the
+   * project's folder, and the app is listed with its project rather than under it. True only when so; absent from an
+   * older host, which has none.
+   */
+  root: z.boolean().optional(),
+  /**
+   * What the manifest declares it will ask Centralu for (`uses`: agents it may run, apps it may call, host data it may
+   * read), absent when it declares nothing or the manifest is invalid (#1141). A declaration, not a permission: the
+   * project's trust card lists it per app, so the person sees what trusting lets its apps ask for. Absent from an older
+   * host.
+   */
+  uses: AppUses.optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 
@@ -106,13 +127,6 @@ export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
  * — what the person reviewed and what gets turned on have to be the same thing. `changed` states
  * what changed since it was turned on, when this is a re-review (null for a first-time import).
  */
-/** The manifest's `uses` — the capabilities the app declares it will use (M4 D). `agent` is either `true` (the person's default agent) or a list of tool names */
-export const AppUses = z.object({
-  agent: z.union([z.boolean(), z.array(z.string())]).optional(),
-  apps: z.array(z.string()).optional(),
-  host: z.array(z.string()).optional(),
-})
-export type AppUses = z.infer<typeof AppUses>
 
 export const AppReview = z.object({
   appId: AppId,

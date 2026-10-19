@@ -487,8 +487,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('apps.setSecret', { appId, projectId, name, value, ...on(machine) })
       },
       importPrepare: (source) => rpc.call('apps.importPrepare', { source }),
-      importCommit: (token, { enable, reviewKey }) =>
-        rpc.call('apps.importCommit', { token, enable, ...(reviewKey !== undefined ? { reviewKey } : {}) }),
+      importCommit: (token, { enable, reviewKey, parent }) =>
+        rpc.call('apps.importCommit', { token, enable, ...(reviewKey !== undefined ? { reviewKey } : {}), ...(parent ? { parent } : {}) }),
       importCancel: async (token) => {
         await rpc.call('apps.importCancel', { token })
       },

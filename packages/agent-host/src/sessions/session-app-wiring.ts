@@ -1,3 +1,5 @@
+import { parseJson } from '../dev-services/store/json.js'
+import { isObj } from '../json-value.js'
 import type { AppReach, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
@@ -10,7 +12,7 @@ import type { HostCards } from './host-cards.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import type { RestartHost } from './restart-policy.js'
 import type { RoutedCardsHost } from './routed-cards.js'
-import { SessionAppsHub } from './session-apps.js'
+import { APP_NAMES_PREFIX, SessionAppsHub } from './session-apps.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueriesHost } from './tool-queries.js'
 import { isAppAgent } from './tool-profiles.js'
@@ -70,9 +72,18 @@ export class SessionAppWiring {
      * What a session attached itself (#371 part A) is counted by the hub on every count, through this
      * port — the hub keeps no copy, so the person's sharing switch and consent are read fresh each time.
      */
+    const settings = this.host.store.settings
     this.appsHub = new SessionAppsHub(rt, {
       ...opts,
-      boundaryOpen: (id) => this.host.autoBoundaryOpen(id),
+      // The names a session has seen stay with their apps for its life (#1141), kept with the session
+      names: {
+        load: (id) => {
+          const raw = parseJson(settings.appSetting(`${APP_NAMES_PREFIX}${id}`))
+          return isObj(raw) ? Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string')) : {}
+        },
+        save: (id, names) => settings.setAppSetting(`${APP_NAMES_PREFIX}${id}`, JSON.stringify(names)),
+      },
+      projectName: (id) => this.host.store.projects.listProjects().find((p) => p.id === id)?.name,
       onDemand: {
         attached: (id) => this.appAccess?.attached(id) ?? [],
         /*
@@ -83,7 +94,6 @@ export class SessionAppWiring {
         allowed: (session, app) => this.host.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
       },
     })
-    rt.setSessionBoundaryPolicy((id) => this.host.autoBoundaryOpen(id))
     this.appAccess = new AppAccess({
       boundaryOpen: (id, boundary) => this.host.autoBoundaryOpen(id, boundary),
       hub: this.appsHub,

@@ -17,10 +17,10 @@ export type LifecycleHost = {
   disposed(): boolean
   appsChanged(): void
   recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc?: AppProcess | null): void
-  blocker(e: AppEntry, opts: { boundaryOpen?: boolean }): Blocker | null
+  blocker(e: AppEntry): Blocker | null
   spawnSpec(e: AppEntry, pipeId: number): SpawnSpec
-  /** Captures the code about to run as a version (E-1) — a user-folder app's */
-  snapshot(appId: string, dir: string, stamp: string): void
+  /** Captures the code about to run as a version (E-1) — an app outside git's (`keepsVersions`) */
+  snapshot(e: AppEntry, stamp: string): void
   find(ref: AppRef): AppEntry | undefined
   holdKey(ref: AppRef): string
   label(ref: AppRef): string
@@ -55,11 +55,11 @@ export class AppLifecycle {
   private spawned = new Set<AppProcess>()
 
   /** An app is never idle while in use — the idle timer is set again once it is done */
-  async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>, boundaryOpen = false): Promise<T> {
+  async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>): Promise<T> {
     e.life.inflight += 1
     this.clearIdle(e)
     try {
-      return await fn(await this.ensureRunning(e, boundaryOpen))
+      return await fn(await this.ensureRunning(e))
     } finally {
       e.life.inflight -= 1
       if (e.life.inflight === 0) for (const w of e.life.idleWaiters.splice(0)) w()
@@ -96,9 +96,9 @@ export class AppLifecycle {
    * encountered restoring sessions (see the `resuming` comment in `manager.ts`). Everyone waits on the
    * same in-progress startup promise instead.
    */
-  private ensureRunning(e: AppEntry, boundaryOpen = false): Promise<AppProcess> {
+  private ensureRunning(e: AppEntry): Promise<AppProcess> {
     const L = e.life
-    const blocked = this.host.blocker(e, { boundaryOpen })
+    const blocked = this.host.blocker(e)
     if (blocked) throw new AppUnavailableError(blocked.reason)
     if (L.proc?.alive) return Promise.resolve(L.proc)
     if (L.starting) return L.starting
@@ -118,7 +118,7 @@ export class AppLifecycle {
        */
       L.stamp = folderFingerprint(e.dir)
       // An app outside git now has the code about to run captured as a version (E-1) — does nothing if it is the same code. The app still starts even if capturing the version fails
-      if (e.ref.projectId === null) this.host.snapshot(e.ref.appId, e.dir, L.stamp)
+      this.host.snapshot(e, L.stamp)
       let proc: AppProcess
       try {
         proc = await AppProcess.start({

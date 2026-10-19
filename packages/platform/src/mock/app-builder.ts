@@ -1,4 +1,4 @@
-import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
+import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol'
 import { appKeyOf, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
@@ -26,6 +26,11 @@ export class AppBuilderMock {
   sendErrorGate: Promise<void> | null = null
   /** What the "New app" window sent to the host — tests check what the window chose (id, name, tool) */
   readonly createdApps: NewAppSpec[] = []
+  /**
+   * Makes and registers a new project folder (`projects.create`, wired by the mock platform): where an app made without
+   * a project lands, as the host's does (#1141)
+   */
+  makeProject: ((name: string, parent?: string) => Promise<ProjectInfo>) | null = null
   /** What the input line below an app screen sent to the host (M4 C-5) — tests check what was sent, from which screen, with what attached */
   readonly builderAsks: BuilderAsk[] = []
   /**
@@ -58,7 +63,17 @@ export class AppBuilderMock {
       const name = spec.name.replace(/\s+/g, ' ').trim()
       if (!name) throw new Error('The app needs a name')
       let dir = `/mock/data/apps/${spec.id}`
-      if (spec.projectId !== null) {
+      let projectId = spec.projectId
+      if (projectId === null) {
+        /*
+         * Like the host (#1141): a new folder `<parent>/<id>` (~/Centralu), registered as a trusted project whose root is
+         * the app. The folder rules and their refusals are the new project's (`projects.create`)
+         */
+        if (!this.makeProject) throw new Error('This mock cannot make a project')
+        const made = await this.makeProject(spec.id, spec.parent)
+        projectId = made.id
+        dir = made.path
+      } else {
         const project = this.projectStore.list.find((p) => p.id === spec.projectId)
         if (!project) throw new Error(`There is no such project: ${spec.projectId}`)
         if (!project.trusted) {
@@ -66,12 +81,12 @@ export class AppBuilderMock {
         }
         dir = `${project.path}/.centralu/apps/${spec.id}`
       }
-      if (this.registry.externalAppList.some((a) => a.appId === spec.id && a.projectId === spec.projectId)) {
+      if (spec.projectId !== null && this.registry.externalAppList.some((a) => a.appId === spec.id && a.projectId === spec.projectId)) {
         throw new Error(`An app "${spec.id}" already exists (${dir}) — use another id`)
       }
       const app: ExternalAppInfo = {
         appId: spec.id,
-        projectId: spec.projectId,
+        projectId,
         dir,
         name,
         version: '0.1.0',
@@ -82,11 +97,12 @@ export class AppBuilderMock {
         status: 'stopped',
         error: null,
         warnings: [],
+        ...(spec.projectId === null ? { root: true } : {}),
       }
       this.registry.externalAppList.push(app)
       this.emit({ type: 'external_apps_changed' })
       try {
-        return { app: structuredClone(app), builder: await this.apps.createBuilder(spec.id, spec.projectId, spec.tool) }
+        return { app: structuredClone(app), builder: await this.apps.createBuilder(spec.id, projectId, spec.tool) }
       } catch (e) {
         return { app: structuredClone(app), builder: null, builderError: (e as Error).message }
       }

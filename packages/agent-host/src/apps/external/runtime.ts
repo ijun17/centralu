@@ -8,20 +8,21 @@ import { memoryCapabilityBook } from './capabilities.js'
 import type { AppCheckReport } from './check.js'
 import { AppCalls, type AppCallOptions } from './app-calls.js'
 import { checkApp } from './app-check.js'
-import { createApp, installUserApp, removeUserApp, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
+import { createApp, installUserApp, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
 import { AppUnavailableError } from './unavailable.js'
 import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
-import { PROJECT_APPS_REL, USER_APPS_REL, scanApps } from './discovery.js'
+import { USER_APPS_REL, scanApps, scanProject } from './discovery.js'
 import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { SecretStore, secretValueProblem } from './secrets.js'
 import { AppStartEnv } from './app-start-env.js'
 import { AppResources } from './app-resources.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
+import { carryAppFiles, sweepCarryLeftovers } from './carry.js'
 import type { Snapshot } from './versions.js'
 import type { Audience } from './visibility.js'
 
@@ -50,6 +51,9 @@ import type { Audience } from './visibility.js'
 const USER_SCOPE = USER_APP_SCOPE
 
 export type { AppRef } from './ref.js'
+/** The file that makes a folder an app — the host's core asks whether a folder has one (#1141) */
+export { MANIFEST_FILE } from './manifest.js'
+export type { AppProjectTarget } from './app-folders.js'
 
 /** The shape of a check report also leaves through this door (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
@@ -69,7 +73,7 @@ export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
 export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
-import { invalidReason, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
+import { invalidReason, keepsVersions, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
@@ -118,9 +122,11 @@ export class ExternalApps {
       disposed: () => this.disposed,
       appsChanged: () => this.appsChanged(),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
-      blocker: (e, opts) => this.blocker(e, opts),
+      blocker: (e) => this.blocker(e),
       spawnSpec: (e, pipeId) => this.startEnv.spawnSpec(e, pipeId),
-      snapshot: (appId, dir, stamp) => this.handover.snapshot(appId, dir, 'started', stamp),
+      snapshot: (e, stamp) => {
+        if (keepsVersions(e)) this.handover.snapshot(this.holdKey(e.ref), e.dir, 'started', stamp)
+      },
       find: (ref) => this.find(ref),
       holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
@@ -148,8 +154,7 @@ export class ExternalApps {
       timing: this.timing,
       lifecycle: this.lifecycle,
       runs: this.deps.runs ?? null,
-      blocker: (e, opts) => this.blocker(e, opts),
-      boundaryOpen: (sessionId) => this.sessionBoundaryOpen(sessionId),
+      blocker: (e) => this.blocker(e),
       masker: (ref) => this.startEnv.masker(ref),
       recordError: (e, b, proc) => this.recordError(e, b, proc),
       emitChanged: (ref, caller) => this.deps.emitChanged?.(ref, caller),
@@ -157,6 +162,8 @@ export class ExternalApps {
     this.desk = new BrokerDesk(
       {
         has: (ref) => this.find(ref) !== undefined,
+        // Only a trusted project's: a root app reaches beyond its project because its project is trusted (#1141)
+        roots: (id) => [...this.scopes.values()].flatMap(({ apps }) => [...apps.values()]).filter((e) => e.found.root === true && e.scope.trusted && e.ref.appId === id).map((e) => e.ref),
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => this.startEnv.masker(ref),
         origin: (runId) => this.calls.chainOrigin(runId),
@@ -201,6 +208,7 @@ export class ExternalApps {
    * UI reads and sends this when a person presses the button (see the comment in errors.ts).
    */
   errors(ref: AppRef): { latest: SentErrorBundle | null; recent: SentErrorBundle[] } {
+    ref = this.resolve(ref)
     return this.errorLog.errors(this.holdKey(ref))
   }
 
@@ -215,10 +223,12 @@ export class ExternalApps {
    * (errors.ts); what actually sends it is the RPC a person triggers by clicking.
    */
   markErrorSent(ref: AppRef, at: number): HeldErrorBundle | 'sent' | null {
+    ref = this.resolve(ref)
     return this.errorLog.markSent(this.holdKey(ref), at)
   }
 
   unmarkErrorSent(ref: AppRef, at: number): void {
+    ref = this.resolve(ref)
     this.errorLog.unmarkSent(this.holdKey(ref), at)
   }
 
@@ -243,12 +253,14 @@ export class ExternalApps {
    * non-current if the manifest is invalid or the app is gone.
    */
   permissions(ref: AppRef): CapabilityDecisionListed[] {
+    ref = this.resolve(ref)
     const m = this.find(ref)?.manifest
     return this.desk.permissions(ref, m ? m.uses : null)
   }
 
   /** Forgets one remembered answer (D-4) — the next time that capability is needed, it is asked again */
   forgetPermission(ref: AppRef, capability: string): void {
+    ref = this.resolve(ref)
     this.desk.forgetPermission(ref, capability)
   }
 
@@ -257,6 +269,7 @@ export class ExternalApps {
    * kept. Read by the runs panel (`apps.usage`).
    */
   agentUse(ref: AppRef): { day: AgentUse; month: AgentUse } {
+    ref = this.resolve(ref)
     const now = Date.now()
     const none = { runs: 0, durationMs: 0, tokens: null }
     const ledger = this.deps.runs
@@ -268,6 +281,7 @@ export class ExternalApps {
 
   /** One app's run records, most recent first (B-7) — records are still readable even for an app whose folder is gone */
   runs(ref: AppRef, limit = 100): AppRunListed[] {
+    ref = this.resolve(ref)
     return this.deps.runs?.list(ref.projectId, ref.appId, limit) ?? []
   }
 
@@ -306,13 +320,6 @@ export class ExternalApps {
     return out
   }
 
-  private sessionBoundaryOpen: (sessionId: string) => boolean = () => false
-
-  /** Host-owned policy; a request cannot claim an auto preset in its arguments. */
-  setSessionBoundaryPolicy(policy: (sessionId: string) => boolean): void {
-    this.sessionBoundaryOpen = policy
-  }
-
   /**
    * An app's tool list — if the app is down, **this is where it starts** (the first time it is
    * needed).
@@ -321,9 +328,10 @@ export class ExternalApps {
    * read is the place it is enforced: this list becomes the source of truth both for what attaches to
    * a session (A-5) and for the tools a screen can call.
    */
-  async tools(ref: AppRef, audience?: Audience, sessionId?: string): Promise<Tool[]> {
+  async tools(ref: AppRef, audience?: Audience): Promise<Tool[]> {
+    ref = this.resolve(ref)
     const e = this.require(ref)
-    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [], !!sessionId && this.sessionBoundaryOpen(sessionId))
+    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [])
     return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
   }
 
@@ -335,6 +343,7 @@ export class ExternalApps {
    * does not start every time a session starts.
    */
   knownTools(ref: AppRef, audience?: Audience): Tool[] | null {
+    ref = this.resolve(ref)
     const known = this.require(ref).life.known
     if (!known) return null
     return known.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
@@ -397,16 +406,19 @@ export class ExternalApps {
    * same code — with two paths, one of them eventually misses a check.
    */
   async call(ref: AppRef, name: string, args: Record<string, unknown>, caller: AppCaller, opts: AppCallOptions = {}): Promise<AppCallOutcome> {
+    ref = this.resolve(ref)
     return this.calls.call(this.require(ref), name, args, caller, opts)
   }
 
   /** Reads an app's resource, starting the app the first time it is needed (`AppResources.readResource`, `app-resources.ts`) */
   readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
+    ref = this.resolve(ref)
     return this.resources.readResource(ref, uri)
   }
 
   /** The resources an app offers, following pagination up to a cap (`AppResources.listResources`, `app-resources.ts`) */
   listResources(ref: AppRef, maxPages?: number): Promise<ListResourcesResult['resources']> {
+    ref = this.resolve(ref)
     return this.resources.listResources(ref, maxPages)
   }
 
@@ -415,11 +427,13 @@ export class ExternalApps {
    * never treated as an idle app — call the returned function to release the hold (close).
    */
   retainView(ref: AppRef): () => void {
+    ref = this.resolve(ref)
     return this.lifecycle.retainView(this.require(ref), ref)
   }
 
   /** The tool that opens the fixed screen, and that screen; starts the app when first needed (`AppResources.homeView`, `app-resources.ts`) */
   homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
+    ref = this.resolve(ref)
     return this.resources.homeView(ref)
   }
 
@@ -429,11 +443,13 @@ export class ExternalApps {
    * storage behind).
    */
   viewOrigin(ref: AppRef): 'opaque' | 'app' {
+    ref = this.resolve(ref)
     return this.find(ref)?.manifest?.view?.origin ?? 'opaque'
   }
 
   /** Whether the app is discovered: its folder is there, in a project that is (or the user folder). Trusted or not */
   exists(ref: AppRef): boolean {
+    ref = this.resolve(ref)
     return this.find(ref) !== undefined
   }
 
@@ -442,6 +458,7 @@ export class ExternalApps {
    * stops it if running — **never starts it**, the next time it is needed does.
    */
   async restart(ref: AppRef): Promise<void> {
+    ref = this.resolve(ref)
     const e = this.require(ref)
     await this.lifecycle.halt(e, 'restart requested')
     resetLife(e.life)
@@ -479,6 +496,7 @@ export class ExternalApps {
    * again if idle). A check never calls a tool, so it leaves no row in the run ledger.
    */
   async check(ref: AppRef): Promise<AppCheckReport> {
+    ref = this.resolve(ref)
     return checkApp(
       {
         timing: this.timing,
@@ -507,11 +525,21 @@ export class ExternalApps {
   }
 
   /**
+   * Writes a new app project's folder from the template (#1141) — the New app dialog, `apps.create` and `create_app`
+   * without a project. The host registers it as a project afterwards; the app is then that project's root app. **This
+   * never starts it.** The body and what it refuses: `writeAppProject` in `app-folders.ts`.
+   */
+  writeAppProject(target: AppProjectTarget, spec: { id: string; name: string; description?: string }): void {
+    writeAppProject(this.folderHost, target, spec)
+  }
+
+  /**
    * Removes a user-folder app (M4 A-7) — the path for withdrawing an approved MCP server from the
    * list. The folder moves to the trash; a project app is never removed. The body and what it
    * refuses: `removeUserApp` in `app-folders.ts`.
    */
   async removeUserApp(ref: AppRef): Promise<void> {
+    ref = this.resolve(ref)
     return removeUserApp(this.folderHost, ref)
   }
 
@@ -537,12 +565,49 @@ export class ExternalApps {
 
   /** Rescans the user folder right now — scans everything if it has never scanned before (pre-startup) */
   private rescanUser(opts: { now?: string } = {}): void {
-    if (this.scopes.has(USER_SCOPE)) this.rescan(USER_SCOPE, opts)
+    this.rescanScopeOf({ projectId: null, appId: '' }, opts)
+  }
+
+  /** Rescans the scope an app lives in right now — scans everything if it has never scanned it before */
+  private rescanScopeOf(ref: AppRef, opts: { now?: string } = {}): void {
+    const key = ref.projectId ?? USER_SCOPE
+    if (this.scopes.has(key)) this.rescan(key, opts)
     else this.refresh()
+  }
+
+  /**
+   * A project was deleted (#1141): its apps' secrets go with it, as its apps' grants and runs go with the project's rows
+   * (`deleteProject` in the store). A project id is never reused — the folder registered again is a new project — so
+   * nothing could read them again. Data, logs and kept versions stay on disk, as they always did.
+   */
+  forgetProject(projectId: string): void {
+    try {
+      this.secrets.forgetScope(projectId)
+    } catch (e) {
+      // A secrets file stuck in place (`private-json-file.ts`) — the project is gone either way; the values stay until it reads
+      console.error(`[apps] could not forget the secrets of deleted project ${projectId}: ${(e as Error).message}`)
+    }
+  }
+
+  /**
+   * Carries what is kept on disk for an app from one key to another (#1141): a user-folder app registered as a project
+   * keeps its data folder, log, kept versions and secrets under its new key. Each is **copied**, never moved — a previous
+   * build serving during a swap still reads the old key — and only where the new key has nothing yet, so running this
+   * again after an interruption changes nothing and never writes over what the app has written since.
+   */
+  carryAppState(from: AppRef, to: AppRef): void {
+    carryAppFiles(this.deps.dataRoot, this.startEnv.appKey(from), this.startEnv.appKey(to))
+    this.secrets.carry(this.startEnv.appKey(from), this.startEnv.appKey(to))
+  }
+
+  /** Removes the half copies a carry interrupted by a stopped host left beside their places (`carry.ts`) */
+  sweepCarryLeftovers(): void {
+    sweepCarryLeftovers(this.deps.dataRoot)
   }
 
   /** Writes a secret value (clears it if `null`). A running app receives it starting from its next startup */
   setSecret(ref: AppRef, name: string, value: string | null): void {
+    ref = this.resolve(ref)
     this.secrets.set(this.startEnv.appKey(ref), name, value)
   }
 
@@ -562,6 +627,7 @@ export class ExternalApps {
    * of a key is the person fixing it (the same as Restart).
    */
   updateSecret(ref: AppRef, name: string, value: string | null): void {
+    ref = this.resolve(ref)
     const e = this.require(ref)
     if (value !== null) {
       if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
@@ -602,18 +668,44 @@ export class ExternalApps {
     return this.info(made)
   }
 
+  /**
+   * Brings a staged app in as a new project of its own (#1141): its folder becomes `target.path`, which the host then
+   * registers as a project (trusted only when the person chose "Import and enable"; trusting it later is enabling it).
+   * The same checks as `commitImport` (the reviewed key, the manifest read again) come first. **This never starts it**
+   * @returns the app's id
+   */
+  commitImportAsProject(token: string, opts: { enable: boolean; reviewKey?: string }, target: AppProjectTarget): string {
+    if (this.disposed) throw new AppUnavailableError('The app runtime has shut down')
+    return this.handover.commitTo(token, opts, target)
+  }
+
+  /** The id of the app an import is staging, or null once it is gone — so the host can say where it would go */
+  stagedAppId(token: string): string | null {
+    return this.handover.stagedId(token)
+  }
+
+  /** Keeps the code an app arrived with as its first version, when Centralu keeps its versions (an import, E-1) */
+  keepArrivedVersion(ref: AppRef): void {
+    ref = this.resolve(ref)
+    this.rescanScopeOf(ref)
+    const e = this.find(ref)
+    if (e && keepsVersions(e)) this.handover.snapshot(this.holdKey(ref), e.dir, 'imported')
+  }
+
   cancelImport(token: string): void {
     this.handover.cancel(token)
   }
 
   /** The review dialog for an imported app — user-folder apps only (a project app follows the project's trust, decision 3) */
   reviewApp(ref: AppRef): AppReview {
+    ref = this.resolve(ref)
     if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; there is nothing to review here")
     return this.handover.review(ref.appId)
   }
 
   /** Enables an imported app — only if the key from the confirmation dialog the person saw matches the current manifest */
   enableApp(ref: AppRef, key: string): ExternalAppInfo {
+    ref = this.resolve(ref)
     if (ref.projectId !== null) throw new AppUnavailableError("A project's apps follow the project's trust; they are not enabled one by one")
     this.handover.enable(ref.appId, key)
     return this.info(this.require(ref))
@@ -621,11 +713,22 @@ export class ExternalApps {
 
   // ── Handover: versions (E-1) ────────────────────────────────────────────────────────────
 
-  /** Versions of an app outside git — user-folder apps only (a project app's versions are git, and the host's core reads those) */
+  /**
+   * Whether Centralu keeps copies of this app's code (E-1): a user-folder app, and a root app whose project is not a git
+   * repository (#1141). Any other app's versions are git's, which the host's core reads (`apps.versions`)
+   */
+  keepsVersions(ref: AppRef): boolean {
+    ref = this.resolve(ref)
+    const e = this.find(ref)
+    return e ? keepsVersions(e) : ref.projectId === null
+  }
+
+  /** Versions of an app outside git (`keepsVersions`) — an app in git is versioned there, and the host's core reads those */
   snapshots(ref: AppRef): (Snapshot & { current: boolean })[] {
-    if (ref.projectId !== null) throw new AppUnavailableError('Project apps are versioned by git')
-    this.rescanUser()
-    return this.handover.versionsOf(ref.appId, this.require(ref).dir)
+    ref = this.resolve(ref)
+    this.rescanScopeOf(ref)
+    if (!this.keepsVersions(ref)) throw new AppUnavailableError('Project apps are versioned by git')
+    return this.handover.versionsOf(this.holdKey(ref), this.require(ref).dir)
   }
 
   /**
@@ -637,12 +740,13 @@ export class ExternalApps {
    * waits on confirmation again.
    */
   restoreVersion(ref: AppRef, id: string): ExternalAppInfo {
-    if (ref.projectId !== null) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
-    this.rescanUser()
+    ref = this.resolve(ref)
+    this.rescanScopeOf(ref)
+    if (!this.keepsVersions(ref)) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
     const before = this.require(ref)
-    this.handover.restore(ref.appId, id, before.dir)
+    this.handover.restore(this.holdKey(ref), id, before.dir, { root: before.found.root === true })
     // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
-    this.rescanUser({ now: ref.appId })
+    this.rescanScopeOf(ref, { now: ref.appId })
     const e = this.require(ref)
     resetLife(e.life)
     void this.reflector.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
@@ -665,6 +769,7 @@ export class ExternalApps {
 
   /** This app's building session's turn ended (M4 C-4) — announced by the host from session state (`ChangeReflector.builderTurnEnded`) */
   builderTurnEnded(ref: AppRef): void {
+    ref = this.resolve(ref)
     this.reflector.builderTurnEnded(ref)
   }
 
@@ -683,6 +788,20 @@ export class ExternalApps {
   }
 
   // ── Discovery ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * The key an app is held under now (#1141). A user-folder app registered as a project in place is that project's root
+   * app, and its old key `user/<id>` still reaches it: an older window during a swap, a stored name, a script or any
+   * other caller of the old key gets the app, not "no such app". Only while the user folder has no app of that id (a
+   * new one there takes the key back) and the project still is (deleting it ends the alias). Every public method that
+   * takes a ref resolves it first, so trust and every other rule apply to the app it reaches, as to its new key.
+   */
+  resolve(ref: AppRef): AppRef {
+    if (ref.projectId !== null || this.scopes.get(USER_SCOPE)?.apps.has(ref.appId)) return ref
+    const projectId = this.deps.adoptedProjectOf?.(ref.appId)
+    const e = projectId ? this.scopes.get(projectId)?.apps.get(ref.appId) : undefined
+    return e?.found.root ? e.ref : ref
+  }
 
   private require(ref: AppRef): AppEntry {
     const e = this.find(ref)
@@ -717,7 +836,11 @@ export class ExternalApps {
       ...this.startEnv.secretSlots(e),
       ...this.importMark(e),
       // A user-folder app is available to every project already, so only a project app carries the mark (#371)
-      ...(e.ref.projectId !== null && this.deps.shared?.(e.ref) ? { shared: true } : {}),
+      // A root app has no share switch: its project's trust decides (#1141), so it never carries the mark
+      ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
+      ...(e.found.root ? { root: true } : {}),
+      // What it declares it will ask for, for the project's trust card (#1141)
+      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length) ? { uses: m.uses } : {}),
     }
   }
 
@@ -741,16 +864,17 @@ export class ExternalApps {
    * status all read, so none of them can let through what another refuses. In order:
    *
    *   invalid      the manifest did not pass validation
-   *   untrusted    its project is not trusted — unless the calling session's boundary is open (`boundaryOpen`)
+   *   untrusted    its project is not trusted: an untrusted project's apps run for nobody, a session under `auto`
+   *                included (owner, #1141; #603's opening no longer applies to apps, so no caller is asked about)
    *   unconfirmed  an imported app the person has not reviewed and enabled (E-3) — checked on every call: if server
    *                or uses changes after being enabled, it is blocked starting from the next startup
    *   removing     its folder is moving to the trash (`removeUserApp`) — nothing starts it meanwhile
    *   failed       it stopped after `maxFailures` failures in a row. `fresh` leaves this out: for a door that is
    *                about to give the app a fresh start itself (a check, a reload on changed files)
    */
-  private blocker(e: AppEntry, opts: { boundaryOpen?: boolean; fresh?: boolean } = {}): Blocker | null {
+  private blocker(e: AppEntry, opts: { fresh?: boolean } = {}): Blocker | null {
     if (!e.manifest) return { kind: 'invalid', reason: invalidReason(e) }
-    if (!e.scope.trusted && !opts.boundaryOpen) {
+    if (!e.scope.trusted) {
       return { kind: 'untrusted', reason: "This app's project is not trusted, so the app does not start — trust the project and it will" }
     }
     const held = this.held(e)
@@ -792,10 +916,7 @@ export class ExternalApps {
     const held = this.scopes.get(key)
     if (!held || this.disposed) return
     const { scope } = held
-    const result =
-      scope.projectId === null
-        ? scanApps(scope.root, USER_APPS_REL, [])
-        : scanApps(scope.root, PROJECT_APPS_REL, ['', '.centralu'])
+    const result = scope.projectId === null ? this.scanUserFolder(scope.root) : scanProject(scope.root)
     const seen = new Set<string>()
     /** Whether there was a change that could change the set of apps attached to a session (A-5) */
     let changed = false
@@ -808,7 +929,7 @@ export class ExternalApps {
         prev.scope = scope
         /*
          * An app in a project that lost trust is stopped immediately — it stays in the list. Only trust lost: an app an
-         * `auto` session started in a project never trusted (`sessionBoundaryOpen`) was stopped by every rescan (#839)
+         * `auto` session started in a project never trusted was stopped by every rescan (#839; since #1141 none starts)
          */
         if (lostTrust) void this.lifecycle.halt(prev, 'project is no longer trusted')
         // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once
@@ -849,6 +970,13 @@ export class ExternalApps {
     }
     this.watchers.setWatched(key, scope.root, result.watch)
     if (changed) this.appsChanged()
+  }
+
+  /** The user folder's apps, less those registered as projects in place (#1141): they are those projects' root apps */
+  private scanUserFolder(root: string): ReturnType<typeof scanApps> {
+    const found = scanApps(root, USER_APPS_REL, [])
+    const adopted = this.deps.adoptedUserApp
+    return adopted ? { ...found, apps: found.apps.filter((a) => !adopted(a.folder, a.dir)) } : found
   }
 
   private dropScope(key: string): void {

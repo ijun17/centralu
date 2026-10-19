@@ -1,14 +1,15 @@
 import { useRef, useState } from 'react'
 import type { ProjectInfo } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
-import { useStore } from '../../../store/store.js'
+import { externalAppKey, useStore } from '../../../store/store.js'
 import { useIsProjectSelected } from '../../../store/selectors.js'
 import { Tooltip } from '../../../components/primitives.jsx'
 import { IconButton } from '../../../components/IconButton.jsx'
-import { ChevronIcon, DotsIcon } from '../../../components/icons.jsx'
+import { AppIcon, ChevronIcon, DotsIcon } from '../../../components/icons.jsx'
+import type { ExternalCatalogApp } from '../../../store/app-catalog.js'
 import { MachineBadge } from '../../machines/MachineTag.jsx'
 import { useRemoteIde } from '../../machines/remoteIde.js'
-import { PROJECT_MIME } from '../reorder.js'
+import { APP_MIME, PROJECT_MIME, projectItemMime } from '../reorder.js'
 import { foldSummary } from '../fold.js'
 import { GUTTER_WIDTH, DISCLOSURE_BUTTON, DISCLOSURE_ICON } from '../layout.js'
 import { ProjectDetail } from './ProjectDetail.jsx'
@@ -21,6 +22,8 @@ export function ProjectHeader({
   projectId,
   folded,
   sessions,
+  rootApp,
+  appCount,
   setNewAppOpen,
   setDeleting,
 }: {
@@ -28,6 +31,10 @@ export function ProjectHeader({
   projectId: string
   folded: boolean
   sessions: SessionSummary[]
+  /** The app this project is (#1141): its manifest stands at the project's root */
+  rootApp?: ExternalCatalogApp
+  /** How many apps the project holds (its root app and those in `.centralu/apps`): trusting it opens the card that lists them */
+  appCount: number
   setNewAppOpen: (open: boolean) => void
   setDeleting: (deleting: boolean) => void
 }) {
@@ -44,6 +51,16 @@ export function ProjectHeader({
   /** Where the menu hangs from — the pressed button (not a corner of the sidebar) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const toggleFold = useStore((s) => s.toggleProjectFold)
+  const openApp = useStore((s) => s.openApp)
+  const askTrust = useStore((s) => s.askTrust)
+  // The app's own screen is the one showing: the mark is lit, as an open app row's mark is
+  const appShown = useStore(
+    (s) =>
+      !!rootApp && s.view === 'app' && !!s.focusedApp && externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === rootApp.key,
+  )
+  // A chain its view started waits on the person (M4 D-4): the mark says so, as the app row's "asks you" did
+  const appAsks = useStore((s) => !!rootApp && s.appQuestions.some((q) => q.origin.appId === rootApp.appId && (q.origin.projectId ?? null) === projectId))
+  const openRootApp = rootApp ? () => openApp(projectId, rootApp.appId) : undefined
   // When expanded, each row's own mark already states its state — do not repeat it on the name line
   const summary = folded ? foldSummary(sessions) : []
 
@@ -71,6 +88,14 @@ export function ProjectHeader({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(PROJECT_MIME, projectId)
+        /*
+         * A project that is an app (#1141) is dragged onto the grid or its project screen the way an app row was: its
+         * line is the app's row now. The project list still reads it as a project being reordered
+         */
+        if (rootApp) {
+          e.dataTransfer.setData(APP_MIME, rootApp.key)
+          e.dataTransfer.setData(projectItemMime(projectId), projectId)
+        }
         e.dataTransfer.effectAllowed = 'move'
       }}
     >
@@ -120,6 +145,28 @@ export function ProjectHeader({
       {project.machine && (
         <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} />
       )}
+      {/*
+        This project is an app (#1141): its manifest stands at the root. The mark says so where the name is, and opens
+        the app's screen. Dimmed when the app cannot run (not trusted, invalid, failed), with the reason in its label,
+        as an app row's mark was; lit while its screen shows or its view waits on the person.
+      */}
+      {rootApp && openRootApp && (
+        <span
+          className={`-my-1 flex shrink-0 items-center ${rootApp.status.runnable ? '' : 'opacity-50'}`}
+          data-testid={`project-app-mark-${project.name}`}
+          data-status={rootApp.info.status}
+          data-asking={appAsks || undefined}
+        >
+          <IconButton
+            label={`Open the app ${rootApp.title}${rootApp.status.reason ? ` — ${rootApp.status.label.toLowerCase()}: ${rootApp.status.reason}` : ''}${appAsks ? ' — it asks you' : ''}`}
+            onClick={openRootApp}
+            testId={`project-app-${project.name}`}
+            lit={appShown || appAsks}
+          >
+            <AppIcon />
+          </IconButton>
+        </span>
+      )}
 
       {/*
         Only marks that claim no new space stay on the name line.
@@ -168,9 +215,12 @@ export function ProjectHeader({
           onClose={() => setMenuOpen(false)}
           // A worktree proposal (#69) waits in the new-session window with its branch filled in; otherwise start at once
           onNewSession={() => (proposalHere ? openNewSession(projectId) : void startSessionNow(projectId))}
+          onOpenApp={openRootApp}
           // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
           onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
-          onToggleTrust={() => void setProjectTrusted(projectId, !project.trusted)}
+          // Trusting a project with apps opens the card that lists them (#1141); stopping is the safe way and needs no list
+          onToggleTrust={() => (!project.trusted && appCount > 0 ? askTrust(projectId) : void setProjectTrusted(projectId, !project.trusted))}
+          trustListsApps={!project.trusted && appCount > 0}
           onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}
           onDelete={() => setDeleting(true)}
         />

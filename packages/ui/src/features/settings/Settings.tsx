@@ -1,3 +1,4 @@
+import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
@@ -429,7 +430,7 @@ function AppsSettings() {
           {catalog.user.length > 0 && (
             <div className="mb-4">
               <Badge as="p" readout>
-                Your apps
+                Other apps
               </Badge>
               <ul className="mt-2 space-y-2">
                 {catalog.user.map((a) => (
@@ -479,7 +480,6 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
-  const trustProject = useStore((s) => s.setProjectTrusted)
   const toggleSettings = useStore((s) => s.toggleSettings)
   const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
@@ -505,16 +505,8 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
         </p>
       )}
       {app.info.status === 'untrusted' && app.projectId && (
-        <Button
-          variant="primary"
-          onRaised
-          size="sm"
-          className="mt-1.5"
-          onClick={() => void trustProject(app.projectId!, true)}
-          data-testid="external-app-trust"
-        >
-          Trust this project
-        </Button>
+        // The same card as the project's row, with its apps listed (#1141)
+        <TrustProjectButton projectId={app.projectId} testId="external-app-trust" className="mt-1.5" />
       )}
       {/* An imported app (M4 E-3) — where it came from, and, if it is waiting on the person's confirmation, the path to that confirmation */}
       {app.info.imported && (
@@ -616,11 +608,12 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
  * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
  * project app is that project's own. When on, a session in another project can find it and attach it
  * to itself for as long as it needs the tools, after the person allows that pair of projects once.
- * A user-folder app has no switch: it is the person's own and available to every project already.
+ * A user-folder app has no switch: it is the person's own and available to every project already. Nor has a root app
+ * (#1141): it follows its project's trust, which already lets it reach the person's other projects (owner, 2026-10-18).
  */
 function ShareLine({ app }: { app: ExternalCatalogApp }) {
   const setShared = useStore((s) => s.setAppShared)
-  if (app.projectId === null) return null
+  if (app.projectId === null || app.info.root) return null
   const shared = app.info.shared === true
   return (
     <label

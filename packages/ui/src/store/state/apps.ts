@@ -1,3 +1,4 @@
+import type { AppArrival } from '@cc/core'
 import type {
   AppQuestion,
   ExternalAppInfo,
@@ -34,6 +35,15 @@ export type AppsSlice = {
    */
   externalApps: ExternalAppInfo[]
   refreshExternalApps(): Promise<void>
+  /**
+   * Apps a trusted project gained since this window last looked (#1141): trusted with the project, so the inbox says so
+   * once (`noteAppArrivals` in @cc/core). Kept in the workspace snapshot, with what was seen, until opened or Done.
+   */
+  appArrivals: AppArrival[]
+  /** Per trusted project, the keys of the apps this window has seen it with (`noteAppArrivals`) */
+  appsSeen: Record<string, string[]>
+  /** Takes an app's arrival notice off the inbox: opened, or Done */
+  dismissAppArrival(key: string): void
   /**
    * Capability questions for chains started from a view (M4 D-4) — a copy of the host's
    * `apps.questions`. Re-read in full when `external_app_questions_changed` arrives, and on

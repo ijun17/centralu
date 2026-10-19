@@ -85,7 +85,7 @@ describe('sessionFolderOf (#1209)', () => {
 describe('computeInbox: a question', () => {
   const q = (state: SessionSummary['state'], over: Partial<SessionSummary> = {}) =>
     ({ id: 'q', projectId: 'p', name: 'api', state, waitingSince: null, lastSeq: 3, lastReadSeq: 3, pendingQuestions: [{}], interruption: null, ...over }) as unknown as SessionSummary
-  const list = (s: SessionSummary) => computeInbox({ sessions: { [s.id]: s }, mcpProposals: [], skillProposals: [] } as never, 0)
+  const list = (s: SessionSummary) => computeInbox({ sessions: { [s.id]: s }, mcpProposals: [], skillProposals: [], appArrivals: [] } as never, 0)
 
   it('is listed as an approval is, marked as a question the person answers', () => {
     expect(list(q('working'))).toMatchObject([{ id: 'q', state: 'waiting_approval', asking: true }])

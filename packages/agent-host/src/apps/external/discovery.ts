@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
+import { serverNameProblem } from '@cc/protocol'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
 import { outsideAppCode } from './folder-walk.js'
@@ -9,6 +10,7 @@ import { outsideAppCode } from './folder-walk.js'
  * Scans the places apps live (M4 A-2, plan decision 1).
  *
  *   project app   <registered project root>/.centralu/apps/<id>/centralu.app.json
+ *   root app      <registered project root>/centralu.app.json — the project is the app (#1141)
  *   user app      <host data folder>/apps/<id>/centralu.app.json
  *
  * This file **only reads** — it does not create folders or start processes. What actually gets
@@ -23,8 +25,13 @@ export const PROJECT_APPS_PARTS = ['.centralu', 'apps'] as const
 export const USER_APPS_PARTS = ['apps'] as const
 
 export type ScannedApp = {
-  /** The folder name. Equals the manifest's id when the manifest is valid (rule below) */
+  /**
+   * The app's id within its scope. For an app in an apps folder, the folder name, which equals the manifest's id when
+   * the manifest is valid (rule below); for a root app, the manifest's id (`scanRootApp`)
+   */
   folder: string
+  /** A root app (#1141): the manifest stands at the project's own root, so the project is the app */
+  root?: true
   /** The absolute path that will become the app process's cwd — exactly the path that was checked */
   dir: string
   /** A hash of the raw manifest text, used to detect changes (null if missing or unreadable) */
@@ -104,7 +111,7 @@ function subfoldersOf(root: string, appRel: string): string[] {
   try {
     return readdirSync(join(root, appRel), { withFileTypes: true })
       .filter((d) => d.isDirectory() && !outsideAppCode(d.name))
-      .map((d) => `${appRel}/${d.name}`)
+      .map((d) => (appRel ? `${appRel}/${d.name}` : d.name))
       .sort()
       .slice(0, SUBFOLDERS_WATCHED)
   } catch {
@@ -112,21 +119,23 @@ function subfoldersOf(root: string, appRel: string): string[] {
   }
 }
 
-function readApp(root: string, folderRel: string, folder: string, dir: string): ScannedApp {
-  const manifestRel = `${folderRel}/${MANIFEST_FILE}`
-  let text: string
+/** The raw manifest text at `manifestRel` under `root`, or why it could not be read (`missing` when there is none) */
+function readManifestText(root: string, manifestRel: string): { text: string } | { missing: true } | { error: string } {
   try {
-    if (!assertExistingPathSync(root, manifestRel).isFile()) {
-      return invalid(folder, dir, `${MANIFEST_FILE} is not a file`)
-    }
-    text = readCapped(join(root, manifestRel))
+    if (!assertExistingPathSync(root, manifestRel).isFile()) return { error: `${MANIFEST_FILE} is not a file` }
+    return { text: readCapped(join(root, manifestRel)) }
   } catch (err) {
-    if (isMissingPathError(err) || isFsMissing(err)) {
-      // This might be a folder that is still being created — state what is missing instead of hiding it
-      return invalid(folder, dir, `there is no ${MANIFEST_FILE}`)
-    }
-    return invalid(folder, dir, `could not read ${MANIFEST_FILE}: ${(err as Error).message}`)
+    if (isMissingPathError(err) || isFsMissing(err)) return { missing: true }
+    return { error: `could not read ${MANIFEST_FILE}: ${(err as Error).message}` }
   }
+}
+
+function readApp(root: string, folderRel: string, folder: string, dir: string): ScannedApp {
+  const read = readManifestText(root, `${folderRel}/${MANIFEST_FILE}`)
+  // A folder with no manifest might be one still being created — state what is missing instead of hiding it
+  if ('missing' in read) return invalid(folder, dir, `there is no ${MANIFEST_FILE}`)
+  if ('error' in read) return invalid(folder, dir, read.error)
+  const { text } = read
   const hash = createHash('sha256').update(text).digest('hex')
   const parsed = parseManifest(text)
   if (!parsed.ok) return { folder, dir, hash, manifest: null, error: parsed.error, warnings: parsed.warnings }
@@ -142,6 +151,77 @@ function readApp(root: string, folderRel: string, folder: string, dir: string): 
     }
   }
   return { folder, dir, hash, manifest: parsed.manifest, error: null, warnings: parsed.warnings }
+}
+
+/**
+ * The id a root app whose manifest is invalid is listed under: no app can take it (`centralu` is reserved, #93), so a
+ * broken root manifest never reads or writes a real app's data, secrets or grants
+ */
+export const BROKEN_ROOT_APP_ID = 'centralu-root'
+
+/**
+ * The manifest at a project's own root (#1141): the project is the app. Null when there is none — a plain project,
+ * which is most of them.
+ *
+ * Unlike an app in an apps folder, the folder name is not the id: the folder is the person's project, named as they
+ * like, and the manifest's `id` names the app. So the id is the manifest's. A manifest that does not pass is still
+ * listed (a broken app is never hidden), under its `id` when that much reads, or `BROKEN_ROOT_APP_ID`.
+ *
+ * `taken` is the ids of the project's apps in `.centralu/apps/`: those are unchanged by #1141, so one with the same id
+ * keeps it, and the root app is listed invalid with the reason.
+ */
+export function scanRootApp(root: string, taken: readonly string[]): ScannedApp | null {
+  const read = readManifestText(root, MANIFEST_FILE)
+  if ('missing' in read) return null
+  const rootApp = (id: string, rest: Omit<ScannedApp, 'folder' | 'dir' | 'root'>): ScannedApp => ({
+    folder: id,
+    dir: root,
+    root: true,
+    ...rest,
+  })
+  if ('error' in read) return rootApp(BROKEN_ROOT_APP_ID, { hash: null, manifest: null, error: read.error, warnings: [] })
+  const hash = createHash('sha256').update(read.text).digest('hex')
+  const parsed = parseManifest(read.text)
+  if (!parsed.ok) {
+    const id = rawId(read.text)
+    return rootApp(id !== null && !taken.includes(id) ? id : BROKEN_ROOT_APP_ID, { hash, manifest: null, error: parsed.error, warnings: parsed.warnings })
+  }
+  const { id } = parsed.manifest
+  if (taken.includes(id)) {
+    return rootApp(BROKEN_ROOT_APP_ID, {
+      hash,
+      manifest: null,
+      warnings: parsed.warnings,
+      error: `this project already has an app "${id}" in ${PROJECT_APPS_REL}/ — give the manifest at the project's root another id`,
+    })
+  }
+  return rootApp(id, { hash, manifest: parsed.manifest, error: null, warnings: parsed.warnings })
+}
+
+/** The `id` of a manifest that did not pass, when it is at least an id's shape — so the app keeps its key while it is mended */
+function rawId(text: string): string | null {
+  try {
+    const id = (JSON.parse(text) as { id?: unknown }).id
+    return typeof id === 'string' && serverNameProblem(id) === null ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Everything a registered project holds (#1141): its apps folder, and the manifest at its root.
+ *
+ * The root is watched always, not only while `.centralu` is missing: that is where a manifest appears or goes. A root
+ * app's own subfolders (`ui/`) are watched like an app folder's, so an edit there is reflected the same way.
+ */
+export function scanProject(root: string): ScanResult {
+  const inner = scanApps(root, PROJECT_APPS_REL, ['', '.centralu'])
+  const rootApp = scanRootApp(root, inner.apps.map((a) => a.folder))
+  if (!rootApp) return { apps: inner.apps, watch: [...new Set(['', ...inner.watch])] }
+  return {
+    apps: [...inner.apps, rootApp],
+    watch: [...new Set(['', ...inner.watch, ...subfoldersOf(root, '')])],
+  }
 }
 
 function invalid(folder: string, dir: string, error: string): ScannedApp {

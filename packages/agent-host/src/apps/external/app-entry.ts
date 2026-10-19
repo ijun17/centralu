@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { PriorDiscovery, Tool } from '@modelcontextprotocol/client'
 import type { AppProcess } from './app-process.js'
 import type { ScannedApp } from './discovery.js'
@@ -116,6 +118,15 @@ export type AppEntry = {
   error: string | null
   warnings: string[]
   life: Life
+}
+
+/**
+ * Whether Centralu keeps copies of this app's code (E-1). A user-folder app has no git; nor has a root app whose project
+ * is not a repository (#1141) — every user-folder app moved into a project is one. A root app in a repository is
+ * versioned by git like any project app: copying a whole repository on every start would cost what git already keeps.
+ */
+export function keepsVersions(e: AppEntry): boolean {
+  return e.ref.projectId === null || (e.found.root === true && !existsSync(join(e.dir, '.git')))
 }
 
 /** The reason an app with an invalid manifest does not run — the same words for every door */

@@ -150,7 +150,7 @@ export function sidebarGroupTests(): void {
         const appSessionMark = await markX(page, `app-session-row-${APP_SESSION}`)
         const appKidMark = await markX(page, `app-session-row-${APP_KID}`)
         const userAppIcon = await left(page.getByTestId('app-row-_user/tool').locator('> span').first())
-        const userAppTitle = await left(page.getByText('Your apps', { exact: true }))
+        const userAppTitle = await left(page.getByText('Other apps', { exact: true }))
 
         // project name < session chip < child chip, one 16px step each
         expect(plainMark - name).toBeCloseTo(16, 0)
@@ -301,7 +301,7 @@ export function sidebarGroupTests(): void {
         await expectCentred(`session-row-${PARENT}`, ['mark', 'title', `children-folded-${PARENT}`])
         await page.getByTestId(`app-fold-${appKey}`).click()
         await expectCentred(`app-row-${appKey}`, ['mark', 'title', `app-folded-${appKey}`])
-        // "Your apps": its title and the two buttons
+        // "Other apps" (the user-folder apps still listed, #1141): its title
         const header = await page.evaluate(() => {
           const mid = (el: Element) => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
           const section = document.querySelector('[data-testid="user-apps"] > header')!
