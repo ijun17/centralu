@@ -630,6 +630,28 @@ describe('worktree sessions', () => {
     expect(events.filter((e) => e.type === 'worktree_pr' && e.sessionId === s.id).length).toBe(2)
   })
 
+  it('a reorder during a merge sweep checks each session once (#1143: the sessions are sorted in place)', async () => {
+    const a = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/sweep-a',
+    })) as SessionInfo
+    const b = (await wtRpc('agents.createSession', {
+      projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/sweep-b',
+    })) as SessionInfo
+
+    wtMgr.prPollMs = 0
+    const asked: string[] = []
+    wtMgr.prLookup = async (_cwd, branch) => {
+      asked.push(branch)
+      // The person drags the sidebar while the sweep waits on gh for the first session
+      if (asked.length === 1) wtMgr.reorderSessions(project.id, [b.id, a.id])
+      return null
+    }
+
+    await wtMgr.refreshMergedWorktrees(project.id)
+
+    expect([...asked].sort()).toEqual(['feat/sweep-a', 'feat/sweep-b'])
+  })
+
   it('asks only once if gh is missing, and does not ask again within the TTL (#76)', async () => {
     await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/no-gh',
