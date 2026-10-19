@@ -848,6 +848,30 @@ export async function runJobs(repo, runId) {
   return (r?.jobs ?? []).map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion ?? null, url: j.html_url ?? null }))
 }
 
+/**
+ * A run's jobs with their steps, for why it failed (the merge queue's rerun policy, run-failure.mjs):
+ * id (the job's check run id too), name, conclusion and each step's name and conclusion. The latest
+ * attempt's, as GitHub answers by default.
+ */
+export async function runJobSteps(repo, runId) {
+  checkRepo(repo)
+  const r = await restJson(`repos/${repo}/actions/runs/${Number(runId)}/jobs?per_page=100`)
+  return (r?.jobs ?? []).map((j) => ({
+    id: j.id ?? null,
+    name: j.name,
+    status: j.status,
+    conclusion: j.conclusion ?? null,
+    steps: (j.steps ?? []).map((s) => ({ name: s.name, conclusion: s.conclusion ?? null })),
+  }))
+}
+
+/** The messages GitHub wrote on a check run (a job): its timeout, a lost runner, an `::error` line. */
+export async function checkRunNotes(repo, checkRunId) {
+  checkRepo(repo)
+  const r = await restJson(`repos/${repo}/check-runs/${Number(checkRunId)}/annotations?per_page=50`, { missing: [404] })
+  return (Array.isArray(r) ? r : []).map((a) => String(a?.message ?? '')).filter(Boolean)
+}
+
 /** The environments a run waits on for approval, and whether this login may give it. */
 export async function pendingDeployments(repo, runId) {
   checkRepo(repo)

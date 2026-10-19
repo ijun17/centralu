@@ -43,16 +43,24 @@ const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
 /**
  * The items one batch would take now: active, in CI, not in a batch, not a fork's or a release
- * bump (`ci.batchable`, from the item's poll), their own CI read on the head they have and not finished (pending or nothing yet), with every run of it not started, and not
- * sent back from a batch on this head. The oldest first, at most `max`, in one repository (the
- * oldest item's).
+ * bump (`ci.batchable`, from the item's poll), their own CI read on the head they have, and not
+ * sent back from a batch on this head. The oldest first (those fixed after a conflict before them,
+ * queueOrder), at most `max`, in one repository (the oldest item's). A stack is one item: one member.
  *
- * With two tiers (`tiers`), also the items whose own quick tier passed (`ci.verdict` `quick`), since
- * they land only through a batch; one sent back from a batch on this head is taken alone, when it is
- * the oldest, and one whose batch of one ended without landing it (`alone`) not on this head.
+ * Without tiers, only those whose own run has not started (every run of it not started): their own
+ * run could land them, and cancelling a started one throws work away.
+ *
+ * With two tiers (`tiers`), **every ready item** (the owner, 2026-10-19): its own quick tier passed
+ * (`ci.verdict` `quick`), still runs or waits for a runner, or has not reported yet, since it lands
+ * only through a batch, whose full run tests what its quick run does. Not one whose own CI failed
+ * (its poll reruns an infrastructure failure, or tells its session). Day one, taking only those not
+ * started or finished, made batches of 1.25 on average, about 20 minutes each, one after another. One
+ * sent back from a batch on this head is taken alone, when it is the oldest, and one whose batch of
+ * one ended without landing it (`alone`) not on this head.
  */
 export function batchCandidates(q, { max, tiers = false }) {
   const waiting = (i) => (i.ci.verdict === 'pending' || i.ci.verdict === 'none') && i.ci.runs?.length > 0 && i.ci.runs.every((r) => NOT_STARTED.has(r.status))
+  const ready = (i) => ['pending', 'none', 'quick'].includes(i.ci.verdict)
   const ok = q.items.filter(
     (i) =>
       i.state === 'ci' &&
@@ -61,7 +69,7 @@ export function batchCandidates(q, { max, tiers = false }) {
       (tiers ? i.alone?.head !== i.head : i.batchless !== i.head) &&
       i.ci?.head === i.head &&
       i.ci.batchable !== false &&
-      (waiting(i) || (tiers && i.ci.verdict === 'quick')),
+      (tiers ? ready(i) : waiting(i)),
   )
   // The oldest first, after those fixed after a conflict (queueOrder)
   ok.sort(queueOrder)
@@ -70,6 +78,21 @@ export function batchCandidates(q, { max, tiers = false }) {
   if (!tiers) return same.slice(0, max)
   if (same[0] && same[0].batchless === same[0].head) return [same[0]]
   return same.filter((i) => i.batchless !== i.head).slice(0, max)
+}
+
+/** How long a batch waits for an item queued just now to be read once, before it forms without it. */
+export const GATHER_MS = 60_000
+
+/**
+ * Whether a batch that could form now should wait a moment (the owner, 2026-10-19: batch every ready
+ * pull request together): another active item of `repo`, queued less than GATHER_MS ago, has not been
+ * read on its head yet, and the batch is not full. Pull requests queued together (a session queueing
+ * five in a row) are then read and batched together, not one batch of one and the rest behind it.
+ */
+export function gathering(q, { repo, now, size, max }) {
+  if (size >= max) return false
+  const same = (i) => String(i.repo).toLowerCase() === String(repo).toLowerCase()
+  return q.items.some((i) => ACTIVE.has(i.state) && i.state !== 'attention' && !i.batch && same(i) && i.ci?.head !== i.head && now - Date.parse(i.queuedAt ?? 0) < GATHER_MS)
 }
 
 /**
@@ -97,7 +120,7 @@ export function formBatch(q, items, { at, ref, cancelled = [] }) {
   }
   q.batches = [...(q.batches ?? []), b]
   for (const i of items) i.batch = id
-  batchEvent(q, b, `Batch ${b.branch}: ${refList(b, b.members.map((m) => m.pr), ref)} wait for CI that has not started, so they are tested together in one run.`, at)
+  batchEvent(q, b, `Batch ${b.branch}: ${refList(b, b.members.map((m) => m.pr), ref)} ${b.members.length === 1 ? 'is' : 'are'} ready, so ${b.members.length === 1 ? 'it is' : 'they are'} tested together in one run.`, at)
   return b
 }
 
