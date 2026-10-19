@@ -57,7 +57,7 @@ describe('which checks a workflow requires', () => {
     // verifier's two rows (#440), the keeper's Linux job (#350) and the host's tests on the remote's pinned Node
     // (remote-hub.md §10.9), and the e2e suite's WebKit and Chromium shards with the report that merges them, and the
     // job that says which of them a commit needs (their stand-ins report the same names), and the Windows unit
-    // tests' two shards beside `windows tests` (#1035)
+    // tests' two shards beside `windows tests` (#1035), and the fail fast that cancels a manual run after verify (#1222)
     expect([...w.names].sort()).toEqual([
       'changes',
       'content verify (macos-14)',
@@ -74,6 +74,7 @@ describe('which checks a workflow requires', () => {
       'e2e (webkit 4/5)',
       'e2e (webkit 5/5)',
       'e2e report',
+      'fail fast',
       'full tier',
       'host tests, remote Node (ubuntu-24.04)',
       'host tests, remote Node (windows-2022)',

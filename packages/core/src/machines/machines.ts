@@ -285,6 +285,24 @@ export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
 export type AutostartRow = { label: string; on: boolean; note: string | null }
 
 /**
+ * The reverse direction's switch (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): its label, the
+ * question turning it on asks once (what it allows, and what it does not), and the row's note when it is on but cannot
+ * work. Null from a hub that predates it
+ */
+export function asksRow(m: Pick<MachineInfo, 'asks' | 'name'>): { label: string; on: boolean; confirm: string; note: string | null } | null {
+  if (!m.asks) return null
+  return {
+    label: `Let sessions on ${m.name} ask this computer's projects`,
+    on: m.asks.on,
+    confirm:
+      `Sessions on ${m.name} may then ask this computer's projects to do work, with ask_project, and nothing else here. ` +
+      `The first time a session there asks a project here, a card asks you on this computer; once you allow that pair, ` +
+      `its later asks need no card until you withdraw it below. Turning this off forgets every pair.`,
+    note: m.asks.on ? m.asks.note : null,
+  }
+}
+
+/**
  * The start-at-boot switch of a machine's row (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by
  * default), from what the machine said it would use. Null where it offers nothing (macOS, a Linux without systemd, WSL
  * without interop) or has not said (a machine that predates it, or never answered).

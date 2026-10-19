@@ -94,6 +94,32 @@ describe('project trust (M4)', () => {
     expect(useStore.getState().projects[p.id]?.trusted).toBe(false)
     await vi.waitFor(() => expect(useStore.getState().externalApps[0]?.status).toBe('untrusted'))
   })
+
+  it('a folder the person let the orchestrator add is asked about once, as one added from the sidebar (#1220)', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    // A project the host only changed, or one already trusted, is not asked about
+    const other = await mock.projects.add('/tmp/trust-other')
+    useStore.getState().dispatchEvent({ type: 'projects_changed' } as NormalizedEvent)
+    const trusted = await mock.projects.add('/tmp/trust-known')
+    await mock.projects.setTrusted(trusted.id, true)
+    useStore.getState().dispatchEvent({ type: 'projects_changed', added: trusted.id } as NormalizedEvent)
+    await useStore.getState().refreshProjects()
+    expect(useStore.getState().projects[other.id]).toBeDefined()
+    expect(useStore.getState().projects[trusted.id]).toBeDefined()
+    expect(useStore.getState().trustAsk).toBeNull()
+
+    // Registered by the host after the person's Allow on the orchestrator's card, not by this window
+    const added = await mock.projects.add('/tmp/trust-orchestrator')
+    useStore.getState().dispatchEvent({ type: 'projects_changed', added: added.id } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().trustAsk).toBe(added.id))
+    expect(useStore.getState().projects[added.id]?.trusted).toBe(false)
+    await useStore.getState().answerTrustAsk(true)
+    expect(mock.trustCalls).toEqual([
+      { projectId: trusted.id, trusted: true },
+      { projectId: added.id, trusted: true },
+    ])
+  })
 })
 
 /**

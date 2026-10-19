@@ -482,9 +482,12 @@ rather than on the maintainer. Exactly two stops, no wizard:
 The project-creation answer ends in an action: the orchestrator's `create_project` tool (#515,
 which replaced `propose_project`) raises an approval card in its own conversation with the full
 path of the new, empty folder (in `~/Centralu`, made on first use, unless another location is given). Nothing is made
-until the person chooses Create, and nothing already there is reused. Adding a folder that
-exists stays the person's, through Add project in the sidebar. The new folder can also be a
+until the person chooses Create, and nothing already there is reused. The new folder can also be a
 clone of a git repository (https or ssh), made with that machine's own git and saved sign-ins.
+A folder that already exists, on this computer or a linked machine, is added with the orchestrator's
+`add_project` command (#1220) behind a card showing the machine, the full path and whether it is a git
+repository and its origin, or by the person through Add project in the sidebar; either way it is asked
+about for trust once. `list_machines` names the linked machines.
 
 #### FR-20. Session archive — **retired (2026-09-02)**
 

@@ -234,6 +234,35 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   in the caller's context can reach the target project as a task. The target's approvals, the
   visible session and Stop are the controls left; revoking the pair ends it.
 
+### A linked machine's session asking this computer (#550)
+
+The reverse direction of linked machines ([plans/remote-hub.md](plans/remote-hub.md) §12.7). The plan treats a linked
+machine as the less trusted side: a compromised server must not reach the person's computer by default (§3.2). So:
+
+- **Off by default, per machine, on this computer.** Only the hub's Settings → Machines turns it on, and the switch is
+  read at every call; off refuses at once and forgets the pairs. It is stored on the machine's row and goes with it.
+- **An allowlist of two calls**, `hub.projects` and `hub.askProject`, answered only through the handler the hub's link
+  to that machine was given. A machine cannot reach any RPC method, the router, a session's conversation, a file, an
+  app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
+  call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
+- **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
+  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review,
+  as start_agent's on another computer, #1038). It names the machine and the asking session there, quoted on one line;
+  turning the switch off closes it. Approving it is remembered for the
+  pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
+- **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
+  nothing; the task framed as from that session on that machine, never as the person or an orchestrator (so a seat that
+  directs would get it as someone else's words); the agent depth counted across the link; once the pair is approved, the
+  target session works under its own preset, trust and approvals (its `auto`, if it has it, then applies to its tool
+  calls, never to the pair's card); the answer cut to size; paths in it listed on the machine and none opened.
+- **Residual:** the machine names the asking session itself. A compromised machine can use any pair approved for any of
+  its sessions, and so reach every project of this computer that a session of that machine was approved for; that is
+  what the switch and each approval consent to, and withdrawing a pair or turning the switch off ends it. While the
+  switch is on, it can also raise this computer's card as often as its calls allow (16 at once), under names it chose;
+  the card says which machine asks, and turning the switch off refuses every call from then on. The task text
+  is the machine's agent's words, as for any ask (the residual above). The machine reads its own trust and depth gates
+  before it asks; a caller there losing trust while this computer's card stands does not withdraw the card.
+
 JSON framing prevents ambiguous transcript-line assembly; it does **not** make text safe
 for an LLM to obey or eliminate prompt injection. Tool scopes and typed approval checks
 remain the deterministic authorization boundaries.
@@ -318,6 +347,8 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `app_guide` | yes | — | — | yes | — |
 | `update_session_settings` | yes | — | — | — | — |
 | `create_project` | yes | — | — | — | — |
+| `add_project` | yes | — | — | — | — |
+| `list_machines` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -468,6 +499,8 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
 | `handoff_session` (the orchestrator hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words, each quoted; "always" for this orchestrator while the host serves it, recorded only for a call that passed every check; an unknown or unusable tool is refused before the card) | asks | asks | open | asks | asks | asks | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the central orchestrator only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an orchestrator or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its live children move to the successor (`moveChildren`, scope `live`), and the successor keeps the original's preset |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
+| `add_project` (the orchestrator adds a folder that already exists, here or on a linked machine, #1220) | asks (a card with the machine, the full path, that it exists and is a folder, and whether it is a git repository with its `origin`, every time) | asks | asks | asks | asks | asks | asks | asks | `ProjectCreation.addFolderAsked` / `addFolderOnMachine` (`sessions/project-creation.ts`) → `askHost` with `alwaysAsk`: `auto` does not answer it, since the folder can be anything on that disk and, once a project, the orchestrator can start sessions in it. The facts are read on the folder's machine (`projects.inspect`, git config only, none of the repository's programs); a missing path, a file or a folder already a project is refused before the card, and on Allow the folder is registered as the sidebar's Add project registers it (`addProject`; on a linked machine that machine's `projects.add`), untrusted when new. The central orchestrator only, as a rare command behind `centralu_run` |
+| `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and connect mode; the central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's shared app | refused | refused | refused | open | refused | refused | refused | open | `AppAccess`, `SessionAppsHub` and runtime startup/call gates use the caller's preset; auto does not mark the project trusted |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -539,6 +572,19 @@ prefix, so this build never writes one. A command the card flags (outside the sa
 either: the card offers no "always", and a rule for the same text does not let it through, since the rule cannot tell
 it from the plain command. What the host remembers is its own key for the card, whatever the window sends (see "Always
 allow" on an agent's own card, above).
+
+**An existing folder becoming a project** (#1220). Before `add_project`, no agent could make Centralu reach a folder
+the person had not picked: `create_project` only makes a new one. The orchestrator's `add_project` is a new way for an
+agent to bring a folder in, on this computer or a linked machine, and the person's card gates it under every preset,
+`auto` included (`alwaysAsk`): a project is somewhere the orchestrator can start sessions, so this is the person's
+choice of reach, not a tool call. The card shows what the folder's own machine found (`projects.inspect`): the machine,
+the absolute path, that something is there and is a folder, and whether it is in a git repository with its `origin`
+(read from the repository's config with git's untrusted settings, so a planted hook or filter does not run). A path
+that is missing, a file, or a folder already a project is refused before the card, with the reason. On Allow the facts
+are read again and the folder is registered by the sidebar's own steps (`addProject`, on a linked machine its
+`projects.add`): untrusted when new, and the window asks about trust as when the person adds a folder. Deny or a
+withdrawn card registers nothing. Only the central orchestrator has it, as a rare command behind `centralu_run`
+(`RARE_COMMANDS`); `list_machines`, beside it, only reads the hub's `machines.list`.
 
 ### Turning things off
 
@@ -697,7 +743,8 @@ What this closed was measured with the real CLI (#152, `scripts/probe-project-tr
 card off even under `safe`.
 
 How projects get trust: a project registered now starts untrusted, and the sidebar asks once when
-it is added. The exception is a new empty folder Centralu made itself (`projects.create` or `create_project`
+it is added, whether the person added it or allowed the orchestrator's `add_project` card (#1220; the host names the
+project in `projects_changed.added`). The exception is a new empty folder Centralu made itself (`projects.create` or `create_project`
 without a Git source, here or on a linked machine, #655): only the person and Centralu wrote there, so it starts
 trusted. A clone stays untrusted, because an agent can ask for any URL and the contents come from outside. The `trusted` column arrived untrusted by default (store v33); v35 then marked every
 project that existed at that moment as trusted, once, so an update did not silently start ignoring
@@ -874,6 +921,10 @@ A host started with `centralu serve` on another machine is reached by the app th
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
 - **Single trusted user.** One host per data folder (the ownership lock), one person's sign-ins. There is no
   account model and no sharing between people.
+- **The reverse direction** (#550). A host calls a hub linked to it only on the connection that hub opened and offered
+  on (`host.hubOffer`), with `rpc` frames the hub answers only through its link's allowlist ("A linked machine's session
+  asking this computer", above). A window, or anything else holding the token, that offers itself as a hub only makes
+  the machine's sessions send it their asks: the token already gives it more than that.
 - **An administrator's ssh on Windows runs everything elevated** (#702). Windows OpenSSH gives an account in the
   Administrators group a full token for a network logon, with no UAC split, so a host the hub starts over ssh, every
   agent it starts and every tool call they make run with administrator rights, where the same person at the desktop

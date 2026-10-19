@@ -67,13 +67,16 @@ export function ApprovalCard({
       })
       if (!action) return
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
-      // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
-      if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always')
+      // Nor does a new project (#515), or an existing folder added as one (#1220): it is one folder, once — there is
+      // nothing to always allow
+      if ((detail.kind === 'capability' || detail.kind === 'project_create' || detail.kind === 'project_add') && action.decision === 'always')
         return
       // Nor does an edit whose file is unknown (#428): there is no path to remember
       if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
+      // Nor an ask from a linked machine's session (#550): Allow is already remembered for its pair
+      if (detail.kind === 'project_access' && detail.from.machine && action.decision === 'always') return
       // Nor an agent started on another machine (#1038), for the same reason
       if (detail.kind === 'agent_start' && detail.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
@@ -123,6 +126,17 @@ export function ApprovalCard({
   if (detail.kind === 'project_create') {
     return (
       <ProjectCreateCard
+        detail={detail}
+        busy={busy}
+        keys={keys}
+        onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
+
+  if (detail.kind === 'project_add') {
+    return (
+      <ProjectAddCard
         detail={detail}
         busy={busy}
         keys={keys}
@@ -296,19 +310,32 @@ function ProjectAccessCard({
         <Pill size="label" edge="solid" tone="bright">
           Awaiting approval
         </Pill>
-        <span className="text-xs text-ink-faint">This session wants to reach another project, and waits</span>
+        <span className="text-xs text-ink-faint">
+          {detail.from.machine
+            ? `A session on ${detail.from.machine} wants to ask a project here, and waits`
+            : 'This session wants to reach another project, and waits'}
+        </span>
       </div>
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {projectAccessQuestion(detail)}
       </p>
-      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        {detail.access === 'delegate'
-          ? `The task goes to an existing session in ${detail.to.name}${detail.to.machine ? ` on ${detail.to.machine}, which works with its own logins and folder there` : ', with its own folder, instructions and permissions'}, and its answer comes back here.`
-          : `The app's tools attach to this session while it uses them.`}{' '}
-        {detail.to.machine
-          ? 'Nothing is remembered for a project on another machine: it asks each time.'
-          : `Always is remembered for ${detail.from.name} → ${detail.to.name}; revoke it in Settings.`}
-      </p>
+      {detail.from.machine ? (
+        <p className="mt-1 px-3 text-xs leading-body text-ink-faint" data-testid="approval-from-machine">
+          The task goes to this session, which works on it with its own folder, instructions and permissions on this
+          computer, and its answer goes back to {detail.from.machine}. Allow is remembered for this session of{' '}
+          {detail.from.machine} and {detail.to.name}: its later asks need no card until you withdraw it in Settings →
+          Machines.
+        </p>
+      ) : (
+        <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+          {detail.access === 'delegate'
+            ? `The task goes to an existing session in ${detail.to.name}${detail.to.machine ? ` on ${detail.to.machine}, which works with its own logins and folder there` : ', with its own folder, instructions and permissions'}, and its answer comes back here.`
+            : `The app's tools attach to this session while it uses them.`}{' '}
+          {detail.to.machine
+            ? 'Nothing is remembered for a project on another machine: it asks each time.'
+            : `Always is remembered for ${detail.from.name} → ${detail.to.name}; revoke it in Settings.`}
+        </p>
+      )}
       {detail.to.trusted === false && (
         <p className="mt-1 px-3 text-xs leading-body text-ink-signal" data-testid="approval-untrusted">
           You have not trusted {detail.to.name}. The session there reads none of its settings or instruction
@@ -319,12 +346,12 @@ function ProjectAccessCard({
       <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
         <ActionKey
           k={keys.allow}
-          label="Allow once"
+          label={detail.from.machine ? 'Allow' : 'Allow once'}
           onClick={() => onAnswer('allow')}
           testId="approve-allow"
           disabled={busy}
         />
-        {!detail.to.machine && (
+        {!detail.to.machine && !detail.from.machine && (
           <ActionKey
             k={keys.always}
             label="Always for this pair"
@@ -520,6 +547,80 @@ function ProjectCreateCard({
           testId="approve-deny"
           disabled={busy}
         />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The orchestrator's add_project card (#1220): a folder that already exists becomes a project. What the folder's own
+ * machine found there is what is agreed to: the machine, the full path, that it is a folder, and whether it is a git
+ * repository and where its origin points. No "always": it is one folder, once.
+ */
+function ProjectAddCard({
+  detail,
+  busy,
+  keys,
+  onAnswer,
+}: {
+  detail: Extract<ApprovalDetail, { kind: 'project_add' }>
+  busy: boolean
+  keys: AnswerKeys
+  onAnswer: (decision: 'allow' | 'deny') => void
+}) {
+  const found = !detail.exists ? 'Nothing is there' : detail.folder ? 'A folder that exists' : 'Not a folder'
+  return (
+    <div
+      className="overflow-hidden rounded-bubble border border-ink-signal bg-surface-raised"
+      data-testid="approval-card"
+      data-kind="project_add"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    >
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <Pill size="label" edge="solid" tone="bright">
+          Awaiting approval
+        </Pill>
+        <span className="text-xs text-ink-faint">The orchestrator wants to add a folder as a project, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
+        Add the folder <span className="readout">{detail.name}</span>
+        {detail.machine ? (
+          <>
+            {' '}
+            on{' '}
+            <span className="readout" data-testid="approval-machine">
+              {detail.machine}
+            </span>
+          </>
+        ) : null}{' '}
+        as a project?
+      </p>
+      <p className="mt-1 break-all px-3 font-mono text-xs leading-body text-ink-muted" data-testid="approval-path">
+        {detail.path}
+      </p>
+      <ul className="mt-1 px-3 text-xs leading-body text-ink" data-testid="approval-facts">
+        <li data-testid="approval-found">{found}</li>
+        <li data-testid="approval-git">
+          {detail.git ? (
+            detail.origin ? (
+              <>
+                A git repository, origin <span className="break-all font-mono">{detail.origin}</span>
+              </>
+            ) : (
+              'A git repository with no origin'
+            )
+          ) : (
+            'Not a git repository'
+          )}
+        </li>
+      </ul>
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+        It is added to the sidebar as Add project adds a folder, not trusted until you trust it. Nothing is added unless you
+        choose Add.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <ActionKey k={keys.allow} label="Add" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
   )
@@ -733,6 +834,8 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)
+  // The host writes the whole question with every fact the card shows (#1220)
+  if (d.kind === 'project_add') return d.text
   if (d.kind === 'agent_start') return agentStartQuestion(d)
   if (d.kind === 'centralu_update') return centraluUpdateQuestion(d)
   return d.raw

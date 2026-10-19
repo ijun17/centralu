@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { MachineInfo } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
@@ -277,6 +278,30 @@ const HANDLERS: ToolHandlers = {
     }
   },
 
+  async add_project(args, { tools, signal }) {
+    /*
+     * The card is the permission (#1220), as create_project's: the manager reads the folder on its machine, refuses a
+     * missing path, a file or an existing project before any card, and registers nothing until the person allows it.
+     */
+    const path = trimmed(args.path)
+    if (!path) return { text: "Give path: the folder's full path on that machine.", isError: true }
+    if (!tools.addProject) return { text: 'This session cannot add projects.', isError: true }
+    const machine = trimmed(args.machine)
+    const r = await tools.addProject({ path, ...(machine ? { machine } : {}) }, signal)
+    if (!r.ok) return { text: `No project was added: ${r.error}`, isError: true }
+    return {
+      text:
+        `Added the folder ${trustedJsonText(r.path)}${r.machine ? ` on ${r.machine}` : ''} as the project ${trustedJsonText(r.name)} [${r.projectId}]. ` +
+        'Start work in it with create_session (project = that id).',
+    }
+  },
+
+  list_machines(_args, { tools }) {
+    const machines = tools.listMachines?.() ?? []
+    if (!machines.length) return { text: 'No machine is linked to this computer. The person links one in Settings, Machines.' }
+    return { text: `${machines.map(machineLine).join('\n')}\nPass a machine's name as machine to create_project or add_project.` }
+  },
+
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
     const waitFor = trimmed(args.waitFor)
@@ -442,11 +467,12 @@ const HANDLERS: ToolHandlers = {
   },
 
   async create_session(args, { tools }) {
-    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage })
+    // Reported unless asked not to (#1233)
+    const reportBack = args.reportBack !== false
+    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage, reportBack })
+    const sent = args.firstMessage === undefined ? '' : ' — sent the first instruction' + (reportBack ? '; you are told when its turn ends' : '')
     return {
-      text: r.ok
-        ? `Created: ${r.name} [${r.sessionId}]` + (args.firstMessage !== undefined ? ' — sent the first instruction' : '')
-        : `Could not create it — ${r.error}`,
+      text: r.ok ? `Created: ${r.name} [${r.sessionId}]${sent}` : `Could not create it — ${r.error}`,
       isError: !r.ok,
     }
   },
@@ -461,6 +487,9 @@ const HANDLERS: ToolHandlers = {
       if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
       if (b.state === 'queued') return { text: queuedText(b) }
       if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
+      if (b.reportTaken) {
+        return { text: `Added as a note to the running turn of ${sessionId}. Another session is owed that turn's report, so you are not told when it ends: read_session it later.` }
+      }
       return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
     }
     /*
@@ -577,4 +606,36 @@ async function runCommandTool(c: { [N in CommandToolName]: { name: N; args: Orch
  */
 function logRun(caller: ToolCaller, command: string, outcome: 'ran' | 'wrong arguments' | 'no such command'): void {
   console.error(`[commands] ${caller.sessionId ?? '-'} centralu_run ${JSON.stringify(command.slice(0, 64))}: ${outcome}`)
+}
+
+/** A linked machine's status in words (#1220); a status this build does not name reads as itself */
+const MACHINE_STATUS: Record<string, string> = {
+  connected: 'connected',
+  connecting: 'connecting',
+  starting: 'connecting (starting Centralu there)',
+  updating: 'updating Centralu there',
+  unreachable: 'unreachable',
+  disconnected: 'disconnected',
+  not_running: 'unreachable (Centralu is not running there)',
+  versions_differ: 'not connected (waiting for the person to align versions)',
+  refused: 'not connected (it refused the link)',
+}
+
+/**
+ * One linked machine for list_machines (#1220): its name as the person gave it (quoted, since it is theirs), status,
+ * OS and shell, and when its link is opened. The OS follows from the shell the hub reaches it with: PowerShell is
+ * Windows, WSL a Linux distro on Windows, a Unix shell macOS or Linux (Linux when it starts at boot with systemd).
+ * `connect` is the person's choice (#1134).
+ */
+function machineLine(m: MachineInfo): string {
+  const os =
+    m.shell === 'powershell'
+      ? 'Windows, PowerShell'
+      : m.shell === 'wsl'
+        ? `Linux in WSL${m.wslDistro ? ` (${m.wslDistro})` : ''} on Windows`
+        : m.autostart?.how === 'systemd'
+          ? 'Linux, Unix shell'
+          : 'macOS or Linux, Unix shell'
+  const connect = m.connect === 'when_needed' ? 'connects when needed' : 'connects at start'
+  return `- ${trustedJsonText(m.name)} [${m.id}]: ${MACHINE_STATUS[m.status] ?? m.status}; ${os}; ${connect}`
 }
