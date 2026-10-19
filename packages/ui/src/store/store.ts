@@ -247,6 +247,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     runsPanelFor: null as string | null,
     orchestratorId: null as string | null,
     orchestratorWaking: false,
+    orchestratorTool: null as ToolName | null,
     introSeen: false,
     trustAsk: null as string | null,
     panelSplit: 0.5,
