@@ -10,7 +10,7 @@ import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-he
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -2457,6 +2457,20 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
     expect(writes().map(short2)).toContain('merge 77')
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  it('lands a quick batch run only with the full tier check reported as skipped, and every run concluded well', () => {
+    const checks = (rows: Row[]) => evaluateChecks({ required: ['full tier', 'verify', 'windows tests', 'keeper e2e'], reported: rows })
+    const quickRows = [check('full tier', 'skipped'), check('verify', 'success'), check('windows tests', 'success')]
+    const ok = [{ status: 'completed', conclusion: 'success' }]
+    expect(quickLanded(checks(quickRows), ok, 'full tier')).toBe(true)
+    // No full tier check at all: not known to be the quick tier
+    expect(quickLanded(checks(quickRows.slice(1)), ok, 'full tier')).toBe(false)
+    // A run that concluded badly on a check outside the required rows
+    expect(quickLanded(checks(quickRows), [{ status: 'completed', conclusion: 'failure' }], 'full tier')).toBe(false)
+    // A quick-tier failure, or a run still going
+    expect(quickLanded(checks([check('full tier', 'skipped'), check('verify', 'failure'), check('windows tests', 'success')]), ok, 'full tier')).toBe(false)
+    expect(quickLanded(checks(quickRows), [{ status: 'in_progress', conclusion: null }], 'full tier')).toBe(false)
   })
 
   it("lands nothing from a batch whose quick run failed, the full tier's jobs unreported as well", async () => {

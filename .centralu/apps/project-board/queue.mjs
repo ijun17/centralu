@@ -446,6 +446,17 @@ export function lowerFailureCounts(run, provedAt) {
  * check did not pass (skipped, or never reported by an older workflow), and no required check it
  * reported failed or is still going; the checks a quick run leaves out are not reported at all.
  */
+/**
+ * Whether a batch's run lands under `ci.landTier: quick` (#1259): its quick tier passed as a pull request's own
+ * does (`quickGreen`), and more strictly, since this decides a landing: the full tier's check reported, skipped (a
+ * run with no such check at all is not known to be the quick tier), and every run concluded well (a run that failed
+ * on a check outside the required rows does not land).
+ */
+export function quickLanded(checks, runs, fullTier) {
+  if (!quickGreen(checks, runs, fullTier) || ranTier(checks, fullTier) !== 'quick') return false
+  return runs.every((r) => OK_CONCLUSIONS.has(r.conclusion))
+}
+
 export function quickGreen(checks, runs, fullTier) {
   if (!fullTier || ranTier(checks, fullTier) === 'full') return false
   if (!runs?.length || runs.some((r) => r.status !== 'completed')) return false
