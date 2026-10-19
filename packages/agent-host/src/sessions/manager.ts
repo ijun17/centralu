@@ -21,16 +21,18 @@ import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
+import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
+import { ApprovalRules } from './approval-rules.js'
+import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
+import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
-import { underGrant } from './ask-project.js'
-import { orchestratorMemory } from './transcript-view.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type {
   RebuildCause,
   ApprovalDecision,
@@ -41,13 +43,10 @@ import type {
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
-  ProjectInfo,
-  SavedCommand,
   SessionInfo,
   SessionState,
   ToolName,
   SettingsApplied,
-  FsResolvePurpose,
   MachineAskConsent,
 } from '@cc/protocol'
 import {
@@ -59,8 +58,7 @@ import {
   appKeyOf,
   alwaysAllowKey,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
-import { registeredTool } from '../adapters/registry.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -83,38 +81,16 @@ import type { UpdateApplyBroker } from '../update-apply.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
-import {
-  gitSummary,
-  gitStatusFiles,
-  gitOriginUrl,
-  gitDiff,
-  gitLog,
-  gitCommitDetail,
-  gitBranches,
-  gitIgnoredEntries,
-} from '../dev-services/git.js'
-import { gitCheckout, gitStage, gitCommit, gitPush, GitWriteRuns } from '../dev-services/git-write.js'
-import { gitValidBranchName, gitWorktreeDirty } from '../dev-services/git-worktree.js'
+import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
 import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
-import {
-  importFile,
-  listDir,
-  moveEntry,
-  readTextFile,
-  resolveEntry,
-  resolveProjectFolder,
-  resolveTarget,
-} from '../dev-services/fs.js'
-import { DirWatchers, type WatchHolder } from '../dev-services/watch.js'
-import { invalidateFileIndex } from '../dev-services/file-search.js'
-import { attachCommitSessions } from '../dev-services/git-attrib.js'
+import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
-import { canonicalPath, isInside, pathParts } from '../dev-services/path-guard.js'
+import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { HostCards, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
@@ -130,7 +106,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -171,16 +147,18 @@ export class SessionManager {
     string,
     { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }
   >()
-  /**
-   * Watcher for the file tree (#34). Only watches expanded directories — the UI sends the set via
-   * fs.watch. Changes go out as an fs_changed event (it is a project-level event, so it has no
-   * sessionId).
-   */
-  private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
-  /** The git panel's writes still running, so the person can cancel one (`git.cancel`, #1007) */
-  private readonly gitWrites = new GitWriteRuns()
+  /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
+  private readonly files: ProjectFiles
+  /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
+  private readonly toolRegistry: ToolRegistry
+  /** The remembered "always allow" answers: written, read for a launch, listed in Settings (approval-rules.ts) */
+  private readonly approvalRules: ApprovalRules
+  /** The registered projects: rows, folders, trust, `ProjectInfo` and the settings kept on them (project-registry.ts) */
+  private readonly projectRegistry: ProjectRegistry
+  /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
+  private readonly launchInputs: LaunchInputs
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -323,6 +301,18 @@ export class SessionManager {
       handoffTimings?: HandoffTimings
     } = {},
   ) {
+    this.files = new ProjectFiles({
+      rootOf: (projectId) => this.projectRegistry.cwdOf(projectId),
+      trust: (projectId) => this.projectRegistry.gitTrust(projectId),
+      session: (sessionId) => this.meta.get(sessionId),
+      store,
+      // `this.emit` is wrapped below; looked up when a change goes out, not now
+      emit: (e) => this.emit(e),
+    })
+    this.toolRegistry = new ToolRegistry(this.parts())
+    this.projectRegistry = new ProjectRegistry(this.parts())
+    this.launchInputs = new LaunchInputs(this.parts())
+    this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
@@ -596,18 +586,17 @@ export class SessionManager {
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
-    const root = this.projectRow(projectId)?.path
+    const root = this.projectRegistry.projectRow(projectId)?.path
     this.store.trash.deleteProject(projectId)
     // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
     this.apps.appsHub?.rt.forgetProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
-    this.watchers.drop(projectId)
-    if (root) invalidateFileIndex(root)
+    this.files.forgetProject(projectId, root)
   }
 
   /** How many of a project's directories are watched (tests) */
   watchedDirCount(projectId: string): number {
-    return this.watchers.watchedCount(projectId)
+    return this.files.watchedDirCount(projectId)
   }
 
   /**
@@ -621,7 +610,7 @@ export class SessionManager {
    * why. The flag is written before this returns; the promise settles when the idle restarts are done.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
-    const was = this.projectRow(projectId)?.trusted
+    const was = this.projectRegistry.projectRow(projectId)?.trusted
     if (!this.store.projects.setProjectTrusted(projectId, trusted)) {
       throw rpcError(`Project not found: ${projectId}`)
     }
@@ -648,173 +637,24 @@ export class SessionManager {
     return this.launches.refreshLaunchSettings(projectId, true)
   }
 
-  /**
-   * Is this project trusted (decision 3, #92) — passed to the adapter when launching a session. False
-   * if the project does not exist.
-   *
-   * Read fresh from the store on every call, the same as the app runtime — holding a cached copy
-   * would keep answering "yes" even after trust was turned off.
-   */
-  private projectTrusted(projectId: string | null): boolean {
-    if (!projectId) return false
-    return this.store.projects.projectRoots().some((p) => p.id === projectId && p.trusted)
+  /** `ProjectRegistry.setProjectCommands` (project-registry.ts), kept on the manager for its callers */
+  setProjectCommands(...a: Parameters<ProjectRegistry['setProjectCommands']>): ReturnType<ProjectRegistry['setProjectCommands']> {
+    return this.projectRegistry.setProjectCommands(...a)
   }
 
-  /**
-   * The settings files reachable from this session (M4 decision 3, #92, #152) — decided by **what
-   * the session is**. Both creating and waking a session go through this one place.
-   *
-   *   Orchestrator / coordinator session          No files at all — it has no project, and that
-   *                                                folder (orchestratorHome) is one a worker can
-   *                                                write to. An instruction arriving through a file
-   *                                                is exactly a privilege-escalation path.
-   *   Builder session of a user-folder app         Trusted — that folder belongs to the user
-   *                                                themselves (decision 3: a user-folder app is trusted)
-   *   Agent the user-folder app asked for (D-1)   Only the person's own settings — see the comment below
-   *   Builder session of a worker, manager or     Follows that project's trust as-is (same as a
-   *   project app; agent the project app          worker under #152)
-   *   asked for (D-1)
-   *
-   * **This is not split by whether the session has orchestrator tools.** It used to be: the adapter
-   * split "if it has orchestrator tools, no files at all", but the worktree manager (#69) and
-   * builder sessions (C-3) also receive those tools. That meant a builder session of a trusted
-   * project could read neither CLAUDE.md nor the user's own ~/.claude (global bypass), so it kept
-   * raising an approval card the person had already turned off everywhere else.
-   *
-   * Whether a session is a builder session is checked via the directory (builderRefOf) — the same
-   * check that decides the tool bundle (`builder`). If apps imported from outside ever exist (they
-   * do not yet), such an app is not trusted until verified (decision 3) — that is where the split
-   * would happen.
-   */
-  private settingFilesFor(
-    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
-  ): Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'> {
-    if (m.kind === 'orchestrator' || m.kind === 'coordinator') return { projectTrusted: false, noSettingFiles: true }
-    if (m.projectId === null && this.appSessions.builderRefOf(m)) return { projectTrusted: true }
-    /*
-     * Agent a user-folder app asked for (M4 D-1) — receives only the person's own settings
-     * (~/.claude, ~/.codex), not files from the folder.
-     *
-     * That session's text was written by the app, not the person. Its slot, like a coordinator
-     * session, is the orchestrator's empty folder (orchestratorHome), which a worker can write to —
-     * if it received the CLAUDE.md and settings placed there, an agent running on the app's text
-     * would take instructions someone else wrote as if they carried authority. The reason a builder
-     * session is trusted (that folder belongs to the person building the app) does not apply here:
-     * this session's folder belongs to neither the app nor the person. But giving it no files at all
-     * (as with a coordinator session) would mean the person's own rules for every agent (approvals,
-     * deny lists) are missing only for agents the app asked for — the one place it would get looser
-     * without the person knowing. A project app's version follows that project's trust like a worker
-     * (below): that session runs inside the project, and whether it gets the project's settings was
-     * already decided by the person through trust.
-     */
-    if (m.projectId === null && this.apps.isAppAgentSession(m)) return { projectTrusted: false }
-    return { projectTrusted: this.projectTrusted(m.projectId) }
+  /** `ProjectRegistry.setWorktreeSetup` (project-registry.ts), kept on the manager for its callers */
+  setWorktreeSetup(...a: Parameters<ProjectRegistry['setWorktreeSetup']>): ReturnType<ProjectRegistry['setWorktreeSetup']> {
+    return this.projectRegistry.setWorktreeSetup(...a)
   }
 
-  private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
-    /*
-     * **Reads the stored value.** 'claude' used to be hardcoded here, which meant the DB's
-     * default_tool column was never read anywhere — and since nothing wrote to it either, nobody
-     * noticed (2026-08-27, caught by a test while adding the remember-tool feature).
-     */
-    const row = this.projectRow(id)
-    const git = await gitSummary(path, { trusted: row?.trusted ?? false })
-    const stored = row?.defaultTool
-    return {
-      id, path, name: basename(path), defaultTool: this.firstTool(stored),
-      // Trust (M4, decision 3) — reads the same column as the app runtime. The trust toggle on screen shows
-      // this value
-      trusted: row?.trusted ?? false,
-      // Default model/effort per tool (#107) — read separately since it is JSON, like commands and
-      // worktreeSetup
-      defaultModels: this.store.projects.projectToolDefaults(id),
-      // Saved shell commands ride along with the project so the Run menu never has a
-      // "loading" state to distinguish from an empty one (issue #44)
-      commands: this.store.projects.projectCommands(id),
-      // Worktree provisioning (#69) rides along too — a new session window prefills it without a separate
-      // fetch
-      worktreeSetup: this.store.projects.worktreeSetup(id),
-      // Instructions for the agents started here (#1161 item 2): the project's settings show them
-      agentInstructions: this.store.projects.agentInstructions(id),
-      // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
-      // is archived — so the screen never navigates to a ghost slot, this side (which knows about
-      // sessions) does the check
-      /*
-       * The trunk, in the shape the window has read since #76. The session is the former manager's, or empty: the
-       * manager was folded into ordinary sessions (#561 part 3), and the window reads only `baseBranch`
-       */
-      worktreeManager: (() => {
-        const trunk = this.store.projects.worktreeTrunk(id)
-        return trunk ? { sessionId: this.store.projects.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
-      })(),
-      git: git.isRepo ? git : null,
-    }
+  /** `ProjectRegistry.setAgentInstructions` (project-registry.ts), kept on the manager for its callers */
+  setAgentInstructions(...a: Parameters<ProjectRegistry['setAgentInstructions']>): ReturnType<ProjectRegistry['setAgentInstructions']> {
+    return this.projectRegistry.setAgentInstructions(...a)
   }
 
-  /**
-   * Replace this project's saved shell commands (issue #44).
-   *
-   * Blank entries are dropped here rather than trusted to the caller: a row that runs
-   * nothing when clicked is worse than no row, and this is the one place every edit —
-   * from any client — has to pass through.
-   *
-   * Nothing else is inspected. These are the user's own commands and go to their own
-   * shell; the approval machinery exists for what an agent proposes, and running these
-   * through it would put a permission prompt in front of what the person just typed.
-   */
-  setProjectCommands(projectId: string, commands: readonly SavedCommand[]): SavedCommand[] {
-    this.requireProject(projectId)
-    // Drop empty commands, and turn an empty alias into no alias — the label is display-only, so all it needs
-    // is normalizing
-    const clean = commands.flatMap((c): SavedCommand[] => {
-      const command = c.command.trim()
-      if (!command) return []
-      const label = c.label?.trim()
-      return [{ command, ...(label ? { label } : {}) }]
-    })
-    const was = JSON.stringify(this.store.projects.projectCommands(projectId))
-    this.store.projects.setProjectCommands(projectId, clean)
-    // The Run menu of every other window reads the project's commands (#719)
-    if (was !== JSON.stringify(clean)) this.emit({ type: 'projects_changed' })
-    return clean
-  }
-
-  /** Worktree provisioning settings (#69) — saved by the new session window's worktree section */
-  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    this.requireProject(projectId)
-    const clean = setup
-      ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
-      : null
-    const saved = clean && (clean.command || clean.copyFiles.length) ? clean : null
-    const was = JSON.stringify(this.store.projects.worktreeSetup(projectId))
-    this.store.projects.setWorktreeSetup(projectId, saved)
-    if (was !== JSON.stringify(this.store.projects.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
-  }
-
-  /**
-   * The instructions for agents started in this project (#1161 item 2): appended to every start_agent task given here
-   * (`agentFrame`, and by a hub to a child it starts in this machine's copy, `remoteAgentFrame`). Trimmed whole; blank
-   * clears them. Every window's project settings read them, so a change is told to all.
-   */
-  setAgentInstructions(projectId: string, text: string): void {
-    this.requireProject(projectId)
-    const clean = text.trim()
-    if (this.store.projects.agentInstructions(projectId) === clean) return
-    this.store.projects.setAgentInstructions(projectId, clean)
-    this.emit({ type: 'projects_changed' })
-  }
-
-  /**
-   * Sidebar order (the person sets it by dragging).
-   *
-   * Anything missing from the received list is **left at the end, as-is** — something that was off
-   * screen should never jump to the front just because an order was saved once.
-   */
-  async reorderProjects(orderedIds: readonly string[]): Promise<ProjectInfo[]> {
-    const known = this.store.projects.listProjects().map((p) => p.id)
-    const rest = known.filter((id) => !orderedIds.includes(id))
-    this.store.projects.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
-    return this.listProjects()
+  /** `ProjectRegistry.reorderProjects` (project-registry.ts), kept on the manager for its callers */
+  reorderProjects(...a: Parameters<ProjectRegistry['reorderProjects']>): ReturnType<ProjectRegistry['reorderProjects']> {
+    return this.projectRegistry.reorderProjects(...a)
   }
 
   reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
@@ -1070,28 +910,14 @@ export class SessionManager {
     }
   }
 
-  async listProjects(): Promise<ProjectInfo[]> {
-    return Promise.all(this.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path)))
+  /** `ProjectRegistry.listProjects` (project-registry.ts), kept on the manager for its callers */
+  listProjects(...a: Parameters<ProjectRegistry['listProjects']>): ReturnType<ProjectRegistry['listProjects']> {
+    return this.projectRegistry.listProjects(...a)
   }
 
-  /**
-   * One project, re-measured (issue #41).
-   *
-   * The caller is a refresh loop — the sidebar count is re-read every time a turn ends —
-   * so this has to cost **one** `git status`. Answering it by calling `listProjects` and
-   * discarding all but one row would run a status per registered project on every turn,
-   * which is exactly the quiet cost that keeps this out of the hot path.
-   */
-  async projectGitStatus(projectId: string): Promise<ProjectInfo> {
-    const p = this.requireProject(projectId)
-    /*
-     * Merge detection (#69) piggybacks here — the UI's call is debounced to fire whenever a turn
-     * ends, which happens to be the same rhythm as "something just moved". A merge done in a
-     * terminal is caught on the next refresh too. It does not block the response: the badge flows
-     * separately as an event.
-     */
-    this.merges.checkMergedInBackground(projectId)
-    return this.projectInfo(p.id, p.path)
+  /** `ProjectRegistry.projectGitStatus` (project-registry.ts), kept on the manager for its callers */
+  projectGitStatus(...a: Parameters<ProjectRegistry['projectGitStatus']>): ReturnType<ProjectRegistry['projectGitStatus']> {
+    return this.projectRegistry.projectGitStatus(...a)
   }
 
   listSessions(): SessionInfo[] {
@@ -1162,7 +988,7 @@ export class SessionManager {
     if (!this.restartPolicy.trustRestartNotice.delete(sessionId)) return
     const m = this.meta.get(sessionId)
     if (!m || !this.handles.has(sessionId)) return
-    const text = this.projectTrusted(m.projectId)
+    const text = this.projectRegistry.projectTrusted(m.projectId)
       ? "Restarted the agent to apply this project's new trust: it now reads the project's own settings and instruction files (CLAUDE.md, AGENTS.md)."
       : "Restarted the agent to apply this project's removed trust: it now reads only your own settings, not the project's files."
     this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'restart', text })
@@ -1706,20 +1532,9 @@ export class SessionManager {
       throw rpcError('That approval request is already gone (the agent restarted). The command was not run.', 'approval_gone')
     }
 
-    // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
-    // restart (C-2)
+    // Persisting the rule (approval-rules.ts)
     // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
-    // A session with no project (#994) has no project to remember for: its project answer is kept for the session
-    if (decision === 'always' && m && remembered) {
-      const projectId = scope === 'project' ? m.projectId : null
-      this.store.permissions.addApprovalRule({
-        scope: projectId !== null ? 'project' : 'session',
-        sessionId: projectId !== null ? undefined : sessionId,
-        projectId: projectId ?? undefined,
-        matcher: remembered,
-        decision: 'allow',
-      })
-    }
+    if (decision === 'always' && m && remembered) this.approvalRules.rememberAlways(sessionId, m.projectId, scope, remembered)
   }
 
   /**
@@ -1748,11 +1563,9 @@ export class SessionManager {
     return this.toolQueries.usageFor(...a)
   }
 
-  /** Which account `tool` is logged in to here, as the hub compares it with a linked machine's (#726) */
-  async accountFor(tool: ToolName): Promise<{ loggedIn: boolean | null; fingerprint: string | null }> {
-    const adapter = this.adapters.get(tool)
-    if (!adapter?.account) return { loggedIn: null, fingerprint: null }
-    return adapter.account().catch(() => ({ loggedIn: null, fingerprint: null }))
+  /** `ToolRegistry.accountFor` (tool-registry.ts), kept on the manager for its callers */
+  accountFor(...a: Parameters<ToolRegistry['accountFor']>): ReturnType<ToolRegistry['accountFor']> {
+    return this.toolRegistry.accountFor(...a)
   }
 
   /** `ToolQueries.listModels` (tool-queries.ts), kept on the manager for its callers */
@@ -1762,17 +1575,9 @@ export class SessionManager {
 
   /** A project's working directory. Used by the terminal to decide its own key (cwd) */
   cwdOfProject(projectId: string): string {
-    return this.cwdOf(projectId)
+    return this.projectRegistry.cwdOf(projectId)
   }
 
-  // ── Git (B-1) — only path resolution happens here; the actual work is delegated to dev-services ──
-  /**
-   * A project's working directory. **The orchestrator (projectId=null) uses a neutral location.**
-   *
-   * Placing it inside a project would have it touching the same files as that project's sessions —
-   * creating with our own hands exactly the concurrent-session conflict FR-2 warns about. The
-   * orchestrator has no hands of its own: sessions do the work, and the orchestrator instructs and reads.
-   */
   /**
    * Where this session actually runs. **The stored path beats the recomputed one** (issue #28).
    *
@@ -1795,20 +1600,14 @@ export class SessionManager {
   private cwdFor(m: SessionInfo): string {
     const stored = this.store.sessions.sessionCwd(m.id)
     if (stored) return stored
-    const derived = m.worktree?.path ?? this.cwdOf(m.projectId)
+    const derived = m.worktree?.path ?? this.projectRegistry.cwdOf(m.projectId)
     this.store.sessions.setSessionCwd(m.id, derived)
     return derived
   }
 
-  /**
-   * "Our own folders" — the search scope used when hunting for stray processes (strays.ts).
-   *
-   * Project directories plus the worktree root. Why the worktree root is included separately:
-   * everything under it is **a folder the app itself created**, so anything running there is by
-   * definition our own business, and it can still exist even after the project is removed from the list.
-   */
-  folderRoots(): string[] {
-    return [...this.store.projects.listProjects().map((p) => p.path), this.worktreeRoot]
+  /** `ProjectRegistry.folderRoots` (project-registry.ts), kept on the manager for its callers */
+  folderRoots(...a: Parameters<ProjectRegistry['folderRoots']>): ReturnType<ProjectRegistry['folderRoots']> {
+    return this.projectRegistry.folderRoots(...a)
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
@@ -1819,7 +1618,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m?.worktree) return null
     // A failed read is not a clean worktree: the delete dialog then warns instead of removing quietly (#850 review)
-    const state = await gitWorktreeDirty(m.worktree.path, this.gitTrust(m.projectId)).catch(() => ({
+    const state = await gitWorktreeDirty(m.worktree.path, this.projectRegistry.gitTrust(m.projectId)).catch(() => ({
       dirty: true,
       changedFiles: 0,
       unknown: true as const,
@@ -1837,128 +1636,104 @@ export class SessionManager {
     return this.handoffNotes.exportHandoffNote(...a)
   }
 
-  private cwdOf(projectId: string | null): string {
-    if (projectId === null) return orchestratorHome()
-    const p = this.requireProject(projectId)
-    return p.path
+  /** `ProjectRegistry.gitTrust` (project-registry.ts), kept on the manager for its callers */
+  gitTrust(...a: Parameters<ProjectRegistry['gitTrust']>): ReturnType<ProjectRegistry['gitTrust']> {
+    return this.projectRegistry.gitTrust(...a)
   }
 
-  /**
-   * The project's trust as a git read needs it (#407): before trust, a read runs none of the
-   * repository's hooks, filters, textconv or fsmonitor (`git-exec.ts`). Read fresh on every call,
-   * like `projectTrusted`.
-   */
-  gitTrust(projectId: string | null): { trusted: boolean } {
-    return { trusted: this.projectTrusted(projectId) }
+  /** `ProjectFiles.projectOrigin` (dev-services/project-files.ts), kept on the manager for its callers */
+  projectOrigin(...a: Parameters<ProjectFiles['projectOrigin']>): ReturnType<ProjectFiles['projectOrigin']> {
+    return this.files.projectOrigin(...a)
   }
 
-  /** The project's `origin` remote (#1038), read as a git read is, under its trust; null with no repository or no origin */
-  projectOrigin(projectId: string): Promise<string | null> {
-    return gitOriginUrl(this.cwdOf(projectId), this.gitTrust(projectId))
+  /** `ProjectFiles.gitStatusFiles` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitStatusFiles(...a: Parameters<ProjectFiles['gitStatusFiles']>): ReturnType<ProjectFiles['gitStatusFiles']> {
+    return this.files.gitStatusFiles(...a)
   }
 
-  gitStatusFiles(projectId: string) {
-    return gitStatusFiles(this.cwdOf(projectId), this.gitTrust(projectId))
-  }
-  gitDiff(projectId: string, path: string, staged?: boolean) {
-    return gitDiff(this.cwdOf(projectId), path, { staged, ...this.gitTrust(projectId) })
-  }
-  async gitLog(projectId: string, limit?: number) {
-    const commits = await gitLog(this.cwdOf(projectId), limit)
-    // Tags which session created each commit (#50) — passes through untouched wherever there is no record
-    // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
-    const trashed = this.store.trash.trashedIds()
-    return attachCommitSessions(commits, this.store.sessions.commitSessions(projectId), (sid) =>
-      this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
-    )
-  }
-  gitCommitDetail(projectId: string, sha: string) {
-    return gitCommitDetail(this.cwdOf(projectId), sha, this.gitTrust(projectId))
-  }
-  gitBranches(projectId: string) {
-    return gitBranches(this.cwdOf(projectId))
-  }
-  /** Things a fresh worktree will not have (#76) — used to point out candidates to copy */
-  gitIgnoredEntries(projectId: string) {
-    return gitIgnoredEntries(this.cwdOf(projectId), undefined, this.gitTrust(projectId))
-  }
-  gitCheckout(projectId: string, branch: string, dryRun?: boolean) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitCheckout(cwd, branch, { dryRun, signal, ...this.gitTrust(projectId) }))
-  }
-  gitStage(projectId: string, paths: string[], unstage?: boolean) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitStage(cwd, paths, unstage, signal))
-  }
-  gitCommit(projectId: string, message: string) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitCommit(cwd, message, signal))
-  }
-  gitPush(projectId: string) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitPush(cwd, signal))
-  }
-  /** Ends the git panel's write still running for this project (#1007); whether there was one */
-  gitCancel(projectId: string): { cancelled: boolean } {
-    return { cancelled: this.gitWrites.cancel(projectId) }
+  /** `ProjectFiles.gitDiff` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitDiff(...a: Parameters<ProjectFiles['gitDiff']>): ReturnType<ProjectFiles['gitDiff']> {
+    return this.files.gitDiff(...a)
   }
 
-  // ── File tree/viewer (C-1) ──
-  listDir(projectId: string, path: string) {
-    return listDir(this.cwdOf(projectId), path, this.gitTrust(projectId))
+  /** `ProjectFiles.gitLog` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitLog(...a: Parameters<ProjectFiles['gitLog']>): ReturnType<ProjectFiles['gitLog']> {
+    return this.files.gitLog(...a)
   }
 
-  /**
-   * Updates the file tree's watch set (#34). When the UI sends the whole set of expanded
-   * directories, changes come back as an `fs_changed` event — this lives here because the direction
-   * is round-trip: the request arrives via RPC, but the answer (a change) goes out through the same
-   * broadcast path as a session event.
-   */
-  watchDirs(projectId: string, paths: readonly string[], holder?: WatchHolder): number {
-    return this.watchers.setWatched(projectId, this.cwdOf(projectId), paths, holder)
+  /** `ProjectFiles.gitCommitDetail` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCommitDetail(...a: Parameters<ProjectFiles['gitCommitDetail']>): ReturnType<ProjectFiles['gitCommitDetail']> {
+    return this.files.gitCommitDetail(...a)
   }
 
-  /** A window's connection closed: the folders only it had open stop being watched (#842 item 6) */
-  forgetWatchHolder(holder: WatchHolder): void {
-    this.watchers.forgetHolder(holder)
-  }
-  readTextFile(projectId: string, path: string, sessionId?: string) {
-    return readTextFile(this.folderOf(projectId, sessionId), path)
+  /** `ProjectFiles.gitBranches` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitBranches(...a: Parameters<ProjectFiles['gitBranches']>): ReturnType<ProjectFiles['gitBranches']> {
+    return this.files.gitBranches(...a)
   }
 
-  /**
-   * The folder a file link of this session is in (#1209): its worktree, or the project's when it has none. Without a
-   * session, the project's. A session of another project is refused, so a project's id cannot carry another's folder.
-   * The answer is the root the caller both checks the path against and reads through: one string, never re-derived.
-   */
-  private folderOf(projectId: string, sessionId: string | undefined): string {
-    if (sessionId === undefined) return this.cwdOf(projectId)
-    const m = this.meta.get(sessionId)
-    if (!m) throw sessionNotFound(sessionId)
-    if (m.projectId !== projectId) throw rpcError(`Session ${sessionId} is not a session of this project`)
-    return m.worktree?.path ?? this.cwdOf(projectId)
+  /** `ProjectFiles.gitIgnoredEntries` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitIgnoredEntries(...a: Parameters<ProjectFiles['gitIgnoredEntries']>): ReturnType<ProjectFiles['gitIgnoredEntries']> {
+    return this.files.gitIgnoredEntries(...a)
   }
 
-  // ── File operations (#19) — only path resolution happens here; validation and execution are delegated to
-  // dev-services ──
-  moveEntry(projectId: string, from: string, toDir: string) {
-    return moveEntry(this.cwdOf(projectId), from, toDir)
+  /** `ProjectFiles.gitCheckout` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCheckout(...a: Parameters<ProjectFiles['gitCheckout']>): ReturnType<ProjectFiles['gitCheckout']> {
+    return this.files.gitCheckout(...a)
   }
-  importFile(projectId: string, toDir: string, name: string, dataBase64: string) {
-    return importFile(this.cwdOf(projectId), toDir, name, Buffer.from(dataBase64, 'base64'))
+
+  /** `ProjectFiles.gitStage` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitStage(...a: Parameters<ProjectFiles['gitStage']>): ReturnType<ProjectFiles['gitStage']> {
+    return this.files.gitStage(...a)
   }
-  /** The absolute path handed to the OS by the desktop shell (trash, file manager, IDE). Built by the side that
-   * knows the project: for the trash the entry itself, a link included; otherwise what it is, a link followed inside the
-   * project; never the project folder (#838) */
-  resolveFile(projectId: string, path: string, purpose?: FsResolvePurpose, sessionId?: string) {
-    // A session's folder is only revealed and opened: the trash and the project folder stay the project's (#1209)
-    if (sessionId !== undefined && (purpose === 'trash' || purpose === 'project'))
-      throw rpcError(`A session's folder is not resolved for ${purpose}`)
-    if (sessionId !== undefined) return resolveTarget(this.folderOf(projectId, sessionId), path)
-    const root = this.cwdOf(projectId)
-    // The project folder for its delete dialog only (#838); an older window's dialog sends the literal root and no purpose
-    if (purpose === 'project' || (purpose === undefined && pathParts(root, path).length === 0)) return resolveProjectFolder(root)
-    return purpose === 'trash' ? resolveEntry(root, path) : resolveTarget(root, path)
+
+  /** `ProjectFiles.gitCommit` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCommit(...a: Parameters<ProjectFiles['gitCommit']>): ReturnType<ProjectFiles['gitCommit']> {
+    return this.files.gitCommit(...a)
+  }
+
+  /** `ProjectFiles.gitPush` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitPush(...a: Parameters<ProjectFiles['gitPush']>): ReturnType<ProjectFiles['gitPush']> {
+    return this.files.gitPush(...a)
+  }
+
+  /** `ProjectFiles.gitCancel` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCancel(...a: Parameters<ProjectFiles['gitCancel']>): ReturnType<ProjectFiles['gitCancel']> {
+    return this.files.gitCancel(...a)
+  }
+
+  /** `ProjectFiles.listDir` (dev-services/project-files.ts), kept on the manager for its callers */
+  listDir(...a: Parameters<ProjectFiles['listDir']>): ReturnType<ProjectFiles['listDir']> {
+    return this.files.listDir(...a)
+  }
+
+  /** `ProjectFiles.watchDirs` (dev-services/project-files.ts), kept on the manager for its callers */
+  watchDirs(...a: Parameters<ProjectFiles['watchDirs']>): ReturnType<ProjectFiles['watchDirs']> {
+    return this.files.watchDirs(...a)
+  }
+
+  /** `ProjectFiles.forgetWatchHolder` (dev-services/project-files.ts), kept on the manager for its callers */
+  forgetWatchHolder(...a: Parameters<ProjectFiles['forgetWatchHolder']>): ReturnType<ProjectFiles['forgetWatchHolder']> {
+    return this.files.forgetWatchHolder(...a)
+  }
+
+  /** `ProjectFiles.readTextFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  readTextFile(...a: Parameters<ProjectFiles['readTextFile']>): ReturnType<ProjectFiles['readTextFile']> {
+    return this.files.readTextFile(...a)
+  }
+
+  /** `ProjectFiles.moveEntry` (dev-services/project-files.ts), kept on the manager for its callers */
+  moveEntry(...a: Parameters<ProjectFiles['moveEntry']>): ReturnType<ProjectFiles['moveEntry']> {
+    return this.files.moveEntry(...a)
+  }
+
+  /** `ProjectFiles.importFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  importFile(...a: Parameters<ProjectFiles['importFile']>): ReturnType<ProjectFiles['importFile']> {
+    return this.files.importFile(...a)
+  }
+
+  /** `ProjectFiles.resolveFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  resolveFile(...a: Parameters<ProjectFiles['resolveFile']>): ReturnType<ProjectFiles['resolveFile']> {
+    return this.files.resolveFile(...a)
   }
 
   /** `UiPreferenceStore.saveWorkspace` (ui-preferences.ts), kept on the manager for its callers */
@@ -1981,33 +1756,14 @@ export class SessionManager {
     return this.prefs.setUiPreferences(...a)
   }
 
-  /** The settings screen must be able to see and delete rules (FR-3: make the outcome visible) */
-  listApprovalRules(): {
-    id: number
-    scope: 'session' | 'project'
-    matcher: string
-    decision: string
-    createdAt: number
-    projectId: string | null
-    sessionId: string | null
-  }[] {
-    return this.store
-      .permissions.listApprovalRules()
-      .filter((r) => r.matcher)
-      .map((r) => ({
-        id: r.id,
-        scope: r.scope as 'session' | 'project',
-        matcher: r.matcher,
-        decision: r.decision,
-        createdAt: r.createdAt,
-        // Included so the settings screen can say which project or session this rule belongs to (#183)
-        projectId: r.projectId,
-        sessionId: r.sessionId,
-      }))
+  /** `ApprovalRules.listApprovalRules` (approval-rules.ts), kept on the manager for its callers */
+  listApprovalRules(...a: Parameters<ApprovalRules['listApprovalRules']>): ReturnType<ApprovalRules['listApprovalRules']> {
+    return this.approvalRules.listApprovalRules(...a)
   }
 
-  deleteApprovalRule(id: number): void {
-    this.store.permissions.deleteApprovalRule(id)
+  /** `ApprovalRules.deleteApprovalRule` (approval-rules.ts), kept on the manager for its callers */
+  deleteApprovalRule(...a: Parameters<ApprovalRules['deleteApprovalRule']>): ReturnType<ApprovalRules['deleteApprovalRule']> {
+    return this.approvalRules.deleteApprovalRule(...a)
   }
 
   /**
@@ -2019,21 +1775,6 @@ export class SessionManager {
     return this.store
       .messages.searchMessages(query, limit)
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
-  }
-
-  /**
-   * Saved rules that apply to this session (session-scoped plus project-scoped). Only an `allow` of a scope this build
-   * knows: a newer build may store another decision or scope (#384), and a rule that cannot be read allows nothing.
-   * A project rule with no project (an earlier build stored one from a session with no project) belongs to no
-   * project, so it applies to no session.
-   */
-  private rulesFor(sessionId: string, projectId: string | null): string[] {
-    return this.store
-      .permissions.listApprovalRules()
-      .filter((r) => r.decision === 'allow' && (r.scope === 'session' || r.scope === 'project'))
-      .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId !== null && r.projectId === projectId))
-      .map((r) => r.matcher)
-      .filter(Boolean)
   }
 
   /**
@@ -2286,6 +2027,7 @@ export class SessionManager {
       get children() {
         return self.children
       },
+      checkMergedInBackground: (...a) => self.merges.checkMergedInBackground(...a),
       cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
       get lettingGo() {
         return self.lettingGo()
@@ -2295,8 +2037,8 @@ export class SessionManager {
       },
       createSession: (...a) => self.createSession(...a),
       cwdFor: (...a) => self.cwdFor(...a),
-      cwdOf: (...a) => self.cwdOf(...a),
-      defaultToolFor: (...a) => self.defaultToolFor(...a),
+      cwdOf: (...a) => self.projectRegistry.cwdOf(...a),
+      defaultToolFor: (...a) => self.toolRegistry.defaultToolFor(...a),
       get delegationFlow() {
         return self.delegationFlow
       },
@@ -2319,11 +2061,11 @@ export class SessionManager {
       get externals() {
         return self.externals
       },
-      firstTool: (...a) => self.firstTool(...a),
+      firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
-      gitTrust: (...a) => self.gitTrust(...a),
+      gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),
       handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
       handleSink: () => self.handleSink(),
@@ -2369,7 +2111,7 @@ export class SessionManager {
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
       migrateApprovedMcpServers: (...a) => self.proposals.migrateApprovedMcpServers(...a),
-      mayRead: (...a) => self.mayRead(...a),
+      mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
         return self.memoryGate
       },
@@ -2381,12 +2123,15 @@ export class SessionManager {
       notBeingRemoved: (...a) => self.notBeingRemoved(...a),
       observeCommit: (...a) => self.events.observeCommit(...a),
       openSession: (...a) => self.openSession(...a),
-      orchestratorMemory: (...a) => self.orchestratorMemory(...a),
+      orchestratorMemory: (...a) => self.launchInputs.orchestratorMemory(...a),
       orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
       pauseReport: (...a) => self.reports.pauseReport(...a),
       pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
+      get proposals() {
+        return self.proposals
+      },
       get prLookup() {
         return self.prLookup
       },
@@ -2396,10 +2141,10 @@ export class SessionManager {
       get prCheckedAt() {
         return self.merges.prCheckedAt
       },
-      projectInfo: (...a) => self.projectInfo(...a),
-      projectOrigin: (...a) => self.projectOrigin(...a),
-      projectRow: (...a) => self.projectRow(...a),
-      projectTrusted: (...a) => self.projectTrusted(...a),
+      projectInfo: (...a) => self.projectRegistry.projectInfo(...a),
+      projectOrigin: (...a) => self.files.projectOrigin(...a),
+      projectRow: (...a) => self.projectRegistry.projectRow(...a),
+      projectTrusted: (...a) => self.projectRegistry.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
       get queue() {
         return self.queue
@@ -2439,7 +2184,7 @@ export class SessionManager {
         return self.resuming
       },
       routedCards: (...a) => self.cards.routedCards(...a),
-      rulesFor: (...a) => self.rulesFor(...a),
+      rulesFor: (...a) => self.approvalRules.rulesFor(...a),
       get running() {
         return self.running
       },
@@ -2447,12 +2192,12 @@ export class SessionManager {
       send: (...a) => self.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
       sessionOf: (...a) => self.sessionOf(...a),
-      settingFilesFor: (...a) => self.settingFilesFor(...a),
+      settingFilesFor: (...a) => self.launchInputs.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
       // Whose a linked child's turn is decides whether its report goes (#1038 review)
       reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
-      skillsPrompt: () => self.skillsPrompt(),
+      skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
@@ -2464,17 +2209,12 @@ export class SessionManager {
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.toolProfileOf(...a),
-      toolLabel: (...a) => self.toolLabel(...a),
+      toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools
       },
       nameOf: (...a) => self.reports.nameOf(...a),
-      toolProblem: async (tool) => {
-        const adapter = self.adapters.get(tool)
-        if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
-        const d = await adapter.detect().catch((e: Error) => ({ installed: false, loggedIn: false, detail: e.message }))
-        return d.installed && d.loggedIn ? null : `${tool} cannot start a session here: ${d.detail}`
-      },
+      toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
@@ -2482,7 +2222,7 @@ export class SessionManager {
       get trashing() {
         return self.trash.trashing
       },
-      trunkOf: (...a) => self.trunkOf(...a),
+      trunkOf: (...a) => self.projectRegistry.trunkOf(...a),
       turnRunning: (...a) => self.turnRunning(...a),
       get turnObservers() {
         return self.turnObservers
@@ -2539,7 +2279,7 @@ export class SessionManager {
       updateCentraluAsked: (sessionId, action, signal) => this.updatesAsked.updateCentraluAsked(sessionId, action, signal),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       createSession: (params) => this.createSession(params),
-      firstTool: (preferred) => this.firstTool(preferred),
+      firstTool: (preferred) => this.toolRegistry.firstTool(preferred),
       rename: (sessionId, name) => this.rename(sessionId, name),
       send: (sessionId, text, attachments, from) => this.send(sessionId, text, attachments, from),
       routedCards: (sessionId, callerId) => this.cards.routedCards(sessionId, callerId),
@@ -2608,19 +2348,6 @@ export class SessionManager {
     return this.appSessions.checkApp(...a)
   }
 
-  /**
-   * The default agent tool for this scope — a project's default tool if it has one, or the
-   * orchestrator's own tool if there is no project (a user-folder app). A builder session (C-2) and an
-   * agent an app asked for (D-1) both use this same rule.
-   */
-  private defaultToolFor(projectId: string | null): ToolName | null {
-    if (projectId !== null) {
-      const project = this.projectRow(projectId)
-      return this.firstTool(project?.defaultTool)
-    }
-    return this.firstTool(this.store.settings.appSetting('orchestrator_tool'))
-  }
-
   /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
   ensureProjectAccess(...a: Parameters<ProjectConsents['ensureProjectAccess']>): ReturnType<ProjectConsents['ensureProjectAccess']> {
     return this.consents.ensureProjectAccess(...a)
@@ -2641,12 +2368,6 @@ export class SessionManager {
     if (this.meta.get(sessionId)?.permissionPreset !== 'auto') return false
     if (boundary) console.error(`[permissions] auto session ${sessionId}: ${boundary} allowed`)
     return true
-  }
-
-  /** Whether a session may read this path because another project handed it back (#371, `CreateSessionOpts.mayRead`) */
-  private mayRead(sessionId: string, path: string, cwd: string): boolean {
-    const grants = this.readGrants.get(sessionId)
-    return !!grants && grants.size > 0 && underGrant(path, grants, cwd)
   }
 
   /** `AskProjectFlow.askProject` (ask-project-flow.ts), kept on the manager for its callers */
@@ -2696,11 +2417,6 @@ export class SessionManager {
   }
 
   /** MCP server proposals waiting on the person's approval */
-  /** The approved skills as a system prompt section (OrchestratorProposals.skillsPrompt) */
-  private skillsPrompt(): string {
-    return this.proposals.skillsPrompt()
-  }
-
   mcpProposals(): ReturnType<OrchestratorProposals['mcpProposals']> {
     return this.proposals.mcpProposals()
   }
@@ -2800,7 +2516,7 @@ export class SessionManager {
   noteAgentMoved(sessionId: string, from: string, to: string): void {
     const m = this.meta.get(sessionId)
     if (!m) return
-    const label = this.toolLabel(m.tool)
+    const label = this.toolRegistry.toolLabel(m.tool)
     this.onEvent({
       type: 'notice',
       sessionId,
@@ -2820,7 +2536,7 @@ export class SessionManager {
       level: 'warning',
       from: 'Centralu',
       label: 'agent update',
-      text: `${this.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
+      text: `${this.toolRegistry.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
     })
   }
 
@@ -2859,20 +2575,9 @@ export class SessionManager {
     return this.apps.setAppShared(...a)
   }
 
-  /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
-   * part 3). null if none was set — HEAD is then used as the baseline */
-  private trunkOf(projectId: string): string | null {
-    return this.store.projects.worktreeTrunk(projectId)
-  }
-
-  /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
-  async setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void> {
-    this.requireProject(projectId)
-    const branch = baseBranch.trim()
-    if (!branch) throw rpcError('Pick the branch worktrees should fork from')
-    if (!(await gitValidBranchName(branch))) throw rpcError(`Not a branch name: ${branch}`)
-    this.store.projects.setWorktreeTrunk(projectId, branch)
-    this.emit({ type: 'projects_changed' })
+  /** `ProjectRegistry.setWorktreeTrunk` (project-registry.ts), kept on the manager for its callers */
+  setWorktreeTrunk(...a: Parameters<ProjectRegistry['setWorktreeTrunk']>): ReturnType<ProjectRegistry['setWorktreeTrunk']> {
+    return this.projectRegistry.setWorktreeTrunk(...a)
   }
 
   /**
@@ -2886,11 +2591,6 @@ export class SessionManager {
   /** `MergeChecks.refreshMergedWorktrees` (merge-checks.ts), kept on the manager for its callers */
   refreshMergedWorktrees(...a: Parameters<MergeChecks['refreshMergedWorktrees']>): ReturnType<MergeChecks['refreshMergedWorktrees']> {
     return this.merges.refreshMergedWorktrees(...a)
-  }
-
-  /** A summary of the orchestrator's past conversation for its next system prompt (transcript-view.ts) */
-  private orchestratorMemory(sessionId: string): string {
-    return orchestratorMemory(this.store.messages, sessionId)
   }
 
   /**
@@ -2925,22 +2625,6 @@ export class SessionManager {
    * app_settings is the right place for it. Once it has actually been created, switching agents in the
    * session's own settings takes over — this value is never read again after that.
    */
-  /**
-   * The tool to use when nothing has chosen one — the first registered adapter, or none.
-   *
-   * A project's `defaultTool` is nullable because only the host knows which tools exist, so
-   * a project created before any tool was picked has none. Falling back to a literal
-   * `'claude'` here would put a vendor name back into code that is meant not to know any.
-   */
-  private firstTool(preferred?: ToolName | null): ToolName | null {
-    return registeredTool(this.adapters, preferred)
-  }
-
-  /** A tool's display name, from whichever adapter owns it — falls back to the bare id. */
-  private toolLabel(tool: ToolName): string {
-    return this.adapters.get(tool)?.descriptor.label ?? tool
-  }
-
   configureOrchestrator(tool: ToolName): void {
     this.store.settings.setAppSetting('orchestrator_tool', tool)
   }
@@ -2978,7 +2662,7 @@ export class SessionManager {
       // marker at all
       kind: 'orchestrator',
       cwd: orchestratorHome(),
-      tool: this.firstTool(configured),
+      tool: this.toolRegistry.firstTool(configured),
       permissionPreset: 'normal',
     })
     // Kept as a name the person set, so the auto-name (FR-18) never overwrites it with the first prompt
@@ -3119,7 +2803,7 @@ export class SessionManager {
     this.linkedReports.dispose()
     // So does a start waiting for memory (#686); handing over, it stays stored for the next host
     this.memoryGate?.close()
-    this.watchers.close()
+    this.files.close()
     // Ends a merge check's gh; the check itself is waited for with the processes (#368). The next host checks merges
     // again at its start
     this.merges.mergeChecksStop.abort()
@@ -3150,18 +2834,6 @@ export class SessionManager {
   private openSession(sessionId: string): SessionInfo {
     this.notBeingRemoved(sessionId)
     return this.sessionOf(sessionId)
-  }
-
-  /** A registered project's row, read now (trust and paths change under a running host) */
-  private projectRow(projectId: string | null | undefined): ReturnType<Store['projects']['listProjects']>[number] | undefined {
-    return projectId ? this.store.projects.listProjects().find((p) => p.id === projectId) : undefined
-  }
-
-  /** A registered project's row, or `Project not found` */
-  private requireProject(projectId: string): ReturnType<Store['projects']['listProjects']>[number] {
-    const p = this.projectRow(projectId)
-    if (!p) throw rpcError(`Project not found: ${projectId}`)
-    return p
   }
 
   /**

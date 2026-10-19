@@ -66,7 +66,7 @@ type NormalizedEvent =
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: the raw tool input (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: the whole result text (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
-  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303)
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303); `after` moves a known context reading there as an estimate (#1282)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: the tool started a fresh conversation (Claude's /clear); a marker, and the gauge empties
   | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
       from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: text the tool wants read, one line; #342: made readable

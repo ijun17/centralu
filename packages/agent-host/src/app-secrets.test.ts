@@ -128,9 +128,24 @@ describe('set or unset is visible, but the value is not', () => {
     plant([], ['API_KEY'])
     make()
     expect(info().secrets).toEqual([{ name: 'API_KEY', set: false }])
-    expect(info().secretsUnreadable).toEqual({ movedTo: expect.stringMatching(/^app-secrets\.json\.unreadable-\d+$/), at: expect.any(Number) })
+    expect(info().secretsUnreadable).toEqual({ movedTo: expect.stringMatching(/^app-secrets\.json\.unreadable-\d+$/), at: expect.any(Number), reason: 'it is not valid JSON' })
     await setSecret('API_KEY', VALUE)
     expect(info().secretsUnreadable).toBeUndefined()
+  })
+
+  // #944: and why, in words that carry nothing of the file
+  it('the list says why the saved secrets could not be read: damaged, or not readable at all', async () => {
+    writeFileSync(join(dataRoot, 'app-secrets.json'), `{"p1/keys": {"API_KEY": "${VALUE}`)
+    plant([], ['API_KEY'])
+    make()
+    expect(info().secretsUnreadable).toMatchObject({ reason: 'it is not valid JSON' })
+    expect(JSON.stringify(rt.list())).not.toContain(VALUE)
+    await rt.dispose()
+    store.close()
+    rmSync(dataRoot, { recursive: true, force: true })
+    mkdirSync(join(dataRoot, 'app-secrets.json'), { recursive: true })
+    make()
+    expect(info().secretsUnreadable).toEqual({ movedTo: null, at: expect.any(Number), reason: 'it is a folder (EISDIR)' })
   })
 
   it('an app that declares no secrets has no field for it', () => {
