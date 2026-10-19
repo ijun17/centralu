@@ -8,6 +8,7 @@ import type { Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
+import { presetFromHub, startedFromHubKey } from './hub-preset.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -65,7 +66,7 @@ function externalMissingReason(label: string, cwd: string): string {
  * What starting a session's process reaches of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf'> &
+export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf' | 'uiPreferences'> &
   Pick<SessionRecordHost, 'cacheLedger'> &
   Pick<SessionTrashHost, 'record' | 'restartPolicy'> &
   Pick<RestartHost, 'lettingGo'> &
@@ -184,6 +185,8 @@ export class SessionStarts {
     }
 
     const id = randomUUID()
+    // Started from a linked computer (#1273): `auto` there only as this computer's switch allows, read at this start
+    const permissionPreset = presetFromHub(params, this.host.uiPreferences())
 
     /*
      * Worktree session (FR-2 option). Created **before the adapter is launched** — it has to be
@@ -225,7 +228,7 @@ export class SessionStarts {
       model: params.model ?? null, effort: params.effort ?? null,
       verbosity: params.verbosity ?? null,
       serviceTier: params.serviceTier ?? null,
-      permissionPreset: params.permissionPreset,
+      permissionPreset,
       importedFrom: params.importHistory ? (params.resumeExternalId ?? null) : null,
       worktree,
       /*
@@ -235,6 +238,7 @@ export class SessionStarts {
        */
       parentSessionId: worktree && params.askedBy ? params.askedBy : null,
       ...(params.forkedFrom ? { forkedFrom: params.forkedFrom } : {}),
+      ...(params.fromHub ? { startedFromHub: true } : {}),
       ...sessionLiveDefaults(),
       // Started from what is installed now, until the process says (#297)
       agentVersion: this.host.versionHint?.(params.tool) ?? null,
@@ -278,7 +282,7 @@ export class SessionStarts {
           tool: params.tool, cwd, model: params.model, effort: params.effort,
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
-          permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
+          permissionPreset, resumeExternalId: params.resumeExternalId,
           noCodeIntelligence,
           inheritsHandoff: !!params.handoff?.fromSessionId,
           choice: { profile, tools },
@@ -322,6 +326,7 @@ export class SessionStarts {
     if (noCodeIntelligence) this.host.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
     // Started by another machine's session (#1038): that depth is this session's own, kept as one started here keeps its
     if (params.agentDepth) this.host.store.settings.setAppSetting(agentDepthKey(id), String(params.agentDepth))
+    if (params.fromHub) this.host.store.settings.setAppSetting(startedFromHubKey(id), 'true')
     this.host.launches.rememberToolPrefix(id)
     this.host.launches.rememberLaunchSettings(info, cwd)
     this.host.store.sessions.setSessionCwd(id, cwd)

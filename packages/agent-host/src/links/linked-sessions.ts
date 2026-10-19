@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -322,10 +322,30 @@ export function linkedSessions(
           ...(opts.effort ? { effort: opts.effort } : {}),
           ...(opts.worktreeBranch ? { worktree: true, worktreeBranch: opts.worktreeBranch } : {}),
           ...(opts.agentDepth ? { agentDepth: opts.agentDepth } : {}),
-        })) as { id: string; name: string }
+          // The caller's preset carried across (#1273): the machine starts it under `auto` only as its own switch allows
+          ...(opts.callerPreset ? { fromHub: { callerPreset: opts.callerPreset } } : {}),
+        })) as { id: string; name: string; permissionPreset?: unknown }
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
-        return { sessionId: info.id, name: opts.name ?? info.name }
+        const preset = PermissionPreset.safeParse(info.permissionPreset)
+        return { sessionId: info.id, name: opts.name ?? info.name, ...(preset.success ? { preset: preset.data } : {}) }
       })
+    },
+
+    async hubAuto(machineId) {
+      const m = machineById(machineId)
+      if (!m) return { ok: false, error: `No linked machine ${machineId}` }
+      // A build from before #1273 has no `host.hubAuto`, and drops `fromHub`: said as such, not as a failure
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
+          return { allowed: r?.allowed === true }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: host.hubAuto')) older = true
+          throw err
+        }
+      })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1273`, olderBuild: true } : r
     },
 
     async origin(project) {

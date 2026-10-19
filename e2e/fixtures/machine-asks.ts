@@ -20,6 +20,23 @@ async function addMachine(page: Page, name: string): Promise<void> {
 }
 
 export function machineAsksTests(): void {
+  // #1273 review: a machine with no window of its own has its "Allow auto from a linked computer" set from here
+  test("each machine's own switch for this computer's auto agents is read and set here", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-machines').click()
+    await addMachine(page, 'Ubuntu box')
+    const sw = page.getByTestId('machine-hub-auto-ubuntu-box')
+    await expect(sw).toBeChecked()
+    await expect(page.getByTestId('machine-row-ubuntu-box')).toContainText('Let auto sessions here start agents under auto on Ubuntu box')
+    await expect(page.getByTestId('machine-hub-auto-note-ubuntu-box')).toContainText('runs under auto too, without asking')
+    await sw.uncheck()
+    await expect(sw).not.toBeChecked()
+    await expect.poll(() => page.evaluate(() => [...(window as any).__mock.hubAutoOff])).toEqual(['ubuntu-box'])
+    await sw.check()
+    await expect.poll(() => page.evaluate(() => [...(window as any).__mock.hubAutoOff])).toEqual([])
+  })
+
   test('the switch is off for a new machine, asks once before it turns on, lists the pairs and forgets them when off', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     await page.getByTestId('open-settings').click()

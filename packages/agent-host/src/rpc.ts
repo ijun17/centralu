@@ -1,6 +1,6 @@
 import { relative } from 'node:path'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, noSuchAppText, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, hubAutoOf, noSuchAppText, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -52,6 +52,11 @@ import type {
  * count in `undefined` placeholders.
  */
 export type RpcServices = {
+  /**
+   * A project was deleted or sessions left the trash for good: a deleted project that a user-folder app had become gives
+   * that folder back once nothing in the trash can restore it (#1204, `UserAppAdoption.settle`)
+   */
+  settleDeletedProjects?: () => Promise<void>
   terminals?: TerminalService
   updates?: UpdateService
   commands?: CommandRunner
@@ -118,6 +123,8 @@ export type MachinesPort = {
   probe(sshTarget: string): Promise<MachineProbe>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
+  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
+  hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'>
   /** The reverse direction's switch for one machine (#550) */
   setAsks(id: string, on: boolean): Promise<MachineInfo>
 }
@@ -131,7 +138,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
+  { settleDeletedProjects, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -671,6 +678,8 @@ export function createRpcHandler(
         commands?.stopCwd(cwd)
       }
       externalApps?.refresh()
+      // After the refresh, which stops its apps: a folder an app works in does not move on Windows
+      void settleDeletedProjects?.()
       return { ok: true as const }
     },
     'projects.setTrusted': async (p) => {
@@ -830,9 +839,14 @@ export function createRpcHandler(
     },
     'trash.purge': async (p) => {
       await mgr.purgeSession(RpcMethods['trash.purge'].params.parse(p).sessionId)
+      void settleDeletedProjects?.()
       return { ok: true as const }
     },
-    'trash.empty': async () => mgr.emptyTrash(),
+    'trash.empty': async () => {
+      const r = await mgr.emptyTrash()
+      void settleDeletedProjects?.()
+      return r
+    },
     // The records of deleted app-agent sessions (#378), the person's like the rest of the trash
     'trash.readRun': async (p) => {
       const { runId, limit, beforeSeq } = RpcMethods['trash.readRun'].params.parse(p)
@@ -884,6 +898,10 @@ export function createRpcHandler(
       return requireMachines().autostart(machineId, on)
     },
     'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
+    'machines.hubAuto': async (p) => {
+      const { machineId, allowed } = RpcMethods['machines.hubAuto'].params.parse(p)
+      return { state: await requireMachines().hubAuto(machineId, allowed) }
+    },
     // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
     'machines.setAsks': async (p) => {
       const { machineId, on } = RpcMethods['machines.setAsks'].params.parse(p)
@@ -924,6 +942,10 @@ export function createRpcHandler(
       const { query, limit } = RpcMethods['host.recall'].params.parse(p)
       return mgr.hostReader().recall(query, limit)
     },
+    // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
+    'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
+    // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
+    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: RpcMethods['host.setHubAuto'].params.parse(p).allowed })) }),
     'host.send': async (p) => {
       const { sessionId, text, from, ask } = RpcMethods['host.send'].params.parse(p)
       await mgr.sendFromHub(sessionId, text, from.name, ask)

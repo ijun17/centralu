@@ -611,10 +611,16 @@ sides (`projects.origin`, compared by `gitRemoteKey`, so `git@github.com:me/app.
 one repository). No such checkout is refused with that machine's projects and their origins; two checkouts are
 refused unless one has the caller's project's name; a machine that cannot be reached is refused as unreachable. The
 caller's gates are the same (an ordinary session of a trusted project, above the agent depth) and are read again after
-the card. The card is `agent_start` with `machine`: it names the computer, is raised every time (an `auto` caller
-included), and offers no "always", as ask_project's card for another machine's project (#700); it is bounded like a
-local start's setup (`START_AGENT_SETUP_MS`). The child is made over the link (`agents.createSession` there) under
-the caller's preset capped at `normal` (as create_session over a link, #838), with the model, effort and worktree
+the card. The card is `agent_start` with `machine`: it names the computer, is raised every time, and offers no
+"always", as ask_project's card for another machine's project (#700); it is bounded like a local start's setup
+(`START_AGENT_SETUP_MS`). An `auto` caller's start raises no card where the machine takes `auto` from this computer
+(#1273): the hub asks it first (`host.hubAuto`, its "Allow auto from a linked computer" switch); a machine whose switch is
+off, or one from before #1273, gets the card, which says why the child runs under `normal` (`autoWithheld`). The child
+is made over the link (`agents.createSession` there) under the caller's preset capped at `normal` (as create_session
+over a link, #838) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
+an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
+did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
+`startedFromHub`, and its row and header show its preset there and on the hub. It is made with the model, effort and worktree
 branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
@@ -651,8 +657,8 @@ unchanged. The cards of the turn its caller gave it come to the caller as a loca
 wait returns them (`asking`), `status` reads them from the machine (`LinkedSessions.cards`), and a card raised while
 no call waits is told once (`cardNotice`); each card's handle names that turn (`RemoteAgent.turn`, new with each start
 or send at rest). `answer` takes a question card's answer to the machine (`agents.answerQuestion` there). An approval
-card stays the person's on that machine, whatever the caller's preset: the child runs under `normal` at most there, and
-a caller's `auto`, which alone lets it answer a local child's approval, is never carried to another computer. `send`
+card stays the person's on that machine, whatever the caller's preset: a caller's `auto`, which alone lets it answer a
+local child's approval, never answers one on another computer, even when its child runs under `auto` there. `send`
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
 refused, as neither a queue nor a fork reaches another machine.

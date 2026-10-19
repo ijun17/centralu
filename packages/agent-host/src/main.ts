@@ -600,6 +600,8 @@ const activity = (): ActivitySnapshot => ({
 })
 const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, {
+    // A deleted project gives back the user-folder app it had become, once the trash cannot restore it (#1204)
+    settleDeletedProjects: () => userAppAdoption.settle(),
     themes,
     terminals,
     updates,
