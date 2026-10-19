@@ -220,9 +220,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **Where it lives**: `merge-queue.json` in the app's data folder, read and written whole and
   synchronously for each change, so it survives the server restarting. A file that does not read
   stops the driver, said once in the app's log, then tried again with a growing wait. Centralu stops an app with no
-  open screen and no call after 5 minutes (docs/apps.md §4), and an app cannot message a session on
-  its own (§13), so the queue has two drivers: this server while it runs, and the **watch command** a
-  session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
+  open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
+  `uses.background`, and this server holds busy exactly while the queue has an active item or a batch with its end
+  to do (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
+  items"), so the queue carries on overnight with nothing open (#1236). The queue has two drivers: this server, and
+  the **watch command** a session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
   every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,
   let go on exit).
 - **Telling the session**: every change worth a message is an event with a sequence number and the

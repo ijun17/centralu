@@ -17,7 +17,7 @@ import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -940,6 +940,35 @@ async function morePolls(n = 2) {
   const target = reads() + n
   await until(() => reads() >= target, `${n} more polls`)
 }
+
+describe('the merge queue keeps the board app running while it has work (#1236)', { timeout: 60_000 * SLOW }, () => {
+  it('is busy while an item waits, is in CI or needs attention, or a batch has its end to do; not once all of it ended', () => {
+    const q = emptyQueue()
+    expect(queueBusy(q)).toBe(null)
+    q.items.push({ ...fresh(), state: 'waiting' }, { ...fresh({ pr: 78 }), state: 'attention' })
+    expect(queueBusy(q)).toBe('merge queue, 2 items')
+    q.items[0].state = 'merged'
+    q.items[1].state = 'closed'
+    expect(queueBusy(q)).toBe(null)
+    q.batches.push({ id: 1, state: 'landing', members: [{ pr: 77 }] })
+    expect(queueBusy(q)).toBe('merge queue, a batch finishing')
+  })
+
+  it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
+    const r = runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
+    const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy
+    await call('merge_queue')
+    expect(busy()).toBeUndefined()
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    await until(() => busy() === 'merge queue, 1 item', 'the hold')
+    // CI finishes: it lands, and the queue has no work left
+    patchGh((s) => {
+      s.checks[SHA] = [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
+      s.runs[SHA] = [ghRun('success')]
+    })
+    await until((x) => stateOf(x) === 'merged' && busy() === undefined, 'the landing and the release')
+  })
+})
 
 describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, () => {
   it('passes check, with queue_merge and unqueue as changes and merge_queue as a read', async () => {

@@ -68,5 +68,5 @@ serveStdio(() => {
   return server
 })
 
-// The merge queue carries on in this server while it runs (queue-driver.mjs)
+// The merge queue carries on in this server, which stays running while the queue has work (queue-driver.mjs queueBusy)
 startQueue()

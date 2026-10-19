@@ -11,7 +11,7 @@ import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, queueOrder } from './queue.mjs'
-import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 
@@ -24,10 +24,26 @@ export function watchCommand({ owner, after }) {
   return ['node', quote(WATCH), 'watch', '--data', quote(dataDir()), ...(owner ? ['--owner', quote(owner)] : []), '--after', String(after)].join(' ')
 }
 
+/**
+ * Holds this app's process while the queue has work, and lets it go once it has none (#1236): Centralu would
+ * otherwise stop it after 5 minutes with no screen and no call, and the queue with it. After every tick (either
+ * driver may have changed the queue) and every change a tool makes. A file that does not read changes nothing.
+ */
+function holdWhileWork() {
+  let q
+  try {
+    q = readQueue(dataDir())
+  } catch {
+    return
+  }
+  void centralu.busy(queueBusy(q) ?? false)
+}
+
 /** Starts this server's driver; called once from server.mjs. */
 export function startQueue() {
   const holder = `server:${process.pid}`
-  const driver = startDriver(dataDir(), { holder })
+  holdWhileWork()
+  const driver = startDriver(dataDir(), { holder, onTick: holdWhileWork })
   // Stopped (Centralu closes its input, and the runtime exits): the lease goes with it, so the next
   // driver need not wait for it to run out
   process.once('exit', () => driver.stopNow())
@@ -41,7 +57,7 @@ function driverLine(q, now = Date.now()) {
   const pause = q.pause && Date.parse(q.pause.until) > now ? ` Paused until ${q.pause.until.slice(11, 19)} UTC: ${q.pause.reason}` : ''
   if (!active) return `Nothing queued.${pause}`
   if (lease && Date.parse(lease.until) > now) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}`
-  return `Driven by the board app while it runs, and by a watch command while one runs.${pause}`
+  return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}`
 }
 
 const COUNTS = [
@@ -145,6 +161,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length }
   })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))
+  holdWhileWork()
   const who = r.item.owner
   const watch = watchCommand({ owner: who, after: r.seq })
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
@@ -167,6 +184,7 @@ async function unqueue({ pr }) {
   const want = itemOf(pr)
   const removed = updateQueue(dataDir(), (q) => dequeue(q, { repo: want.repo, pr: want.number, at: new Date().toISOString() }, queueRef))
   if (!removed) return asError(answer(`${want.ref} is not in the merge queue.`, { removed: false }))
+  holdWhileWork()
   return answer(`Took ${want.ref} out of the merge queue; nothing on GitHub changed.`, { removed: true })
 }
 
