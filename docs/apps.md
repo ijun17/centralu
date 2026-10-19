@@ -100,6 +100,26 @@ visibility is not read as the default: the side that is wrong stays closed.
   a swap, a stored name, a script) resolves to the project's root app (`ExternalApps.resolve`, which
   every runtime method taking a key reads first), with that app's trust and rules, while the user
   folder has no app of that id and the project still exists.
+  **A deleted project gives the folder back** (#1204): while a session of the project is in the trash
+  the folder stays where it is, adopted, since restoring one registers the project again at that path.
+  Once none is (the project had none, or the trash lost them for good), its folder goes to
+  `<data folder>/app-trash/` as a removed user-folder app's does, the data, logs and kept versions it
+  kept under `<project id>/<id>` go back to `_user/<id>`, and the record goes. **Nothing `_user/<id>`
+  already held is deleted**: it can be the only copy of something (a previous build serving after a
+  rollback writes there only), so it goes beside the folder, to `<data folder>/app-trash/<id>-<ms>-user-data/`,
+  where no sweep looks, before the project's copy takes its place. Its secrets and grants are not
+  returned: they went with the project, and the folder put back gets what `_user/<id>` still holds.
+  Moving the folder back into the user folder makes it a new project, with its data. Nothing moves
+  while a project is registered at that folder (the person added it again, in any spelling, or through
+  a link, a junction or a `subst` drive: real paths are compared; or inside the folder) or a session in
+  the trash names it, nor while a project's path cannot be resolved (a drive that is not there now, a
+  link loop, no access, or a UNC path, which is never resolved). Such a project holds every give-back
+  until it resolves or goes; a mapped drive letter is resolved, and a dead server can make that slow. Only
+  the folder that carries the adoption's mark moves: another folder of that name, and what is kept for
+  it, is never touched.
+  Checked at each start once the host is ready, after a project is deleted, and after the trash is
+  emptied or loses a session; a move that fails (a folder in use on Windows) is tried again a few
+  times, then at the next start.
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes
