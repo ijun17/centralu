@@ -10,6 +10,8 @@ import { trustedJsonText } from './tool-answers.js'
  */
 export type MachineOps = {
   list(): MachineInfo[]
+  /** What ssh would connect to (`ssh -G`, no connection opened, no key loaded): shown on add_machine's card */
+  resolve(sshTarget: string): Promise<{ hostName: string | null; user: string | null; port: number | null; proxyCommand?: string | null; proxyJump?: string | null; error: string | null }>
   probe(sshTarget: string): Promise<MachineProbe>
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null }): MachineInfo
   remove(id: string): Promise<void>
@@ -59,7 +61,16 @@ export function machineLine(m: MachineInfo): string {
 }
 
 /** Why `machines.add` would refuse this target (links-registry.ts), said before anything runs */
+/** Control and format characters (bidi overrides among them): a card or a list line would not show what they hide */
+const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029]/u
+
+/** Why a name or a distro the model gave cannot be shown honestly on a card, or null */
+function hiddenError(what: string, value: string): string | null {
+  return HIDDEN.test(value) ? `The ${what} has a control or formatting character in it; give it as plain text.` : null
+}
+
 function targetError(target: string): string | null {
+  if (HIDDEN.test(target)) return hiddenError('ssh target', target)
   if (!target || target.startsWith('-') || /\s/.test(target) || target.length > 255) {
     return `Not an ssh target: ${JSON.stringify(target)}. Use a host alias from this computer's ~/.ssh/config, or user@host.`
   }
@@ -155,50 +166,60 @@ export class MachineFlow {
   }
 
   /**
-   * add_machine: the target checked and probed (one BatchMode ssh, nothing changed there) before the card, which names
-   * the target, what runs there and what linking does. The shell follows what answered, as the Add machine dialog's
-   * rows do: a Unix shell, Windows (PowerShell), or a WSL distro of that Windows when one is named.
+   * add_machine (#1219; the security review of #1238): nothing connects before the person allows it. The target is
+   * checked and resolved with `ssh -G` (no connection, no key loaded), and the card shows what ssh would reach: host,
+   * user, port, and a proxy when one is set. After Allow, one BatchMode ssh probes what runs there; a target that does
+   * not answer, or runs nothing this computer can link, is linked nowhere and the answer says why, with no second card.
+   * The shell follows what answered, as the Add machine dialog's rows do: a Unix shell, Windows (PowerShell), or a WSL
+   * distro of that Windows when one is named.
    */
   private async add(ops: MachineOps, sessionId: string, req: Extract<MachineRequest, { action: 'add' }>, signal?: AbortSignal): Promise<MachineAnswer> {
     const target = req.sshTarget.trim()
-    const bad = targetError(target)
+    const bad = hiddenError('ssh target', req.sshTarget) ?? targetError(target) ?? hiddenError('name', req.name ?? '') ?? hiddenError('WSL distro', req.wslDistro ?? '')
     if (bad) return { ok: false, error: bad }
     const distro = req.wslDistro?.trim() || null
     const name = (req.name?.trim() || `${target.replace(/^.*@/, '')}${distro ? ` ${distro}` : ''}`).slice(0, 64)
-    const linked = ops.list()
-    if (linked.some((m) => m.name.toLowerCase() === name.toLowerCase())) return { ok: false, error: `A linked machine is already called ${name}; give another name.` }
+    const sameName = (list: MachineInfo[]) => list.find((m) => m.name.toLowerCase() === name.toLowerCase())
+    if (sameName(ops.list())) return { ok: false, error: `A linked machine is already called ${name}; give another name.` }
+    const to = await ops.resolve(target)
+    if (to.error) return { ok: false, error: `ssh could not read where ${target} goes: ${to.error}. Nothing was linked.` }
+    const reach = [
+      `${to.user ? `${to.user}@` : ''}${to.hostName ?? target}${to.port ? `, port ${to.port}` : ''}`,
+      to.proxyJump ? `through ProxyJump ${to.proxyJump}` : null,
+      to.proxyCommand ? `through ProxyCommand ${to.proxyCommand}` : null,
+    ].filter(Boolean)
+    const refused = await this.ask(
+      sessionId,
+      `Link ${target} as the machine ${name}${distro ? ` (its WSL distro ${distro})` : ''}? ssh resolves it to ${reach.join(', ')}. ` +
+        'Once you allow it, this computer connects there with your ssh keys, first to see what runs there, then to keep the link: it runs ' +
+        "`centralu serve --connection` and starts the Centralu installed there when none is running. Its sessions and projects join this computer's " +
+        'lists, and agents here can work on it. Nothing is installed: that is a separate question.',
+      signal,
+    )
+    if (refused) return { ok: false, error: refused }
     const probe = await ops.probe(target)
     if (!probe.reachable) return { ok: false, error: `${target} did not answer over ssh${probe.error ? `: ${probe.error}` : ''}. Nothing was linked.` }
-    if (!probe.os) return { ok: false, error: `Could not tell what runs on ${target}; the person can add it from Settings, Machines, choosing what it runs.` }
+    if (!probe.os) return { ok: false, error: `Could not tell what runs on ${target}, so nothing was linked; the person can add it from Settings, Machines, choosing what it runs.` }
     let shell: RemoteShell
     let wslDistro: string | null = null
     if (probe.os === 'posix') {
-      if (distro) return { ok: false, error: `${target} runs a Unix shell, not Windows, so it has no WSL distro; leave wslDistro out.` }
+      if (distro) return { ok: false, error: `${target} runs a Unix shell, not Windows, so it has no WSL distro; nothing was linked.` }
       shell = 'posix'
     } else if (distro) {
       const found = probe.wslDistros.find((d) => d.name.toLowerCase() === distro.toLowerCase())
-      if (!found) return { ok: false, error: `${target} has no WSL distro ${distro}${probe.wslDistros.length ? `; it has ${probe.wslDistros.map((d) => d.name).join(', ')}` : ''}.` }
+      if (!found) return { ok: false, error: `${target} has no WSL distro ${distro}${probe.wslDistros.length ? `; it has ${probe.wslDistros.map((d) => d.name).join(', ')}` : ''}. Nothing was linked.` }
       shell = 'wsl'
       wslDistro = found.name
     } else {
       shell = 'powershell'
     }
-    const same = linked.find((m) => m.sshTarget === target && m.shell === shell && (shell !== 'wsl' || (m.wslDistro ?? '').toLowerCase() === (wslDistro ?? '').toLowerCase()))
-    if (same) return { ok: false, error: `${target} is already linked that way, as ${same.name}.` }
-    const runs = osOf({ shell, wslDistro, autostart: null })
-    const refused = await this.ask(
-      sessionId,
-      `Link ${target} as the machine ${name} (${runs})? This computer then connects to it over your ssh and keys, runs \`centralu serve --connection\` there, ` +
-        'and starts the Centralu installed there when none is running. Its sessions and projects join this computer\'s lists, and agents here can work ' +
-        'on it. Nothing is installed: that is a separate question.',
-      signal,
-    )
-    if (refused) return { ok: false, error: refused }
     // Read again: the same machine may have been linked, or the name taken, while the card stood
     const now = ops.list()
-    const taken = now.find((m) => m.name.toLowerCase() === name.toLowerCase()) ?? now.find((m) => m.sshTarget === target && m.shell === shell && (shell !== 'wsl' || (m.wslDistro ?? '').toLowerCase() === (wslDistro ?? '').toLowerCase()))
+    const same = now.find((m) => m.sshTarget === target && m.shell === shell && (shell !== 'wsl' || (m.wslDistro ?? '').toLowerCase() === (wslDistro ?? '').toLowerCase()))
+    if (same) return { ok: false, error: `${target} is already linked that way, as ${same.name}, so nothing more was linked.` }
+    const taken = sameName(now)
     if (taken) return { ok: false, error: `${taken.name} was linked while the card stood, so nothing more was linked.` }
-    return done(`Linked ${target} as ${name}.`, ops.add({ name, sshTarget: target, shell, wslDistro }))
+    return done(`Linked ${target} as ${name} (${osOf({ shell, wslDistro, autostart: null })}).`, ops.add({ name, sshTarget: target, shell, wslDistro }))
   }
 
   /** The machine card, allow or deny only (`MACHINE_CHANGE`): the refusal the orchestrator reads, or null once allowed */

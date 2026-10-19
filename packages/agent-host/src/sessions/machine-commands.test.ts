@@ -55,10 +55,16 @@ function fakeOps() {
   const calls: unknown[][] = []
   const machines: MachineInfo[] = [machine({})]
   const probes = new Map<string, MachineProbe>()
+  /** What `ssh -G` resolves a target to; a target not set here resolves to itself */
+  const resolved = new Map<string, Awaited<ReturnType<MachineOps['resolve']>>>()
   let refusal: string | null = null
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
+    resolve: async (sshTarget) => {
+      calls.push(['resolve', sshTarget])
+      return resolved.get(sshTarget) ?? { hostName: sshTarget.replace(/^.*@/, ''), user: sshTarget.includes('@') ? sshTarget.replace(/@.*$/, '') : null, port: 22, error: null }
+    },
     probe: async (sshTarget) => {
       calls.push(['probe', sshTarget])
       return probes.get(sshTarget) ?? { sshTarget, reachable: false, os: null, windowsShell: null, wslDistros: [], error: 'Connection refused' }
@@ -103,11 +109,12 @@ function fakeOps() {
     ops: o,
     calls,
     probes,
+    resolved,
     refuseInstalls: (why: string) => {
       refusal = why
     },
     /** The calls that changed something, leaving out the reads and the pre-checks */
-    changes: () => calls.filter((c) => !['probe', 'installRefusal'].includes(c[0] as string)),
+    changes: () => calls.filter((c) => !['resolve', 'probe', 'installRefusal'].includes(c[0] as string)),
   }
 }
 
@@ -150,20 +157,26 @@ async function answered(orcId: string, command: (typeof COMMANDS)[number], args:
 }
 
 describe('add_machine', () => {
-  it('probes first, asks with the target, what runs there and what linking does, and links it only on Allow', async () => {
-    ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
+  const posix = (sshTarget: string): MachineProbe => ({ sshTarget, reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
+
+  it('connects nowhere before the card, which shows what ssh -G resolves the target to; probes and links only after Allow', async () => {
+    ops.probes.set('box', posix('box'))
+    ops.resolved.set('box', { hostName: 'box.lan', user: 'me', port: 2222, proxyCommand: 'ssh -W %h:%p jump', proxyJump: null, error: null })
     const orc = await mgr.orchestrator()
-    const call = run(orc.id, 'add_machine', { sshTarget: 'me@box' })
+    const call = run(orc.id, 'add_machine', { sshTarget: 'box' })
     await eventually(() => !!card(orc.id))
-    expect(ops.calls).toEqual([['probe', 'me@box']])
-    expect(card(orc.id)!.text).toContain('Link me@box as the machine box (macOS or Linux, Unix shell)?')
+    // Only ssh -G so far, which opens no connection: the person's keys have reached nothing
+    expect(ops.calls).toEqual([['resolve', 'box']])
+    expect(card(orc.id)!.text).toContain('Link box as the machine box? ssh resolves it to me@box.lan, port 2222, through ProxyCommand ssh -W %h:%p jump.')
+    expect(card(orc.id)!.text).toContain('connects there with your ssh keys, first to see what runs there')
     expect(card(orc.id)!.text).toContain('centralu serve --connection')
     expect(card(orc.id)!.text).toContain('Nothing is installed')
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
-    expect(ops.changes()).toEqual([['add', { name: 'box', sshTarget: 'me@box', shell: 'posix', wslDistro: null }]])
-    expect(r.text).toContain('Linked me@box as box.')
+    expect(ops.calls.map((c) => c[0])).toEqual(['resolve', 'probe', 'add'])
+    expect(ops.changes()).toEqual([['add', { name: 'box', sshTarget: 'box', shell: 'posix', wslDistro: null }]])
+    expect(r.text).toContain('Linked box as box (macOS or Linux, Unix shell).')
     expect(r.text).toContain('- "box" [box]: connecting; macOS or Linux, Unix shell; connects at start')
   })
 
@@ -171,17 +184,47 @@ describe('add_machine', () => {
     ops.probes.set('me@win', { sshTarget: 'me@win', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }], error: null })
     const orc = await mgr.orchestrator()
     const win = await answered(orc.id, 'add_machine', { sshTarget: 'me@win', name: 'Desk' }, 'allow')
-    expect(win.question).toContain('as the machine Desk (Windows, PowerShell)')
+    expect(win.r.text).toContain('Linked me@win as Desk (Windows, PowerShell).')
     const wsl = await answered(orc.id, 'add_machine', { sshTarget: 'me@win', wslDistro: 'ubuntu' }, 'allow')
-    expect(wsl.question).toContain('(Linux in WSL (Ubuntu) on Windows)')
+    expect(wsl.question).toContain('Link me@win as the machine win ubuntu (its WSL distro ubuntu)?')
+    expect(wsl.r.text).toContain('(Linux in WSL (Ubuntu) on Windows)')
     expect(ops.changes()).toEqual([
       ['add', { name: 'Desk', sshTarget: 'me@win', shell: 'powershell', wslDistro: null }],
       ['add', { name: 'win ubuntu', sshTarget: 'me@win', shell: 'wsl', wslDistro: 'Ubuntu' }],
     ])
   })
 
+  it('links nothing when the person denies it, and never connects', async () => {
+    ops.probes.set('me@box', posix('me@box'))
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'add_machine', { sshTarget: 'me@box' }, 'deny')
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/did not approve/)
+    expect(ops.calls).toEqual([['resolve', 'me@box']])
+  })
+
+  it('after Allow, links nothing and says why when the target does not answer or runs nothing it can link; no second card', async () => {
+    ops.probes.set('me@odd', { sshTarget: 'me@odd', reachable: true, os: null, windowsShell: null, wslDistros: [], error: null })
+    ops.probes.set('me@box', posix('me@box'))
+    ops.probes.set('me@laptop', { sshTarget: 'me@laptop', reachable: true, os: 'windows', windowsShell: 'powershell', wslDistros: [], error: null })
+    const orc = await mgr.orchestrator()
+    for (const [args, reason] of [
+      [{ sshTarget: 'me@gone' }, /me@gone did not answer over ssh: Connection refused\. Nothing was linked/],
+      [{ sshTarget: 'me@odd' }, /Could not tell what runs on me@odd, so nothing was linked/],
+      [{ sshTarget: 'me@laptop', name: 'Other' }, /already linked that way, as Laptop, so nothing more was linked/],
+      [{ sshTarget: 'me@laptop', name: 'Other', wslDistro: 'Debian' }, /has no WSL distro Debian\. Nothing was linked/],
+      [{ sshTarget: 'me@box', wslDistro: 'Ubuntu' }, /runs a Unix shell, not Windows, so it has no WSL distro; nothing was linked/],
+    ] as const) {
+      const { r } = await answered(orc.id, 'add_machine', args, 'allow')
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+      expect(r.text, JSON.stringify(args)).toMatch(reason)
+      expect(card(orc.id), JSON.stringify(args)).toBeUndefined()
+    }
+    expect(ops.changes()).toEqual([])
+  })
+
   it('links nothing more when the same machine was linked while the card stood', async () => {
-    ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
+    ops.probes.set('me@box', posix('me@box'))
     const orc = await mgr.orchestrator()
     const call = run(orc.id, 'add_machine', { sshTarget: 'me@box' })
     await eventually(() => !!card(orc.id))
@@ -190,40 +233,31 @@ describe('add_machine', () => {
     mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/Box was linked while the card stood/)
+    expect(r.text).toMatch(/already linked that way, as Box/)
     expect(ops.changes().filter((c) => c[0] === 'add').length).toBe(1)
   })
 
-  it('links nothing when the person denies it', async () => {
-    ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
-    const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'add_machine', { sshTarget: 'me@box' }, 'deny')
-    expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/did not approve/)
-    expect(ops.changes()).toEqual([])
-  })
-
-  it('refuses before any card: no ssh target, no answer, a name or a way already linked, a distro that is not there', async () => {
-    ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
-    ops.probes.set('me@laptop', { sshTarget: 'me@laptop', reachable: true, os: 'windows', windowsShell: 'powershell', wslDistros: [], error: null })
+  it('refuses before any card and any ssh: no ssh target, control or bidi characters, a name taken, a target ssh -G cannot read', async () => {
+    ops.resolved.set('me@broken', { hostName: null, user: null, port: null, error: 'bad configuration option: Hostnme' })
     const orc = await mgr.orchestrator()
     for (const [args, reason] of [
       [{ sshTarget: '-oProxyCommand=x' }, /Not an ssh target/],
       [{ sshTarget: 'me@ box' }, /Not an ssh target/],
-      [{ sshTarget: 'me@gone' }, /me@gone did not answer over ssh: Connection refused/],
+      [{ sshTarget: 'me@box\u202e' }, /ssh target has a control or formatting character/],
+      [{ sshTarget: 'me@box\n' }, /ssh target has a control or formatting character/],
+      [{ sshTarget: 'me@box', name: 'Lap\u200btop' }, /name has a control or formatting character/],
+      [{ sshTarget: 'me@box', name: 'Desk\u0007' }, /name has a control or formatting character/],
+      [{ sshTarget: 'me@win', wslDistro: 'Ubu\u202entu' }, /WSL distro has a control or formatting character/],
       [{ sshTarget: 'me@box', name: 'laptop' }, /already called laptop/],
-      [{ sshTarget: 'me@laptop', name: 'Other' }, /already linked that way, as Laptop/],
-      [{ sshTarget: 'me@laptop', name: 'Other', wslDistro: 'Debian' }, /has no WSL distro Debian/],
-      [{ sshTarget: 'me@box', wslDistro: 'Ubuntu' }, /runs a Unix shell, not Windows/],
+      [{ sshTarget: 'me@broken' }, /ssh could not read where me@broken goes: bad configuration option/],
     ] as const) {
       const r = await run(orc.id, 'add_machine', args)
       expect(r.isError, JSON.stringify(args)).toBe(true)
       expect(r.text, JSON.stringify(args)).toMatch(reason)
       expect(card(orc.id), JSON.stringify(args)).toBeUndefined()
     }
-    // A target that is not one is never even probed
-    expect(ops.calls.filter((c) => c[0] === 'probe').map((c) => c[1])).not.toContain('-oProxyCommand=x')
-    expect(ops.changes()).toEqual([])
+    // Only ssh -G ran, and only for the one target that got that far
+    expect(ops.calls).toEqual([['resolve', 'me@broken']])
   })
 })
 

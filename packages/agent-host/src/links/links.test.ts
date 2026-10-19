@@ -2314,6 +2314,10 @@ describe('the machine commands on a real hub (#1219)', () => {
     await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     expect((await u.call('projects.list')).length).toBe(1)
+    // A session of the machine the person let ask a project of this computer (#550)
+    const here = await hub.mgr.addProject(folder())
+    hub.store.machines.setLinkedMachineAsks('m1', true)
+    expect(hub.store.machines.setMachineAskConsent({ machineId: 'm1', sessionId: 's-there', sessionName: 'worker', projectId: here.id })).toBe(true)
     const orc = await hub.mgr.orchestrator()
     const call = run(hub, orc.id, 'remove_machine', { machine: 'Remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
@@ -2321,7 +2325,10 @@ describe('the machine commands on a real hub (#1219)', () => {
     hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
     expect((await call).isError).toBeFalsy()
     expect(hub.links.list()).toEqual([])
-    expect(await u.call('projects.list')).toEqual([])
+    expect((await u.call('projects.list')).map((p: { id: string }) => p.id)).toEqual([here.id])
+    // What the machine was let ask is forgotten with it, as the card says
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+    expect(hub.store.machines.linkedMachineAsks('m1')).toBe(false)
     // Nothing on the machine changed: its project is still there
     expect(remote.store.projects.listProjects().length).toBe(1)
   })

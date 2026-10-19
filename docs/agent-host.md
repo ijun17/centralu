@@ -1297,12 +1297,17 @@ when needed (`MachineInfo.connect`, #1134).
 wslDistro? }`, `install_machine { machine, action: install | update }`, `remove_machine`, `reconnect_machine`,
 `set_machine_connect { connect }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
 hub's links (`MachineFlow`, `sessions/machine-flow.ts`, wired by `SessionManager.useMachineOps(links)` in main.ts).
-`add_machine` probes the target first (`machines.probe`, one BatchMode ssh) and picks the shell as the Add machine
-dialog's rows do: a Unix shell, Windows through PowerShell, or a WSL distro of it when one is named. Linking, installing,
+`add_machine` connects nowhere before the person's card (security review of #1238): the target is resolved with `ssh -G`
+(`Links.resolve`; no connection, no key loaded) and the card shows the host, user and port ssh would use, and its
+ProxyCommand or ProxyJump when one is set. After Allow one BatchMode ssh probes what runs there (`machines.probe`); a
+target that does not answer or runs nothing it can link is linked nowhere, and the answer says why, with no second card.
+The shell follows the probe as the Add machine dialog's rows do: a Unix shell, Windows through PowerShell, or a WSL
+distro of it when one is named. A target, name or distro with a control or format character (Unicode Cc, Cf, bidi
+overrides among them) is refused before anything runs. Linking, installing,
 updating, removing and start at boot wait for a card in the orchestrator's slot under every preset (an `other` card,
 `about: "machine_change"`, the question whole in `raw`, so any window reads it; allow or deny, nothing remembered).
 Reconnecting and the connect mode act at once, as the row's buttons do. Refused before any card: a machine not linked,
-a target that is no ssh target or does not answer, a name or a target and shell already linked, and an install or update
+a target that is no ssh target or that `ssh -G` cannot read, a name already linked, and an install or update
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 

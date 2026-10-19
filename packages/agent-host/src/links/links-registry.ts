@@ -9,7 +9,7 @@ import type {
   SshHostList,
 } from '@cc/protocol'
 import { probeTarget } from './probe.js'
-import { listSshHosts } from './ssh-config.js'
+import { listSshHosts, resolveAlias, type ResolvedHost } from './ssh-config.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
 import type { RemoteSpec } from './tunnel.js'
 import { isObj } from '../json-value.js'
@@ -98,6 +98,14 @@ export class Links {
         linked: linked.filter((m) => m.sshTarget === h.alias).map((m) => ({ machineId: m.id, name: m.name, shell: m.shell, wslDistro: m.wslDistro })),
       })),
     }
+  }
+
+  /**
+   * What ssh would connect to for a target (`ssh -G`, which opens no connection and loads no key): the orchestrator's
+   * add_machine card shows it before anything connects (#1219)
+   */
+  resolve(sshTarget: string): Promise<ResolvedHost> {
+    return resolveAlias(sshTarget, this.deps.ssh ?? {})
   }
 
   /** One BatchMode ssh to tell what runs there (probe.ts); the target need not be linked or in the config */
