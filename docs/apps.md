@@ -125,8 +125,11 @@ app wrote there while running would reach the whole team.
   written over, and apps start without secrets until they are entered again; one that cannot be read
   at all is left in place and not written until it can be (`private-json-file.ts`). Either is said on
   screen (#944): the app list carries `secretsUnreadable` (the copy's file name, or null while the file
-  is stuck in place) on every app that declares secrets, and the Secrets section shows one line above
-  the fields; while the file is stuck, Save is disabled and says why. The line goes for an app once
+  is stuck in place, and `reason`: why, in a few words such as "it is not valid JSON" or "Centralu may
+  not read it (EACCES)", never anything the file holds) on every app that declares secrets, and the
+  Secrets section shows one line above the fields; while the file is stuck, Save is disabled and says
+  why. The reason is known to the host that met the file: a copy found after a restart is named
+  without one. The line goes for an app once
   that app has a value again (one file holds every app's values), or once a stuck file reads again;
   a moved-aside copy is found in the data folder, so a restart says it again until the copy is
   removed or each app's values are back. An
@@ -1164,7 +1167,8 @@ import read as the person's own (#1172). When the file is gone and a copy moved 
 (`app-imports.json.unreadable-<ms>`) is in the data folder, the host writes a new file at once in
 which every app then in the user folder has a mark of its own (`lost`, naming the copy). Each of
 them, the person's own apps too, is `unconfirmed` until it is reviewed and enabled, and its reason
-names both files by full path. The review does not say the app was imported, and neither does
+names both files by full path, and why the file could not be read while the host that moved it runs
+(#944). The review does not say the app was imported, and neither does
 Settings once it is enabled; like an import, it asks again if its `server` or `uses` changes. An
 app made after that is not held, and removing the copy changes nothing. Putting a mended copy back
 as `app-imports.json` makes it the record again, even while the host runs: the host reads the file

@@ -88,6 +88,11 @@ export class ImportBook {
    * every lookup: a list asks once per app, and each try lists two folders and stats every app
    */
   private retryAt: number | null = null
+  /**
+   * Why each copy this host moved aside could not be read (#944), for the reason its held apps give. Known only to the
+   * host that moved it: after a restart the reason names the copy without saying why
+   */
+  private whyMoved = new Map<string, string>()
 
   constructor(private readonly dataRoot: string) {
     this.file = new PrivateJsonFile(join(dataRoot, IMPORTS_FILE), {
@@ -112,7 +117,8 @@ export class ImportBook {
 
   /** The reason an app holds for a mark written because the marks were lost (`ImportMark.lost`) */
   lostReason(copy: string): string {
-    return `Centralu could not read ${this.file.path} and moved it to ${join(this.dataRoot, copy)}, so it cannot tell whether this app was imported. Review what it runs, then enable it`
+    const why = this.whyMoved.get(copy)
+    return `Centralu could not read ${this.file.path}${why ? ` (${why})` : ''} and moved it to ${join(this.dataRoot, copy)}, so it cannot tell whether this app was imported. Review what it runs, then enable it`
   }
 
   /**
@@ -198,8 +204,11 @@ export class ImportBook {
     this.doubtReason = null
     this.seen = before
     this.retryAt = null
+    const met = this.file.trouble
+    if (met?.movedTo && met.reason) this.whyMoved.set(met.movedTo, met.reason)
     if (this.file.unreadable) {
-      this.doubtReason = `${this.file.path} could not be read, so whether this app was imported is not known. It stays off until that file can be read again`
+      const why = met?.reason ? ` (${met.reason})` : ''
+      this.doubtReason = `${this.file.path} could not be read${why}, so whether this app was imported is not known. It stays off until that file can be read again`
     } else if (stat(this.file.path) === null) {
       this.afterLoss()
     }
