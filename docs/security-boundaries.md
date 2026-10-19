@@ -965,6 +965,11 @@ A host started with `centralu serve` on another machine is reached by the app th
   (`hello_ok.elevated`, from the token's integrity level) and the machine's row in Settings → Machines says it in one
   sentence with the way out: link the machine through a standard account with its own ssh key. A host running as root
   on Linux or macOS is reported the same way.
+- **A host started over ssh on Windows has no access to the person's saved sign-ins** (#1224). A key login is a network
+  logon without the password, so DPAPI cannot unlock the user's master key and Credential Manager reads as empty
+  (measured: `cmdkey /list` printed `* NONE *` there while the profile held 46 saved credentials). Git Credential
+  Manager can neither use nor save a sign-in. Centralu does not work around it (no plaintext store, no token carried
+  through Centralu): the host says which logon it runs in (`hello_ok.logon`) and the machine's row says what that means.
 - **A dev build on a linked machine** (`pnpm remote-dev`, #1036; [plans/remote-hub.md](plans/remote-hub.md) §10.11)
   sends nothing new across the link (no file travels but the installer every update sends), but it does run what is
   on that machine: the working copy there, by its own bundler on the pinned Node, at a commit the hub named in full and

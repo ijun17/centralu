@@ -35,6 +35,12 @@ export function protocolVersionOf(entry) {
  * is added by `--detach` only.
  */
 export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof }) {
+  /*
+   * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
+   * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
+   * desktop window on Windows uses this serve's host through `--window` only when it is listed (#1223 review)
+   */
+  const takes = ['from', 'window']
   return JSON.stringify({
     v: 1,
     port,
@@ -48,7 +54,43 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
     ...(detach ? { detach } : {}),
     // The running host proves it holds the token before the hub sends it (#838); absent: the hub sends hello as before
     ...(proof ? { proof: true } : {}),
+    takes,
   })
+}
+
+/**
+ * Where a `serve` was asked for from (#1223), for the host's `host.lock` (`CC_SERVE_FROM`): the hub's name `--from`
+ * gave, and the ssh client's address when this runs in an ssh session (OpenSSH's `SSH_CLIENT`, on Windows too). What a
+ * `--detach` found is carried to the launcher it starts (`CENTRALU_STARTED_FROM`), which runs outside the ssh session.
+ * Null when neither is known.
+ */
+export function serveFrom(env, hub = null) {
+  const carried = parseStartedFrom(env.CENTRALU_STARTED_FROM)
+  if (carried) return carried
+  const ssh = String(env.SSH_CLIENT ?? env.SSH_CONNECTION ?? '').trim().split(/\s+/)[0] ?? ''
+  const from = {
+    ...(typeof hub === 'string' && FROM_NAME_RE.test(hub) ? { hub } : {}),
+    ...(SSH_ADDRESS_RE.test(ssh) ? { ssh } : {}),
+  }
+  return from.hub || from.ssh ? from : null
+}
+
+const FROM_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/
+/** An IPv4 or IPv6 address as OpenSSH writes it: digits, hex, dots and colons */
+const SSH_ADDRESS_RE = /^[0-9A-Fa-f.:]{2,64}$/
+
+function parseStartedFrom(raw) {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw)
+    const from = {
+      ...(typeof v?.hub === 'string' && FROM_NAME_RE.test(v.hub) ? { hub: v.hub } : {}),
+      ...(typeof v?.ssh === 'string' && SSH_ADDRESS_RE.test(v.ssh) ? { ssh: v.ssh } : {}),
+    }
+    return from.hub || from.ssh ? from : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -69,9 +111,11 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
  *   `CENTRALU_MANAGED`, which is the launcher's business and would otherwise reach every agent.
  * - `CC_SERVE=1` lets the host take `host.stop` (`--stop`); a host the app runs refuses it.
  */
-export function hostEnv(env, { dataDir, version, hostDir, legacyToken }) {
+export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = null }) {
   const out = { ...env }
-  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED']) delete out[k]
+  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CC_SERVE_FROM', 'CC_STARTED_BY']) delete out[k]
+  // Who asked for this host, for its host.lock (#1223): a second host on the folder names it when refused
+  if (from) out.CC_SERVE_FROM = JSON.stringify(from)
   out.CC_DATA_DIR = dataDir
   // The host `host.stop` may end (`centralu serve --stop`): nothing else stops it in order on Windows
   out.CC_SERVE = '1'
@@ -238,6 +282,8 @@ export function probeHost({ port, token, protocolVersion, prove = false, timeout
             running: true,
             protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
             version: typeof m.build?.version === 'string' ? m.build.version : undefined,
+            // Which Windows logon it runs in (#1224): a `network` one is moved into the sign-in (serve-handover.mjs)
+            ...(HOST_LOGONS.includes(m.logon) ? { logon: m.logon } : {}),
           })
         } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
           // The token was right (it is checked first), so this is our host, on another protocol
@@ -289,12 +335,39 @@ function tcpProbe(port, timeoutMs) {
   })
 }
 
+/** The logons a host's `hello_ok.logon` may name (#1224) */
+const HOST_LOGONS = ['interactive', 'network', 'batch', 'service']
+
+/**
+ * One call to a running host (`method` with `params`), as `askHostToStop` makes it: a hello with the token, then the
+ * call. Its result, or null when it did not answer or refused. For `host.handover` (#1224)
+ */
+export function askHostRpc({ port, token, protocolVersion, prove = false, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+  if (typeof WebSocketImpl !== 'function') return Promise.resolve(null)
+  return helloExchange({
+    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    timedOut: null,
+    failed: () => null,
+    on: (done) => ({
+      unproven: () => done(null),
+      gone: () => done(null),
+      message: (m, ws) => {
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'call', method, params }))
+        else if (m.kind === 'res' && m.id === 'call') done(m.ok && m.result && typeof m.result === 'object' ? m.result : null)
+        else if (m.kind === 'res' && m.ok === false) done(null)
+      },
+    }),
+  })
+}
+
 /**
  * Asks a running host to stop (`host.stop`, an additive RPC): a hello with the token, then the call.
  * `{ ok: true }` once the host took it, `{ ok: false, message, protocolVersion? }` otherwise; the
  * last names the host's protocol when the hello was refused for it, so the caller can ask again.
+ * `ifIdle` (#1224): only if nothing runs there, checked and acted on by the host in one step; `{ ok: false, busy: true }`
+ * when something does.
  */
-export function askHostToStop({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, protocolVersion, prove = false, ifIdle = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
   // With `prove`, the token goes out only to a host that proved it holds it (#838)
   return helloExchange({
@@ -305,8 +378,11 @@ export function askHostToStop({ port, token, protocolVersion, prove = false, tim
       unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
       gone: () => done({ ok: false, message: 'the connection closed' }),
       message: (m, ws) => {
-        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
-        else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: ifIdle ? { ifIdle: true } : {} }))
+        else if (m.kind === 'res' && m.id === 'stop' && m.ok && m.result?.ok === false) {
+          // `ifIdle` and something runs there (#1224): nothing was changed
+          done({ ok: false, busy: true, message: 'it has work running', activity: m.result.busy ?? null, calls: m.result.calls ?? 0 })
+        } else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
         else if (m.kind === 'res' && m.ok === false) {
           const pv = m.error?.code === 'version_mismatch' ? mismatchProtocolOf(m.error) : null
           done({ ok: false, message: m.error?.message ?? 'refused', ...(pv !== null ? { protocolVersion: pv } : {}) })

@@ -413,6 +413,25 @@ its agents are killed with it. `centralu serve --stop` therefore asks the runnin
 WebSocket with the token from `serve.json` (an additive RPC), waits for the port to close, and only then ends the
 process. On posix, SIGTERM to the launcher stays the stop (agent-host.md §4.7).
 
+**In the person's Windows sign-in when someone is signed in (#1224, 2026-10-19).** A host WMI creates from the hub's
+ssh session keeps that session's logon: a key login is a network logon without the password, so DPAPI cannot unlock
+the user's vault there, Git Credential Manager can neither use nor save a sign-in, an administrator's token is the
+full one (§10.9c), and what the host opens for the person lands in session 0. Measured on a linked Windows 11 PC: the
+host's children saw `cmdkey /list` empty while the profile held 46 credential files. A scheduled task whose principal
+is `Interactive`, started with `Start-ScheduledTask` from that same ssh session, ran in session 1 with an interactive
+logon at medium integrity and saw the user's entries. So `serve --detach` on Windows first looks for this user's
+Explorer outside session 0; with one, it registers the data folder's task without a trigger (the one `--autostart on`
+gives an `AtLogOn` trigger; a task with no trigger reads as autostart off) and starts it. WMI stays the start when
+nobody is signed in, and the host then says which logon it runs in (`hello_ok.logon`), which the machine's row turns
+into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out. **The hand-over**: when the person later signs in
+(the task's trigger, with autostart on) or a `--detach` starts the task while such a network-logon host still holds the
+folder, the task's `serve` waits until that host has nothing running a person would lose, stops it in order and starts
+its own. The check and the stop are one call the host decides in one step (`host.stop { ifIdle }`, which from its yes on
+refuses every new call), so a turn the hub starts cannot slip in between, as it could over two calls. It waits 30
+minutes at most, then gives up until the next sign-in or start, and the machine's row says it waits, then that it gave
+up (`host.handover`). Waiting rather than asking: without a keeper on Windows a stop ends what runs, and an idle host
+loses nothing.
+
 **Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.
 Windows: a per-user scheduled task at logon (no administrator needed; not created on the test laptop, so not
@@ -702,7 +721,8 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
 - **The connection line says it** (`autostart: { on, how, linger }`) from a mark `--autostart` keeps in the data folder
   (`autostart.json`), so no link start asks systemd or Task Scheduler. `--autostart status` asks them and corrects the
   mark.
-- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart off`; it
+- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart remove`
+  (`off` of a serve from before it; since #1224 `off` keeps the Windows task without its trigger); it
   refuses to go on when the entry would not go. A version older than `--autostart` is passed by: it cannot have written
   one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
   leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).

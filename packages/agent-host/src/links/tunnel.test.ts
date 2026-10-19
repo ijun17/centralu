@@ -10,6 +10,7 @@ import {
   detachCommand,
   lastLine,
   parseConnectionLine,
+  hubNameForRemote,
   powershell,
   serveCommand,
   shimNames,
@@ -480,6 +481,29 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
       expect(forwards[0]).toContain('-N')
       expect(forwards.at(-1)!.at(-1)).toBe('wsl.exe -d Ubuntu-24.04 --exec sleep infinity')
+    }, 30_000 * SLOW)
+
+    /*
+     * #1223: the host a link starts writes the hub's name to its host.lock, so a Centralu window on that machine that
+     * finds the folder held can say whose link holds it. Only a remote whose line says it takes `--from` is sent one:
+     * an older serve answers an option it does not know with an error, and would never start
+     */
+    it('names this computer to a remote that takes --from, cleaned for its command line, and to no other', async () => {
+      for (const takes of [['from'], undefined]) {
+        rmSync(stateFile(), { force: true })
+        const t = tunnel(
+          { FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'ok', FAKE_SSH_LINE: line({ port: await freePort(), ...(takes ? { takes } : {}) }) },
+          { shell: 'powershell' },
+          { hubName: 'Jun’s MacBook Pro.local' },
+        )
+        expect((await t.open()).line.takes).toEqual(takes)
+        await expect(t.startHost()).resolves.toEqual({ how: 'detached', note: null })
+      }
+      const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
+      expect(detaches[0]!.run).toContain('{ & centralu.cmd serve --detach --from Jun-s-MacBook-Pro.local }')
+      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach }')
+      expect(hubNameForRemote('---')).toBeNull()
+      expect(hubNameForRemote('a'.repeat(80))).toHaveLength(64)
     }, 30_000 * SLOW)
 
     it('where WMI is blocked, runs the host in the forward’s own session instead, and it ends with the link', async () => {

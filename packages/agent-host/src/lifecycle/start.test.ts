@@ -116,10 +116,32 @@ describe("the launcher's variables (ST16)", () => {
       keeperSource: 'content',
       frontDoor: 'ws://127.0.0.1:4100',
       startedByServe: true,
+      startedBy: 'keeper',
+      serveFrom: null,
       token: 'secret',
       tokenOnStdin: true,
     })
     for (const name of LAUNCH_VARIABLES) expect(env, name).not.toHaveProperty(name)
     expect(env).toEqual({ CC_DATA_DIR: '/d', PATH: '/bin' })
+  })
+
+  /** For host.lock, so a second host on the folder can say who holds it (#1223) */
+  it('say who started the host and, for centralu serve, from where; nothing it cannot trust', () => {
+    const take = (env: Record<string, string | undefined>) => {
+      const l = takeLaunchEnv(env)
+      return { startedBy: l.startedBy, serveFrom: l.serveFrom, left: Object.keys(env) }
+    }
+    expect(take({ CC_SERVE: '1', CC_SERVE_FROM: JSON.stringify({ hub: 'Mac-mini', ssh: '192.168.0.5' }) })).toEqual({
+      startedBy: 'serve',
+      serveFrom: { hub: 'Mac-mini', ssh: '192.168.0.5' },
+      left: [],
+    })
+    expect(take({ CC_STARTED_BY: 'app' })).toEqual({ startedBy: 'app', serveFrom: null, left: [] })
+    expect(take({})).toEqual({ startedBy: null, serveFrom: null, left: [] })
+    // A name that could break the sentence, a value of another shape, or text that is not JSON is left out
+    expect(take({ CC_SERVE: '1', CC_SERVE_FROM: JSON.stringify({ hub: 'a b\nc', ssh: 7 }) }).serveFrom).toBeNull()
+    expect(take({ CC_SERVE: '1', CC_SERVE_FROM: '{' }).serveFrom).toBeNull()
+    // Only serve says where it came from
+    expect(take({ CC_SERVE_FROM: JSON.stringify({ hub: 'Mac' }) }).serveFrom).toBeNull()
   })
 })
