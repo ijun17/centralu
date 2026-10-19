@@ -180,6 +180,20 @@ describe('add_machine', () => {
     ])
   })
 
+  it('links nothing more when the same machine was linked while the card stood', async () => {
+    ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
+    const orc = await mgr.orchestrator()
+    const call = run(orc.id, 'add_machine', { sshTarget: 'me@box' })
+    await eventually(() => !!card(orc.id))
+    // Linked meanwhile, from the Machines screen
+    ops.ops.add({ name: 'Box', sshTarget: 'me@box', shell: 'posix' })
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    const r = await call
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/Box was linked while the card stood/)
+    expect(ops.changes().filter((c) => c[0] === 'add').length).toBe(1)
+  })
+
   it('links nothing when the person denies it', async () => {
     ops.probes.set('me@box', { sshTarget: 'me@box', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
     const orc = await mgr.orchestrator()

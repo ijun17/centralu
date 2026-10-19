@@ -194,6 +194,10 @@ export class MachineFlow {
       signal,
     )
     if (refused) return { ok: false, error: refused }
+    // Read again: the same machine may have been linked, or the name taken, while the card stood
+    const now = ops.list()
+    const taken = now.find((m) => m.name.toLowerCase() === name.toLowerCase()) ?? now.find((m) => m.sshTarget === target && m.shell === shell && (shell !== 'wsl' || (m.wslDistro ?? '').toLowerCase() === (wslDistro ?? '').toLowerCase()))
+    if (taken) return { ok: false, error: `${taken.name} was linked while the card stood, so nothing more was linked.` }
     return done(`Linked ${target} as ${name}.`, ops.add({ name, sshTarget: target, shell, wslDistro }))
   }
 
