@@ -454,6 +454,16 @@ describe('what never gets brought in', () => {
     expect(JSON.parse(readFileSync(join(late, MANIFEST_FILE), 'utf8')).name).toBe('Made meanwhile')
   })
 
+  it('a broken link at the id is a name taken too: bringing in is refused and the link stays (the same check as a new app’s, #1143)', async () => {
+    make()
+    mkdirSync(join(dataRoot, 'apps'), { recursive: true })
+    const link = join(dataRoot, 'apps', 'gone')
+    symlinkSync(join(root, 'nowhere'), link, process.platform === 'win32' ? 'junction' : 'dir')
+    const { token } = await rt.prepareImport(plantSource('gone-src', 'gone'))
+    expect(() => rt.commitImport(token, { enable: false })).toThrow('An app with the id "gone" is already in your apps')
+    expect(readdirSync(join(dataRoot, 'apps'))).toEqual(['gone'])
+  })
+
   it('brought in as a project (#1141): the folder lands at the target with no import mark, and a target taken meanwhile is refused and left as it was', async () => {
     make()
     const home = join(root, 'Centralu')
