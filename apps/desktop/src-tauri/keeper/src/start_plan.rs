@@ -156,11 +156,15 @@ pub struct Facts {
     /// A keeper answers on `<data>/keeper.sock`.
     pub keeper_answering: bool,
     pub shell: Shell,
+    /// This data folder has the `centralu` launcher `centralu serve` keeps (`os::serve_launcher`, Windows only, #1223),
+    /// and that serve said it takes `--window` and speaks this window's protocol (`serve_window::choose`): a linked
+    /// hub's serve may hold the folder, and the window can use its host.
+    pub serve_usable: bool,
 }
 
 impl Facts {
     /// The window's facts on this platform and build, before it has looked for a keeper.
-    pub fn window(env: Env, bundled_host: bool) -> Facts {
+    pub fn window(env: Env, bundled_host: bool, serve_usable: bool) -> Facts {
         Facts {
             os: Os::current(),
             build: Build::current(),
@@ -168,6 +172,7 @@ impl Facts {
             bundled_host,
             keeper_answering: false,
             shell: Shell::Untried,
+            serve_usable,
         }
     }
 }
@@ -217,6 +222,10 @@ pub enum Host {
     Named,
     /// The source, through the workspace's tsx, with `CC_DEV=1`.
     Source,
+    /// The data folder's `centralu` launcher as `centralu serve --window` (#1223): it makes sure the folder's serve
+    /// host runs, in this sign-in, and hands the window that host's port and token as a ready line. The host is not
+    /// the window's: quitting the window leaves it running for the hub linked to this machine.
+    Serve,
 }
 
 /// Why this mode, in a word the table and the tests use, and in words (`text`).
@@ -233,6 +242,7 @@ pub enum Reason {
     NoBundledHost,
     NoShellHere,
     DebugKeeper,
+    ServeInstalled,
 }
 
 impl Reason {
@@ -254,6 +264,9 @@ impl Reason {
             Reason::NoBundledHost => "this release build carries no bundled host, so it runs the source host like a debug build",
             Reason::NoShellHere => "only macOS has a shell; elsewhere the window starts the keeper",
             Reason::DebugKeeper => "tauri dev builds only the window, so a centralu-keeper beside it may be older code",
+            Reason::ServeInstalled => {
+                "centralu serve is installed in this data folder (a hub linked this machine): the window uses that host, started in this sign-in, instead of one the folder's lock would refuse"
+            }
         }
     }
 }
@@ -291,6 +304,10 @@ pub fn plan(f: &Facts) -> Plan {
         return direct(Reason::HostCommand);
     }
     match f.os {
+        // One host per data folder: a linked hub's serve holds this one, or will (#1223). A dev build has its own folder
+        Os::Windows if f.serve_usable && !dev => {
+            return Plan { mode: StartMode::Direct, host: Some(Host::Serve), dev, reason: Reason::ServeInstalled };
+        }
         Os::Windows => return direct(Reason::NoKeeperHere),
         Os::Linux if !f.env.use_keeper => return direct(Reason::KeeperOptIn),
         Os::MacOs if !release && !f.env.use_keeper => return direct(Reason::DebugDirect),

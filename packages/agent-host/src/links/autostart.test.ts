@@ -127,7 +127,22 @@ describe('autostartRemote', () => {
     expect(await removeAutostart(c({ code: 2, stderr: 'unknown option for serve: --autostart' }).c)).toBe(false)
     expect(await removeAutostart(c({ stdout: 'CENTRALU-NOT-FOUND' }).c)).toBe(false)
     await expect(removeAutostart(c({ stdout: '{"v":1,"autostart":{"ok":false,"on":true,"how":"task","linger":null,"message":"Access is denied."}}' }).c)).rejects.toThrow(
-      'Centralu on box could not stop starting at boot: Access is denied.',
+      'Centralu on box could not remove its start at boot: Access is denied.',
     )
+  })
+
+  /** Since #1224's review `off` keeps the Windows task without its trigger; uninstall asks `remove`, and `off` of a serve from before it */
+  it('an uninstall asks remove, and off of a serve that predates remove', async () => {
+    const asked: string[] = []
+    const answers = [
+      { code: 2, stdout: '', stderr: '--autostart needs on, off or status (got "remove")' },
+      { code: 0, stdout: '{"v":1,"autostart":{"ok":true,"on":false,"how":"task","linger":null}}', stderr: '' },
+    ]
+    const exec = async (command: string) => {
+      asked.push(/serve --autostart (\w+)/.exec(command)?.[1] ?? command)
+      return answers.shift()!
+    }
+    expect(await removeAutostart({ exec, spec: { shell: 'posix' }, target: 'box' })).toBe(true)
+    expect(asked).toEqual(['remove', 'off'])
   })
 })

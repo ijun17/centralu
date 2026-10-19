@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { RpcMethods } from '@cc/protocol'
 import { createRpcHandler } from './rpc.js'
+import { Drain, DrainCut } from './drain.js'
+import { createStopGate } from './lifecycle/stop-gate.js'
 import type { SessionManager } from './sessions/manager.js'
 
 /**
@@ -53,6 +55,62 @@ describe('host.stop', () => {
   it('is refused by a host with nothing to stop it through (one the app runs)', async () => {
     const rpc = await handler({})
     await expect(rpc('host.stop', {})).rejects.toThrow(/quit the app instead/)
+  })
+
+  /*
+   * #1224's review: the hand-over into the Windows sign-in asked the activity, then stopped, over two calls; a turn the
+   * hub started in between was ended with the host. `ifIdle` checks and acts in one step on the host, counting calls in
+   * flight (one may be about to start a turn), and from its yes on refuses every new call
+   */
+  const idle = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
+
+  it('with ifIdle, a call in flight or work running makes it answer busy and stop nothing; idle, it stops and no turn can start after', async () => {
+    const drain = new Drain()
+    let activity = { ...idle }
+    let stopped = 0
+    const rpc = await handler({ stopHost: () => void stopped++, stopGate: createStopGate({ drain, activity: () => activity }) })
+    // As the transport runs every call: tracked by the drain
+    const call = (method: string, params: unknown) => drain.track(`rpc ${method}`, () => rpc(method, params))
+
+    // A send arrived first and has not started its turn yet
+    let release = () => {}
+    const send = drain.track('rpc sessions.send', () => new Promise<void>((r) => (release = r)))
+    await expect(call('host.stop', { ifIdle: true })).resolves.toEqual({ ok: false, busy: idle, calls: 1 })
+    release()
+    await send
+    // Its turn runs now
+    activity = { ...idle, working: 1 }
+    await expect(call('host.stop', { ifIdle: true })).resolves.toEqual({ ok: false, busy: { ...idle, working: 1 }, calls: 0 })
+    // An open terminal counts as much as a turn
+    activity = { ...idle, terminals: 1 }
+    await expect(call('host.stop', { ifIdle: true })).resolves.toMatchObject({ ok: false })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(stopped).toBe(0)
+
+    activity = { ...idle }
+    await expect(call('host.stop', { ifIdle: true })).resolves.toEqual({ ok: true })
+    // The turn the hub starts now is refused, as retryable, instead of being cut by the stop
+    await expect(drain.track('rpc sessions.send', async () => 'started')).rejects.toBeInstanceOf(DrainCut)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(stopped).toBe(1)
+  })
+
+  it('without ifIdle stops as before, whatever runs; with ifIdle and no way to tell, it refuses', async () => {
+    let stopped = 0
+    const rpc = await handler({ stopHost: () => void stopped++, stopGate: createStopGate({ drain: new Drain(), activity: () => ({ ...idle, working: 3 }) }) })
+    await expect(rpc('host.stop', {})).resolves.toEqual({ ok: true })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(stopped).toBe(1)
+    const blind = await handler({ stopHost: () => void stopped++ })
+    await expect(blind('host.stop', { ifIdle: true })).rejects.toThrow(/cannot tell whether it is idle/)
+  })
+
+  it('keeps what a sign-in’s serve says about taking over (host.handover)', async () => {
+    const said: unknown[] = []
+    const rpc = await handler({ handover: (h) => void said.push(h) })
+    await expect(rpc('host.handover', { handover: { state: 'waiting', since: 5 } })).resolves.toEqual({ ok: true })
+    await expect(rpc('host.handover', { handover: null })).resolves.toEqual({ ok: true })
+    expect(said).toEqual([{ state: 'waiting', since: 5 }, null])
   })
 })
 

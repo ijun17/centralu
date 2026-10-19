@@ -176,6 +176,12 @@ pub const CLOSE_STDIN_TO_STOP: bool = false;
 /// Whether a `.bin/` sh script can be started as a program (it can: the kernel reads its `#!`).
 pub const RUNS_SH_SCRIPTS: bool = true;
 
+/// Only Windows' window attaches to a `centralu serve` host (#1223, `start_plan::Host::Serve`): elsewhere a window
+/// runs its own host, or attaches to a keeper.
+pub fn serve_launcher() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// A group of its own, led by the host (`host_proc::spawn_host`).
 pub fn own_group(cmd: &mut Command) {
     cmd.process_group(0);

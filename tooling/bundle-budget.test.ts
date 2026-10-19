@@ -197,4 +197,14 @@ describe('CI finds main\'s record among main\'s own runs, page by page', () => {
     // The other job running styles.test.ts in CI says which job compares, rather than skipping quietly
     expect(workflow.split(/^ {2}windows-tests-unit:\n/m)[1]!.split(/^ {2}\S/m)[0]).toContain('CC_BUNDLE_COMPARED_BY: verify')
   })
+
+  it('every release job that runs pnpm verify says build.yml compares (the shim job too; beta.30 rehearsal)', () => {
+    const release = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+    // The jobs that run the release script, which runs pnpm verify unless told to skip it
+    for (const job of ['platform', 'shim']) {
+      const body = release.split(new RegExp(`^ {2}${job}:\\n`, 'm'))[1]!.split(/^ {2}\S/m)[0]!
+      expect(body, job).toContain('pnpm release:npm')
+      expect(body, job).toContain('CC_BUNDLE_COMPARED_BY: build.yml verify')
+    }
+  })
 })

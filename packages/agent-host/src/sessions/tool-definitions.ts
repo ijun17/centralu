@@ -640,6 +640,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   'Commands for linked machines: add_machine, install_machine, remove_machine, reconnect_machine, set_machine_connect, set_machine_autostart.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
+  // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
+  'Projects that are apps attach on demand: the find_apps command lists them.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
   'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',

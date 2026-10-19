@@ -385,7 +385,7 @@ export class ChildReports {
     if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return
     const modelText = `${forModel}\nsourceSessionId: ${from.sessionId}`
     try {
-      await this.host.deliver(sessionId, text, undefined, from, relayed, undefined, 'inline', relayed ? (h) => h.send(modelText) : undefined)
+      await this.host.deliver(sessionId, text, undefined, from, relayed, undefined, 'inline', undefined, undefined, relayed ? modelText : undefined)
     } catch (e) {
       // The session may be asleep or deleted — a notice must not destabilize the host
       if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return
