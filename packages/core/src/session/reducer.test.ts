@@ -290,6 +290,17 @@ describe('limits, context and errors', () => {
     expect(s.state).toBe('working')
   })
 
+  it('a compaction that reports its size moves the gauge there, as an estimate in the known window (#1282)', () => {
+    const read = applyEvent(s0(), ev({ type: 'context_update', used: 964000, window: 1000000, exactness: 'exact' }), NOW)
+    const compacted = applyEvent(read, ev({ type: 'compaction', failed: false, before: 964000, after: 8800 }), NOW)
+    expect(compacted.context).toEqual({ used: 8800, window: 1000000, exactness: 'estimate' })
+    // A failed one shrank nothing; one with no size (Codex's) waits for the tool's next reading
+    expect(applyEvent(read, ev({ type: 'compaction', failed: true, reason: 'Not enough messages to compact.' }), NOW).context).toEqual(read.context)
+    expect(applyEvent(read, ev({ type: 'compaction', failed: false }), NOW).context).toEqual(read.context)
+    // With no reading yet the window is unknown
+    expect(applyEvent(s0(), ev({ type: 'compaction', failed: false, before: 964000, after: 8800 }), NOW).context).toBeNull()
+  })
+
   it('an error leaves the error state and its message', () => {
     const s = applyEvent(s0(), ev({ type: 'error', error: { code: 'adapter_crashed', message: 'died', retryable: true } }), NOW)
     expect(s.state).toBe('error')

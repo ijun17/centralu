@@ -256,7 +256,7 @@ export class SessionManager {
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
-  private quitNotices: { sessionId: string; requester: string }[] = []
+  private quitNotices: { sessionId: string; requester: string; swapped?: true }[] = []
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -399,7 +399,8 @@ export class SessionManager {
     }
     // A card the previous host left standing over a kept process closes back into its rest here too (#428)
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
-    this.children.restoreReports(this.meta, keeperOpts.keptSessions)
+    // A turn that ended while the old host let go is told as such (#1186), once the start is done, as a quit's is
+    for (const m of this.children.restoreReports(this.meta, keeperOpts.keptSessions)) this.quitNotices.push({ sessionId: m.sessionId, requester: m.callerSessionId, swapped: true })
     this.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()
@@ -875,7 +876,7 @@ export class SessionManager {
     if (this.disposing || this.handingOver) return
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
-    for (const n of now) void this.reports.tellAskerOfInterruption(n.sessionId, n.requester)
+    for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester))
   }
 
   /**
@@ -1893,6 +1894,7 @@ export class SessionManager {
       },
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
+      forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),

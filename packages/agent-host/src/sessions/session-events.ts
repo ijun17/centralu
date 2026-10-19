@@ -1,6 +1,6 @@
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo } from '@cc/protocol'
-import { applyBackgroundTasks, applySessionState, nextStateFor } from '@cc/protocol'
+import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -280,7 +280,8 @@ export class SessionEvents {
    * While SessionInfo had none of these fields, a UI that disconnected and came back received only
    * state=waiting_approval, and **had no payload to draw the approval card with** — with no requestId
    * either, it could not even respond. These are never put in the DB (upsert does not know these
-   * fields) — if the host restarts, they really are gone. The cards, the activity and the limit are set with the
+   * fields) — if the host restarts, they really are gone. The context reading is the exception (#48,
+   * store v17). The cards, the activity and the limit are set with the
    * state they belong to (`applySessionState`, protocol session-state.ts); these are the rest.
    */
   private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
@@ -290,14 +291,16 @@ export class SessionEvents {
         if (e.request) this.host.cacheLedger.record(m.tool, m.id, e.request)
         break
       case 'context_update':
-        m.context = { used: e.used, window: e.window, exactness: e.exactness }
+        m.context = nextContext(m.context, e)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
-        m.context = null
+        m.context = nextContext(m.context, e)
         this.host.cacheLedger.note(m.id, 'compaction')
         break
       case 'compaction':
+        // The size it came out at, until the tool's next reading (#1282); stored with the session like any reading
+        m.context = nextContext(m.context, e)
         // The conversation the next request sends begins with a summary the cache has never seen (§6.1)
         this.host.cacheLedger.note(m.id, 'compaction')
         break
@@ -390,6 +393,12 @@ export class SessionEvents {
      * A wake or a restart waited out here takes seconds, and the trust a task was let through on can go meanwhile.
      */
     stillAllowed?: () => string | null,
+    /**
+     * For a relayed message, what the agent reads instead of the bare wake (#1186): the words Centralu wrote about the
+     * other session, never that session's own (`ChildReports.tellSession`'s `forModel`). The rest of the input, a
+     * line Centralu adds once (`rootAppsNotice`), goes with it as with any other text
+     */
+    relayedText?: string,
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
@@ -467,6 +476,7 @@ export class SessionEvents {
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
       // A hub's orchestrator directs as this host's own does (`sendFromHub`)
+      : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
@@ -479,6 +489,8 @@ export class SessionEvents {
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
     else h.send(input)
+    // It takes messages again: what could not be told it before goes in now (#1186)
+    this.host.reports.deliverHeld(sessionId)
   }
 
   /**
