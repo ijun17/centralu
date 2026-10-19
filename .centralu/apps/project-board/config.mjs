@@ -61,6 +61,12 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 // The merge queue's rerun policy (2026-10-19, run-failure.mjs): it reruns only infrastructure failures,
 // and a failed job named here (exact names, `*` for any characters) counts as one: a known-flaky job.
 // PROJECT_BOARD_QUEUE_FLAKY (the list as JSON): for the tests only
+// The main guard (#1259, main-guard.mjs): on where changes land after the fast tier (`ci.landTier` "quick"), unless
+// `queue.guard.enabled` is false. `jobPaths` attributes a failed job to paths (a job name, or the start of a matrix
+// job's, → path prefixes ending in "/" or exact paths): the culprit is then the one commit that touches them.
+// PROJECT_BOARD_QUEUE_GUARD ("on" or "off"): for the tests only
+const guardConf = config.queue?.guard ?? {}
+const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOARD_QUEUE_GUARD === 'on' : guardConf.enabled !== false && CI.landTier === 'quick'
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
   flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
@@ -71,5 +77,12 @@ export const QUEUE = {
     timeoutMs: Math.max(1, Number(conflicts.timeoutMinutes ?? 30) || 30) * 60_000,
     checkout: checkoutEnv !== undefined ? checkoutEnv || null : (conflicts.checkout ?? APP_DIR),
   },
+  guard: guardOn
+    ? {
+        jobPaths: Object.fromEntries(
+          Object.entries(guardConf.jobPaths ?? {}).filter(([k, v]) => k && Array.isArray(v) && v.every((p) => typeof p === 'string' && p)),
+        ),
+      }
+    : null,
 }
 

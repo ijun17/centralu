@@ -778,7 +778,9 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
   out({ state: 'pending', statuses: [] })
 } else if (path && path.includes('/actions/workflows/build.yml/runs?')) {
-  const runs = (st.runs ?? {})[new URLSearchParams(path.split('?')[1]).get('head_sha')] ?? []
+  // By commit (a pull request's, a batch's), else by branch (main's push runs, a bisect probe's): the main guard (#1259)
+  const query = new URLSearchParams(path.split('?')[1])
+  const runs = query.get('head_sha') ? ((st.runs ?? {})[query.get('head_sha')] ?? []) : ((st.branchRuns ?? {})[query.get('branch')] ?? [])
   out(args.includes('--slurp') ? [{ workflow_runs: runs }] : { workflow_runs: runs })
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path) && st.rerunError) {
   fail(st.rerunError)
@@ -806,6 +808,11 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.prs[path.split('/')[4]].baseRefName = body.base
   save()
   out({ number: Number(path.split('/')[4]) })
+} else if (path === R + '/issues' && args.includes('POST')) {
+  const body = JSON.parse(stdin)
+  st.issues = [...(st.issues ?? []), body]
+  write(['issue', body.title])
+  out({ number: 500 + st.issues.length, html_url: 'https://github.com/ijun17/centralu/issues/' + (500 + st.issues.length) })
 } else if (path && args.includes('DELETE')) {
   write(['delete', path.split('/heads/')[1]])
 } else fail('fake gh: unexpected call ' + JSON.stringify(args) + ' (HTTP 400)')
@@ -897,6 +904,8 @@ const FAST_LAND = { PROJECT_BOARD_CI_FULL_TIER: 'full tier', PROJECT_BOARD_CI_LA
  * merge in the checkout this app is committed in, whose remote is the real GitHub.
  */
 const NO_CHECKOUT = { PROJECT_BOARD_QUEUE_CHECKOUT: '' }
+/** No main guard unless a test asks for it (#1259): it reads main's runs on its own clock */
+const NO_GUARD = { PROJECT_BOARD_QUEUE_GUARD: 'off' }
 
 function runtime(state?: Gh, env: Record<string, string> = {}, path: string[] = []) {
   if (state) fake.setState(state)
@@ -904,7 +913,7 @@ function runtime(state?: Gh, env: Record<string, string> = {}, path: string[] = 
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...env }, path),
+    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...NO_GUARD, ...env }, path),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -2496,5 +2505,169 @@ describe('the watch command: the queuing session hears about its items', { timeo
     expect(quiet.code).toBe(6)
     expect(quiet.out).toContain('No news in 0.01 minutes.')
     expect((await watch(['watch'])).code).toBe(2)
+  })
+})
+
+// --- The main guard (#1259): main's full runs after landing on the fast tier --------------------------
+
+/**
+ * Main as the guard finds it: a green commit, then `commits` (each changing its files), the last one red; pushed to a
+ * bare repository standing for GitHub's, which the checkout fetches from (as the conflict tests' checkout does).
+ */
+function mainRepo(commits: { subject: string; files: string[] }[]) {
+  const origin = join(root, 'origin.git')
+  const work = join(root, 'work')
+  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+  g(root, 'init', '-q', '-b', 'main', work)
+  g(work, 'config', 'user.name', 'Tester')
+  g(work, 'config', 'user.email', 'tester@example.test')
+  g(work, 'config', 'commit.gpgsign', 'false')
+  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
+  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  writeFileSync(join(work, 'README.md'), 'base\n')
+  g(work, 'add', '-A')
+  g(work, 'commit', '-q', '-m', 'green base')
+  const green = g(work, 'rev-parse', 'HEAD')
+  const shas: string[] = []
+  for (const c of commits) {
+    for (const f of c.files) {
+      mkdirSync(join(work, f, '..'), { recursive: true })
+      writeFileSync(join(work, f), `${c.subject}\n`)
+    }
+    g(work, 'add', '-A')
+    g(work, 'commit', '-q', '-m', c.subject)
+    shas.push(g(work, 'rev-parse', 'HEAD'))
+  }
+  g(work, 'push', '-q', 'origin', 'main')
+  return { work, origin, green, shas }
+}
+
+/** A push run of build.yml on main (`id`, its commit, how it ended), long before any test runs */
+const mainRun = (id: number, sha: string, conclusion: string | null) => ({ ...ghRun(conclusion, 1, sha, { id, head_branch: 'main', event: 'push' }), created_at: '2026-10-17T08:00:00Z' })
+/** A bisect probe's run, made after the probe started (any time from now on) */
+const probeRun = (id: number, sha: string, conclusion: string) => ({ ...ghRun(conclusion, 1, sha, { id, head_branch: `queue/bisect-${sha.slice(0, 12)}`, event: 'workflow_dispatch' }), created_at: '2099-01-01T00:00:00Z' })
+const failedJob = (id: number, name: string) => ({ id, name, status: 'completed', conclusion: 'failure', steps: [{ name: 'pnpm test', conclusion: 'failure' }] })
+
+/** The queue file as the queue left it: the items given (a merged one that landed a commit, say) */
+function seedQueue(items: Record<string, unknown>[]) {
+  const dir = join(root, 'data', 'app-data', 'p1', 'project-board')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'merge-queue.json'), JSON.stringify({ version: 1, seq: 0, pause: null, items, events: [], batches: [], batchSeq: 0, batchOff: null }))
+}
+
+/** The queue landed `commit` (as #90, for another session): the guard watches main once the queue has landed something */
+const landed = (commit: string) =>
+  seedQueue([{ repo: R, pr: 90, lowers: [], owner: 'other', state: 'merged', commit, title: 'feat(apps): change 90', updatedAt: new Date().toISOString(), reruns: {} }])
+
+function guardRuntime(repo: ReturnType<typeof mainRepo>, state: Gh, env: Record<string, string> = {}) {
+  mkdirSync(appTmp(), { recursive: true })
+  const tmp = { TMPDIR: appTmp(), TEMP: appTmp(), TMP: appTmp() }
+  return runtime(
+    ghState(state),
+    {
+      ...FAST_LAND,
+      PROJECT_BOARD_QUEUE_GUARD: 'on',
+      PROJECT_BOARD_QUEUE_GUARD_MS: '50',
+      PROJECT_BOARD_QUEUE_CHECKOUT: repo.work,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig'),
+      ...tmp,
+      ...env,
+    },
+    gitWrapper(fake.bin),
+  )
+}
+/** The guard's state in the queue file; none before the queue first writes it */
+const guardOnDisk = () => (filesNamed(join(root, 'data'), 'merge-queue.json').length ? (queueOnDisk().guard ?? {}) : {})
+const issues = (): { title: string; body: string }[] => gh().issues ?? []
+const mainRedNotices = () => notices().filter((e) => e.kind === 'main-red') as unknown as { kind: string; text: string; owner: string | null }[]
+
+describe('the main guard finds what broke main after it landed (#1259)', { timeout: 120_000 * SLOW }, () => {
+  it('reads nothing of main while the queue has landed nothing', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    guardRuntime(repo, { branchRuns: { main: [mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] } })
+    await call('merge_queue')
+    await new Promise((r) => setTimeout(r, 500))
+    expect(ghCalls().some((a) => a.join(' ').includes('event=push'))).toBe(false)
+    expect(issues()).toEqual([])
+  })
+
+  it('the only commit since the last green one is the culprit: an issue with the failure, and its session is told once', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', state: 'merged', commit: repo.shas[0], title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': 'FAIL unit packages/ui/src/a.test.ts > renders\nAssertionError: expected 1 to be 2' },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the issue and the notice')
+    expect(issues()[0]!.title).toBe('Main is red since #81 feat(ui): change 81')
+    expect(issues()[0]!.body).toContain('the only commit since the last green one')
+    expect(issues()[0]!.body).toContain('FAIL unit packages/ui/src/a.test.ts > renders')
+    expect(mainRedNotices()).toHaveLength(1)
+    expect(mainRedNotices()[0]!.owner).toBe('tester')
+    expect(mainRedNotices()[0]!.text).toContain('Merge queue: main went red after #81 (feat(ui): change 81 (#81)) landed: verify failed at')
+    // Ticks go on, main still red on that commit: nothing is filed or said again
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(issues()).toHaveLength(1)
+    expect(mainRedNotices()).toHaveLength(1)
+    expect(guardOnDisk().hunt).toMatchObject({ red: repo.shas[0], outcome: 'reported', culprit: { sha: repo.shas[0] } })
+    expect(gh().dispatched ?? []).toEqual([])
+  })
+
+  it("attributes by the failed job's paths when exactly one commit touches them, with no run", async () => {
+    const repo = mainRepo([
+      { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
+      { subject: 'fix(desktop): change 82 (#82)', files: ['apps/desktop/src-tauri/src/keeper.rs'] },
+      { subject: 'docs: change 83 (#83)', files: ['docs/a.md'] },
+    ])
+    landed(repo.shas[2]!)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, repo.shas[2]!, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'keeper e2e (linux)')] },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: repo.shas[1], how: expect.stringContaining('touches the paths of keeper e2e (linux)') })
+    expect(issues()[0]!.title).toBe('Main is red since #82 fix(desktop): change 82')
+    expect(gh().dispatched ?? []).toEqual([])
+  })
+
+  it('bisects otherwise: the full tier on the middle commit, then on the next, and the culprit is the first that fails', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [, c2, c3, c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'success')] } },
+        [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(992, c3, 'failure')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the bisect', 60_000)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3, how: expect.stringContaining('bisected') })
+    expect(gh().dispatched).toEqual([
+      { ref: probe(c2), inputs: { tier: 'full' } },
+      { ref: probe(c3), inputs: { tier: 'full' } },
+    ])
+    expect(writes().map(short2)).toEqual(expect.arrayContaining([`branch ${probe(c2)}`, `delete ${probe(c2)}`, `branch ${probe(c3)}`, `delete ${probe(c3)}`]))
+    expect(issues()[0]!.title).toBe('Main is red since #83 feat(apps): change 83')
+  })
+
+  it('does nothing while main is green, and keeps the app running while main has a run going', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const going = { ...mainRun(990, repo.shas[0]!, null), status: 'in_progress' }
+    landed(repo.shas[0]!)
+    const r = guardRuntime(repo, { branchRuns: { main: [going, mainRun(980, repo.green, 'success')] } })
+    const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy
+    await call('merge_queue')
+    await until(() => guardOnDisk().green === repo.green && busy() === "main guard, waiting for main's full run", 'the hold')
+    patchGh((s) => (s.branchRuns.main = [mainRun(990, repo.shas[0]!, 'success'), mainRun(980, repo.green, 'success')]))
+    await until(() => guardOnDisk().green === repo.shas[0] && busy() === undefined, 'green and the release')
+    expect(issues()).toEqual([])
   })
 })

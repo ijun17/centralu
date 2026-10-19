@@ -63,6 +63,8 @@ import { classifyRun } from './run-failure.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { listSome, plural, short, span } from './util.mjs'
+import { GUARD_MS, guardTick } from './main-guard.mjs'
+import { actOnRed } from './main-revert.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
 export const LEASE_FILE = 'merge-queue.lease.json'
@@ -139,7 +141,36 @@ export const WORKING = new Set(['waiting', 'ci'])
 export function queueBusy(q) {
   const active = q.items.filter((i) => WORKING.has(i.state)).length
   if (active) return `merge queue, ${plural(active, 'item')}`
-  return activeBatch(q) ? 'merge queue, a batch finishing' : null
+  if (activeBatch(q)) return 'merge queue, a batch finishing'
+  // The main guard (#1259): main's full run after a landing not judged yet, or a culprit being looked for
+  if (q.guard?.hunt && !q.guard.hunt.outcome) return 'main guard, finding what broke main'
+  return q.guard?.pending ? "main guard, waiting for main's full run" : null
+}
+
+/**
+ * One step of the main guard (#1259, main-guard.mjs), at most once per its interval, by the driver holding the
+ * lease: whichever driver runs, one guards. A step that fails is said once and waits the interval.
+ */
+export async function runGuard(dir, { holder, now = Date.now(), ref = queueRef, act = actOnRed } = {}) {
+  if (!QUEUE.guard) return { did: 'off' }
+  const q = readQueue(dir)
+  // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
+  if (!q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
+  if (q.guard?.nextAt && Date.parse(q.guard.nextAt) > now) return { did: 'wait' }
+  if (!takeLease(dir, holder, now)) return { did: 'busy' }
+  try {
+    return await guardTick({
+      q,
+      now,
+      update: (fn) => updateQueue(dir, fn),
+      renew: () => takeLease(dir, holder, Date.now()),
+      act: (found) => act(dir, found, { now, ref, update: (fn) => updateQueue(dir, fn) }),
+      failingLine,
+    })
+  } finally {
+    const after = readQueue(dir)
+    if (!after.items.some((i) => ACTIVE.has(i.state)) && !activeBatch(after)) releaseLease(dir, holder)
+  }
 }
 
 // --- The lease ---------------------------------------------------------------------------------------
@@ -658,6 +689,7 @@ export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onT
   // A tick that throws (the queue file does not read) says so once, then waits longer each time
   let failures = 0
   let said = null
+  let guardSaid = null
   const loop = async () => {
     if (stopped) return
     let done
@@ -666,6 +698,14 @@ export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onT
       const r = await tick(dir, { holder, ref })
       failures = 0
       said = null
+      try {
+        await runGuard(dir, { holder, ref })
+      } catch (e) {
+        const message = `the main guard: ${String(e?.message ?? e)}`
+        if (message !== guardSaid) console.error(`[project-board] merge queue: ${message}`)
+        guardSaid = message
+        updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), lastError: message, nextAt: new Date(Date.now() + GUARD_MS).toISOString() }))
+      }
       onTick?.(r)
     } catch (e) {
       failures += 1

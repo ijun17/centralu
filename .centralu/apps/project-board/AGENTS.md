@@ -510,6 +510,40 @@ run and the full tier's check is not asked for.
   without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue.test.ts`,
   `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
 
+### The main guard (#1259)
+
+With changes landing after the fast tier, the full tier runs on main after they land. The **main
+guard** (`main-guard.mjs`, its actions in `main-revert.mjs`) watches it: on while `ci.landTier` is
+`quick` (unless `queue.guard.enabled` is false), one step at most every 2 minutes once the queue has landed something, in the same ticks as
+the queue and by whichever driver holds the lease. Its state is the queue file's `guard`: `green` (the
+last fully green commit of main), `pending` (main's newest push run still going), `hunt` (a red being
+looked into).
+
+- **Main's state** (`mainVerdict`): build.yml's push runs on the default branch, newest first. A
+  cancelled run (a newer push superseded it) and one still running say nothing; the newest that
+  passed is `green`; the newest that failed, when newer than it, is the red to look into.
+- **The candidates** are the first-parent commits after the last green one up to the red one, with
+  their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
+  `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
+  no checkout: the guard reports the red without a culprit.
+- **The culprit**, in order: the only candidate; else by the failed jobs' paths
+  (`queue.guard.jobPaths`: a job's name, or the start of a matrix job's, → path prefixes), when every
+  failed job has paths and exactly one candidate touches them; else **bisect**: the full tier
+  (`tier: full`) on the middle candidate, on a branch `queue/bisect-<sha>` at that commit, halving the
+  range by its outcome until the first red commit is next to the last green one. A probe's branch is
+  deleted once its run has spoken; a probe cancelled twice ends the bisect without a culprit.
+- **Once acted** on a red, the guard does nothing more about it (or about red runs on older commits)
+  until main is green again. Main green during a bisect (a flake) ends it.
+- **Acting**: an issue with the failure (the run, the failed jobs, the first failing line, the
+  candidates and how the culprit was found), and a message to the session that queued the culprit
+  (its merged item, by the commit it landed as, else by the pull request in the subject: posted into
+  that session as its notices are, and seen by its watch command). Kind `main-red`.
+- **Keeping running**: the board holds busy while main's newest run is going or a hunt is under way
+  (`queueBusy`), so the guard sees the full run that follows a landing.
+- `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`) and `PROJECT_BOARD_QUEUE_GUARD_MS` are for tests only.
+  Tests: `tooling/project-board-queue.test.ts` ("the main guard …"), with a real git checkout and a
+  fake `gh`.
+
 ## Which tool for which task (#957)
 
 `help` (model only, read-only) answers a fixed table: which of this app's tools to use for a

@@ -20,6 +20,12 @@
   "queue": {
     "batch": { "min": 1, "max": 4 },
     "flakyJobs": [],
+    "guard": {
+      "jobPaths": {
+        "keeper e2e": ["apps/desktop/"],
+        "host tests, remote Node": ["packages/agent-host/", "packages/protocol/"]
+      }
+    },
     "conflicts": {
       "mechanical": [
         { "files": ["pnpm-lock.yaml"], "run": [["pnpm", "install", "--lockfile-only", "--ignore-scripts"]] },

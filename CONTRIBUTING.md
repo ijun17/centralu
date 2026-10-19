@@ -171,7 +171,10 @@ through a batch built on main that runs the quick tier on what lands, a batch of
 full tier then runs on main, after it landed. So nothing has run the UI scenarios, the bundles or the
 keeper on your change before it is on main: run `pnpm verify` locally anyway, all of it, before you
 push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
-run was quick.) To run the
+run was quick.) When main's full run fails, the board's main guard finds the commit that broke it
+among those since main was last fully green (the only one, the one touching the failed job's paths,
+or by running the full tier on candidates), files an issue with the failure and tells the session
+that queued it. To run the
 full tier on your branch before queueing it (UI work, a change to the keeper or the bundles):
 
 ```bash
