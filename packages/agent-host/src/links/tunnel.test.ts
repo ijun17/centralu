@@ -431,6 +431,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect((logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))).toEqual([])
   })
 
+  it('tells the person to update a Centralu that prints no connection line with the npm their shell runs (#688)', async () => {
+    // A Centralu there from before `serve`: it answers, with no line of ours
+    const old = { FAKE_SSH_LINE: '{}', FAKE_SSH_HAS: 'centralu' }
+    await expect(tunnel(old, { shell: 'powershell' }).open()).rejects.toThrow('may predate `centralu.cmd serve` (update it there: npm.cmd i -g centralu)')
+    await expect(tunnel(old).open()).rejects.toThrow('may predate `centralu serve` (update it there: npm i -g centralu)')
+  })
+
   it('a forward ssh refuses fails the open with ssh’s reason', async () => {
     await expect(tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }), FAKE_SSH_FORWARD_FAIL: '1' }).open()).rejects.toThrow(/Address already in use/)
   })

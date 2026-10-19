@@ -111,8 +111,11 @@ export interface Tunnel {
   close(): Promise<void>
 }
 
-/** Reads the one JSON line `--connection` prints; anything else on stdout is not ours */
-export function parseConnectionLine(stdout: string): ConnectionLine {
+/**
+ * Reads the one JSON line `--connection` prints; anything else on stdout is not ours. `spec` is the remote's, for the
+ * words of the update to tell the person when there is no line (`npmInstall`)
+ */
+export function parseConnectionLine(stdout: string, spec?: RemoteSpec): ConnectionLine {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   for (let i = lines.length - 1; i >= 0; i--) {
     let raw: unknown
@@ -144,7 +147,7 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
       }
     }
   }
-  throw new Error('The remote did not print a connection line; its Centralu may predate `centralu serve` (update it there: npm i -g centralu)')
+  throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
 }
 
 /** The `takes` field: the names in it that are words, or nothing */
@@ -353,6 +356,16 @@ export const MANAGED_PS =
  */
 export function shimNames(spec: RemoteSpec | undefined): { npm: string; centralu: string } {
   return spec?.shell === 'powershell' ? { npm: 'npm.cmd', centralu: 'centralu.cmd' } : { npm: 'npm', centralu: 'centralu' }
+}
+
+/** The command to tell a person to install or update Centralu from npm there, in its shell's terms (`shimNames`) */
+export function npmInstall(spec: RemoteSpec | undefined): string {
+  return `${shimNames(spec).npm} i -g centralu`
+}
+
+/** Centralu is not found there: what the person types to install it and start it once */
+function notInstalled(where: string, spec: RemoteSpec): Error {
+  return new Error(`Centralu is not installed ${where} (run \`${npmInstall(spec)}\` there, then \`${shimNames(spec).centralu} serve\` once)`)
 }
 
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
@@ -606,17 +619,13 @@ export class SshTunnel implements Tunnel {
     const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.takesFrom ? (this.opts.hubName ?? hostname()) : null)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      const n = shimNames(remote)
-      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
-    }
+    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     let answer: DetachAnswer
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
       if (/unknown option for serve: --detach/.test(r.stderr)) {
-        const n = shimNames(remote)
-        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${n.centralu} serve\` there, or update it (${n.npm} i -g centralu)`)
+        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${shimNames(remote).centralu} serve\` there, or update it (${npmInstall(remote)})`)
       }
       const why = lastLine(r.stderr)
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
@@ -702,12 +711,9 @@ export class SshTunnel implements Tunnel {
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
     const r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      const n = shimNames(remote)
-      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
-    }
+    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
-      return parseConnectionLine(r.stdout)
+      return parseConnectionLine(r.stdout, remote)
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)
