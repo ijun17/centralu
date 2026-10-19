@@ -48,10 +48,11 @@ export function taskLine(task: string, max = 160): string {
  *
  * `asker` (#1186): which session asks, by its name and id, so the receiver can tell two asks from one project apart and
  * name the asker to the person. It said the project only, though the store and the screen had the session all along.
- * A name is one quoted line (`frameField`), as the project's is.
+ * A name is one line (`frameField`) written as a JSON string (#1186 review), so a `"` or a `\` in it cannot close the
+ * quote and go on as Centralu's words on the frame's line.
  */
 export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string }): string {
-  const who = asker ? ` It is the session "${frameField(asker.name)}"${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
+  const who = asker ? ` It is the session ${JSON.stringify(frameField(asker.name))}${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
   return [
     `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
       'Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path.]',
