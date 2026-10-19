@@ -231,7 +231,9 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    the target project being removed, withdraws a card still standing (`withdrawReaches`).
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
    back (the caller's project name a one-line field, `frameField`, as the parent's name in `agentFrame` and
-   `agentNoteFrame` is, #428), and appears in the target conversation with `from` identifying the asking session. An idle
+   `agentNoteFrame` is, #428), and names the asking session by its name (one line, written as a JSON string so a quote in it cannot close it) and id (#1186: the model
+   read the project only; `from`, which identifies the session, is in the store and on screen, not in the input). It
+   appears in the target conversation with `from` identifying the asking session. An idle
    session resumes as needed, and once it is awake (a wake or a deferred restart takes seconds) the caller's trust and
    depth and the target project are read once more before the task is written (`deliver`'s `stillAllowed`): an `auto`
    caller's untrusted project still lets it through (#606); its depth and a removed project still refuse. A session busy with a turn that is not the caller's (the person's,
@@ -242,7 +244,16 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    delegation's watcher is never replaced. `AgentRunWait` holds until the delivered input's receipt completes,
    even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
 5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
-   characters. Named files and folders inside the target project, resolved through symlinks, become
+   characters: the first 4,500 and the last 1,200 are kept, and the cut names the read that shows the rest,
+   `read_session(sessionId, around=<the answer's first seq>, offset=4500)` (#1186; `clipAnswer`, `answerAt`). Where
+   that session cannot be read from the caller (a hub's), the cut names the session as before. `read_session` shows
+   at most 2,000 characters of a line's text; a longer line says which characters it shows (`shown`) and the read that
+   goes on (`readOn`: the same call with `around` at the line's first seq and `offset`), and a read with `offset`
+   shows up to 8,000 characters of that one line (`sessions/session-lines.ts`). `offset` is in no tool definition:
+   the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
+   (`host.readSession`'s `offset`, additive: an older machine answers its plain read, and the hub says that machine cannot read from an offset rather than showing the same cut lines again; a read from an offset always says what it shows, which is how the hub tells them apart). The cut used to send the caller
+   to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
+   the middle of a long answer could not be read back at all. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
    A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
    #428), so a short name, another case or a link to the root reads as the place it names.
@@ -251,7 +262,9 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
 
 **Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
 bridge wait of 280 s. It then answers still working, naming the session and how to call again with
-`project`, `session` and no task. Without `session`, one outstanding call in that project is enough
+`project`, `session` and no task, and where the turn is (`progress`, #1186): how long the session has recorded
+nothing and its last step (a tool call's title on one line, quoted as JSON), as start_agent's and agent_session's
+`working` do; a session at work and one stuck read the same before. Without `session`, one outstanding call in that project is enough
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
@@ -308,7 +321,13 @@ For a machine's project the call runs through the links, not the manager's own s
 exclusions as here), the person's consent is asked for this call, the task goes as `host.send` (recorded
 there as sent by the asking session, named with this computer), and the turn is waited on through the
 machine's own events, which the hub relays qualified (`observeLinked`). The answer is the session's last
-words, read there. It runs on that machine with its own logins, folder and preset.
+words, read there whole (`host.lastAnswer`, #1186: its text up to 100,000 characters, its length and its first
+message's seq there), cut as an answer is cut here, the cut naming `read_session` on that session with that seq and
+an offset. The hub used to read it from `host.readSession`'s lines, which the machine cut at 2,000 characters of JSON,
+so a long answer came back as an older line or empty; an older machine is still read that way, its cut line read back
+as far as it goes. A read that failed is said (the turn ended, the answer could not be read, read it with
+`read_session` once the machine answers), here, in start_agent's answers for a child there and in a report's preview,
+where it used to come back as an empty answer. It runs on that machine with its own logins, folder and preset.
 
 | Choice | Reason |
 |---|---|
@@ -490,14 +509,26 @@ below retained for `safe` and `normal`:
    and that the final message is the answer) recorded as sent by the caller (`from`).
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
-   (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with
-   `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
+   (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
+   ended (finished, failed, paused on its own background work, a usage limit, cut short), the session's id, the
+   kind of its tool's error (`errorKind`: overloaded, usage limit, network, refused, other), how to go on, and
+   `read_session(sessionId, around=<its last response's seq>)`, which shows the last response and the error, an error
+   row being one `role: "error"` line; the last response itself, the error's words, the session's and project's names
+   and its tasks' descriptions stay in the stored report and the screen (#120: nothing the reported session, its tool,
+   its machine or a name could write goes into the receiver's input; a CLI's error can carry a hook's output, and a
+   linked machine's is whatever it sends). A `Reason:` built from an error's text (a note or a queued request that was
+   not delivered) reaches the model by its kind too; one Centralu wrote is quoted as JSON. The model used
+   to read "intersession message available" and an id alone, for every such notice. A report or notice that cannot
+   be delivered (the receiver cannot be woken: its tool fails to start) is logged and kept in memory, and goes in
+   once that session takes a message again (`deliverHeld`); it used to be dropped without a word. A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
    is written to `report_marks` (store v49, #646) as well as kept in memory, so a host swap (#280) does not lose
    it: the leaving host's `detachAll` fails its waits without reporting (`handingOver`), the next host restores
    the marks of the sessions the keeper kept that are still in their turn, which ends under it. It drops a
    mark whose session has no process any more (that turn died with the old host) and one whose kept session
    already finished its turn during the swap, so a later turn the person starts there is never reported as the
-   assigned work (#166); that answer stays readable through `agent_session`. Paths the
+   assigned work (#166); that answer stays readable through `agent_session`, and the caller is told once that a turn
+   ended during the swap, with the read that shows it, not that the work finished (`tellTurnEndedInSwap`, #1186: it
+   used to hear nothing). Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
    Each answer that promises the notice (`working` with the report armed, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that
@@ -982,7 +1013,9 @@ When session B asks session A for work (`agent_session` send, `ask_project` to a
 while A runs a turn that is not B's (the person's, another session's delegation, an app's), or while requests are
 queued ahead, Centralu does not decide for B (owner decision 2026-10-14). The request tool returns `busy` with the
 choices, each marked available or not and why (`busyChoices`), and sends nothing; B calls again with `ifBusy`, or
-passes it up front. B's own running turn there is not busy for B: a note into its own work goes on as before. Messages
+passes it up front. The answer also says where A's turn is and how many requests are queued there already (`progress`,
+`ahead`, #1186), so B can choose knowing what it waits behind. Queueing by default, as #1186 proposed, is not done:
+the owner's decision above leaves the choice to B. B's own running turn there is not busy for B: a note into its own work goes on as before. Messages
 the person sends are unchanged. The answer says which choice ran and its handle.
 
 | `ifBusy` | What happens |

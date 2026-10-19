@@ -1,10 +1,11 @@
 import type { SessionInfo } from '@cc/protocol'
 import type { ChildRunResult, RoutedCard } from '../adapters/contract.js'
-import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants } from './ask-project.js'
+import { ASK_WAIT_MS, answerAt, clipAnswer, pathsIn, readableGrants } from './ask-project.js'
 import { taskList } from './background-stops.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import { cleanUpDue } from './own-agents.js'
+import { progressOf } from './transcript-view.js'
 import { turnAnswer } from './turn-answer.js'
 import { namedCall } from './tool-seats.js'
 import { raceBound } from './with-timeout.js'
@@ -38,6 +39,7 @@ export class DelegationWaits {
   agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {
     if (arm && !observing) this.host.children.markReport(d.sessionId, d.callerId)
     const notice = d.notice()
+    const progress = progressOf(this.host.store.messages, d.sessionId)
     return {
       ok: true,
       state: 'working',
@@ -46,6 +48,7 @@ export class DelegationWaits {
       tool: this.host.meta.get(d.sessionId)?.tool ?? '',
       reported: !observing && this.host.children.awaitingReport.get(d.sessionId) === d.callerId,
       ...(notice ? { notice } : {}),
+      ...(progress ? { progress } : {}),
     }
   }
 
@@ -54,6 +57,11 @@ export class DelegationWaits {
     // Told when it ends, as a wait past its bound is: the answer to the card lets the turn go on without this call
     this.host.children.markReport(d.sessionId, d.callerId)
     return { ok: true, state: 'asking', sessionId: d.sessionId, sessionName: this.host.meta.get(d.sessionId)?.name ?? d.sessionId, tool: this.host.meta.get(d.sessionId)?.tool ?? '', cards }
+  }
+
+  /** A child's answer cut to size, the cut naming the read that shows what it left out (#1186) */
+  private clipped(sessionId: string, answer: string, name: string): string {
+    return clipAnswer(answer, name, answerAt(this.host.store.messages, sessionId, answer))
   }
 
   /** A child with nothing of the caller's running: its last final answer (#561), and a report it still owes (#721) */
@@ -65,7 +73,7 @@ export class DelegationWaits {
       sessionId: child.id,
       sessionName: child.name,
       tool: child.tool,
-      answer: clipAnswer(turnAnswer(this.host.store.messages.loadMessages(child.id, 50)), child.name),
+      answer: this.clipped(child.id, turnAnswer(this.host.store.messages.loadMessages(child.id, 50)), child.name),
       sessionState: child.state,
       ...(child.interruption ? { interruption: child.interruption } : {}),
       ...(notice ? { notice } : {}),
@@ -175,7 +183,7 @@ export class DelegationWaits {
     }
     if (observing) return {
       ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
-      tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: clipAnswer(r.answer, name()), readable: [], outside: [],
+      tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: this.clipped(d.sessionId, r.answer, name()), readable: [], outside: [],
     }
     const { granted, outside } = this.grantReads(d.callerId, r.answer, d.target.path)
     /*
@@ -195,7 +203,7 @@ export class DelegationWaits {
       sessionId: d.sessionId,
       sessionName: name(),
       tool: this.host.meta.get(d.sessionId)?.tool ?? '',
-      answer: clipAnswer(r.answer, name()),
+      answer: this.clipped(d.sessionId, r.answer, name()),
       readable: granted,
       outside,
       ...(notice ? { notice } : {}),
