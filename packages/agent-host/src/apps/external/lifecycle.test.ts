@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type RuntimeTiming } from './runtime.js'
 import { SECRETS_FILE } from './secrets.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
-import { alive } from '../../process.test-helpers.js'
+import { ownProcesses } from '../../process.test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
@@ -26,6 +26,9 @@ let projRoot = ''
 let appLogs = ''
 let trusted = true
 let rt: ExternalApps
+// What this test has seen end is not ended again by a cleanup: its number may be someone else's by then (#1308)
+let own = ownProcesses()
+const alive = (pid: number) => own.alive(pid)
 
 type Rec = { t: string; pid: number; at: number; method?: string; grandchild?: number; env?: Record<string, string | null> }
 const records = (id: string): Rec[] => {
@@ -62,6 +65,7 @@ const make = (timing: Partial<RuntimeTiming> = {}, env?: NodeJS.ProcessEnv) => {
 }
 
 beforeEach(() => {
+  own = ownProcesses()
   fixture = tempRoot('cc-apps-life-')
   dataRoot = join(fixture, 'data')
   projRoot = join(fixture, 'proj')
@@ -333,7 +337,7 @@ describe('the shutdown rule (S-5)', () => {
       expect(alive(grandchild)).toBe(true)
       await until(() => alive(grandchild), (a) => a === false, 6_000)
     } finally {
-      if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
+      own.end([grandchild])
     }
     // The test's own cap must exceed the waits (3 s and 6 s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
   }, 15_000 * SLOW)
@@ -358,7 +362,7 @@ describe('the shutdown rule (S-5)', () => {
       await until(() => alive(grandchild), (a) => a === false, 8_000)
       await until(() => hostLog('parent'), (log) => log.includes('process(es) it left running'), 2_000)
     } finally {
-      if (alive(grandchild)) process.kill(grandchild)
+      own.end([grandchild])
     }
   }, 15_000 * SLOW)
 
@@ -379,7 +383,7 @@ describe('the shutdown rule (S-5)', () => {
       await until(() => [alive(pid), alive(grandchild)], ([a, b]) => !a && !b, 8_000)
       expect(hostLog('stubborn')).toContain('did not exit within 300ms')
     } finally {
-      if (alive(grandchild)) process.kill(grandchild)
+      own.end([grandchild])
     }
   }, 15_000 * SLOW)
 
@@ -398,7 +402,7 @@ describe('the shutdown rule (S-5)', () => {
       await until(() => alive(pid), (a) => a === false, 6_000)
       expect((await first).status).not.toBe('ok')
     } finally {
-      if (alive(pid)) process.kill(-pid, 'SIGKILL')
+      own.end([pid], { group: true })
     }
   }, 15_000 * SLOW)
 

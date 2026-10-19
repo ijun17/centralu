@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream'
-import { alive } from '../process.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 
 /**
  * A stand-in for an agent CLI that starts a helper of its own, the way Claude Code's LSP tool starts
@@ -45,13 +45,39 @@ export function helperPid(stdout: Readable): Promise<number> {
       if (nl < 0) return
       clearTimeout(t)
       stdout.off('data', onData)
-      resolve(Number(got.slice(0, nl).trim()))
+      const pid = Number(got.slice(0, nl).trim())
+      seen.forget([pid])
+      resolve(pid)
     }
     stdout.on('data', onData)
   })
 }
 
-export { alive }
+/**
+ * What this file's tests have seen end, which `killLeftovers` leaves alone: once a process is gone its number is free,
+ * and ending it again would end whatever program has been given the number since (#1308)
+ */
+const seen = ownProcesses()
+
+/** Whether the process exists; a process found gone is not ended again by `killLeftovers` */
+export const alive = (pid: number): boolean => seen.alive(pid)
+
+/**
+ * A CLI this test started: the pid to give `killLeftovers`, which is left alone once the CLI has exited. Its handle
+ * tells the end; asking `alive` after the fact cannot tell it from a program that has the number now.
+ */
+export function ownCli(cli: { pid?: number; once(event: 'exit', listener: () => void): unknown }): number {
+  const pid = cli.pid!
+  seen.forget([pid])
+  cli.once('exit', () => seen.sawEnd(pid))
+  return pid
+}
+
+/** A pid read from a file: a process this test started, whatever the number was before. Give it to `killLeftovers` */
+export function ownPid(pid: number): number {
+  seen.forget([pid])
+  return pid
+}
 
 /** Waits for the process to be gone, up to `ms`. Returns whether it is */
 export async function goneWithin(pid: number, ms: number): Promise<boolean> {
@@ -62,11 +88,7 @@ export async function goneWithin(pid: number, ms: number): Promise<boolean> {
 
 /** Ends what a test started that the code under test should have ended, so a failing test leaves nothing running */
 export function killLeftovers(pids: number[]): void {
-  for (const pid of pids.splice(0)) {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      // already gone
-    }
-  }
+  const left = pids.splice(0)
+  seen.end(left)
+  seen.forget(left)
 }

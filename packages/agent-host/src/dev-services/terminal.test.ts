@@ -8,7 +8,7 @@ import { alive as isAlive, cleanUp, consoleHosts, plantTreeScript, settle, treeP
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
-import { alive } from '../process.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -172,7 +172,8 @@ describe('multiple terminals', () => {
           onExit: (cb: (e: { exitCode: number }) => void) => void shell.once('exit', (code) => cb({ exitCode: code ?? 0 })),
           write: () => {},
           resize: () => {},
-          kill: (signal = 'SIGHUP') => void process.kill(shell.pid!, signal as NodeJS.Signals),
+          // By the handle: Node sends nothing to a shell that has already exited
+          kill: (signal = 'SIGHUP') => void shell.kill(signal as NodeJS.Signals),
         }
       },
     }
@@ -181,19 +182,16 @@ describe('multiple terminals', () => {
     const t = svc.create(dir, 80, 24)
     for (let i = 0; i < 250 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20))
     const server = Number(readFileSync(pidFile, 'utf8'))
+    // The server is known by its number only; once this test has seen it end, the number is not ours to signal (#1308)
+    const own = ownProcesses()
     try {
       svc.close(t.id)
-      for (let i = 0; i < 150 && (alive(server) || alive(shells[0]!.pid!)); i++) await new Promise((r) => setTimeout(r, 20))
-      expect(alive(shells[0]!.pid!)).toBe(false)
-      expect(alive(server)).toBe(false)
+      for (let i = 0; i < 150 && (own.alive(server) || own.alive(shells[0]!.pid!)); i++) await new Promise((r) => setTimeout(r, 20))
+      expect(own.alive(shells[0]!.pid!)).toBe(false)
+      expect(own.alive(server)).toBe(false)
     } finally {
-      for (const pid of [server, shells[0]!.pid!]) {
-        try {
-          process.kill(pid, 'SIGKILL')
-        } catch {
-          // already gone
-        }
-      }
+      shells[0]!.kill('SIGKILL') // its handle: nothing is sent once the shell has exited
+      own.end([server])
     }
   }, 30_000 * SLOW)
 

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KILL_GRACE_MS, type WinProcRow } from '../dev-services/kill-tree.js'
 import { CodexClient } from './codex/client.js'
-import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers } from './fake-agent-cli.test-helpers.js'
+import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli, ownPid } from './fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -30,7 +30,7 @@ describe('an agent CLI started without a keeper, for real', () => {
   // Windows has no process groups: a stop there is `taskkill /T` on the tree (the tests below)
   it.skipIf(!unix)('leads a process group of its own, not the host’s', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli(), env: process.env })
-    started.push(await helperPid(p.stdout), p.pid!)
+    started.push(await helperPid(p.stdout), ownCli(p))
     const pgid = (pid: number) => Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim())
     expect(pgid(p.pid!)).toBe(p.pid)
     expect(pgid(p.pid!)).not.toBe(pgid(process.pid))
@@ -54,7 +54,7 @@ describe('an agent CLI started without a keeper, for real', () => {
   it.skipIf(!unix)('a CLI and a helper that ignore TERM are KILLed once the grace is over', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli({ ignoreTerm: true }), env: process.env })
     const helper = await helperPid(p.stdout)
-    started.push(helper, p.pid!)
+    started.push(helper, ownCli(p))
     const exited = exitOf(p)
     p.kill('SIGTERM')
     await new Promise((r) => setTimeout(r, 300))
@@ -66,7 +66,7 @@ describe('an agent CLI started without a keeper, for real', () => {
   it.runIf(!unix)('Windows: a stop is taskkill on the tree, which ends the CLI and its helper', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli(), env: process.env })
     const helper = await helperPid(p.stdout)
-    started.push(helper, p.pid!)
+    started.push(helper, ownCli(p))
     const exited = exitOf(p)
     expect(p.kill('SIGTERM')).toBe(true)
     // `taskkill /F` ends a process with exit code 1; Windows has no signal to report
@@ -102,7 +102,7 @@ describe('an agent CLI started without a keeper, for real', () => {
       })
       await ended
       const helper = Number(readFileSync(pidFile, 'utf8'))
-      started.push(helper)
+      started.push(ownPid(helper))
       expect(await goneWithin(helper, unix ? 5000 : 15_000)).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -282,7 +282,7 @@ describe('an agent CLI started without a keeper (Windows)', () => {
     }
     const p = spawnLocalAgent({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], env: process.env }, os)
     orphan = p.pid! + 100_000
-    started.push(p.pid!)
+    started.push(ownCli(p))
     // Long enough for the orphan's creation time (50 ms before the listing) to fall inside its life
     await new Promise((r) => setTimeout(r, 150))
     const exited = exitOf(p)
@@ -300,7 +300,7 @@ describe('the stderr an agent CLI leaves for a failure message', () => {
   it('keeps a character whole when the pipe splits it between two chunks', async () => {
     const script = "const b = Buffer.from('실패: 한글\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => process.stderr.write(b.subarray(4)), 200)"
     const p = spawnLocalAgent({ command: process.execPath, args: ['-e', script], env: process.env })
-    started.push(p.pid!)
+    started.push(ownCli(p))
     await exitOf(p)
     expect(p.stderrTail()).toBe('실패: 한글\n')
   })

@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
-import { alive } from '../../process.test-helpers.js'
+import { ownProcesses } from '../../process.test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
@@ -21,7 +22,9 @@ let projRoot = ''
 let appLogs = ''
 let hold = ''
 let rt: ExternalApps
-const pids: number[] = []
+// What a test has seen end is not ended again afterwards: its number may be someone else's by then (#1308)
+let own = ownProcesses()
+const alive = (pid: number) => own.alive(pid)
 
 /** The pids the wrapper wrote as each process came up, before it waited */
 const spawned = (): number[] => {
@@ -31,6 +34,7 @@ const spawned = (): number[] => {
 const ref = { projectId: 'p1', appId: 'notes' }
 
 beforeEach(() => {
+  own = ownProcesses()
   fixture = tempRoot('cc-apps-starting-')
   projRoot = join(fixture, 'proj')
   appLogs = join(fixture, 'logs')
@@ -63,8 +67,8 @@ beforeEach(() => {
 afterEach(async () => {
   rmSync(hold, { force: true })
   await rt?.dispose()
-  for (const pid of [...spawned(), ...pids]) if (alive(pid)) process.kill(pid, 'SIGKILL')
-  pids.length = 0
+  // `dispose` stops them and the test may not have looked: look first, then end only what is still there (#1308)
+  await own.endAfter(spawned(), 5_000 * SLOW)
   await removeTree(fixture)
 })
 
@@ -91,6 +95,8 @@ describe('an app still starting (#839)', () => {
     const next = rt.tools(ref)
     void next.catch(() => {})
     await until(() => spawned().length, (n) => n === 2)
+    // A new process, whatever number the abandoned one had (#1308)
+    own.forget([spawned()[1]!])
     rmSync(hold)
     await expect(first).rejects.toThrow(/abandoned/)
     expect((await next).map((t) => t.name)).toEqual(['echo'])

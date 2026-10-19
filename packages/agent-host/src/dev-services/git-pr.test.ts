@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
-import { alive } from '../process.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 
 
 /**
@@ -40,15 +40,14 @@ function fakeGh(bin: string): void {
 describe('gh stopped by an abort (#368)', () => {
   let root: string
   let childPid: number | undefined
+  // What a test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
+  let own = ownProcesses()
+  const alive = (pid: number) => own.alive(pid)
   afterEach(() => {
-    // It can end between the check and the kill (ESRCH failed this cleanup on Linux CI, #368)
-    if (childPid !== undefined && alive(childPid)) {
-      try {
-        process.kill(childPid)
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e
-      }
-    }
+    // It can end between the last look and the kill (ESRCH failed this cleanup on Linux CI, #368): `end` ignores that
+    if (childPid !== undefined) own.end([childPid], { signal: 'SIGTERM' })
+    childPid = undefined
+    own = ownProcesses()
     vi.unstubAllEnvs()
     __forgetPrograms()
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
