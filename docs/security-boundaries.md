@@ -1749,7 +1749,7 @@ or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub 
 A worktree session's file links (#1209) name the session: `fs.readFile` and `fs.resolve` with a `sessionId` take that
 session's folder as the root instead of the project's (its worktree, or the project when it has none), and every check
 above runs against that root. The host builds the root from its own record of the session, never from a path the window
-sends, and hands the same string to the containment check and to the read (`SessionManager.folderOf`). A session of
+sends, and hands the same string to the containment check and to the read (`ProjectFiles.folderOf`, `dev-services/project-files.ts`). A session of
 another project is refused, so a project id cannot carry a stranger's folder, and a path outside the worktree is refused
 like one outside the project, the main checkout included. A session's folder is only read, revealed and opened: `trash`
 and `project` with a `sessionId` are refused.
