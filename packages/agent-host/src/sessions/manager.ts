@@ -25,6 +25,7 @@ import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
+import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -37,7 +38,6 @@ import type {
   ApprovalDecision,
   Attachment,
   ApprovalScope,
-  GridPanel,
   MachineInfo,
   NormalizedEvent,
   PermissionPreset,
@@ -54,7 +54,6 @@ import {
   DATA_DIR,
   oneLineText,
   withoutToolRecord,
-  appKeyOf,
   alwaysAllowKey,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
@@ -105,7 +104,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -157,6 +156,8 @@ export class SessionManager {
   private readonly projectRegistry: ProjectRegistry
   /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
   private readonly launchInputs: LaunchInputs
+  /** The sidebar order of sessions and the grid's panels (session-layout.ts) */
+  private readonly layout: SessionLayout
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -310,6 +311,7 @@ export class SessionManager {
     this.toolRegistry = new ToolRegistry(this.parts())
     this.projectRegistry = new ProjectRegistry(this.parts())
     this.launchInputs = new LaunchInputs(this.parts())
+    this.layout = new SessionLayout(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
@@ -649,95 +651,29 @@ export class SessionManager {
     return this.projectRegistry.reorderProjects(...a)
   }
 
-  reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
-    /*
-     * The order is **a single global one** (sidebar_order). Renumbering just this project's own
-     * from 0 would collide with other projects' values, so sorting one project would scramble the
-     * whole list. So only **the slots this project occupied** in the global order are swapped in
-     * with the new order, and every other session is left exactly where it was.
-     */
-    const all = this.listSessions()
-    const mine = new Set(all.filter((s) => s.projectId === projectId).map((s) => s.id))
-    const rest = [...mine].filter((id) => !orderedIds.includes(id))
-    const replacement = [...orderedIds.filter((id) => mine.has(id)), ...rest]
-    let k = 0
-    const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
-    this.store.sessions.setSessionOrder(globalOrder)
-    // Reorder the in-memory copy too — saving alone leaves it out of sync with the screen until the next
-    // launch. Sorted in place (#1143): the map stays the one every module reads, so none is left on an old copy
-    const rank = new Map(globalOrder.map((id, i) => [id, i]))
-    const sorted = [...this.meta.entries()].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))
-    this.meta.clear()
-    for (const [id, m] of sorted) this.meta.set(id, m)
-    return this.listSessions()
+  /** `SessionLayout.reorderSessions` (session-layout.ts), kept on the manager for its callers */
+  reorderSessions(...a: Parameters<SessionLayout['reorderSessions']>): ReturnType<SessionLayout['reorderSessions']> {
+    return this.layout.reorderSessions(...a)
   }
 
-  /** Grid layout — sessions and apps, in order (#288) */
-  grid(): GridPanel[] {
-    return this.store.grid.listGridView()
+  /** `SessionLayout.grid` (session-layout.ts), kept on the manager for its callers */
+  grid(...a: Parameters<SessionLayout['grid']>): ReturnType<SessionLayout['grid']> {
+    return this.layout.grid(...a)
   }
 
-  /**
-   * Saves the layout.
-   *
-   * **Unknown sessions are filtered out.** If a deleted session's id stays in the layout and comes
-   * back, the screen tries to draw something that no longer exists — filtering once at save time
-   * means nobody has to worry about it afterward. An app panel is kept while its project is
-   * registered (a user-folder app has none). Whether the app itself exists is the screen's
-   * question: the app list is read from folders and can lag behind, and a panel dropped here for
-   * that reason would not come back once the list caught up.
-   */
-  setGridView(panels: readonly GridPanel[]): GridPanel[] {
-    const known = new Set(this.meta.keys())
-    const projects = new Set(this.store.projects.listProjects().map((p) => p.id))
-    // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
-    const remote = (id: string) => !known.has(id) && this.linkedSession(id)
-    /*
-     * Another machine's app (#82, remote-hub.md §11.8) is kept while that machine is linked and, for a project app,
-     * while the hub's mirror knows its project: the machine of a user-folder app is named by `machine`, a project
-     * app's by its qualified project. A `machine` on a panel of this host's own app is dropped: it would name nothing.
-     */
-    const appMachine = (p: Extract<GridPanel, { kind: 'app' }>): string | null =>
-      p.projectId === null ? (p.machine && this.linkedApps.linked(p.machine) ? p.machine : null) : this.linkedApps.projectMachine(p.projectId)
-    const seen = new Set<string>()
-    const clean: GridPanel[] = []
-    for (const p of panels) {
-      if (p.kind === 'session') {
-        const key = `session:${p.sessionId}`
-        if (seen.has(key) || !(known.has(p.sessionId) || remote(p.sessionId))) continue
-        seen.add(key)
-        clean.push(p)
-        continue
-      }
-      const { machine: _machine, ...own } = p
-      const elsewhere = projects.has(p.projectId ?? '') ? null : appMachine(p)
-      // A panel naming a machine this host does not link is nobody's app here
-      if (!elsewhere && (p.machine || (p.projectId !== null && !projects.has(p.projectId)))) continue
-      const panel: GridPanel = elsewhere && p.projectId === null ? { ...own, machine: elsewhere } : own
-      const key = `app:${appKeyOf(p.projectId, p.appId, elsewhere)}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      clean.push(panel)
-    }
-    this.store.grid.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
-    return clean
+  /** `SessionLayout.setGridView` (session-layout.ts), kept on the manager for its callers */
+  setGridView(...a: Parameters<SessionLayout['setGridView']>): ReturnType<SessionLayout['setGridView']> {
+    return this.layout.setGridView(...a)
   }
 
-  /** Whether a machine-qualified id names a session of a linked machine the hub knows (#82). None without links */
-  private linkedSession: (sessionId: string) => boolean = () => false
-
-  useLinkedSessions(known: (sessionId: string) => boolean): void {
-    this.linkedSession = known
+  /** `SessionLayout.useLinkedSessions` (session-layout.ts), kept on the manager for its callers */
+  useLinkedSessions(...a: Parameters<SessionLayout['useLinkedSessions']>): ReturnType<SessionLayout['useLinkedSessions']> {
+    return this.layout.useLinkedSessions(...a)
   }
 
-  /** The linked machines, for grid panels of their apps (#82). None without links */
-  private linkedApps: { linked(machine: string): boolean; projectMachine(projectId: string): string | null } = {
-    linked: () => false,
-    projectMachine: () => null,
-  }
-
-  useLinkedApps(lookup: { linked(machine: string): boolean; projectMachine(projectId: string): string | null }): void {
-    this.linkedApps = lookup
+  /** `SessionLayout.useLinkedApps` (session-layout.ts), kept on the manager for its callers */
+  useLinkedApps(...a: Parameters<SessionLayout['useLinkedApps']>): ReturnType<SessionLayout['useLinkedApps']> {
+    return this.layout.useLinkedApps(...a)
   }
 
   /** The linked machines' sessions, for the central orchestrator's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
