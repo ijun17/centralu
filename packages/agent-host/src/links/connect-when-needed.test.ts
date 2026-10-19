@@ -287,7 +287,14 @@ describe('a machine that connects when needed (#1134)', () => {
     // Someone at that machine works in the session meanwhile
     const there = s.id.slice('m1.'.length)
     await remote.mgr.send(there, 'while you were away')
-    await eventually(() => remote.mgr.listSessions().find((x) => x.id === there)?.state === 'idle')
+    /*
+     * Wait for the turn there to have answered and ended: its reply stored, the session resting after it. Waiting for
+     * `idle` passed at once, since the session is still idle when send returns and its turn starts 20 ms later (the
+     * scripted agent), and a turn ends in `waiting_input`, not `idle`. A loaded runner then read the history after the
+     * reconnect before the reply was in it (a full-tier failure of #1238)
+     */
+    await eventually(async () => (await remote.mgr.loadMessages(there, 200)).some((m: any) => m.payload?.text === 'echo: while you were away'))
+    await eventually(() => remote.mgr.listSessions().find((x) => x.id === there)?.state === 'waiting_input')
     await expect(hub.call('messages.load', { sessionId: s.id })).rejects.toMatchObject({ data: { reason: 'unreachable' } })
 
     const resyncs = hub.events.filter((e: any) => e.type === 'machine_resync').length

@@ -7,7 +7,7 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
@@ -247,6 +247,40 @@ describe('the host process, started for real', () => {
     } finally {
       if (owner.ok) owner.release()
     }
+  }, 60_000 * SLOW)
+
+  /*
+   * #1223: on a linked Windows machine the folder is often held by the host a hub's link started. host.lock says who
+   * started it and from where, and a second host on the folder (the desktop window's) says so instead of "close the
+   * running window", which sent the person looking for a window that was not there.
+   */
+  it('says in host.lock that centralu serve started it for a hub, and a second host names that link in its refusal', async () => {
+    const s = setup()
+    const token = 'token-handed-on-stdin-0123456789'
+    const host = startHost(s, ['--watch-parent'], {
+      CC_HOST_TOKEN_ON_STDIN: '1',
+      CC_SERVE: '1',
+      CC_SERVE_FROM: JSON.stringify({ hub: 'Mac-mini', ssh: '192.168.0.5' }),
+    })
+    host.p.stdin!.write(`${JSON.stringify({ token })}\n`)
+    await host.ready
+    try {
+      const lock = JSON.parse(readFileSync(join(dirname(s.db), 'host.lock'), 'utf8')) as Record<string, unknown>
+      expect(lock).toMatchObject({ pid: host.p.pid, by: 'serve', from: { hub: 'Mac-mini', ssh: '192.168.0.5' } })
+      expect(typeof lock.at).toBe('number')
+      const second = spawnSync(process.execPath, ['--import', 'tsx', MAIN, '--db', s.db, '--port', '0'], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: env(s, { CC_STARTED_BY: 'app' }),
+      })
+      expect(second.status).toBe(1)
+      expect(second.stdout).toContain('Another Centralu is already using this data: the host `centralu serve` runs for the link from Mac-mini')
+      expect(second.stdout).toContain('the link from Mac-mini loses this computer until it reconnects')
+    } finally {
+      host.p.stdin!.end()
+    }
+    expect(await host.exited).toBe(0)
   }, 60_000 * SLOW)
 
   it('without --watch-parent the end of stdin means nothing, and a signal still shuts it down (HO7)', async () => {

@@ -3,6 +3,7 @@ import type {
   BackgroundTask,
   GitSource,
   Interruption,
+  MachineConnect,
   MachineInfo,
   RpcResult,
   ApprovalDetail,
@@ -13,6 +14,13 @@ import type {
   ToolName,
   UpdateStatus,
 } from '@cc/protocol'
+
+/** One request of the orchestrator's machine commands (#1219), as the tool runner reads its arguments */
+export type MachineRequest =
+  | { action: 'add'; sshTarget: string; name?: string; wslDistro?: string }
+  | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
+  | { action: 'connect'; machine: string; connect: MachineConnect }
+  | { action: 'autostart'; machine: string; on: boolean }
 
 export type OrchestratedSession = {
   sessionId: string
@@ -545,6 +553,12 @@ export type OrchestratorTools = {
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
   /** The linked machines as `machines.list` answers (#1220, the list_machines command); absent on seats that cannot */
   listMachines?(): MachineInfo[]
+  /**
+   * A change to the linked machines (#1219, the machine commands): add, install or update Centralu, remove, reconnect,
+   * connect mode, start at boot. Those that change a machine or this computer's reach wait for the person's card.
+   * The answer is the text the model reads. Absent on seats that cannot.
+   */
+  machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

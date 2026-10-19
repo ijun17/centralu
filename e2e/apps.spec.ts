@@ -24,6 +24,8 @@ type AppInfo = {
   error: string | null
   warnings: string[]
   root?: boolean
+  /** A linked machine's user-folder app (#82) */
+  machine?: string
   uses?: { agent?: boolean | string[]; apps?: string[]; host?: string[]; background?: string }
   shared?: boolean
   busy?: string
@@ -794,6 +796,20 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     const pinned = page.getByTestId('pinned-app-_user/timer')
     await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     expect(await opened(page)).toEqual([{ appId: 'timer', projectId: null }])
+  })
+
+  /*
+   * A linked machine's user-folder app is keyed by its machine in the sidebar (`m1:_user/timer`), apart from this computer's app of
+   * the same id. The Grid button looked a dropped app up by the project and id alone, so it found nothing for it, while the grid
+   * itself (which keys by the catalog) took the same drop.
+   */
+  test("a linked machine's user-folder app dropped on the Grid button stands on the grid with its machine (#1143 U5)", async ({ page }) => {
+    await addProject(page, '/tmp/alpha')
+    await setApps(page, [app('timer', null, { name: 'Timer', machine: 'm1' })])
+    // Taken by the row's left end: its machine's badge stands over the middle
+    await page.dragAndDrop('[data-testid="app-row-m1:_user/timer"]', '[data-testid="grid-button"]', { sourcePosition: { x: 24, y: 10 } })
+    await expect(page.getByTestId('grid')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__store.getState().gridPanels)).toEqual([{ kind: 'app', projectId: null, appId: 'timer', machine: 'm1' }])
   })
 
   test('a project whose folder has the manifest at its root is an app (#1141): its line carries the app mark, the mark and the menu open it, and it is not a row under itself', async ({ page }) => {
