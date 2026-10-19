@@ -108,12 +108,19 @@ export type LinkedSessions = {
   /**
    * A new session in a machine's project, under `preset` (`normal` when none is given; the caller caps it, #838), named
    * if a name is given. For start_agent's child there (#1038): its model and effort, a new worktree on `worktreeBranch`,
-   * and the agent depth it is kept at (`CreateSessionParams.agentDepth`)
+   * and the agent depth it is kept at (`CreateSessionParams.agentDepth`); `callerPreset`, the preset its caller carries
+   * there (#1273, `CreateSessionParams.fromHub`), `auto` only once the machine said it takes it (`hubAuto`). `preset` in
+   * the answer: what the machine started it under, as it says
    */
   createSession(
     project: LinkedProject,
-    opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number },
-  ): Promise<Outcome<{ sessionId: string; name: string }>>
+    opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number; callerPreset?: PermissionPreset },
+  ): Promise<Outcome<{ sessionId: string; name: string; preset?: PermissionPreset }>>
+  /**
+   * Whether a machine runs an `auto` caller's child under `auto` too (#1273, `host.hubAuto` there): its "Allow auto from
+   * a linked computer" switch. `olderBuild`: the machine runs a Centralu from before it, which keeps `normal`
+   */
+  hubAuto(machineId: string): Promise<Outcome<{ allowed: boolean }> | { ok: false; error: string; olderBuild: true }>
   /**
    * A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none. `olderBuild`: the
    * machine runs a Centralu from before it, which also drops `createSession`'s `agentDepth`
