@@ -1,5 +1,5 @@
 import { frameField } from '@cc/protocol'
-import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
+import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
 
@@ -9,6 +9,19 @@ import { interruptionWords } from './interruptions.js'
  */
 export function trustedJsonText(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+}
+
+/**
+ * A name as one quoted line for a card the person reads before deleting or a line the model reads (#1219): JSON-quoted,
+ * and every control and format character (bidi overrides, zero-width ones, C1 controls) written as an escape, so the
+ * line reads as what it holds. Cut to `max` characters. `trustedJsonText` leaves the format characters alone.
+ */
+export function plainQuoted(value: string, max = 60): string {
+  const cut = value.length > max ? `${value.slice(0, max)}…` : value
+  return JSON.stringify(cut).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, (c) => {
+    const code = c.codePointAt(0)!
+    return code > 0xffff ? `\\u{${code.toString(16)}}` : `\\u${code.toString(16).padStart(4, '0')}`
+  })
 }
 
 /**
@@ -61,17 +74,27 @@ export function cardsText(cards: readonly RoutedCard[]): string {
 }
 
 /**
+ * Where a running turn is (#1186), said after "still working": how long it has recorded nothing, and its last step,
+ * which can be the session's own words (a command it runs), so quoted as JSON
+ */
+export function progressText(p: TurnProgress | undefined): string {
+  if (!p) return ''
+  return ` It last recorded something ${p.quietFor} ago${p.lastStep ? `; its last step, as JSON: ${JSON.stringify(p.lastStep)}` : ''}.`
+}
+
+/**
  * A busy session's choices (#677), as the requester reads them: each with whether it can be taken now, and the call
  * that takes it. Nothing was sent; the requester decides.
  */
-export function busyText(b: { sessionName: string; sessionId: string; sessionState: string; choices: readonly BusyChoice[] }, call: (choice: string) => string): string {
+export function busyText(b: { sessionName: string; sessionId: string; sessionState: string; choices: readonly BusyChoice[]; ahead?: number; progress?: TurnProgress }, call: (choice: string) => string): string {
   const what: Record<BusyChoice['choice'], string> = {
     note: 'add it to the running turn as a note; that turn\'s answer stays its owner\'s, and you read the reply to your note',
     queue: 'hold it and deliver it as a new turn when the running one ends; you are told when that turn ends',
     fork: 'start a sub-session from a copy of its conversation now, linked to you, in a worktree of its own (fork_read: read-only work in its folder)',
   }
   const lines = b.choices.map((c) => `- ${c.choice}: ${c.available ? `${what[c.choice]}. ${call(c.choice === 'fork' ? 'fork' : c.choice)}` : `not available: ${c.why}`}`)
-  return `"${b.sessionName}" [${b.sessionId}] is busy (${b.sessionState}) with a turn that is not yours, so nothing was sent. Choose:\n${lines.join('\n')}`
+  const ahead = b.ahead ? ` ${b.ahead} request${b.ahead === 1 ? ' is' : 's are'} queued there already.` : ''
+  return `"${b.sessionName}" [${b.sessionId}] is busy (${b.sessionState}) with a turn that is not yours, so nothing was sent.${progressText(b.progress)}${ahead} Choose:\n${lines.join('\n')}`
 }
 
 export function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number; lowMemory?: string }): string {
@@ -103,7 +126,7 @@ export function askProjectText(r: AskProjectResult): ToolOutput {
   if (r.state === 'working') {
     return {
       text:
-        `${r.project} is still working on it in ${where}${r.notice ? ` — ${r.notice}` : ''}. ` +
+        `${r.project} is still working on it in ${where}${r.notice ? ` — ${r.notice}` : ''}.${progressText(r.progress)} ` +
         `To keep waiting, call ask_project again with project "${r.project}", session "${r.sessionId}" and no task; the work goes on meanwhile.`,
     }
   }
@@ -197,7 +220,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     case 'working':
       return {
         text:
-          `${who} is working on it${r.notice ? ` — ${r.notice}` : ''}. ` +
+          `${who} is working on it${r.notice ? ` — ${r.notice}` : ''}.${progressText(r.progress)} ` +
           (r.reported ? `You will be told when it ends. ${NO_POLLING} ` : '') +
           `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
       }

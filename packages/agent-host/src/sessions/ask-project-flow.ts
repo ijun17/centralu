@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
-import { labelOf, lastActiveOf } from './transcript-view.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
@@ -10,8 +10,6 @@ import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
-/** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
-const ANSWER_READ_MAX_CHARS = 100_000
 
 /**
  * An ask_project call's task in a session of a linked machine, while its turn runs there (#700). The hub cannot see
@@ -325,12 +323,12 @@ export class AskProjectFlow {
         const releaseHold = d.wait.holdInput()
         const release = () => { releaseHold(); this.host.applyDeferredRestart(delegatedId) }
         releaseInput = release
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false, undefined, 'inline', (h, input) => {
+        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', (h, input) => {
           const fail = (e: Error) => { d.wait.fail(e); release() }
           void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
         }, stillAllowed)
       } else {
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
+        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
       }
     } catch (e) {
       d.wait.fail(e as Error)
@@ -454,7 +452,8 @@ export class AskProjectFlow {
     // Registered before the send: the machine's first events can reach the hub before its answer does
     this.linkedAsks.set(chosen.id, ask)
     // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
-    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task), labelOf(this.host.store.messages, this.host.meta.get(callerId)!), { depth: depthOf(this.host, callerId) + 1 })
+    const asker = labelOf(this.host.store.messages, this.host.meta.get(callerId)!)
+    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task, { name: asker, sessionId: callerId }), asker, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
       return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }
@@ -522,14 +521,19 @@ export class AskProjectFlow {
       if (this.linkedAsks.get(ask.sessionId) === ask) this.linkedAsks.delete(ask.sessionId)
       if (!r.ok) return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.` }
       // Its last words, read there: the whole text, cut here as an answer is cut everywhere
-      const answer = await reader.lastWords(ask.sessionId, ANSWER_READ_MAX_CHARS).catch(() => '')
+      const words = await reader.lastWords(ask.sessionId, ANSWER_READ_MAX_CHARS).catch((e: Error) => ({ ok: false as const, error: e.message }))
+      // A read that failed is said, not handed back as an empty answer (#1186): the turn ended, and the task is done there
+      if (!words.ok) {
+        return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] ended its turn, but its answer could not be read there (${words.error}). Do not give the task again: read it with read_session(sessionId="${ask.sessionId}") once that machine answers.` }
+      }
+      const answer = words.text
       return {
         ok: true,
         state: 'done',
         project: ask.project,
         sessionId: ask.sessionId,
         sessionName: ask.sessionName,
-        answer: clipAnswer(answer, ask.sessionName),
+        answer: clipAnswer(answer, ask.sessionName, words.seq !== null ? { sessionId: ask.sessionId, seq: words.seq } : undefined),
         // Paths in the answer are that machine's: listed, not opened to the caller
         readable: [],
         outside: pathsIn(answer),
@@ -550,10 +554,11 @@ export class AskProjectFlow {
       case 'asking':
         return { ok: true, state: 'asking', ...base, sessionName: sessionName(), cards: r.cards }
       case 'working':
-        return { ok: true, state: 'working', ...base, sessionName: sessionName() }
       case 'bound': {
-        const notice = d.notice()
-        return { ok: true, state: 'working', ...base, sessionName: sessionName(), ...(notice ? { notice } : {}) }
+        const notice = r.kind === 'bound' ? d.notice() : undefined
+        // Where its turn is (#1186): a session at work and one stuck read the same before
+        const progress = progressOf(this.host.store.messages, d.sessionId)
+        return { ok: true, state: 'working', ...base, sessionName: sessionName(), ...(notice ? { notice } : {}), ...(progress ? { progress } : {}) }
       }
       case 'cancelled':
         return { ok: false, error: d.joinedTurn
@@ -568,7 +573,7 @@ export class AskProjectFlow {
         }
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
-    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName()), readable: granted, outside }
+    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
   }
 
 }

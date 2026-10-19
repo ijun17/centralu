@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fakeExe, fakeNodeExe } from '../fake-exe.test-helpers.js'
 import { sha256, type FakePackage } from './fake-registry.test-helpers.js'
 import type { RemoteRuntime } from './install.js'
-import { PS_PREAMBLE, type RemoteCommand } from './tunnel.js'
+import { PS_PREAMBLE, type RemoteCommand, type RemoteRun } from './tunnel.js'
 
 /**
  * This Windows machine playing the Windows machine a hub links to (docs/plans/remote-hub.md §10), for
@@ -19,8 +19,12 @@ import { PS_PREAMBLE, type RemoteCommand } from './tunnel.js'
 export const WIN_NODE_V = '24.21.0'
 export const WIN_NODE_FILE = `node-v${WIN_NODE_V}-win-x64.zip`
 
+/** What the fake ssh prints when it could not run the command or the command was ended: no status, and not a bare exit 1 (#1244) */
+export const FAKE_SSH_MARK = 'fake ssh: '
+
 /** Windows OpenSSH runs the command line it is given through cmd.exe; so does `shell: true` */
 const SSH = `const r = require('node:child_process').spawnSync(process.argv.at(-1), { shell: true, stdio: 'inherit' })
+if (r.error || r.status === null) console.error(${JSON.stringify(FAKE_SSH_MARK)} + (r.error ? r.error.message : 'the command was ended by ' + r.signal))
 process.exit(r.status ?? 1)
 `
 
@@ -131,4 +135,49 @@ export function pwsh7ModulePath(dir: string): string {
   }
   // Then the rest of what pwsh puts in the variable
   return [mod, join(process.env.ProgramFiles ?? 'C:\\Program Files', 'PowerShell', 'Modules'), process.env.PSModulePath ?? ''].join(';')
+}
+
+/**
+ * Whether a command on the stand-in remote ended without a word: a non-zero exit, nothing on stdout, and on stderr
+ * nothing but PowerShell's progress records and what the fake ssh says of a command it could not run (`FAKE_SSH_MARK`).
+ * Every script Centralu runs there says something when it fails (a `CENTRALU-INSTALL fail …` line, a JSON line with
+ * `ok: false`, `Centralu: no version is installed` on stderr, PowerShell's errors in CLIXML), so what is left is a
+ * process that was ended, crashed (Windows PowerShell started with `-EncodedCommand` exits 1 when its last command
+ * failed, whatever the exit code of that command) or never ran, and not an answer.
+ *
+ * It happened on GitHub's windows-2022 runners in install-windows.test.ts (#1244): three times in one afternoon, exit 1
+ * and nothing printed, after 3 to 8 seconds, from a different command each time (the stop of the old host, the install
+ * step of the next version). No wall-clock bound is involved: production's stop has none beyond `SSH_EXEC_TIMEOUT_MS`
+ * (30 minutes). It has not been seen on a development machine (22 runs of the file under load, 3,900 runs of the stop
+ * alone on two cores), so the cause is not known. Both commands run the `node.exe` of the remote's Node folder, and
+ * a scanner holding a freshly unpacked file was seen on those runners before (#1133): a guess, not a finding.
+ *
+ * Production does not rerun anything: there the person reads "gave no answer (exit 1)" and tries again. Whether a real
+ * machine ends a command like this is not known either.
+ */
+export function diedSilently(r: RemoteRun): boolean {
+  const said = clixmlErrors(r.stderr)
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== '' && !l.startsWith(FAKE_SSH_MARK))
+  return r.code !== 0 && r.stdout.trim() === '' && said.length === 0
+}
+
+/**
+ * `exec`, run again (up to `attempts` runs in all) when the command died silently (`diedSilently`). For a stand-in
+ * remote only. The commands of install, update, rollback and uninstall look at the machine's state and leave it right,
+ * so a second run is an ordinary run; one that died after it had changed something shows in the test's own checks
+ * (the fake's `events`), as a failure with its own message, not as a pass. The run that finally answers is returned
+ * as it is, so a command that fails says why and one that dies every time still fails. `onDied` hears of each death.
+ */
+export async function execThroughSilentDeath(
+  exec: (c: RemoteCommand) => Promise<RemoteRun>,
+  command: RemoteCommand,
+  o: { attempts?: number; onDied?: (r: RemoteRun, attempt: number) => void } = {},
+): Promise<RemoteRun> {
+  const attempts = o.attempts ?? 3
+  for (let attempt = 1; ; attempt++) {
+    const r = await exec(command)
+    if (attempt >= attempts || !diedSilently(r)) return r
+    o.onDied?.(r, attempt)
+  }
 }

@@ -41,6 +41,25 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
     expect(said).toEqual(['what is on the board?', 'and now?'])
   })
 
+  /*
+   * A report is often an orchestrator's first turn of the day. What the model reads of it is Centralu's words about the
+   * other session (#1186), and the line goes before them, as before any other turn's text, and is not used up unsaid
+   */
+  it("goes before a report's words when the report is the first turn", async () => {
+    const orc = await mgr.orchestrator()
+    const tools = adapter.lastOrchestratorTools!
+    store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ 'p1/board': 'app-board' }))
+    const cwd = dir('cc-notice-')
+    const { id: projectId } = (await rpc('projects.add', { path: cwd })) as { id: string }
+    const worker = (await rpc('agents.createSession', { projectId, cwd, tool: 'claude' })) as SessionInfo
+    await tools.sendToSession(worker.id, 'tell me when done', true)
+    adapter.handleOf(worker.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    const report = adapter.handleOf(orc.id)!.sent[0]!
+    expect(report.startsWith(`${LINE}\n\n[Centralu] The assigned work finished.`)).toBe(true)
+    expect(report).toContain(`sourceSessionId: ${worker.id}`)
+  })
+
   it('is not said to an orchestrator that had only user-folder apps, nor later when it attaches a root app itself', async () => {
     const orc = await mgr.orchestrator()
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ '_user/timer': 'app-timer' }))

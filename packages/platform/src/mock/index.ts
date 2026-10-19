@@ -357,6 +357,8 @@ export class MockPlatform implements Platform {
   /** The pairs approved for a machine's sessions to ask this computer's projects (#550) */
   get askPairs() { return this.machinesMock.askPairs }
   set askPairs(value: MachinesMock['askPairs']) { this.machinesMock.askPairs = value }
+  /** Machines whose "Allow auto from a linked computer" a test turned off (#1273) */
+  get hubAutoOff() { return this.machinesMock.hubAutoOff }
   /** What the window said it needs, in order (#1134) */
   get machinesNeeded() { return this.machinesMock.needed }
 

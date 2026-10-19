@@ -141,6 +141,21 @@ const RETIRED_THEME_TOKEN_SET: ReadonlySet<string> = new Set(RETIRED_THEME_TOKEN
 /** A theme file's id is its file name without `.json`: lowercase words and hyphens */
 export const ThemeId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/)
 
+/** A theme that ships with the app: its stylesheet block is `[data-theme='<id>']` (Dark is the `@theme` values themselves) */
+export type ThemePreset = { id: string; name: string; base: 'dark' | 'light' }
+
+/**
+ * The presets the stylesheet defines (`packages/ui/src/styles/index.css`), here so the host can name them too: the
+ * orchestrator's `set_preferences` picks a theme by id or name (#1219), and the screen reads this same list
+ * (`THEME_PRESETS` in app/theme.ts). The first preset of each base is that side's default.
+ */
+export const THEME_PRESETS: readonly ThemePreset[] = [
+  { id: 'dark', name: 'Dark', base: 'dark' },
+  { id: 'light', name: 'Light', base: 'light' },
+  { id: 'hc-dark', name: 'High contrast dark', base: 'dark' },
+  { id: 'hc-light', name: 'High contrast light', base: 'light' },
+]
+
 /** What the screen writes into a theme file (the host adds `$schema`) */
 export const ThemeFileContent = z.object({
   name: z.string().min(1).max(80),

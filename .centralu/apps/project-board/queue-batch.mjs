@@ -39,7 +39,7 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
@@ -216,7 +216,8 @@ async function build(b, ctx) {
     })
   if (!renew()) return { yielded: true }
   try {
-    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch)
+    // Landing after the fast tier (#1259): the batch runs the quick tier on what lands
+    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, TIERS && CI.landTier === 'quick' ? { tier: 'quick' } : undefined)
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why
@@ -332,8 +333,8 @@ async function runCi(b, ctx) {
     save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
-  if (d.state === 'green' && TIERS && ranTier(checks, CI.fullTier) !== 'full') {
-    // Green without the full tier: nothing lands from less (two tiers). A check still to come waits
+  if (d.state === 'green' && TIERS && CI.landTier !== 'quick' && ranTier(checks, CI.fullTier) !== 'full') {
+    // Green without the full tier, where nothing lands from less (`ci.landTier: full`). A check still to come waits
     if (ranTier(checks, CI.fullTier) === null && runs.some((r) => r.status !== 'completed')) {
       save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
       return { state: 'ci' }
@@ -435,7 +436,10 @@ async function landNext(b, ctx) {
     lowerBranches = (await Promise.all(mine.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
   const subject = squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
   const checks = pr.state === 'OPEN' && pr.mergeStateStatus === 'UNSTABLE' ? await readChecks(repo, pr.headRefOid) : null
-  const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, subject, subjectMax: SUBJECT_MAX, now, ref })
+  // UNSTABLE may also come from a run its own successful run made moot (a duplicate started in the same second, #1015),
+  // as on the single path: without this, a green batch waited 30 minutes, went back and was batched again, for ever
+  const superseded = checks ? [...supersededSuites((await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })).runs)] : []
+  const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, superseded, subject, subjectMax: SUBJECT_MAX, now, ref })
   const n = ref(repo, step.pr)
   const view = mine ? { ...mine, title: pr.title } : { repo, pr: step.pr, lowers: [], title: pr.title }
   const tested = ` Tested in batch ${b.branch} with ${list(b, prs.filter((p) => p !== step.pr), ref) || 'nothing else'}.`

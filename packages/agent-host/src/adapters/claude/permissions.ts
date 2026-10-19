@@ -138,7 +138,7 @@ export async function personsDefaultMode(): Promise<PermissionMode | null> {
  *   untrusted project                                       ['user'] only the user's own settings (~/.claude)
  *
  * **Which row applies is decided by the manager, based on the session's kind and project, and
- * passed down** (the manager's `settingFilesFor`). This must never be inferred from whether the
+ * passed down** (launch-inputs.ts `settingFilesFor`). This must never be inferred from whether the
  * session receives tools — it once was: `orchestratorTools` being set used to mean `[]`, but the
  * worktree manager and builder sessions also receive those tools. A builder session in a trusted
  * project could then read neither CLAUDE.md nor the user's own ~/.claude (the global bypass),
