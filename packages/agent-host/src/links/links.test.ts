@@ -1456,6 +1456,21 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     }
   })
 
+  // host.lastAnswer (#1186): the whole last response and where it starts, of a session a hub is shown and no other
+  it('a machine answers the whole last response of a session it shares, up to 100,000 characters, and no other session', async () => {
+    const { store } = seeded([['w1', 'worker', true], ['or', 'orchestrator', true]])
+    const long = 'z'.repeat(120_000)
+    talk(store, 'w1', [['write it all', long]])
+    const remote = await remoteHost(0, store)
+    const reader = remote.mgr.hostReader()
+    const seq = store.messages.loadMessages('w1', 10).find((m) => m.role === 'assistant')!.seq
+    for (const [asked, got] of [[undefined, 100_000], [1, 1], [5000, 5000], [100_000, 100_000], [200_000, 100_000]] as const) {
+      expect(await reader.lastAnswer('w1', asked)).toEqual({ text: long.slice(0, got), length: 120_000, seq })
+    }
+    await expect(reader.lastAnswer('or')).rejects.toThrow('Not a session this machine shares: or')
+    await expect(reader.lastAnswer('nobody')).rejects.toThrow('Not a session this machine shares: nobody')
+  })
+
   it('lists an unreachable machine’s sessions as last known, and says it could not search it', async () => {
     const { tool, remote, hub } = await rig()
     await tool('list_sessions')
@@ -1512,6 +1527,41 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const there = remote.store.messages.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
     expect(there.payload).toMatchObject({ from: { name: expect.stringContaining('on Hub mac') } })
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
+  })
+
+  /*
+   * #1186: the hub read the answer from the machine's read_session lines, which the machine cut at 2,000 characters, so
+   * a long answer came back as an older line or nothing, and the cut's pointer led to a second cut. The whole answer
+   * comes from host.lastAnswer, and the cut names the read there that shows the middle.
+   */
+  it('cuts a long answer from a machine with the read that shows the rest there, and that read shows it (#1186)', async () => {
+    const { name, ask, answer, hub } = await rig()
+    const middle = `MIDDLE-START${'m'.repeat(5000)}MIDDLE-END`
+    const call = ask({ project: name, task: `${'h'.repeat(4500)}${middle}${'t'.repeat(1500)}` })
+    await answer('allow')
+    const r = await call
+    if (!r.ok || r.state !== 'done') throw new Error(JSON.stringify(r))
+    expect(r.answer.startsWith('echo: [A session in the project "hub-project"')).toBe(true)
+    expect(r.answer).not.toContain('MIDDLE-END')
+    const read = /read_session\(sessionId="([^"]+)", around=(\d+), offset=(\d+)\)/.exec(r.answer)
+    expect(read?.[1]).toBe('m1.w1')
+    // The caller's own read_session, as the model calls it, read on that machine from the cut
+    const shown = await hub.mgr.runOrchestratorTool('h1', 'read_session', { sessionId: read![1], around: Number(read![2]), offset: Number(read![3]) })
+    expect(shown.isError).not.toBe(true)
+    const line = JSON.parse(shown.text.trim().split('\n').at(-1)!) as { text: string }
+    expect(line.text).toContain('MIDDLE-START')
+    expect(line.text).toContain('MIDDLE-END')
+  })
+
+  it('says the answer could not be read there, rather than answering empty (#1186)', async () => {
+    const { remote, name, ask, answer } = await rig()
+    const real = remote.mgr.hostReader.bind(remote.mgr)
+    vi.spyOn(remote.mgr, 'hostReader').mockImplementation(() => ({ ...real(), lastAnswer: async () => { throw new Error('the store is busy') } }))
+    const call = ask({ project: name, task: 'say hello' })
+    await answer('allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('ended its turn, but its answer could not be read there (the store is busy)') })
+    expect((r as { error: string }).error).toContain('read_session(sessionId="m1.w1")')
   })
 
   // The machine counts its session one level below the hub's caller while it works on the task (#838 item 12)

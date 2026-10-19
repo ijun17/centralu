@@ -55,7 +55,7 @@ type NormalizedEvent =
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: 도구가 받은 입력 그대로 (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: 결과 글 전체 (#221)
   | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; 표시 실패의 이유는 note가 말한다
-  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303)
+  | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 마커: claude compact_boundary, codex 완료된 contextCompaction 항목 (#303); `after`가 있으면 알고 있던 context 수치를 그 값으로 옮긴다, 추정치로 (#1282)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: 도구가 새 대화를 시작했다(Claude의 /clear). 마커이며 게이지가 비워진다
   | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
       from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: 도구가 읽히길 바라는 글, 한 줄. #342: 읽기 쉽게

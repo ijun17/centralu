@@ -327,6 +327,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.sessions': HUB,
   'host.readSession': HUB,
   'host.recall': HUB,
+  'host.lastAnswer': HUB,
   'host.send': HUB,
   'host.hubAuto': HUB,
   'host.setHubAuto': HUB,

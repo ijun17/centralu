@@ -11,7 +11,8 @@ import type { HostAsk } from './host-cards.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionTrashHost } from './session-trash.js'
 import { agentFrame, presetWithin } from './start-agent.js'
-import { labelOf } from './transcript-view.js'
+import { errorKind } from './error-kind.js'
+import { labelOf, progressOf } from './transcript-view.js'
 
 /**
  * What the request queue reaches of the session manager (#428), typed as the manager declares each member. The manager
@@ -89,7 +90,16 @@ export class QueuedRequests {
   }
 
   busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }> {
-    return { state: 'busy', sessionId: target.id, sessionName: target.name, sessionState: this.host.children.queued.get(target.id)?.length && !inTurn(target.state) ? 'queued requests' : blockedOnQuestion(target) ? 'waiting on a question' : target.state, choices: this.busyChoices(callerId, target, from) }
+    // How many requests a queued one would wait behind, and where the running turn is (#1186)
+    const ahead = this.host.children.queued.get(target.id)?.length ?? 0
+    const progress = progressOf(this.host.store.messages, target.id)
+    return {
+      state: 'busy', sessionId: target.id, sessionName: target.name,
+      sessionState: ahead && !inTurn(target.state) ? 'queued requests' : blockedOnQuestion(target) ? 'waiting on a question' : target.state,
+      choices: this.busyChoices(callerId, target, from),
+      ...(ahead ? { ahead } : {}),
+      ...(progress ? { progress } : {}),
+    }
   }
 
   /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
@@ -179,7 +189,7 @@ export class QueuedRequests {
       } else {
         d = this.host.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'
-        await this.host.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
+        await this.host.deliver(sessionId, askFrame(callerProject, r.text, { name: from.name, sessionId: caller.id }), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       }
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) this.host.children.queuedTurnStarted(sessionId)
@@ -192,7 +202,7 @@ export class QueuedRequests {
         d.wait.fail(e as Error)
       } else this.host.children.releaseTurn(sessionId, caller.id)
       this.host.children.dropQueued((x) => x.id === r.id)
-      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
+      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message, true)
       this.scheduleDrain(sessionId)
     }
   }
@@ -301,14 +311,22 @@ export class QueuedRequests {
     }
   }
 
-  /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
-  async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
+  /**
+   * A queued request could not be delivered (#677): said in the requester's session, as a report is. `fromError`: the
+   * reason is an error's text, not Centralu's own sentence, and reaches the model by its kind only (#1186 review)
+   */
+  async tellQueuedFailed(callerId: string, sessionId: string, why: string, fromError = false): Promise<void> {
     const name = this.host.nameOf(sessionId)
+    const reason = fromError
+      ? `Reason, by kind: ${errorKind(why)} (its words are an error's, kept in this notice on the person's screen).`
+      : `Reason (as JSON): ${JSON.stringify(why.slice(0, 600))}`
     await this.host.tellSession(
       callerId,
       `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
       { sessionId, name },
       true,
+      // What the model reads (#1186): not the session's name, which is not Centralu's words (#120), nor an error's words
+      `[Centralu] Your queued request to another session was not delivered.\nid: ${sessionId}\n\n${reason}`,
     )
   }
 

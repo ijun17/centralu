@@ -1,4 +1,5 @@
 import { frameField, oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
+import type { TurnProgress } from '../adapters/contract.js'
 import type { MessageRecords } from '../dev-services/store/messages.js'
 import { clipPreview, lastResponse } from './turn-answer.js'
 
@@ -141,6 +142,26 @@ export function contextAt(
     parts.push(`${mark} ${indentedLines(t)}`)
   }
   return parts.join('\n')
+}
+
+/**
+ * Where a running turn is (`TurnProgress`, #1186): how long the session has recorded nothing, and its last step, a
+ * tool call's title cut to one line included (the session's words, rendered as JSON)
+ */
+export function progressOf(reader: MessageReader, sessionId: string, now = Date.now()): TurnProgress | undefined {
+  const last = reader.loadMessages(sessionId, 1).at(-1)
+  if (!last) return undefined
+  const ms = Math.max(0, now - last.ts)
+  const quietFor = ms < 60_000 ? `${Math.floor(ms / 1000)} s` : ms < 3_600_000 ? `${Math.floor(ms / 60_000)} min` : `${Math.floor(ms / 3_600_000)} h`
+  const summary = (last.payload as { summary?: { title?: unknown; tool?: unknown } } | null)?.summary
+  const lastStep =
+    last.kind === 'tool_call' && typeof summary?.title === 'string' ? `${typeof summary.tool === 'string' ? summary.tool : 'tool'}: ${summary.title.split('\n')[0]!.slice(0, 100)}`
+    : last.kind === 'tool_result' ? 'a tool call returned'
+    : last.kind === 'reasoning' ? 'thinking'
+    : last.kind === 'text' && last.role === 'assistant' ? 'writing'
+    : last.kind === 'text' && last.role === 'user' ? 'took in a message'
+    : undefined
+  return { quietFor, ...(lastStep ? { lastStep } : {}) }
 }
 
 /** When it last moved — used to tell which session's conversation is happening right now */

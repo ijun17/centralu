@@ -377,6 +377,15 @@ export type HostSessionRow = z.infer<typeof HostSessionRow>
 export const HostReadSessionResult = z.object({ state: z.string(), lines: z.array(z.string()) })
 export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
 
+/**
+ * A session's last response, whole (`host.lastAnswer`, #1186): its text up to the characters asked for, how long it is
+ * in all, and the seq of its first message (`host.readSession`'s `around`), null when it has said nothing. A hub read
+ * it from `host.readSession`'s lines, which are cut at 2,000 characters, so a long answer came back as an older line or
+ * nothing at all
+ */
+export const HostLastAnswerResult = z.object({ text: z.string(), length: z.number().int().min(0), seq: z.number().int().nullable() })
+export type HostLastAnswerResult = z.infer<typeof HostLastAnswerResult>
+
 /** One search hit, as `recall` shows it (`host.recall`); `seq` goes back as `host.readSession`'s `around` */
 export const HostRecallHit = z.object({
   sessionId: z.string(),
