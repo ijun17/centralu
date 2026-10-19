@@ -186,10 +186,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
   check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
-  pull_request run when a push run shares the commit (`latestRuns`). A cancelled run is rerun once per
-  head and failed jobs once per head (`gh api …/rerun`, `…/rerun-failed-jobs`), written down before
-  asking and counted as done only once its attempt number moves; GitHub refusing the rerun, failing
-  again or cancelled again → attention, naming the job and its first failing line. No run on a head
+  pull_request run when a push run shares the commit (`latestRuns`). **Only an infrastructure failure
+  is rerun** (below, "Reruns"): a cancelled run once per head and failed jobs once per head (`gh api
+  …/rerun`, `…/rerun-failed-jobs`), written down before asking and counted as done only once its
+  attempt number moves; a test or build failure, GitHub refusing the rerun, failing again or cancelled
+  again → attention, naming the job and its first failing line. No run on a head
   for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
   job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
   clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
@@ -209,7 +210,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (a driver stopped between the merge and writing it down, or by hand): then each head branch is
   deleted and the lowers closed, a branch kept when another open pull request is based on it (deleting
   it would close that one). Found merged into another branch, nothing is closed or deleted. Never
-  `--auto`, never `--delete-branch`, never a force push.
+  `--auto`, never `--delete-branch`, never a force push but one: the lease after a restack (Conflicts, below).
 - **Failures on one item** that are not an outage (a pull request gone, a write GitHub refuses) are
   counted; three in a row → attention, once.
 - **Gentle on GitHub**: one item per tick (5 s), each item again after its own wait (90 s while CI
@@ -238,6 +239,38 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - `PROJECT_BOARD_QUEUE_TICK_MS` and `PROJECT_BOARD_QUEUE_POLL_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
+
+### Reruns (2026-10-19)
+
+On the queue's first day 19 runs were rerun, most of them a test failing the same way again, each a CI
+run the next batch waited behind. The owner's rule: **the queue reruns only infrastructure failures**.
+`run-failure.mjs` holds it (pure); the driver reads, for each finished run that did not pass, its jobs
+and their steps (`runJobSteps`, `/actions/runs/{id}/jobs`) and what GitHub wrote on each job that did
+not pass (`checkRunNotes`, `/check-runs/{id}/annotations`), once per run attempt (kept on the item or
+the batch as `failures`), and `decideRun` decides from it, for an item's head and a batch's alike.
+
+- **Real** (no rerun, attention at once): a job that failed in a step (a test, a build), or failed
+  with nothing naming the runner; also when the run's conclusion is `cancelled` because CI cancelled
+  the rest after it. The attention text names the job, the step, and (as before) its first failure
+  line from the job's log; for a cancelled run it says CI cancelled the rest (fail fast).
+- **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
+  its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
+  minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
+  test failure); a lost runner ("lost communication with the server", "received a shutdown signal");
+  a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
+  failure beside any of these makes the run real.
+- **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
+  `verify` job fails, CI cancels the rest of that run at once (fail fast). The queue therefore never
+  reads a run's conclusion alone: a `cancelled` run with a failed job is a failure.
+- A batch reads its run the same way: a real failure is split at once (no rerun first), an
+  infrastructure one rerun once.
+- Without a reading of the run's jobs for its attempt (`decideRun` called without `failures`), the
+  checks decide: a cancelled run with a job that failed is real, one without is cancelled (rerun), any
+  other failure is real.
+- `PROJECT_BOARD_QUEUE_FLAKY` (the list as JSON) sets the list for tests only. Tests:
+  `tooling/project-board-queue.test.ts` (the classification, the decision, and the app against the
+  fake `gh`: a verify failure not rerun, in a failed and in a fail-fast cancelled run; a timeout rerun
+  once; a lost runner rerun and landed).
 
 ### Conflicts (#1182)
 
@@ -271,6 +304,20 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   batch, the full tier) before it lands: nothing lands that CI has not passed on. A merge git makes
   cleanly though GitHub said DIRTY is pushed the same way. Tests fail if the push gains `--force` or
   the check that the branch is at the head GitHub reported goes.
+- **Stacked on one the queue landed as a squash** (#1221 on #1218, 2026-10-19): GitHub moves such a
+  pull request's base to the default branch, but its branch still carries the lower's original commits,
+  which conflict with their own squash (five files there), and merging main in cannot fix that. So
+  before merging, the queue looks for a pull request it landed (its merged items' heads, newest first)
+  whose head is in the branch and not in the default branch (squashed, not merged), the nearest one
+  (`landedUnder`), and rebases the branch onto the default branch without its commits (`git rebase
+  --onto <default> <its head>`, hooks off, in the same temporary worktree). Pushed with a lease on the
+  head it read (`--force-with-lease=refs/heads/<branch>:<head>`, the owner's, 2026-10-19: the only push
+  the queue forces), so git refuses it when the author pushed meanwhile (`superseded`, as for a merge).
+  The new head runs CI (and a batch, the full tier) before it lands, and goes to the front once fixed.
+  Only a rebase that itself conflicts is handed off, with that instruction ("Rebase <branch> onto main
+  without #N's commits (git rebase --onto origin/main <head>) … push with --force-with-lease"), not
+  "merge main". Events: `rebase` (`dropped`: that pull request, `files` when it conflicted), then `push`
+  with `lease: true`.
 - **What regenerating made is shown**: a regenerated golden is approved without a person, and would
   be the baseline from then on even if it records a regression. So the commit body and the
   `regenerate` event carry each regenerated file's lines added and removed against the default
@@ -326,7 +373,8 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
 - `PROJECT_BOARD_QUEUE_CHECKOUT` (empty: none) and `PROJECT_BOARD_QUEUE_CONFLICTS` (the lists as JSON)
   change these only for tests, which otherwise would merge in this checkout, whose remote is GitHub.
   Tests: `tooling/project-board-queue.test.ts` (the lists, and the app with real git and a bare
-  repository standing for GitHub's: mechanical only lands with no attention, code, the UX baseline and
+  repository standing for GitHub's: a pull request stacked on a squashed one rebased and landed, or
+  handed off when even the rebase conflicts; mechanical only lands with no attention, code, the UX baseline and
   a migration step hand off; a branch that moved, an author pushing during regeneration, a branch with
   main in it already, a failing command; the environment the commands see, and the cleanup on each
   path).
@@ -336,14 +384,23 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
 The free plan runs about one CI build at a time, so pull requests queued together each waited for
 their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
 and the tick drives the running batch before any item, under the same lease. On while `project.json`
-has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`, default 6).
+has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`,
+default 4: the owner's, 2026-10-19, this repository's too).
 
-- **Which**: active items in CI whose own CI was read on their head and has not started (every run
-  `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
-  from a batch on that head (`batchless`), not a fork's (its head would run CI in this repository's
-  branch) and not a release bump (its CI is the release's evidence), the oldest first, in one
-  repository. Sent back, an item is batchable again only after its own next poll. One batch runs at a
-  time; an item in a batch is not polled on its own (`dueItem`).
+- **Which**: active items in CI whose own CI was read on their head, not sent back from a batch on
+  that head (`batchless`), not a fork's (its head would run CI in this repository's branch) and not a
+  release bump (its CI is the release's evidence), in one repository, those fixed after a conflict
+  first (`front`), then in the order they were queued; a stack is one item, so one member. With two
+  tiers, **every ready item** (2026-10-19): its own quick run passed, still runs, waits for a runner
+  or has not reported yet, but not one whose own CI failed (its poll handles that). Without tiers,
+  only one whose own run has not started (every run `queued`, `waiting`, `requested` or `pending`):
+  that run could land it, and cancelling a started one throws work away. Day one, taking only those
+  not started or finished, made batches of 1.25 pull requests on average, about 20 minutes each, one
+  after another (5 queued: about 100 minutes). Sent back, an item is batchable again only after its
+  own next poll. One batch runs at a time; an item in a batch is not polled on its own (`dueItem`).
+- **Gathering**: a batch that is not full waits while another active item of its repository, queued
+  less than a minute ago, has not been read on its head yet (`gathering`), so pull requests queued
+  together in a row share one batch instead of the first going alone.
 - **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
   branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
   batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
@@ -351,13 +408,17 @@ has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of 
   into it for another reason (a 404 or 422, a head gone, already in main). With two or more merged, the CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
   permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
-  Then the members' own runs that have not started are cancelled, each written down before it is
-  cancelled (`cancelled`, which a batch split or re-formed from this one keeps for its members).
+  Then the members' own runs that have not started are cancelled (with two tiers, every one not
+  finished: the batch's full run tests what a quick run does, and the runners are the batch's), each
+  written down before it is cancelled (`cancelled`, which a batch split or re-formed from this one
+  keeps for its members).
 - **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
-  required set from the default branch plus jobs the batch adds, a cancelled run rerun once, failed
-  jobs once. A member that changes meanwhile (pushed, closed, a draft, taken out, queued again) ends
-  the run; the rest are tried again without it. **Red** (failed twice): split in halves, a half of
-  two or more tried again, one alone goes back to its own CI. Anything else (no run in 15 minutes, a
+  required set from the default branch plus jobs the batch adds, and only an infrastructure failure
+  rerun, once (Reruns, above). A member that changes meanwhile (pushed, closed, a draft, taken out,
+  queued again) ends the run; the rest are tried again without it. **Red** (a test or build failure,
+  or an infrastructure failure twice): split in halves, a half of
+  two or more tried again, one alone goes back to its own CI; with two tiers every half is tried
+  again, down to single pull requests (bisect, below). Anything else (no run in 15 minutes, a
   refused rerun) sends them all back.
 - **The required-checks rule** (#962's open question, decided here): the queue's own rule, with no
   branch protection change. A member's required checks count as passed when the batch run passed
@@ -408,12 +469,19 @@ finished otherwise, null while not reported).
   (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
   off) → attention `full-tier`, saying how to start the full tier on it.
 - **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
-  repository's), and the fewest left after a conflict or a change is `min(2, min)`. A batch also takes
+  repository's), and the fewest left after a split, a conflict or a change is 1, whatever `min`. A batch also takes
   items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
   is taken alone, when it is the oldest. The batch's run must have passed the full tier's check too,
   or nothing lands from it (the batch is dropped).
-- **A batch of one that ended without landing its member** (red, refused, stopped, three errors, a
-  conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
+- **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
+  the default branch as it is then, so a half that passes lands before the other half is tried, and a
+  red half is split again. **A pull request red alone** (the end of a bisect, or a batch of one) needs
+  attention at once (`failed`: "#N failed alone in batch …", the job, its step and its first failure
+  line), kept as `alone.reason` on that head, which its poll answers before anything else
+  (`decideCi`): its own run, cancelled for the batch, is not rerun first only to say "quick tier
+  passed", and the message is sent once.
+- **A batch of one that ended without landing its member** otherwise (refused, stopped, three errors,
+  a conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
   its session (`full-tier`, with the batch's reason). A new head, or queueing it again, clears it.
   Without this a red batch of one was formed again every tick.
 - **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
@@ -608,7 +676,8 @@ step shows on the screen.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
-  (pure) and their steps on GitHub.
+  (pure) and their steps on GitHub. `run-failure.mjs` — why a CI run failed, real or infrastructure
+  (pure: the rerun policy). `queue-conflict.mjs` — the git work of a conflict.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
