@@ -9,7 +9,7 @@ import { memoryCapabilityBook } from './capabilities.js'
 import type { AppCheckReport } from './check.js'
 import { AppCalls, type AppCallOptions } from './app-calls.js'
 import { checkApp } from './app-check.js'
-import { createApp, installUserApp, moveToAppTrash, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
+import { appTrashEntry, createApp, installUserApp, moveToAppTrash, removeUserApp, writeAppProject, type AppProjectTarget, type FoldersHost, type NewAppSpec, type UserAppSpec } from './app-folders.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
@@ -665,7 +665,8 @@ export class ExternalApps {
    * a removed user-folder app's does, and what it kept under the project's key returns to the user-folder key, where a
    * folder put back into the user folder finds it (`returnAppFiles`). The adoption decides when and checks that the
    * folder is the one the project was made from (`UserAppAdoption`); this does the moving, in one synchronous step.
-   * Refused while the project is still registered here. Returns where the folder went, or null when it was not there
+   * What the user-folder key already held is kept beside the folder (`<id>-<ms>-user-data`), never deleted. Refused
+   * while the project is still registered here. Returns where the folder went, or null when it was not there
    */
   returnAdoptedApp(projectId: string, appId: string): string | null {
     if (this.scopes.has(projectId)) throw new Error(`project ${projectId} is still registered`)
@@ -673,8 +674,9 @@ export class ExternalApps {
     const from = this.startEnv.appKey({ projectId, appId })
     const to = this.startEnv.appKey({ projectId: null, appId })
     const dir = this.userAppDir(appId)
-    const trashed = existsSync(dir) ? moveToAppTrash(this.deps.dataRoot, dir, appId) : null
-    returnAppFiles(this.deps.dataRoot, from, to)
+    const at = Date.now()
+    const trashed = existsSync(dir) ? moveToAppTrash(this.deps.dataRoot, dir, appId, at) : null
+    returnAppFiles(this.deps.dataRoot, from, to, `${appTrashEntry(this.deps.dataRoot, appId, at)}-user-data`)
     return trashed
   }
 
