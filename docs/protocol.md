@@ -343,7 +343,7 @@ window of the host's build answers it:
 | a remembered `agents` consent (#561), in Settings' list of consents | beta.17 | lists it without saying what it allows |
 | the apply card (#665) and the handoff card (#694) | beta.23, beta.25 | reads them, since they ride on `other` |
 | the orchestrator's machine card (#1219, `about: "machine_change"`) | the release after beta.29 | reads it, since it rides on `other`; offers "always", which the host reads as allow, once |
-| the orchestrator's settings card (#1219, `about: "orchestrator_change"`) | the release after beta.29 | reads it, since it rides on `other`; offers "always", which the host reads as allow, once |
+| the orchestrator's settings and trash card (#1219, `about: "orchestrator_change"`) | the release after beta.29 | reads it, since it rides on `other`; offers "always", which the host reads as allow, once |
 
 So a new card kind that has to reach released windows rides on `other` with an `about`, the question whole in `raw`,
 as the apply and handoff cards do; a kind of its own is for a card a generic one can stand in for.

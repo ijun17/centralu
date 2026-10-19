@@ -222,6 +222,35 @@ export const ORCHESTRATOR_TOOLS = [
       })
       .strict(),
   },
+  /*
+   * #1219: the trash. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
+   * waits for the person's card naming what goes.
+   */
+  {
+    name: 'list_trash',
+    description: 'Lists the trash: deleted sessions, kept app runs, trashed subagent steps, and sessions whose subagent steps could be trashed.',
+    schema: z.object({}),
+  },
+  {
+    name: 'restore_trashed',
+    description: 'Brings a session back from the trash, or (what "subagent_steps") puts its trashed subagent steps back under their cards. No card.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'subagent_steps']).optional() }),
+  },
+  {
+    name: 'trash_subagent_steps',
+    description: "Moves a live session's subagent steps to the trash (its conversation stays); restore_trashed brings them back. No card.",
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.') }),
+  },
+  {
+    name: 'delete_trashed',
+    description: 'Deletes one trashed session, or (what "subagent_steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
+    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'subagent_steps']).optional() }),
+  },
+  {
+    name: 'empty_trash',
+    description: 'Deletes everything listed in the trash for good, kept app runs included. The person approves a card naming what goes first.',
+    schema: z.object({}),
+  },
   {
     name: 'create_session',
     description:
@@ -666,7 +695,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
-  'Linked machines: add_machine and the other *_machine commands. Settings: get_preferences, set_preferences.',
+  'Linked machines: add_machine and the other *_machine commands. Settings: get_preferences, set_preferences. Trash: list_trash.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

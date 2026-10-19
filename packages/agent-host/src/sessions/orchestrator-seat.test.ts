@@ -62,6 +62,7 @@ beforeEach(() => {
     machineList: vi.fn(() => []),
     machineRequest: vi.fn(),
     preferencesRequest: vi.fn(),
+    trashRequest: vi.fn(),
     startAgent: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     agentSession: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     listAgents: vi.fn(async () => []),

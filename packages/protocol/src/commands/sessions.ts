@@ -430,7 +430,7 @@ export const SUBAGENT_STEPS_PAGE = 500
 /**
  * A session in the trash (#204), as Settings lists it.
  *
- * Deleting a session moves it here instead of destroying it; only Settings deletes it for good. The list says what
+ * Deleting a session moves it here instead of destroying it; only Settings deletes it for good (or the orchestrator, after the person's card, #1219). The list says what
  * each one still holds and what goes with it, because a trash that shows names but not contents is the hidden store
  * the retired archive was (FR-20): it had a way in and no way out, and nobody could see what it kept.
  */

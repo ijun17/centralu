@@ -883,7 +883,8 @@ commands, so their 874 characters ride in none of its requests; one line of its 
 
 The preferences commands (#1219, `get_preferences` and `set_preferences`, rare) came with no more resident cost: the machine line,
 which named six commands, now names one and says "the other *_machine commands", and the same line names the two. Claude 9,443 → 9,411,
-Codex 9,495 → 9,463; the two definitions ride in none of the orchestrator's requests (`centralu_commands` lists them).
+Codex 9,495 → 9,463; the two definitions ride in none of the orchestrator's requests (`centralu_commands` lists them). The five
+trash commands added "Trash: list_trash." to that line: Claude 9,430, Codex 9,482, against the ceiling of 9,500.
 
 An orchestrator that had root apps attached before this build reads one line before its first turn by it ("Project
 apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you

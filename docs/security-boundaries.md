@@ -362,6 +362,11 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `set_machine_autostart` | yes | — | — | — | — |
 | `get_preferences` | yes | — | — | — | — |
 | `set_preferences` | yes | — | — | — | — |
+| `list_trash` | yes | — | — | — | — |
+| `restore_trashed` | yes | — | — | — | — |
+| `trash_subagent_steps` | yes | — | — | — | — |
+| `delete_trashed` | yes | — | — | — | — |
+| `empty_trash` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -526,6 +531,8 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `reconnect_machine`, `set_machine_connect` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setConnect`: what the Machines row's Reconnect and connect setting do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
 | `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, idle sleep, update checking and moving idle sessions to a new agent CLI (the orchestrator changes a setting the window offers, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field; `sessionTools`, the agent ceiling, depth and models, trust, approval rules and app grants have none, and an unknown field is refused by name. The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
 | `set_preferences` `applyUpdatesWhenIdle: true`, when it is off (#1219) | asks (a card saying that a newer Centralu then installs by itself and the window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAutoApply`. Turning it off asks nothing. A denial leaves it off and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
+| `list_trash`, `restore_trashed`, `trash_subagent_steps` (the orchestrator reads the trash, brings a session or its subagent steps back, or moves a session's subagent steps there, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrashFlow.run` (`sessions/trash-flow.ts`) → the window's own calls through the router (`trash.list`, `subagents.usage`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`), so a linked machine's trash is reached as the window reaches it and the host's checks decide (a session not in the trash is refused, a restore whose project folder is gone is refused). Nothing is lost: all three are reversible. The central orchestrator only, as rare commands behind `centralu_run` |
+| `delete_trashed` (one trashed session, or its trashed subagent steps, for good) and `empty_trash` (everything listed: sessions, kept app runs, trashed steps) (#1219) | asks (a card naming the session or the counts, the size, up to ten names, the tool conversation files and worktrees that go with them, and that it cannot be undone, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then the window's `trash.purge`, `trash.purgeSubagentSteps` and `trash.purgeRuns`, one per item the card named (`trash.empty` is not called: it takes everything there is). Refused before the card: a session that is not in the trash (a live session is never deleted from here), steps not in the trash. After Allow the trash is read again: a session restored while the card stood is kept, one that reached the trash meanwhile is not deleted, and steps moved there after the card are kept (`upTo`). The trash on a linked machine that could not be reached is left alone and named. The central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -628,7 +635,7 @@ what it can tell without connecting: a machine not linked, a target that is no s
 a target, name or distro with a control or format character (a bidi override would make the card read otherwise than
 what runs), a name already linked, and an install this computer cannot make.
 
-**Settings from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
+**Settings and the trash from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
 window's Settings changes, through the window's own calls, so the same schemas and handlers decide. The reversible
 settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
 at once. What widens what agents may do or cost (`sessionTools`, the agent ceiling, depth and models), trust, approval
@@ -636,6 +643,12 @@ rules and app grants have no field: an unknown field is refused by name. "Apply 
 setting that asks: with it on, code arrives and the window relaunches without a later question, which is what
 `update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
 is read as allow, once).
+
+The trash is the person's safety net, so deleting from it for good is the one thing there that asks (`delete_trashed`, `empty_trash`):
+the card names what goes (the sessions by name, how many, how large, the tool's conversation files and worktrees that
+go with them), and the host deletes exactly what the card named and is still in the trash, never more. Listing, restoring
+and moving a session's subagent steps to the trash lose nothing and ask nothing. A live session cannot be deleted
+through these commands: it has to be in the trash first, which `agents.deleteSession` and the sidebar do.
 
 ### Turning things off
 

@@ -41,6 +41,14 @@ export type PreferenceChanges = {
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
 export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: PreferenceChanges }
 
+/** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
+export type TrashRequest =
+  | { action: 'list' }
+  | { action: 'restore'; sessionId: string; what: 'session' | 'subagent_steps' }
+  | { action: 'trash_steps'; sessionId: string }
+  | { action: 'delete'; sessionId: string; what: 'session' | 'subagent_steps' }
+  | { action: 'empty' }
+
 export type OrchestratedSession = {
   sessionId: string
   name: string
@@ -604,6 +612,11 @@ export type OrchestratorTools = {
    * when idle" waits for the person's card. Absent on seats that cannot.
    */
   preferences?(req: PreferencesRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * The trash (#1219): list it, restore a session or its subagent steps, move a session's subagent steps to it; deleting
+   * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
+   */
+  trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

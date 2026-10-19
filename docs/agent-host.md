@@ -1371,6 +1371,24 @@ the params with the method's schema and reads the answer with its result schema,
   card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves it off and the
   call's other changes still happen. Turning it off, or on when it already is, asks nothing; neither does any other field.
 
+**The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
+`delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
+preferences) are the Trash screen's calls. `what` is `session` (the default) or `subagent_steps`.
+
+- `list_trash` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
+  sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the trashed subagent
+  steps, and the sessions whose steps could be moved there. Rows beyond 25 are counted.
+- `restore_trashed`, `trash_subagent_steps`: `trash.restore` (which registers a deleted project's folder again, as in the window),
+  `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and ask nothing.
+- `delete_trashed` and `empty_trash` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
+  A session or steps that are not in the trash are refused before the card, so a live session cannot be deleted this way.
+  The card names the session (or the counts, the size and up to ten names), what goes with it (the tool's conversation
+  file, a worktree marked for removal) and that it cannot be undone. After Allow the trash is read again and the host
+  deletes exactly what the card named and is still there, one `trash.purge` / `trash.purgeSubagentSteps` (with the `upTo`
+  the card listed) / `trash.purgeRuns` (one call per machine) at a time, as the window's Empty trash does; `trash.empty` is
+  not used, because it takes everything in the trash, also what arrived after the card. A session restored while the card
+  stood is kept and said so; one that failed to delete stays and is reported, and the rest go on.
+
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
 The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same

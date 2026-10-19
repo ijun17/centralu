@@ -23,6 +23,14 @@ export const WINDOW_METHODS = [
   'updates.setAutoApply',
   'agents.versions',
   'agents.setAutoApplyVersions',
+  'trash.list',
+  'trash.restore',
+  'trash.restoreSubagentSteps',
+  'subagents.usage',
+  'subagents.trash',
+  'trash.purge',
+  'trash.purgeSubagentSteps',
+  'trash.purgeRuns',
 ] as const satisfies readonly RpcMethodName[]
 
 export type WindowMethod = (typeof WINDOW_METHODS)[number]
