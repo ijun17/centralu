@@ -87,7 +87,7 @@ export function currentRareTier(): RareTier {
  * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
  * the instructions; the first of the orchestrator's window functions to come as commands (#1219). In since #1219's
  * second slice: the six machine commands, which the instructions name in one line. In since the preferences (#1219):
- * get_preferences and set_preferences; the line now says "the other *_machine commands" and names them (32 characters less).
+ * get_preferences and set_preferences; the machine commands are found by their name (centralu_commands "machine") and the line names three more (30 characters less).
  * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
  * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
  * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.

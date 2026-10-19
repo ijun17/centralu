@@ -1,7 +1,7 @@
 import { ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
-import { trustedJsonText } from './tool-answers.js'
+import { plainQuoted } from './tool-answers.js'
 import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
 export type { PreferencesRequest }
@@ -16,6 +16,15 @@ const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029]/u
 
 /** A theme the person can pick: a preset, or a theme file that reads cleanly */
 type ThemeChoice = { id: string; name: string; base: 'dark' | 'light'; file: boolean }
+
+/** The cards for the update switches (see the comment where they are asked) */
+const APPLY_CARD =
+  'Turn on "Apply updates automatically when idle"? From then on this computer installs a newer Centralu by itself as soon as one is ' +
+  'published, and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
+const CHECK_CARD =
+  'Turn on checking for updates automatically? "Apply updates automatically when idle" is on, so as soon as a newer Centralu is published ' +
+  'this computer installs it by itself and the desktop window relaunches into it when nothing is busy, without asking again. You can turn ' +
+  'either off in Settings, Updates.'
 
 const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 
@@ -64,16 +73,16 @@ export class PreferencesFlow {
     const choices = themes.status === 'fulfilled' ? themeChoices(themes.value) : themeChoices([])
     const named = (id: string) => {
       const c = choices.find((x) => x.id === id)
-      return c ? `${trustedJsonText(c.name)} [${c.id}]` : `[${trustedJsonText(id)}] (no such theme; the stylesheet's own is shown)`
+      return c ? `${plainQuoted(c.name)} [${c.id}]` : `[${plainQuoted(id)}] (no such theme; the stylesheet's own is shown)`
     }
     const lines = [
       'Appearance',
       `- Theme mode: ${p.themeMode}; dark theme ${named(p.themeDark)}; light theme ${named(p.themeLight)}`,
-      `- Themes to choose from (set_preferences theme): ${choices.map((c) => `${trustedJsonText(c.name)} [${c.id}] (${c.base}${c.file ? ', a theme file' : ''})`).join(', ')}`,
+      `- Themes to choose from (set_preferences theme): ${choices.map((c) => `${plainQuoted(c.name)} [${c.id}] (${c.base}${c.file ? ', a theme file' : ''})`).join(', ')}`,
       `- Text size: ${p.textSize} (${TEXT_SIZES.join(', ')}; 1 is the default)`,
-      `- Body font: ${p.bodyFont ? trustedJsonText(p.bodyFont) : "the app's own"}; code font: ${p.codeFont ? trustedJsonText(p.codeFont) : "the app's own"}`,
+      `- Body font: ${p.bodyFont ? plainQuoted(p.bodyFont, 200) : "the app's own"}; code font: ${p.codeFont ? plainQuoted(p.codeFont, 200) : "the app's own"}`,
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
-      `- Accent colour: ${p.accent === null ? 'none' : trustedJsonText(p.accent)}`,
+      `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
@@ -144,8 +153,35 @@ export class PreferencesFlow {
         return `Idle sessions sleep after ${now.afterMinutes === null ? 'never' : `${now.afterMinutes} minutes`}.`
       })
     }
-    if (changes.checkForUpdates !== undefined) {
-      const enabled = changes.checkForUpdates
+    /*
+     * The two update switches together. Code arrives unasked once checking and applying are both on, so the card is for the
+     * change that makes it so, whichever of the two completes it: apply turned on, or checking turned on while apply is on.
+     * Turning either off, or leaving them as they are, asks nothing. (docs/agent-host.md §4.5)
+     */
+    let checkUpdates = changes.checkForUpdates
+    let applyUpdates = changes.applyUpdatesWhenIdle
+    if (checkUpdates === true || applyUpdates === true) {
+      try {
+        const before = await callWindow(rpc, 'updates.status', { force: false })
+        const turningApplyOn = applyUpdates === true && !before.autoApply
+        const checksComeOn = () => checkUpdates === true && !before.auto && (applyUpdates ?? before.autoApply)
+        if (turningApplyOn || checksComeOn()) {
+          const refused = await this.ask(sessionId, turningApplyOn ? APPLY_CARD : CHECK_CARD, signal)
+          if (refused) {
+            failed.push(`${turningApplyOn ? 'Applying updates' : 'Update checks'}: ${refused}`)
+            if (turningApplyOn) applyUpdates = undefined
+            // With apply left off, checking coming on is no longer the change that lets code arrive unasked
+            if (checksComeOn()) checkUpdates = undefined
+          }
+        }
+      } catch (e) {
+        failed.push(`Updates: ${(e as Error).message}`)
+        if (checkUpdates === true) checkUpdates = undefined
+        if (applyUpdates === true) applyUpdates = undefined
+      }
+    }
+    if (checkUpdates !== undefined) {
+      const enabled = checkUpdates
       await attempt('Update checks', async () => {
         const now = await callWindow(rpc, 'updates.setAuto', { enabled })
         return `Checking for updates automatically is ${onOff(now.auto)}.`
@@ -158,22 +194,9 @@ export class PreferencesFlow {
         return `Moving idle sessions to a newly installed agent CLI is ${onOff(now.autoApply)}.`
       })
     }
-    if (changes.applyUpdatesWhenIdle !== undefined) {
-      const enabled = changes.applyUpdatesWhenIdle
+    if (applyUpdates !== undefined) {
+      const enabled = applyUpdates
       await attempt('Applying updates', async () => {
-        // Turning it off, or on when it already is, asks nothing: the card is for the change that lets code arrive unasked
-        if (enabled) {
-          const before = await callWindow(rpc, 'updates.status', { force: false })
-          if (!before.autoApply) {
-            const refused = await this.ask(
-              sessionId,
-              'Turn on "Apply updates automatically when idle"? From then on this computer installs a newer Centralu by itself as soon as one is ' +
-                'published, and the window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.',
-              signal,
-            )
-            if (refused) throw new Error(refused)
-          }
-        }
         const now = await callWindow(rpc, 'updates.setAutoApply', { enabled })
         return `Applying updates automatically when idle is ${onOff(now.autoApply)}.`
       })
@@ -193,8 +216,8 @@ export class PreferencesFlow {
     if (byId) return byId
     const byName = choices.filter((c) => c.name.toLowerCase() === wanted.toLowerCase())
     if (byName.length === 1) return byName[0]!
-    if (byName.length > 1) return `Several themes are called ${trustedJsonText(wanted)}; give one of their ids: ${byName.map((c) => c.id).join(', ')}.`
-    return `No theme is called ${trustedJsonText(wanted)}. Choose one of: ${choices.map((c) => `${trustedJsonText(c.name)} [${c.id}]`).join(', ')}.`
+    if (byName.length > 1) return `Several themes are called ${plainQuoted(wanted)}; give one of their ids: ${byName.map((c) => c.id).join(', ')}.`
+    return `No theme is called ${plainQuoted(wanted)}. Choose one of: ${choices.map((c) => `${plainQuoted(c.name)} [${c.id}]`).join(', ')}.`
   }
 
   /** The preferences card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
@@ -221,11 +244,11 @@ function appearanceText(now: UiPreferences, patch: Record<string, unknown>, them
   const parts: string[] = []
   if (theme) {
     const side = theme.base === 'dark' ? now.themeDark : now.themeLight
-    parts.push(`theme ${trustedJsonText(theme.name)} [${side}] (the ${theme.base} theme, shown now; mode ${now.themeMode})`)
+    parts.push(`theme ${plainQuoted(theme.name)} [${side}] (the ${theme.base} theme, shown now; mode ${now.themeMode})`)
   }
   if ('textSize' in patch) parts.push(`text size ${now.textSize}`)
-  if ('bodyFont' in patch) parts.push(`body font ${now.bodyFont ? trustedJsonText(now.bodyFont) : "the app's own"}`)
-  if ('codeFont' in patch) parts.push(`code font ${now.codeFont ? trustedJsonText(now.codeFont) : "the app's own"}`)
+  if ('bodyFont' in patch) parts.push(`body font ${now.bodyFont ? plainQuoted(now.bodyFont, 200) : "the app's own"}`)
+  if ('codeFont' in patch) parts.push(`code font ${now.codeFont ? plainQuoted(now.codeFont, 200) : "the app's own"}`)
   if ('lineHeight' in patch) parts.push(`line height ${now.lineHeight}`)
   return `Now: ${parts.join('; ')}.`
 }

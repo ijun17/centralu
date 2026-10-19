@@ -138,7 +138,7 @@ describe('get_preferences', () => {
     expect(r.text).toContain('- Check for updates automatically: on (checkForUpdates); apply updates automatically when idle: off')
     expect(r.text).toContain('running 1.0.0, latest known 1.1.0 (newer)')
     expect(r.text).toContain('- Move idle sessions to a newly installed agent CLI: on')
-    // Read only: nothing was set, and no check went to the network
+    // Read only: nothing was set, and nothing was asked of the registry (the stand-in would have said so)
     expect(updates.calls).toEqual(['check:false'])
     expect(sleeper.calls).toEqual([])
   })
@@ -314,6 +314,41 @@ describe('set_preferences: idle sleep and the update switches', () => {
     expect(updates.calls.filter((c) => c === 'setAutoApply:true').length).toBe(1)
   })
 
+  it('asks before turning checking on while apply is on, since that is the other half: a check installs at once', async () => {
+    updates.set({ auto: false, autoApply: true })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, { checkForUpdates: true }, 'allow')
+    expect(question).toContain('Turn on checking for updates automatically? "Apply updates automatically when idle" is on')
+    expect(question).toContain('installs it by itself')
+    expect(r.text).toBe('Checking for updates automatically is on.')
+    expect(updates.calls).toEqual(['check:false', 'setAuto:true'])
+  })
+
+  it('leaves checking off when that card is denied, and turning checking on while apply is off asks nothing', async () => {
+    updates.set({ auto: false, autoApply: true })
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, { checkForUpdates: true }, 'deny')
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/Update checks: The person did not approve it, so it stays off/)
+    expect(updates.calls.filter((c) => c.startsWith('setAuto'))).toEqual([])
+    // With apply off there is nothing for a check to install unasked
+    updates.set({ auto: false, autoApply: false })
+    const free = await run(orc.id, 'set_preferences', { checkForUpdates: true })
+    expect(free.text).toBe('Checking for updates automatically is on.')
+    expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('asks once for both switches turned on together, and a denial leaves checking on alone as the person had it', async () => {
+    updates.set({ auto: false, autoApply: false })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, { checkForUpdates: true, applyUpdatesWhenIdle: true }, 'deny')
+    expect(question).toContain('Turn on "Apply updates automatically when idle"?')
+    // Apply stays off, so checking by itself installs nothing and goes ahead
+    expect(r.text).toContain('Checking for updates automatically is on.')
+    expect(r.text).toContain('Not changed: Applying updates: The person did not approve it')
+    expect(updates.calls.filter((c) => c.startsWith('set'))).toEqual(['setAuto:true'])
+  })
+
   it('turning it off, or on when it already is, asks nothing', async () => {
     const orc = await mgr.orchestrator()
     const off = await run(orc.id, 'set_preferences', { applyUpdatesWhenIdle: false })
@@ -356,6 +391,17 @@ describe('what set_preferences does not reach', () => {
 })
 
 describe('who may run them', () => {
+  it('are found through centralu_commands, as the instructions say: "machine" lists the machine commands, and the settings and trash ones are named', async () => {
+    const orc = await mgr.orchestrator()
+    const machines = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'machine' })).text
+    for (const name of ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_connect', 'set_machine_autostart']) expect(machines, name).toContain(`- ${name}:`)
+    const trash = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trash' })).text
+    for (const name of ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash']) expect(trash, name).toContain(`- ${name}:`)
+    const prefs = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'preferences' })).text
+    expect(prefs).toContain('- get_preferences:')
+    expect(prefs).toContain('- set_preferences:')
+  })
+
   it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
     for (const name of COMMANDS) {
       expect(commandsFor('orchestrator', 'commands')).toContain(name)

@@ -1354,7 +1354,7 @@ ends with the machine as it is after the change (`machineLine`). An install or u
 the params with the method's schema and reads the answer with its result schema, and only the methods named in
 `WINDOW_METHODS` are callable), so the host checks them as it checks the window.
 
-- `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: no network)
+- `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
   It also lists what no command changes (send key, session tools, agent ceiling and depth) and says the notification
   switches are not reachable yet (they live in the window's workspace snapshot, §1.4).
@@ -1366,10 +1366,13 @@ the params with the method's schema and reads the answer with its result schema,
   `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
   schema refusal comes before any write; a service the host lacks (no update service in a test) is reported next to the
   changes that did happen.
-- Turning **on** "apply updates when idle" asks first, in every preset: with it on, a newer Centralu installs by itself
-  and the window relaunches into it when nothing is busy, so code arrives with no later question. The card is an `other`
-  card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves it off and the
-  call's other changes still happen. Turning it off, or on when it already is, asks nothing; neither does any other field.
+- Turning **on** "apply updates when idle" asks first, in every preset, and so does turning **on** checking for updates
+  while apply is on (it is the other half of the same thing: `UpdateService.setAuto(true)` checks at once and installs what it
+  finds when apply is on). With both on, a newer Centralu installs by itself and the desktop window relaunches into it when
+  nothing is busy, so code arrives with no later question. One card covers whichever change completes the pair; it is an
+  `other` card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves the pair
+  as it was and the call's other changes still happen. Turning either off, or leaving them as they are, asks nothing; neither
+  does any other field.
 
 **The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
 `delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
@@ -1378,16 +1381,19 @@ preferences) are the Trash screen's calls. `what` is `session` (the default) or 
 - `list_trash` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
   sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the trashed subagent
   steps, and the sessions whose steps could be moved there. Rows beyond 25 are counted.
-- `restore_trashed`, `trash_subagent_steps`: `trash.restore` (which registers a deleted project's folder again, as in the window),
-  `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and ask nothing.
+- `restore_trashed`, `trash_subagent_steps`: `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and
+  ask nothing, with one exception: restoring a session whose project was deleted registers the project's folder again (as
+  the window's Restore does), which is what `add_project` asks about, so that restore raises a card naming the folder. A
+  session not in the trash is refused before any call.
 - `delete_trashed` and `empty_trash` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
   A session or steps that are not in the trash are refused before the card, so a live session cannot be deleted this way.
   The card names the session (or the counts, the size and up to ten names), what goes with it (the tool's conversation
   file, a worktree marked for removal) and that it cannot be undone. After Allow the trash is read again and the host
   deletes exactly what the card named and is still there, one `trash.purge` / `trash.purgeSubagentSteps` (with the `upTo`
   the card listed) / `trash.purgeRuns` (one call per machine) at a time, as the window's Empty trash does; `trash.empty` is
-  not used, because it takes everything in the trash, also what arrived after the card. A session restored while the card
-  stood is kept and said so; one that failed to delete stays and is reported, and the rest go on.
+  not used, because it takes everything in the trash, also what arrived after the card. A session restored or deleted while the card
+  stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
+  with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
 
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
@@ -1416,9 +1422,9 @@ window's channel), grouped, and for each group one of three states.
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
 | Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
-| Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312) |
+| Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312; #1306) |
 | The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
-| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`) |
+| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
 | `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |

@@ -695,7 +695,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
-  'Linked machines: add_machine and the other *_machine commands. Settings: get_preferences, set_preferences. Trash: list_trash.',
+  'Linked machines: add_machine and others (centralu_commands "machine"). Settings: get_preferences, set_preferences. Trash: list_trash.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

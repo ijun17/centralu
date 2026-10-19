@@ -173,6 +173,51 @@ describe('restore_trashed and trash_subagent_steps', () => {
   })
 })
 
+describe('restore_trashed of a session whose project was deleted', () => {
+  async function trashedWithDeletedProject() {
+    const other = join(root, 'other-proj')
+    mkdirSync(other)
+    const p = (await rpc('projects.add', { path: other })) as { id: string }
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: other, tool: 'claude' })) as SessionInfo
+    await rpc('agents.deleteSession', { sessionId: s.id })
+    await rpc('projects.delete', { projectId: p.id })
+    return { s, other }
+  }
+
+  it('asks naming the folder that will be registered again, then restores it on Allow', async () => {
+    const { s, other } = await trashedWithDeletedProject()
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'restore_trashed', { sessionId: s.id }, 'allow')
+    expect(question).toContain('Its project')
+    expect(question).toContain('was deleted, so restoring registers its folder')
+    expect(question).toContain('other-proj')
+    expect(r.text).toContain('from the trash.')
+    expect(r.text).toContain('had been deleted; its folder is registered again')
+    expect(await live()).toContain(s.id)
+    expect(((await rpc('projects.list', {})) as { path: string }[]).map((x) => x.path)).toContain(other)
+  })
+
+  it('restores nothing and registers no folder when the person denies it', async () => {
+    const { s } = await trashedWithDeletedProject()
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'restore_trashed', { sessionId: s.id }, 'deny')
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/did not approve it, so nothing was restored/)
+    expect((await trash()).sessions.map((x) => x.id)).toEqual([s.id])
+    expect(await live()).not.toContain(s.id)
+  })
+
+  it('asks nothing for a session whose project is still there, and refuses one that is not in the trash', async () => {
+    const orc = await mgr.orchestrator()
+    const gone = await trashed('Plain')
+    expect((await run(orc.id, 'restore_trashed', { sessionId: gone.id })).isError).toBeFalsy()
+    expect(card(orc.id)).toBeUndefined()
+    const none = await run(orc.id, 'restore_trashed', { sessionId: gone.id })
+    expect(none.isError).toBe(true)
+    expect(none.text).toMatch(/is not in the trash; list_trash shows what is\. Nothing was restored/)
+  })
+})
+
 describe('delete_trashed', () => {
   it('asks naming the session, what it holds and that it cannot be undone, then deletes it for good on Allow', async () => {
     const gone = await trashed('Old plan')
@@ -222,8 +267,22 @@ describe('delete_trashed', () => {
       await rpc('trash.restore', { sessionId: gone.id })
     })
     expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/was restored while the card stood, so nothing was deleted/)
+    expect(r.text).toMatch(/is no longer in the trash \(restored or deleted while the card stood\), so nothing was deleted/)
     expect(await live()).toContain(gone.id)
+  })
+
+  it('does not delete a session that was restored and trashed again while the card stood: it is not what the card named', async () => {
+    const gone = await trashed('Round trip')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'delete_trashed', { sessionId: gone.id }, 'allow', async () => {
+      await rpc('trash.restore', { sessionId: gone.id })
+      // A later moment, so the second deletion is stamped later than the first
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await rpc('agents.deleteSession', { sessionId: gone.id })
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toMatch(/was restored and deleted again while the card stood, so it is not what the card named and nothing was deleted/)
+    expect((await trash()).sessions.map((x) => x.id)).toEqual([gone.id])
   })
 
   it('deletes the trashed subagent steps the card named, and keeps those moved to the trash after it', async () => {
@@ -302,10 +361,24 @@ describe('empty_trash', () => {
     })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('Deleted for good: 1 session.')
-    expect(r.text).toContain('Restored while the card stood, so kept: "Restored meanwhile".')
+    expect(r.text).toContain('Not what the card named when it was answered (restored, deleted or deleted again meanwhile), so left alone: "Restored meanwhile".')
     expect(r.text).toContain('The trash now holds 1 session, 0 app runs and subagent steps of 0 sessions.')
     expect((await trash()).sessions.map((s) => s.id)).toEqual([late])
     expect(await live()).toContain(restored.id)
+  })
+
+  it('leaves a session alone that was restored and trashed again while the card stood', async () => {
+    const again = await trashed('Again')
+    await trashed('Plain')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'empty_trash', {}, 'allow', async () => {
+      await rpc('trash.restore', { sessionId: again.id })
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await rpc('agents.deleteSession', { sessionId: again.id })
+    })
+    expect(r.text).toContain('Deleted for good: 1 session.')
+    expect(r.text).toContain('Not what the card named when it was answered (restored, deleted or deleted again meanwhile), so left alone: "Again".')
+    expect((await trash()).sessions.map((x) => x.id)).toEqual([again.id])
   })
 
   it('asks nothing when the trash is already empty', async () => {
