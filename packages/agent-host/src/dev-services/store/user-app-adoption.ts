@@ -165,6 +165,17 @@ export class UserAppAdoptionRecords {
     })()
   }
 
+  /**
+   * Drops the record of a folder whose project was deleted and gave it back (#1204), only while it is still the record
+   * with this mark: one a folder adopted since has written stays
+   */
+  forget(appId: string, mark: string): void {
+    this.updateJson(ADOPTED_USER_APPS_KEY, (adopted) => {
+      const r = adopted[appId]
+      if (isObj(r) && r.mark === mark) delete adopted[appId]
+    })
+  }
+
   /** Reads a JSON object setting, lets `edit` change it in place, and writes it back (an absent or unreadable one starts empty) */
   private updateJson(key: string, edit: (value: Record<string, unknown>) => void): void {
     const raw = parseJson(this.settings.appSetting(key))

@@ -66,6 +66,12 @@ export class UiPreferenceStore {
         this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
       }
     }
+    /*
+     * "Allow auto from a linked computer" fails closed (#1273 review, owner decision 2026-10-19): its only job is to
+     * restrict, and a damaged record must not bring back what the person turned off. Absent still reads as on (the
+     * default); a row that is not an object, or a value that is not true or false, reads as off.
+     */
+    if (this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')) prefs.hubAuto = false
     return prefs
   }
 
@@ -78,7 +84,15 @@ export class UiPreferenceStore {
    */
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
     const current = this.uiPreferences()
-    this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
+    const stored = this.storedUiPreferences()
+    /*
+     * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273
+     * review): a broken row reads back as `{}`, so saving any other setting over it would drop the field, and absent
+     * reads as on. Written as off, unless this change sets it
+     */
+    const damaged = this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')
+    const kept = damaged && patch.hubAuto === undefined ? { hubAuto: false } : {}
+    this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, ...kept, ...patch }))
     // The session tools switch also decides the apps a session attached through them (#382): recount every live one
     if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
       // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)

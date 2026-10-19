@@ -1,6 +1,7 @@
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { withHubMark } from './hub-preset.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -9,6 +10,9 @@ import { InterruptionWatch, type InterruptionWatchHost } from './interruption-wa
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { MachineFlow, type MachineOps } from './machine-flow.js'
+import { PreferencesFlow } from './preferences-flow.js'
+import { TrashFlow } from './trash-flow.js'
+import type { WindowRpc } from './window-rpc.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
@@ -178,6 +182,10 @@ export class SessionManager {
   /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
   private readonly projectCreation: ProjectCreation
   private readonly machineFlow: MachineFlow
+  /** The orchestrator's get_preferences and set_preferences (preferences-flow.ts) */
+  private readonly preferencesFlow: PreferencesFlow
+  /** The orchestrator's trash commands (trash-flow.ts) */
+  private readonly trashFlow: TrashFlow
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
@@ -316,6 +324,8 @@ export class SessionManager {
     this.updatesAsked = new UpdatesAsked(this.parts())
     this.projectCreation = new ProjectCreation(this.parts())
     this.machineFlow = new MachineFlow(this.parts())
+    this.preferencesFlow = new PreferencesFlow(this.parts())
+    this.trashFlow = new TrashFlow(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
@@ -375,7 +385,8 @@ export class SessionManager {
       const stale = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
       // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
-      this.meta.set(s.id, fixed)
+      // Started from a linked computer (#1273): kept beside the row, as its depth is
+      this.meta.set(s.id, withHubMark(store.settings, fixed))
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
@@ -484,6 +495,12 @@ export class SessionManager {
   /** The hub's links, for the orchestrator's machine commands (#1219); main.ts wires them */
   useMachineOps(ops: MachineOps): void {
     this.machineFlow.useOps(ops)
+  }
+
+  /** The window's RPC as the router answers it, for the orchestrator's settings commands (#1219); main.ts wires it */
+  useWindowRpc(rpc: WindowRpc): void {
+    this.preferencesFlow.useRpc(rpc)
+    this.trashFlow.useRpc(rpc)
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -634,6 +651,11 @@ export class SessionManager {
   /** `ProjectRegistry.setWorktreeSetup` (project-registry.ts), kept on the manager for its callers */
   setWorktreeSetup(...a: Parameters<ProjectRegistry['setWorktreeSetup']>): ReturnType<ProjectRegistry['setWorktreeSetup']> {
     return this.projectRegistry.setWorktreeSetup(...a)
+  }
+
+  /** `ProjectRegistry.setAgentInstructions` (project-registry.ts), kept on the manager for its callers */
+  setAgentInstructions(...a: Parameters<ProjectRegistry['setAgentInstructions']>): ReturnType<ProjectRegistry['setAgentInstructions']> {
+    return this.projectRegistry.setAgentInstructions(...a)
   }
 
   /** `ProjectRegistry.reorderProjects` (project-registry.ts), kept on the manager for its callers */
@@ -1345,6 +1367,11 @@ export class SessionManager {
     return this.projectRegistry.folderRoots(...a)
   }
 
+  /** `WorktreeSessions.deleteHubChild` (worktree-sessions.ts, #1161 item 3): `agents.deleteAgentChild` */
+  deleteHubChild(...a: Parameters<WorktreeSessions['deleteHubChild']>): ReturnType<WorktreeSessions['deleteHubChild']> {
+    return this.worktrees.deleteHubChild(...a)
+  }
+
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
    */
   async worktreeStatus(
@@ -2027,6 +2054,8 @@ export class SessionManager {
       addFolderOnMachine: (sessionId, reader, machine, path, signal) => this.projectCreation.addFolderOnMachine(sessionId, reader, machine, path, signal),
       machineList: () => this.machineList(),
       machineRequest: (sessionId, req, signal) => this.machineFlow.run(sessionId, req, signal),
+      preferencesRequest: (sessionId, req, signal) => this.preferencesFlow.run(sessionId, req, signal),
+      trashRequest: (sessionId, req, signal) => this.trashFlow.run(sessionId, req, signal),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),

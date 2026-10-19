@@ -26,6 +26,7 @@ export function ProjectHeader({
   appCount,
   setNewAppOpen,
   setDeleting,
+  setInstructing,
 }: {
   project: ProjectInfo
   projectId: string
@@ -37,6 +38,8 @@ export function ProjectHeader({
   appCount: number
   setNewAppOpen: (open: boolean) => void
   setDeleting: (deleting: boolean) => void
+  /** Opens the instructions for agents started in the project (#1161 item 2) */
+  setInstructing: (open: boolean) => void
 }) {
   // A project on a linked machine opens in VS Code over Remote-SSH (#82); null for this computer's, and where that cannot work
   const remoteIde = useRemoteIde(projectId)
@@ -222,6 +225,7 @@ export function ProjectHeader({
           onToggleTrust={() => (!project.trusted && appCount > 0 ? askTrust(projectId) : void setProjectTrusted(projectId, !project.trusted))}
           trustListsApps={!project.trusted && appCount > 0}
           onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}
+          onAgentInstructions={() => setInstructing(true)}
           onDelete={() => setDeleting(true)}
         />
       )}

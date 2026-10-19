@@ -150,6 +150,13 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
      * "always": the consent is for this call only, as for ask_project's (#700).
      */
     machine: z.string().optional(),
+    /**
+     * The caller runs under `auto` and the child on `machine` will not (#1273): `machine_off`, that machine's "Allow auto
+     * from a linked computer" switch is off; `older`, it runs a Centralu that cannot take `auto` from another computer.
+     * Absent: the child runs under the caller's preset (an `auto` caller's start on a machine that takes it raises no
+     * card at all), or an older host.
+     */
+    autoWithheld: z.enum(['machine_off', 'older']).optional(),
   }),
   /**
    * An ordinary session asks to check or install Centralu itself (#581). Applying the installed build (#665) is not an
@@ -360,4 +367,17 @@ export const MACHINE_CHANGE = 'machine_change'
 /** The orchestrator's card for a change to a linked machine (#1219) */
 export function isMachineChange(d: ApprovalDetail): boolean {
   return d.kind === 'other' && d.about === MACHINE_CHANGE
+}
+
+/**
+ * The `about` of the orchestrator's card for a change to its settings or the trash that the person must allow (#1219:
+ * turning on "apply updates when idle", deleting from the trash for good, emptying it), on an `other`
+ * detail like `MACHINE_CHANGE`: the question is whole in `raw`, so a window of any build reads it. Allow or deny only,
+ * and the host remembers nothing for one.
+ */
+export const ORCHESTRATOR_CHANGE = 'orchestrator_change'
+
+/** The orchestrator's card for a change to its settings or the trash (#1219) */
+export function isOrchestratorChange(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === ORCHESTRATOR_CHANGE
 }

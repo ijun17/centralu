@@ -9,6 +9,7 @@ import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
 import { AgentVersionNotice } from './AgentVersionNotice.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
+import { PresetTag } from './PresetTag.jsx'
 import { SubagentSteps } from './chat-rows/ChatRow.jsx'
 import { AskedByBadge } from './chat-rows/delegation.jsx'
 
@@ -71,6 +72,8 @@ export function SessionHeader({
         approval or a question is answered, so all three say which machine they act on.
       */}
       <SessionMachineTag sessionId={session.id} testId="session-machine" />
+      {/* Started from a linked computer (#1273): the preset it runs under, on both computers */}
+      <PresetTag preset={session.permissionPreset} startedFromHub={session.startedFromHub} testId="session-preset" />
 
       {/* Another project's session asked for this one (#371) — the way back to it */}
       {session.askedBy && <AskedByBadge callerId={session.askedBy} projectId={session.projectId ?? null} />}

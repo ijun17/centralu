@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import type { ChildRunResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { ChildOwnership } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
@@ -409,5 +409,57 @@ describe("nothing of the person's turn on the child's machine reaches the caller
     if (machine.turn !== 'hub') expect(hub.children.linkedReports.has(CHILD)).toBe(false)
     // The caller's text went into the person's turn only where the scenario races it in, never by a path asked here
     if (entry !== 'send, at rest') expect(machine.fromHub.length).toBe(hubSends)
+  })
+})
+
+/*
+ * #1161 review: the start called `reader.agentInstructions`, which a reader from before it (this file's stand-in, a
+ * build that predates #1161) does not have, and every start here failed with "is not a function". A reader without the
+ * new calls, or whose call fails or never answers, starts and deletes as it did before.
+ */
+describe('a reader from before #1161, or one whose new calls fail', () => {
+  /** The stand-in reader with `more` on top, wired in as a host's start would */
+  const withReader = (more: Partial<LinkedSessions>, listed?: string) => {
+    const plain = Machine.prototype.reader.bind(machine)
+    machine.reader = () => {
+      const r = plain()
+      const projects = listed === undefined ? r.projects : async () => ({ projects: [{ id: 'm1.p', machineId: 'm1', machine: 'Box', name: 'app', path: '/app', defaultTool: null, agentInstructions: listed }], away: [] })
+      return { ...r, projects, ...more } as LinkedSessions
+    }
+    hub.boot()
+  }
+
+  it('starts the child with what the machine listed when the reader has no agentInstructions, and with none when it listed none', async () => {
+    withReader({}, 'LISTED-TEXT')
+    expect(await hub.start()).toMatchObject({ ok: true })
+    expect(machine.fromHub[0]).toContain('TASK-TEXT')
+    expect(machine.fromHub[0]).toContain('LISTED-TEXT')
+    // The stand-in as it is lists no instructions, as a machine that predates them
+    await hub.act('delete')
+    withReader({})
+    expect(await hub.start()).toMatchObject({ ok: true })
+    expect(machine.fromHub[1]).toContain('TASK-TEXT')
+    expect(machine.fromHub[1]).not.toContain('standing instructions')
+  })
+
+  it('starts the child with what the machine listed when the read throws', async () => {
+    withReader({ agentInstructions: async () => { throw new Error('the link broke') } }, 'LISTED-TEXT')
+    expect(await hub.start()).toMatchObject({ ok: true })
+    expect(machine.fromHub[0]).toContain('LISTED-TEXT')
+  })
+
+  it('starts the child with what the machine listed when the read never answers', async () => {
+    withReader({ agentInstructions: () => new Promise(() => {}) }, 'LISTED-TEXT')
+    expect(await hub.start()).toMatchObject({ ok: true })
+    expect(machine.fromHub[0]).toContain('LISTED-TEXT')
+  }, 20_000 * SLOW)
+
+  it('deletes a worktree child as before when the reader has no deleteAgentChild, and answers when the call throws', async () => {
+    const start = () => hub.agents.startAgent('h1', { task: 'TASK-TEXT', machine: 'Box', branch: 'feat-x', wait: false })
+    expect(await start()).toMatchObject({ ok: true })
+    expect(await hub.act('delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('its worktree there, on feat-x, stays') })
+    withReader({ deleteAgentChild: async () => { throw new Error('the link broke') } })
+    expect(await start()).toMatchObject({ ok: true })
+    expect(await hub.act('delete')).toMatchObject({ ok: false, error: expect.stringContaining('the link broke') })
   })
 })

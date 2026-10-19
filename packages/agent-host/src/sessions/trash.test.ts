@@ -8,7 +8,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
-import { ORCHESTRATOR_TOOLS } from './orchestrator-tools.js'
+import { ORCHESTRATOR_TOOLS, RARE_COMMANDS, RARE_TIERS, profileAllows } from './orchestrator-tools.js'
 import { BROKER_TOOLS } from '../apps/external/broker.js'
 import { HOST_CAPABILITIES } from '../apps/external/capabilities.js'
 
@@ -146,19 +146,37 @@ describe('emptying the trash', () => {
 })
 
 /*
- * Nobody but the person deletes for good (#204, carried from #96). The trash is reached only through the RPC, which
- * is the UI's socket. This holds it two ways: no agent tool, broker tool or host capability is named for it, and no
- * code outside the RPC handler calls the manager's purge.
+ * Nobody but the person decides to delete for good (#204, carried from #96; #1219). The trash is reached through the RPC,
+ * which is the UI's socket, and by the central orchestrator's five trash commands, which make the same calls and delete
+ * only after the person's card (trash-commands.test.ts). This holds it three ways: no other agent tool, broker tool or
+ * host capability is named for it, those five are rare commands of the orchestrator's seat alone, and no code outside
+ * the RPC handler calls the manager's purge.
  */
+const ORCHESTRATOR_TRASH_COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash']
+const TRASH_VERB = /trash|purge|delete_session|restore_session|empty/i
+
 describe('who can delete for good', () => {
-  it('agents and apps have no verb for the trash', () => {
+  it("agents and apps have no verb for the trash, but the orchestrator's five commands", () => {
     const names = [
       ...ORCHESTRATOR_TOOLS.map((t) => t.name),
       ...BROKER_TOOLS,
       ...HOST_CAPABILITIES,
     ]
     expect(names.length).toBeGreaterThan(10)
-    expect(names.filter((n) => /trash|purge|delete_session|restore_session|empty/i.test(n))).toEqual([])
+    // A new verb for the trash has to be named in this list, with the card that guards its delete
+    expect(names.filter((n) => TRASH_VERB.test(n)).sort()).toEqual([...ORCHESTRATOR_TRASH_COMMANDS].sort())
+    expect([...BROKER_TOOLS, ...HOST_CAPABILITIES].filter((n) => TRASH_VERB.test(n))).toEqual([])
+  })
+
+  it("the orchestrator's trash commands are its own rare commands: no other seat has them in any tier", () => {
+    for (const name of ORCHESTRATOR_TRASH_COMMANDS) {
+      expect(RARE_COMMANDS.orchestrator, name).toContain(name)
+      for (const tier of RARE_TIERS) {
+        for (const profile of ['scoped', 'builder', 'reader'] as const) {
+          expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
+        }
+      }
+    }
   })
 
   it('only the RPC handler calls the purge', () => {
