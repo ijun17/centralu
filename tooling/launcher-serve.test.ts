@@ -51,7 +51,6 @@ import {
   lockHolderPid,
   lockHolder,
   moveIntoSignIn,
-  nothingRunning,
   runServe,
   serveFrom,
   processStartTime,
@@ -867,31 +866,37 @@ describe('starting through WMI', () => {
 describe('moving a host that runs in a network logon into the Windows sign-in', () => {
   const idle = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
 
-  /** A host on a data folder's recorded port, with its token: it says `logon`, answers `host.activity` from `counts`, and goes on `host.stop` */
+  /**
+   * A host on a data folder's recorded port, with its token: it says `logon`, answers `host.stop {ifIdle}` busy while
+   * `counts` (taken one per stop) says something runs and goes when it does not, and keeps what `host.handover` told it
+   */
   async function heldFolder(logon: 'network' | 'interactive' | null, counts: Record<string, number>[]) {
     const d = tempDir()
     ensureServeState(d)
     recordServePort(d, await freePort())
     const state = readServeState(d)!
     const calls: string[] = []
+    const told: unknown[] = []
     const server: HostServer = new HostServer({
       port: state.port!,
       token: state.token,
       ...(logon ? { logon: () => logon } : {}),
       build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
-      onRpc: async (method) => {
-        calls.push(method)
-        if (method === 'host.activity') return counts.length > 1 ? counts.shift() : counts[0]
+      onRpc: async (method, params) => {
+        calls.push(`${method}${(params as { ifIdle?: boolean })?.ifIdle ? ' ifIdle' : ''}`)
+        if (method === 'host.handover') told.push((params as { handover: unknown }).handover)
         if (method === 'host.stop') {
+          const now = counts.length > 1 ? counts.shift()! : counts[0]!
+          if ((params as { ifIdle?: boolean })?.ifIdle && Object.values(now).some((n) => n > 0)) return { ok: false, busy: now, calls: 0 }
           setTimeout(() => void server.close(), 20)
           return { ok: true }
         }
-        return {}
+        return { ok: true }
       },
     })
     await server.listen()
     const existing = await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })
-    return { d, server, calls, existing }
+    return { d, server, calls, told, existing }
   }
 
   it('reads the logon a host says in its hello', async () => {
@@ -903,15 +908,45 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     }
   })
 
-  it('waits while the host has work running, then stops it in order and frees the folder', async () => {
+  /*
+   * #1224's review: the check and the stop are one call, `host.stop {ifIdle}`, which the host decides and acts on in one
+   * step (lifecycle/stop-gate.ts there); asked as two (the activity, then the stop), a turn the hub started in between
+   * was ended with the host
+   */
+  it('stops only through host.stop {ifIdle}, asking again while it answers busy, and says it waits', async () => {
     const h = await heldFolder('network', [{ ...idle, working: 1 }, { ...idle, terminals: 1 }, idle])
     try {
       const moved = await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform: 'win32', logonOf: async () => 'interactive', pollMs: 50 })
       expect(moved).toBe(true)
-      // Asked three times; stopped only after the answer with nothing running
-      expect(h.calls.filter((c) => c === 'host.activity')).toHaveLength(3)
-      expect(h.calls.indexOf('host.stop')).toBe(h.calls.length - 1)
+      expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual(['host.stop ifIdle', 'host.stop ifIdle', 'host.stop ifIdle'])
+      expect(h.calls).not.toContain('host.activity')
+      expect(h.told).toEqual([{ state: 'waiting', since: expect.any(Number) }])
       expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(false)
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  it('gives up after the bound with the host still busy, says so to the host, and never stops it', async () => {
+    const h = await heldFolder('network', [{ ...idle, working: 1 }])
+    let clock = 0
+    try {
+      const moved = await moveIntoSignIn({
+        dataDir: h.d,
+        entry: SOURCE_HOST,
+        env: {},
+        existing: h.existing,
+        platform: 'win32',
+        logonOf: async () => 'interactive',
+        pollMs: 10,
+        maxWaitMs: 30 * 60_000,
+        // Ten minutes pass between two asks
+        now: () => (clock += 10 * 60_000),
+      })
+      expect(moved).toBe(false)
+      expect(h.told.map((t) => (t as { state: string }).state)).toEqual(['waiting', 'gave_up'])
+      expect(h.calls.every((c) => c !== 'host.stop')).toBe(true)
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
     } finally {
       await h.server.close()
     }
@@ -928,17 +963,11 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
       const h = await heldFolder(logon, [idle])
       try {
         expect(await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform, logonOf: async () => mine, pollMs: 50 }), `${logon} ${mine} ${platform}`).toBe(false)
-        expect(h.calls).not.toContain('host.stop')
+        expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual([])
       } finally {
         await h.server.close()
       }
     }
-  })
-
-  it('counts every kind of work as running, and an unreadable answer as running too', () => {
-    expect(nothingRunning(idle)).toBe(true)
-    for (const k of Object.keys(idle)) expect(nothingRunning({ ...idle, [k]: 1 }), k).toBe(false)
-    expect(nothingRunning(null)).toBe(false)
   })
 
   /** What the sign-in task runs: `serve` in the foreground, which used to give up on a folder another host held */

@@ -5,6 +5,7 @@ import {
   PROTOCOL_VERSION,
   ProtocolErrorCode,
   type HostBuild,
+  type HostHandover,
   type HostLogon,
   type RpcAnswer,
   type NormalizedEvent,
@@ -108,6 +109,8 @@ export type HostServerOptions = {
   elevated?: () => boolean | null
   /** Which Windows logon this host runs in, read at every `hello_ok` (#1224, elevation.ts); null: not known, or not Windows */
   logon?: () => HostLogon | null
+  /** A sign-in's serve waiting to take over from this host, read at every `hello_ok` (#1224, `host.handover`) */
+  handover?: () => HostHandover | null
   /** A connection that passed hello has ended (its `RpcContext.client`) */
   onClientGone?: (client: number) => void
   /**
@@ -705,6 +708,7 @@ export class HostServer {
       ...(this.opts.build ? { build: this.opts.build } : {}),
       ...elevatedField(this.opts.elevated?.()),
       ...(this.opts.logon?.() ? { logon: this.opts.logon() } : {}),
+      ...(this.opts.handover?.() ? { handover: this.opts.handover() } : {}),
     })
   }
 

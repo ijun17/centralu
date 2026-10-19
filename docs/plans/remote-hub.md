@@ -425,9 +425,12 @@ gives an `AtLogOn` trigger; a task with no trigger reads as autostart off) and s
 nobody is signed in, and the host then says which logon it runs in (`hello_ok.logon`), which the machine's row turns
 into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out. **The hand-over**: when the person later signs in
 (the task's trigger, with autostart on) or a `--detach` starts the task while such a network-logon host still holds the
-folder, the task's `serve` waits until that host has nothing running a person would lose (its `host.activity`, all
-zero), stops it in order and starts its own. Waiting rather than asking: without a keeper on Windows a stop ends what
-runs, and an idle host loses nothing.
+folder, the task's `serve` waits until that host has nothing running a person would lose, stops it in order and starts
+its own. The check and the stop are one call the host decides in one step (`host.stop { ifIdle }`, which from its yes on
+refuses every new call), so a turn the hub starts cannot slip in between, as it could over two calls. It waits 30
+minutes at most, then gives up until the next sign-in or start, and the machine's row says it waits, then that it gave
+up (`host.handover`). Waiting rather than asking: without a keeper on Windows a stop ends what runs, and an idle host
+loses nothing.
 
 **Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.

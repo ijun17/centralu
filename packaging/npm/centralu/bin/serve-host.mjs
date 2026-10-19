@@ -338,10 +338,10 @@ function tcpProbe(port, timeoutMs) {
 const HOST_LOGONS = ['interactive', 'network', 'batch', 'service']
 
 /**
- * What a running host would stop if it stopped now (`host.activity`, the counts of the host's one idle rule), or null
- * when it did not answer: a hello with the token, then the call, as `askHostToStop` does
+ * One call to a running host (`method` with `params`), as `askHostToStop` makes it: a hello with the token, then the
+ * call. Its result, or null when it did not answer or refused. For `host.handover` (#1224)
  */
-export function askHostActivity({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostRpc({ port, token, protocolVersion, prove = false, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve(null)
   return helloExchange({
     port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
@@ -351,8 +351,8 @@ export function askHostActivity({ port, token, protocolVersion, prove = false, t
       unproven: () => done(null),
       gone: () => done(null),
       message: (m, ws) => {
-        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'activity', method: 'host.activity', params: {} }))
-        else if (m.kind === 'res' && m.id === 'activity') done(m.ok && m.result && typeof m.result === 'object' ? m.result : null)
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'call', method, params }))
+        else if (m.kind === 'res' && m.id === 'call') done(m.ok && m.result && typeof m.result === 'object' ? m.result : null)
         else if (m.kind === 'res' && m.ok === false) done(null)
       },
     }),
@@ -363,8 +363,10 @@ export function askHostActivity({ port, token, protocolVersion, prove = false, t
  * Asks a running host to stop (`host.stop`, an additive RPC): a hello with the token, then the call.
  * `{ ok: true }` once the host took it, `{ ok: false, message, protocolVersion? }` otherwise; the
  * last names the host's protocol when the hello was refused for it, so the caller can ask again.
+ * `ifIdle` (#1224): only if nothing runs there, checked and acted on by the host in one step; `{ ok: false, busy: true }`
+ * when something does.
  */
-export function askHostToStop({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, protocolVersion, prove = false, ifIdle = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
   // With `prove`, the token goes out only to a host that proved it holds it (#838)
   return helloExchange({
@@ -375,8 +377,11 @@ export function askHostToStop({ port, token, protocolVersion, prove = false, tim
       unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
       gone: () => done({ ok: false, message: 'the connection closed' }),
       message: (m, ws) => {
-        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
-        else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: ifIdle ? { ifIdle: true } : {} }))
+        else if (m.kind === 'res' && m.id === 'stop' && m.ok && m.result?.ok === false) {
+          // `ifIdle` and something runs there (#1224): nothing was changed
+          done({ ok: false, busy: true, message: 'it has work running', activity: m.result.busy ?? null, calls: m.result.calls ?? 0 })
+        } else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
         else if (m.kind === 'res' && m.ok === false) {
           const pv = m.error?.code === 'version_mismatch' ? mismatchProtocolOf(m.error) : null
           done({ ok: false, message: m.error?.message ?? 'refused', ...(pv !== null ? { protocolVersion: pv } : {}) })
