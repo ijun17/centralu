@@ -526,19 +526,31 @@ the queue and by whichever driver holds the lease. Its state is the queue file's
 last fully green commit of main), `pending` (main's newest push run still going), `hunt` (a red being
 looked into).
 
-- **Main's state** (`mainVerdict`): build.yml's push runs on the default branch, newest first. A
-  cancelled run (a newer push superseded it) and one still running say nothing; the newest that
-  passed is `green`; the newest that failed, when newer than it, is the red to look into.
+- **Main's state** (`mainVerdict`): build.yml's push runs on the default branch, newest first. A run
+  on main is never cancelled by a newer push (build.yml's concurrency: `cancel-in-progress` is false
+  for `refs/heads/main`, #1259 review), so every landed commit's full run finishes and is seen. One
+  still running (or cancelled by hand) says nothing; the newest that passed is `green`; the newest
+  that failed, when newer than it, is the red to look into; `unfinished` counts those still going.
+- **Holding landing**: while more than `queue.guard.maxMainRuns` (3) of main's full runs are
+  unfinished, the queue lands nothing and moves nothing (`tick` answers `held`; `merge_queue` says
+  "Landing held: N of main's full runs unfinished"): each landing adds a full run, and the runners
+  are shared.
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
   no checkout: the guard reports the red without a culprit.
-- **The culprit**, in order: the only candidate; else by the failed jobs' paths
-  (`queue.guard.jobPaths`: a job's name, or the start of a matrix job's, → path prefixes), when every
-  failed job has paths and exactly one candidate touches them; else **bisect**: the full tier
-  (`tier: full`) on the middle candidate, on a branch `queue/bisect-<sha>` at that commit, halving the
-  range by its outcome until the first red commit is next to the last green one. A probe's branch is
-  deleted once its run has spoken; a probe cancelled twice ends the bisect without a culprit.
+- **The culprit**, in order: the only candidate; else a **suspect by the failed jobs' paths**
+  (`queue.guard.jobPaths`: a job's name, or the start of a matrix job's, → path prefixes or exact
+  paths; `keeper e2e` lists the host's build inputs too, `host tests, remote Node` the Node version
+  file, the lockfile and `packages/core`), when every failed job has paths, exactly one candidate
+  touches them and it touches nothing outside them; a suspect is **confirmed** before anything is done
+  about it, with the full tier on the commit before it (must pass) and on it (must fail), and when
+  either answers otherwise the hunt bisects what is left (`refuted` names the suspect); else
+  **bisect**: the full tier (`tier: full`) on the middle candidate, on a branch `queue/bisect-<sha>`
+  at that commit, halving the range by its outcome until the first red commit is next to the last
+  green one (`nextStep`). A probe's branch is deleted once its run has spoken; a probe cancelled twice,
+  or one whose run has not finished after 2 hours (`PROBE_MAX_MS`), ends the hunt without a culprit,
+  and the issue says why.
 - **Once acted** on a red, the guard does nothing more about it (or about red runs on older commits)
   until main is green again. Main green during a bisect (a flake) ends it.
 - **Acting** (`actOnRed`): the culprit is **reverted** in a pull request (`revert: <its subject>`,
@@ -558,7 +570,8 @@ looked into).
   "refuses to tag a commit whose only green run is a batch's quick run …").
 - **Keeping running**: the board holds busy while main's newest run is going or a hunt is under way
   (`queueBusy`), so the guard sees the full run that follows a landing.
-- `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`) and `PROJECT_BOARD_QUEUE_GUARD_MS` are for tests only.
+- `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`), `PROJECT_BOARD_QUEUE_GUARD_MS`, `PROJECT_BOARD_QUEUE_PROBE_MS`
+  and `PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS` are for tests only.
   Tests: `tooling/project-board-queue.test.ts` ("the main guard …"), with a real git checkout and a
   fake `gh`.
 

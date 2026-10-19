@@ -611,6 +611,8 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     return { did: 'idle' }
   }
   if (q.pause && Date.parse(q.pause.until) > now) return { did: 'paused', until: q.pause.until }
+  // Too many of main's full runs unfinished (#1259): each landing adds one, so the queue waits for them
+  if (QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns) return { did: 'held', unfinished: q.guard.unfinished }
   if (!takeLease(dir, holder, now)) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
   q = readQueue(dir)
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI

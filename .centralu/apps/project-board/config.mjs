@@ -79,6 +79,8 @@ export const QUEUE = {
   },
   guard: guardOn
     ? {
+        // The queue lands nothing while more of main's full runs than this are unfinished (#1259): each landing adds one
+        maxMainRuns: Math.max(1, Number(process.env.PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS) || Number(guardConf.maxMainRuns ?? 3) || 3),
         jobPaths: Object.fromEntries(
           Object.entries(guardConf.jobPaths ?? {}).filter(([k, v]) => k && Array.isArray(v) && v.every((p) => typeof p === 'string' && p)),
         ),
