@@ -28,6 +28,8 @@ import { rpcError } from '../rpc-error.js'
  *     gets the same answer every time. The link (links.ts) asks the remote for its connection line
  *     again, or reports the versions for the person to align (§4).
  *   - **`hello_ok` is reported with the remote's build**, for the version check (§4).
+ *   - **It stops redialling after `redials` tries** (#1143): the same forward can stay up while the host behind it is
+ *     gone, and redialling it then never ends. The link reads the connection line again, which is what starts a host.
  *   - **It answers a request only through `RemoteClientEvents.call`** (#550, plan §12.7). A host's call to its
  *     client (the reverse direction) is dropped, never dispatched, unless the link gave that handler; the link
  *     gives one that serves an allowlist and refuses everything else, and a compromised remote must not reach the
@@ -63,6 +65,12 @@ export type RemoteClientOptions = {
   /** One call's bound. Generous: a forwarded resume can take minutes (the UI's own budget is 180 s) */
   callTimeoutMs?: number
   maxBackoffMs?: number
+  /**
+   * How many times in a row it dials the same address again without reaching the host's hello, before it stops and
+   * reports `gaveUp`. Absent: without end. The link sets it (linked-machine-connection.ts): past these few, whether a
+   * host still runs there is the machine's to say, through its connection line, and only the link can ask that
+   */
+  redials?: number
   /** The protocol number sent in hello. Only tests set it */
   protocolVersion?: number
   /**
@@ -77,6 +85,8 @@ export type RemoteClientEvents = {
   event?: (event: unknown) => void
   terminal?: (frame: { terminalId: string; data?: string; exitCode?: number | null }) => void
   down?: (reason: string) => void
+  /** Dialled again `redials` times in a row and no host answered: it dials no more (the owner closes it) */
+  gaveUp?: (reason: string) => void
   refused?: (r: RemoteRefusal) => void
   /**
    * Answers a call the remote host makes to the hub (#550, the reverse direction). Absent: every such call is dropped,
@@ -129,6 +139,11 @@ export class RemoteClient {
 
   get connected(): boolean {
     return this.ready
+  }
+
+  /** Whether it asks the host to prove it holds the token (`RemoteClientOptions.proveHost`) */
+  get provesHost(): boolean {
+    return this.opts.proveHost === true
   }
 
   connect(): void {
@@ -396,6 +411,11 @@ export class RemoteClient {
     this.failAll('The link dropped')
     if (this.closed) return
     if (wasReady) this.on.down?.(reason)
+    // `attempt` counts the dials since the last hello
+    if (this.opts.redials !== undefined && this.attempt >= this.opts.redials) {
+      this.on.gaveUp?.(reason)
+      return
+    }
     const delay = Math.min(this.opts.maxBackoffMs ?? 5000, 200 * 2 ** this.attempt++)
     this.reconnectTimer = setTimeout(() => this.connect(), delay)
   }

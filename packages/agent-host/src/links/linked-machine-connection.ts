@@ -53,6 +53,14 @@ function hiddenKind(s: unknown): boolean {
 const RETRY_MS: [number, number] = [2_000, 5 * 60_000]
 
 /**
+ * How many times the client dials the forward again after a drop before the link reads the connection line instead
+ * (`RemoteClientOptions.redials`, #1143). From 200 ms, doubling, about 6 s in all: a blip, or a host swapped in place
+ * there (about 1 s, docs/agent-host.md), is back within them and keeps the event cursor. Past them the question is
+ * whether a host still runs there, which costs an ssh command, and its answer may start one
+ */
+const LINK_REDIALS = 5
+
+/**
  * A machine that connects when needed (#1134) stays connected this long after the last thing that needed it, and
  * longer while a session there is in a turn. A window that keeps one of its projects or sessions open says so again
  * well within it (every 2 minutes, `machines.need`)
@@ -82,6 +90,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected hostStarted: (HostStart & { at: number }) | null = null
   protected endpoint: Endpoint | null = null
   protected client: RemoteClient | null = null
+  /** The client when it stopped redialling (`gaveUp`, #1143) and is waiting, idle, for the next opening */
+  private gaveUp: RemoteClient | null = null
   /** Sessions of the remote the hub shows / hides, by the remote's id. Events of any other session are not passed on */
   private shown = new Set<string>()
   private hidden = new Set<string>()
@@ -497,8 +507,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   private async doOpen(): Promise<void> {
     if (this.stopped) return
-    this.client?.close()
-    this.client = null
+    // Kept only when it gave up redialling: `connectClient` points it at what the connection line says
+    if (this.client !== this.gaveUp) {
+      this.client?.close()
+      this.client = null
+    }
     this.setStatus('connecting', null)
     let endpoint = await this.openTunnel()
     if (!endpoint) return
@@ -644,9 +657,22 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   private connectClient(endpoint: Endpoint): void {
+    /*
+     * The client that gave up redialling (#1143) is pointed at what the line names: at the same address it keeps its
+     * cursor, so the host replays what it sent meanwhile (a new lifetime resyncs as ever). Every path that ends the
+     * client nulls `this.client`, so one still held here was never closed
+     */
+    const idle = this.client !== null && this.client === this.gaveUp ? this.client : null
+    this.gaveUp = null
+    if (idle && idle.provesHost === (endpoint.line.proof === true)) {
+      idle.updateEndpoint(endpoint.url, endpoint.token)
+      return
+    }
+    this.client?.close()
+    this.client = null
     const client = new RemoteClient(
       // A host that can prove it holds the token is asked to, before the token goes out (#838)
-      { ...this.deps.client, url: endpoint.url, token: endpoint.token, proveHost: endpoint.line.proof === true },
+      { redials: LINK_REDIALS, ...this.deps.client, url: endpoint.url, token: endpoint.token, proveHost: endpoint.line.proof === true },
       {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),
@@ -656,6 +682,24 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         down: (reason) => {
           if (this.client !== client) return
           this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); reconnecting`)
+        },
+        /*
+         * A few redials of the same forward did not reach a host (#1143). A detached host that died leaves `ssh -N` up,
+         * and redialling it went on for good: the host was started again only when ssh died or the person pressed
+         * reconnect. Now the link does what reconnect does: reads the connection line again, which starts a host there
+         * when none runs, on the link's own backoff. The client is kept, idle, for the host the line names next: a host
+         * that was there all along (a laptop waking, a network change) replays what it sent meanwhile (`connectClient`)
+         */
+        gaveUp: (reason) => {
+          if (this.client !== client) return
+          if (this.held) {
+            client.close()
+            this.client = null
+            return
+          }
+          this.gaveUp = client
+          this.setStatus('unreachable', `${this.name}'s host did not answer on the link (${reason}); asking the machine again`)
+          this.retryLater()
         },
         refused: (r) => {
           if (this.client !== client) return

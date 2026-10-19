@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -697,6 +698,80 @@ describe('a hub linked to another host (#82)', () => {
       await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.links.list()[0]!.hostStarted).toMatchObject({ how: 'link_bound', note: /through WMI/ })
       expect(l.logs.join('\n')).toMatch(/its host runs only while this link is up: Windows did not start Centralu through WMI/)
+    })
+
+    /*
+     * #1143 L5: the client redialled the same forward for good, and only the link's own retry reads the connection line
+     * and runs `serve --detach`. A detached host that died while `ssh -N` stayed up was never started again.
+     */
+    it('starts a host again when the detached one died behind a forward that stayed up', async () => {
+      let host = await remoteHost()
+      let starts = 0
+      let alive = true
+      // The forward never goes down: only the host behind it does
+      const tunnel = Object.assign(new DirectTunnel(() => lineFor(host.port, { hostRunning: alive })), {
+        startHost: async (): Promise<HostStart> => {
+          starts++
+          host = await remoteHost()
+          alive = true
+          return { how: 'detached', note: null }
+        },
+      })
+      const store = new Store()
+      const registry = storeRegistry(store)
+      registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+      const statuses: string[] = []
+      const links = new Links({
+        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        broadcast: (e) => {
+          if (e.type === 'machine_status') statuses.push(e.machine.status)
+        },
+        terminal: () => {},
+        mirror: storeMirror(store),
+        registry,
+        tunnelFor: () => tunnel,
+        retryMs: [50, 200],
+        client: { maxBackoffMs: 100 },
+      })
+      cleanups.push(() => links.stop())
+      links.start()
+      await eventually(() => links.list()[0]!.status === 'connected')
+      expect(starts).toBe(0)
+      statuses.length = 0
+      alive = false
+      await host.close()
+      await eventually(() => starts === 1 && links.list()[0]!.status === 'connected')
+      expect(statuses).toEqual(expect.arrayContaining(['unreachable', 'starting', 'connected']))
+    })
+
+    it('a host that was there all along replays what it sent while the forward was dead, after the link read its line again', async () => {
+      const remote = await remoteHost()
+      // The forward: passes through, or, blocked, takes no connection and cuts the ones it held
+      let blocked = false
+      const held = new Set<Socket>()
+      const forward = createServer((c) => {
+        if (blocked) return c.destroy()
+        const r = connect(remote.port, '127.0.0.1')
+        c.pipe(r)
+        r.pipe(c)
+        held.add(c)
+        c.on('close', () => held.delete(c))
+        c.on('error', () => r.destroy())
+        r.on('error', () => c.destroy())
+      })
+      await new Promise<void>((r) => forward.listen(0, '127.0.0.1', () => r()))
+      cleanups.push(() => new Promise<void>((r) => forward.close(() => r())))
+      const hub = await hubHost(() => lineFor((forward.address() as AddressInfo).port))
+      await eventually(() => status(hub) === 'connected')
+      const u = await ui(hub.port)
+      blocked = true
+      for (const c of held) c.destroy()
+      // Past its redials the link asks the machine again; the line says the host runs, and the forward is still dead
+      await eventually(() => /asking the machine again/.test(hub.links.list()[0]!.error ?? ''))
+      remote.server.broadcast({ type: 'projects_changed' })
+      blocked = false
+      await eventually(() => status(hub) === 'connected')
+      await eventually(() => u.events().some((e) => e.type === 'projects_changed'))
     })
 
     it('reports a start that failed as not running, with the reason, and tries again later', async () => {
