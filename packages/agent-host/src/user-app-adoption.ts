@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
+import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
 
 /**
  * User-folder apps become projects (#1141, docs/plans/root-apps.md §4). Each `<data>/apps/<id>/` whose manifest is
@@ -28,6 +29,16 @@ import type { Store } from './dev-services/store.js'
  * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
  * It stays in the user folder with its reason, and the log says so once.
  *
+ * **A project the person deletes gives its folder back** (#1204), once nothing in the trash could bring it back: no
+ * session of it is left there (restoring one registers the project again, at the same path, under the same id) and no
+ * project is registered at the folder (the person may have added it again). Until
+ * then the folder stays where it is, adopted, so a restore finds it. After, it goes to `<data>/app-trash/` as a
+ * removed user-folder app's does, what the project kept for it returns to the user-folder key, and the record goes: a
+ * person who moves the folder back into the user folder gets it as a new project, with its data. Left in place, it was
+ * listed nowhere and nothing could remove it. Checked at each run (so once the host is ready: a project deleted
+ * before this build, or a move a stopped host left half done) and whenever a project is deleted or the trash loses
+ * sessions (`settle`).
+ *
  * Trust: the project is trusted, as the user folder was, except for an imported app the person never enabled (or
  * whose command or uses changed since): its project starts untrusted, and trusting it is enabling it. A folder that is
  * already a project keeps whatever trust the person gave it.
@@ -40,7 +51,13 @@ export type AdoptionDeps = {
   sessionsMoved(sessionIds: readonly string[], projectId: string): void
   /** The project list changed — the windows re-read it */
   changed(): void
+  /** How long a give-back that failed waits before it is tried again (tests shorten it) */
+  retryMs?: number
 }
+
+/** A give-back that failed is tried again this many times while the host runs, then at the next start */
+const GIVE_BACK_RETRIES = 5
+const GIVE_BACK_RETRY_MS = 3000
 
 /**
  * Where an adopted folder keeps its mark: in Centralu's own folder inside the project (`.centralu`, where a project's
@@ -76,6 +93,49 @@ export function adoptedProjectOf(store: Pick<Store, 'adoption'>, appId: string):
 /** A path spelled as a registered project's is: resolved, with a capital drive letter (`ProjectCreation.addProject`) */
 const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
 
+/**
+ * Whether a kept path (a project's, a trashed session's) could name this folder (#1204), or null when the folder's own
+ * real path cannot be told. It errs toward yes: a folder wrongly kept is only kept, while one wrongly moved is a live
+ * project's. Both sides are compared by their real paths (`realFolder`), so a project added through a symbolic link, a
+ * junction, a `subst` drive or a short name is the same folder, and with ASCII case folded on every system (a
+ * case-sensitive disk may keep one folder too many). A project inside the folder counts too: the folder would move from
+ * under it. A kept path whose real path cannot be told counts as this folder (a drive not there now, a link loop, no
+ * access), and so does a UNC path, which is never resolved: a share may not answer
+ */
+function folderMatcher(dir: string): ((kept: string) => boolean) | null {
+  const fold = (path: string) => path.replace(/[A-Z]/g, (c) => c.toLowerCase())
+  const real = realFolder(dir)
+  if (real === null) return null
+  const near = [fold(resolve(dir)), fold(real)]
+  /** The folder itself, or something inside it */
+  const within = (path: string) => near.some((n) => path === n || path.startsWith(n.endsWith(sep) ? n : n + sep))
+  return (kept) => {
+    const k = resolve(kept)
+    if (within(fold(k)) || k.startsWith('\\\\')) return true
+    const r = realFolder(k)
+    return r === null || within(fold(r))
+  }
+}
+
+/**
+ * A path's real path, through the nearest folder that exists (a project folder may be gone); null when it cannot be told:
+ * any error but "not there" (no access, a link loop, a drive that does not answer)
+ */
+function realFolder(path: string): string | null {
+  const full = resolve(path)
+  try {
+    return realpathSync.native(full)
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+    const parent = dirname(full)
+    // A root that is not there (a drive unplugged, a `subst` gone since a restart) says nothing of where it pointed
+    if (parent === full) return null
+    const up = realFolder(parent)
+    return up === null ? null : join(up, basename(full))
+  }
+}
+
 export class UserAppAdoption {
   private running: Promise<number> | null = null
   private again = false
@@ -84,11 +144,16 @@ export class UserAppAdoption {
   /** Apps left in the user folder, by their reason — said once, not on every list change */
   private said = new Map<string, string>()
   private swept = false
+  /** Set by the first run, once the host is ready: `settle` does nothing before, as nothing may move while a swap can still hand back */
+  private ready = false
+  /** Give-backs that failed, by app id, and how many times */
+  private readonly retries = new Map<string, number>()
 
   constructor(private readonly deps: AdoptionDeps) {}
 
   /** Adopts every user-folder app the runtime lists now; the number adopted. Runs one at a time; a call meanwhile runs once more after */
   run(): Promise<number> {
+    this.ready = true
     if (this.running) {
       this.again = true
       return this.running
@@ -101,6 +166,20 @@ export class UserAppAdoption {
       }
     })
     return this.running
+  }
+
+  /**
+   * A project was deleted, or sessions left the trash for good (#1204): gives back the folders of deleted projects that
+   * nothing in the trash can restore any more. Only once the host is ready (the first `run`); that run checks too
+   */
+  settle(): Promise<void> {
+    if (!this.ready) return Promise.resolve()
+    // A run under way may have read the trash before this change: a run of its own after it
+    const prior = this.running
+    return (prior ? prior.catch(() => 0).then(() => this.run()) : this.run()).then(
+      () => undefined,
+      (e: Error) => console.error(`[apps] giving back the folders of deleted projects failed: ${e.message}`),
+    )
   }
 
   /** Adopts what appears later (an approved MCP server written to the user folder). Returns the unsubscribe */
@@ -131,6 +210,7 @@ export class UserAppAdoption {
         console.error(`[apps] could not sweep half copies an interrupted move left: ${(e as Error).message}`)
       }
     }
+    await this.giveBack()
     let adopted = 0
     for (const app of this.waiting()) {
       try {
@@ -148,6 +228,54 @@ export class UserAppAdoption {
     return adopted
   }
 
+  /**
+   * Whether the folder this record names is free to give back: its project is gone, no other project is registered at
+   * the folder (the person may have added it again), and nothing in the trash would register one there
+   */
+  private released(record: AdoptedRecord, dir: string): boolean {
+    const projects = this.deps.store.projects.listProjects()
+    if (projects.some((p) => p.id === record.projectId) || this.deps.store.trash.holdsProject(record.projectId)) return false
+    const here = folderMatcher(dir)
+    if (!here) return false
+    return !projects.some((p) => here(p.path)) && !this.deps.store.trash.trashedProjectPaths().some(here)
+  }
+
+  /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */
+  private async giveBack(): Promise<void> {
+    let records: [string, AdoptedRecord][] = []
+    try {
+      records = Object.entries(this.deps.store.adoption.adopted())
+    } catch (e) {
+      console.error(`[apps] could not read which folders became projects: ${(e as Error).message}`)
+      return
+    }
+    for (const [appId, record] of records) {
+      const dir = this.deps.rt.userAppDir(appId)
+      try {
+        if (!this.released(record, dir)) continue
+        await this.deps.rt.projectStopped(record.projectId)
+        /*
+         * Checked again with nothing awaited from here to the move: a session restored, or the folder added as a
+         * project, while its apps stopped keeps it. A folder there that is not the one the project was made from
+         * (no mark, or another) is someone else's: nothing of it is touched, and its own adoption follows
+         */
+        if (!this.released(record, dir)) continue
+        if (existsSync(dir) && adoptionMark(dir) !== record.mark) continue
+        const to = this.deps.rt.returnAdoptedApp(record.projectId, appId)
+        this.deps.store.adoption.forget(appId, record.mark)
+        this.retries.delete(appId)
+        console.error(`[apps] deleted project ${record.projectId} gave back user-folder app ${appId}${to ? `: its folder is in ${to}` : ''}`)
+      } catch (e) {
+        // Kept as it was; tried again shortly (a folder a process still works in does not move on Windows), then at the next start
+        const tries = (this.retries.get(appId) ?? 0) + 1
+        this.retries.set(appId, tries)
+        const again = tries <= GIVE_BACK_RETRIES
+        console.error(`[apps] deleted project ${record.projectId} could not give back user-folder app ${appId} yet${again ? '' : ' (tried again at the next start)'}: ${(e as Error).message}`)
+        if (again) setTimeout(() => void this.settle(), this.deps.retryMs ?? GIVE_BACK_RETRY_MS).unref()
+      }
+    }
+  }
+
   private adopt(app: ExternalAppInfo): void {
     const path = spelled(app.dir)
     // An import the person has not enabled stays off: its project starts untrusted, and trusting it is enabling it
@@ -160,6 +288,7 @@ export class UserAppAdoption {
     const mark = randomUUID()
     mkdirSync(join(app.dir, ADOPTION_MARK[0]), { recursive: true })
     writeFileSync(join(app.dir, ...ADOPTION_MARK), `${mark}\n`)
+    this.retries.delete(app.appId)
     const moved = this.deps.store.adoption.carry(app.appId, { path, name: basename(path), trusted: !held, newId: projectId }, mark)
     this.deps.sessionsMoved(moved.sessions, moved.projectId)
     console.error(`[apps] user-folder app ${app.appId} is now the app of project ${moved.projectId} (${path})${held ? ', untrusted until enabled' : ''}`)

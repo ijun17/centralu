@@ -3,6 +3,7 @@ import type {
   BackgroundTask,
   GitSource,
   Interruption,
+  LineHeight,
   MachineConnect,
   MachineInfo,
   RpcResult,
@@ -21,6 +22,32 @@ export type MachineRequest =
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
   | { action: 'connect'; machine: string; connect: MachineConnect }
   | { action: 'autostart'; machine: string; on: boolean }
+
+/** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
+export type PreferenceChanges = {
+  /** A theme by id or name; it sets the dark or the light side by the theme's base, and shows that side */
+  theme?: string
+  textSize?: number
+  bodyFont?: string
+  codeFont?: string
+  lineHeight?: LineHeight
+  /** Minutes of quiet before an idle session sleeps, or 'never' */
+  idleSleepMinutes?: number | 'never'
+  checkForUpdates?: boolean
+  applyUpdatesWhenIdle?: boolean
+  moveIdleSessionsToNewAgentCli?: boolean
+}
+
+/** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
+export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: PreferenceChanges }
+
+/** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
+export type TrashRequest =
+  | { action: 'list' }
+  | { action: 'restore'; sessionId: string; what: 'session' | 'steps' }
+  | { action: 'trash_steps'; sessionId: string }
+  | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
+  | { action: 'empty' }
 
 export type OrchestratedSession = {
   sessionId: string
@@ -76,6 +103,8 @@ export type LinkedProject = {
   trusted?: boolean
   /** Set when the machine cannot be asked just now: why. The project is then what the headers mirror last held */
   away?: string
+  /** The person's instructions there for agents started in it (#1161 item 2); absent when none, or from a machine that predates them */
+  agentInstructions?: string
 }
 
 /** Failed with a sentence the model reads, or done */
@@ -108,12 +137,19 @@ export type LinkedSessions = {
   /**
    * A new session in a machine's project, under `preset` (`normal` when none is given; the caller caps it, #838), named
    * if a name is given. For start_agent's child there (#1038): its model and effort, a new worktree on `worktreeBranch`,
-   * and the agent depth it is kept at (`CreateSessionParams.agentDepth`)
+   * and the agent depth it is kept at (`CreateSessionParams.agentDepth`); `callerPreset`, the preset its caller carries
+   * there (#1273, `CreateSessionParams.fromHub`), `auto` only once the machine said it takes it (`hubAuto`). `preset` in
+   * the answer: what the machine started it under, as it says
    */
   createSession(
     project: LinkedProject,
-    opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number },
-  ): Promise<Outcome<{ sessionId: string; name: string }>>
+    opts: { tool?: ToolName; name?: string; preset?: PermissionPreset; model?: string; effort?: string; worktreeBranch?: string; agentDepth?: number; callerPreset?: PermissionPreset },
+  ): Promise<Outcome<{ sessionId: string; name: string; preset?: PermissionPreset }>>
+  /**
+   * Whether a machine runs an `auto` caller's child under `auto` too (#1273, `host.hubAuto` there): its "Allow auto from
+   * a linked computer" switch. `olderBuild`: the machine runs a Centralu from before it, which keeps `normal`
+   */
+  hubAuto(machineId: string): Promise<Outcome<{ allowed: boolean }> | { ok: false; error: string; olderBuild: true }>
   /**
    * A machine project's `origin` remote, as git there has it (`projects.origin`, #1038); null with none. `olderBuild`: the
    * machine runs a Centralu from before it, which also drops `createSession`'s `agentDepth`
@@ -123,6 +159,20 @@ export type LinkedSessions = {
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
+  /**
+   * The project's instructions for started agents as the machine has them now (#1161 item 2), '' for none; an error
+   * when it cannot be asked, so the caller keeps what it listed before. Optional, as is `deleteAgentChild`: a reader
+   * from before them (a stand-in, a build that predates #1161) has neither, and its caller does as it did then
+   */
+  agentInstructions?(project: LinkedProject): Promise<Outcome<{ text: string }>>
+  /**
+   * A start_agent child deleted there with the worktree made for it on `branch`, when nothing would be lost
+   * (`agents.deleteAgentChild` there, #1161 item 3). `olderBuild`: the machine predates it, and nothing was deleted
+   */
+  deleteAgentChild?(
+    sessionId: string,
+    branch: string,
+  ): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> | { ok: false; error: string; olderBuild: true }>
   /**
    * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
    * last thousand messages: whose turn it is running (#1038 review)
@@ -579,6 +629,17 @@ export type OrchestratorTools = {
    * The answer is the text the model reads. Absent on seats that cannot.
    */
   machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * The preferences (#1219, preferences and the trash): read them all, and change the reversible ones the window offers (theme, text
+   * size, fonts, line height, idle sleep, the update switches) through the window's own calls. Turning on "apply updates
+   * when idle" waits for the person's card. Absent on seats that cannot.
+   */
+  preferences?(req: PreferencesRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * The trash (#1219): list it, restore a session or its subagent steps, move a session's subagent steps to it; deleting
+   * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
+   */
+  trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

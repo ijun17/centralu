@@ -32,7 +32,7 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
  * background work rather than ending the turn on "waiting for it" (#729). It directs nothing else (product-spec.md
  * §1.2): the task is the parent's words, and the child works under its own approvals.
  */
-export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = []): string {
+export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = [], instructions = ''): string {
   return [
     `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
@@ -42,7 +42,19 @@ export function agentFrame(parentName: string, task: string, setupProblems: read
     ...(setupProblems.length ? ['', worktreeSetupFrame(setupProblems)] : []),
     '',
     task,
+    ...projectInstructions(instructions),
   ].join('\n')
+}
+
+/**
+ * The person's instructions for agents started in the project (#1161 item 2, `ProjectInfo.agentInstructions`), after
+ * the task: the rules every brief repeated (worktrees, stacking, what never to run), set once in the project's
+ * settings. Said to be the person's, from the project's settings on the computer the child runs on, so the child tells
+ * them apart from the parent's task. Nothing when none are set.
+ */
+export function projectInstructions(text: string): string[] {
+  const t = text.trim()
+  return t ? ['', "[The person's standing instructions for agents started in this project, from the project's settings on this computer:]", '', t] : []
 }
 
 /**
@@ -76,13 +88,15 @@ export function agentChoice(
  * The task of a child started on a linked machine (#1038): as `agentFrame`, said as from a session of the same
  * repository on another computer, whose name the link already gives as "<name> on <hub>"
  */
-export function remoteAgentFrame(parentName: string, task: string): string {
+export function remoteAgentFrame(parentName: string, task: string, instructions = ''): string {
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     '',
     task,
+    // The machine's own copy of the project's instructions: its paths and its shell, not the parent's (#1161 item 2)
+    ...projectInstructions(instructions),
   ].join('\n')
 }
 

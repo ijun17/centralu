@@ -31,8 +31,8 @@ import { basename, dirname, join } from 'node:path'
 export class PrivateJsonFile<T> {
   /** True while the last read returned the empty document in place of a file it could not use */
   private standIn = false
-  /** The last time this file could not be used, for the screen (#944): where it went, or null when it is still in place */
-  private lastTrouble: { movedTo: string | null; at: number } | null = null
+  /** The last time this file could not be used, for the screen (#944): where it went, or null when it is still in place, and why */
+  private lastTrouble: FileTrouble | null = null
 
   constructor(
     readonly path: string,
@@ -61,7 +61,7 @@ export class PrivateJsonFile<T> {
    * The last time this file could not be used, while it matters (#944): moved aside (`movedTo`, a file name in the same
    * folder) until a write succeeds, or still in place and refusing writes (`movedTo` null) until it reads again
    */
-  get trouble(): { movedTo: string | null; at: number } | null {
+  get trouble(): FileTrouble | null {
     return this.lastTrouble
   }
 
@@ -72,15 +72,16 @@ export class PrivateJsonFile<T> {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code
       if (code === 'ENOENT') return this.settled(this.opts.empty())
-      return this.stuck(`could not be read (${code ?? (e as Error).message})`)
+      return this.stuck('could not be read', readFailure(e))
     }
     let doc: unknown
     try {
       doc = JSON.parse(text)
     } catch {
-      return this.damaged()
+      // Never the parse error's message: it quotes the text it stopped at, and this may be the secrets file
+      return this.damaged(NOT_JSON)
     }
-    if (!this.opts.valid(doc)) return this.damaged()
+    if (!this.opts.valid(doc)) return this.damaged(WRONG_SHAPE)
     return this.settled(doc)
   }
 
@@ -142,29 +143,62 @@ export class PrivateJsonFile<T> {
     return doc
   }
 
-  /** Read, but not a document: moved aside so its bytes survive, unless it cannot be moved */
-  private damaged(): T {
+  /** Read, but not a document (`reason`): moved aside so its bytes survive, unless it cannot be moved */
+  private damaged(reason: string): T {
     const aside = `${this.path}.unreadable-${Date.now()}`
     try {
       renameSync(this.path, aside)
     } catch (e) {
       // Gone in the meantime: the other host of a swap moved it aside first, and nothing is left to overwrite
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') return this.settled(this.opts.empty())
-      return this.stuck(`is unreadable and could not be moved aside (${(e as Error).message})`)
+      return this.stuck('is unreadable and could not be moved aside', `${reason}, and it could not be moved aside (${errorCode(e)})`)
     }
-    console.error(`[apps] ${this.opts.label} is unreadable; moved to ${basename(aside)}. ${this.opts.lost}`)
+    console.error(`[apps] ${this.opts.label} is unreadable (${reason}); moved to ${basename(aside)}. ${this.opts.lost}`)
     this.standIn = false
-    this.lastTrouble = { movedTo: basename(aside), at: Date.now() }
+    this.lastTrouble = { movedTo: basename(aside), at: Date.now(), reason }
     return this.opts.empty()
   }
 
-  private stuck(why: string): T {
+  private stuck(what: string, reason: string): T {
     // Said once, not on every read: the secrets file is read for every list broadcast
-    if (!this.standIn) console.error(`[apps] ${this.opts.label} ${why}; it is left as it is and not written until it can be read. ${this.opts.lost}`)
-    if (!this.standIn) this.lastTrouble = { movedTo: null, at: Date.now() }
+    if (!this.standIn) console.error(`[apps] ${this.opts.label} ${what} (${reason}); it is left as it is and not written until it can be read. ${this.opts.lost}`)
+    if (!this.standIn) this.lastTrouble = { movedTo: null, at: Date.now(), reason }
+    // Still stuck, for another reason now (held open, then damaged and held): the screen says the current one
+    else if (this.lastTrouble) this.lastTrouble = { ...this.lastTrouble, reason }
     this.standIn = true
     return this.opts.empty()
   }
+}
+
+/**
+ * When a private file could not be used (#944): `movedTo` is the copy it was moved aside to (a file name in the same
+ * folder), or null while it is still in place; `reason` says why in a few words and never quotes the file. A copy found
+ * in the folder after a restart has no reason to give
+ */
+export type FileTrouble = { movedTo: string | null; at: number; reason?: string }
+
+const NOT_JSON = 'it is not valid JSON'
+const WRONG_SHAPE = 'it is not the JSON object Centralu writes'
+
+/** An error's code, never its message (which names paths and may one day quote more) */
+function errorCode(e: unknown): string {
+  return (e as NodeJS.ErrnoException)?.code ?? 'unknown error'
+}
+
+/** Why a file could not be read, in words a person can act on, with the OS's code */
+function readFailure(e: unknown): string {
+  const code = errorCode(e)
+  const words: Record<string, string> = {
+    EACCES: 'Centralu may not read it',
+    // On Windows also what a file another program holds (an antivirus scan) answers
+    EPERM: 'access to it was refused',
+    EBUSY: 'another program holds it open',
+    EISDIR: 'it is a folder',
+    EMFILE: 'too many files are open',
+    ENFILE: 'too many files are open',
+    EIO: 'the disk could not read it',
+  }
+  return Object.hasOwn(words, code) ? `${words[code]} (${code})` : `reading it failed (${code})`
 }
 
 /** How old a temp file of a live host has to be before it counts as left behind. A write takes milliseconds */

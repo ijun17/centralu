@@ -123,6 +123,13 @@ export const UiPreferences = z.object({
    */
   agentModels: AgentModels.optional(),
   /**
+   * Whether a session a linked computer's `auto` session starts on this one runs under `auto` too (#1273): start_agent
+   * with a machine, from the computer this one is linked to as its hub. On by default (owner decision 2026-10-19); off,
+   * such a session runs under `normal` and the hub's card asks each time, for a computer the person shares. Optional, as
+   * agentDepth: a record from before it has none and reads as on (`hubAutoOf`).
+   */
+  hubAuto: z.boolean().optional(),
+  /**
    * The sidebar groups the person folded (#666): the children of a session (`session:<id>`) and the
    * sessions of an app (`app:<key>`). Only folded groups are listed, so a group nobody touched is
    * open and an unknown or stale key does nothing. A way of looking, kept with the other screen
@@ -152,6 +159,11 @@ export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 export const DEFAULT_AGENT_DEPTH = 1
 /** The deepest the setting goes (#867): three levels of agents below the person's session */
 export const MAX_AGENT_DEPTH = 3
+
+/** Whether this computer takes `auto` from its hub's `auto` sessions (#1273): on unless the person turned it off */
+export function hubAutoOf(prefs: Pick<UiPreferences, 'hubAuto'>): boolean {
+  return prefs.hubAuto !== false
+}
 
 /** The agent depth in force: the saved one, else the default */
 export function agentDepthOf(prefs: Pick<UiPreferences, 'agentDepth'>): number {

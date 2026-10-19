@@ -1,4 +1,4 @@
-import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type UiPreferences } from '@cc/protocol'
+import { THEME_PRESETS, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol'
 
 /**
  * The theme engine (#312 step 3).
@@ -13,18 +13,14 @@ import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type UiPreferenc
  */
 
 export type ThemeBase = 'dark' | 'light'
-export type ThemePreset = { id: string; name: string; base: ThemeBase }
 
 /**
  * The presets the stylesheet defines. Dark is the `@theme` values themselves; the others are
  * `[data-theme='…']` blocks in index.css. The first preset of each base is that side's default.
+ * The list is the protocol's (`THEME_PRESETS`), so the host names the same ones (#1219).
  */
-export const THEME_PRESETS: readonly ThemePreset[] = [
-  { id: 'dark', name: 'Dark', base: 'dark' },
-  { id: 'light', name: 'Light', base: 'light' },
-  { id: 'hc-dark', name: 'High contrast dark', base: 'dark' },
-  { id: 'hc-light', name: 'High contrast light', base: 'light' },
-]
+export { THEME_PRESETS }
+export type { ThemePreset }
 
 export { THEME_TOKENS }
 

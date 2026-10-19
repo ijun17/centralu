@@ -23,6 +23,7 @@ import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { gitWorktreeRemove } from '../dev-services/git-worktree.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
+import { withHubMark } from './hub-preset.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
 import { codeIntelligenceKey } from './tool-profiles.js'
 import { type DelegationFlow, agentStartPersonText } from './delegation-flow.js'
@@ -469,7 +470,8 @@ export class SessionTrash {
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
       if (fixed !== back || recovered) this.host.store.sessions.upsertSession(fixed)
-      this.host.meta.set(sessionId, fixed)
+      // Started from a linked computer (#1273): its mark is kept beside the row until the purge, and comes back with it
+      this.host.meta.set(sessionId, withHubMark(this.host.store.settings, fixed))
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
       if (recovered) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })

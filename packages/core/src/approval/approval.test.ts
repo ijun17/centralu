@@ -35,6 +35,17 @@ describe('the start-agent question (#561)', () => {
       'Start Codex in "website" on "Windows PC", in a new worktree on "centralu/parser", with safe permissions, to write the parser?',
     )
   })
+
+  // #1273: an auto caller's child that runs normal there says why, so the person knows what they allow
+  it("says why an auto caller's child on another computer will not run under auto", () => {
+    const d = { kind: 'agent_start' as const, project: { id: 'p', name: 'website' }, tool: 'Codex', preset: 'normal' as const, text: 'write the parser', machine: 'Home PC' }
+    expect(agentStartQuestion({ ...d, autoWithheld: 'machine_off' })).toBe(
+      'Start Codex in "website" on "Home PC", with normal permissions (not auto: "Home PC" does not allow auto from a linked computer), to write the parser?',
+    )
+    expect(agentStartQuestion({ ...d, autoWithheld: 'older' })).toBe(
+      'Start Codex in "website" on "Home PC", with normal permissions (not auto: "Home PC" runs an older Centralu that cannot take it), to write the parser?',
+    )
+  })
 })
 
 describe('the cross-project consent question (#371)', () => {
