@@ -420,7 +420,7 @@ describe("nothing of the person's turn on the child's machine reaches the caller
 describe('a reader from before #1161, or one whose new calls fail', () => {
   /** The stand-in reader with `more` on top, wired in as a host's start would */
   const withReader = (more: Partial<LinkedSessions>, listed?: string) => {
-    const plain = machine.reader.bind(machine)
+    const plain = Machine.prototype.reader.bind(machine)
     machine.reader = () => {
       const r = plain()
       const projects = listed === undefined ? r.projects : async () => ({ projects: [{ id: 'm1.p', machineId: 'm1', machine: 'Box', name: 'app', path: '/app', defaultTool: null, agentInstructions: listed }], away: [] })
@@ -429,10 +429,17 @@ describe('a reader from before #1161, or one whose new calls fail', () => {
     hub.boot()
   }
 
-  it('starts the child without instructions when the reader has no agentInstructions', async () => {
+  it('starts the child with what the machine listed when the reader has no agentInstructions, and with none when it listed none', async () => {
+    withReader({}, 'LISTED-TEXT')
     expect(await hub.start()).toMatchObject({ ok: true })
     expect(machine.fromHub[0]).toContain('TASK-TEXT')
-    expect(machine.fromHub[0]).not.toContain('standing instructions')
+    expect(machine.fromHub[0]).toContain('LISTED-TEXT')
+    // The stand-in as it is lists no instructions, as a machine that predates them
+    await hub.act('delete')
+    withReader({})
+    expect(await hub.start()).toMatchObject({ ok: true })
+    expect(machine.fromHub[1]).toContain('TASK-TEXT')
+    expect(machine.fromHub[1]).not.toContain('standing instructions')
   })
 
   it('starts the child with what the machine listed when the read throws', async () => {
