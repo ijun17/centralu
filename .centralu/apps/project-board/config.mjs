@@ -32,6 +32,11 @@ export const CI = {
   // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
   // PROJECT_BOARD_CI_FULL_TIER: for the tests only, which run the queue without tiers too (empty: none)
   fullTier: fullTierOf(process.env.PROJECT_BOARD_CI_FULL_TIER ?? config.ci?.fullTier),
+  // What a change lands after, with two tiers (#1259, the owner's decision of 2026-10-19): `quick`, its own quick
+  // run and its batch's run of the quick tier (the full tier runs on main after it lands, and the main guard reverts
+  // what breaks it); `full` (the default), nothing lands without a full run on what lands.
+  // PROJECT_BOARD_CI_LAND_TIER: for the tests only
+  landTier: (process.env.PROJECT_BOARD_CI_LAND_TIER ?? config.ci?.landTier) === 'quick' ? 'quick' : 'full',
 }
 
 // The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items
@@ -56,6 +61,12 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 // The merge queue's rerun policy (2026-10-19, run-failure.mjs): it reruns only infrastructure failures,
 // and a failed job named here (exact names, `*` for any characters) counts as one: a known-flaky job.
 // PROJECT_BOARD_QUEUE_FLAKY (the list as JSON): for the tests only
+// The main guard (#1259, main-guard.mjs): on where changes land after the fast tier (`ci.landTier` "quick"), unless
+// `queue.guard.enabled` is false. `jobPaths` attributes a failed job to paths (a job name, or the start of a matrix
+// job's, → path prefixes ending in "/" or exact paths): the culprit is then the one commit that touches them.
+// PROJECT_BOARD_QUEUE_GUARD ("on" or "off"): for the tests only
+const guardConf = config.queue?.guard ?? {}
+const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOARD_QUEUE_GUARD === 'on' : guardConf.enabled !== false && CI.landTier === 'quick'
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
   flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
@@ -66,5 +77,14 @@ export const QUEUE = {
     timeoutMs: Math.max(1, Number(conflicts.timeoutMinutes ?? 30) || 30) * 60_000,
     checkout: checkoutEnv !== undefined ? checkoutEnv || null : (conflicts.checkout ?? APP_DIR),
   },
+  guard: guardOn
+    ? {
+        // The queue lands nothing while more of main's full runs than this are unfinished (#1259): each landing adds one
+        maxMainRuns: Math.max(1, Number(process.env.PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS) || Number(guardConf.maxMainRuns ?? 3) || 3),
+        jobPaths: Object.fromEntries(
+          Object.entries(guardConf.jobPaths ?? {}).filter(([k, v]) => k && Array.isArray(v) && v.every((p) => typeof p === 'string' && p)),
+        ),
+      }
+    : null,
 }
 

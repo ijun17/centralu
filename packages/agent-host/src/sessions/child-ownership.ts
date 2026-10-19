@@ -234,8 +234,12 @@ export class ChildOwnership {
     if (!this.reports.delete(sessionId)) return
     this.store.children.clearReportMark(sessionId)
   }
-  /** At startup (#646): the report marks of the sessions the keeper kept that still owe them, and nothing else */
-  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): void {
+  /**
+   * At startup (#646): the report marks of the sessions the keeper kept that still owe them, and nothing else. Returns
+   * the marks of kept sessions that ended their turn during the swap, whose callers are told so (#1186)
+   */
+  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): { sessionId: string; callerSessionId: string }[] {
+    const endedInSwap: { sessionId: string; callerSessionId: string }[] = []
     /*
      * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
      * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
@@ -254,11 +258,13 @@ export class ChildOwnership {
         continue
       }
       if (child && keptSessions?.has(mark.sessionId)) {
-        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
+        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap; its caller is told`)
+        if (sessions.has(mark.callerSessionId)) endedInSwap.push(mark)
       }
       this.store.children.clearReportMark(mark.sessionId)
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
     }
+    return endedInSwap
   }
 
   /** At startup (#676): the delegated turns of kept sessions still in them; any other row is dropped */

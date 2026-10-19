@@ -232,7 +232,7 @@ export class MachineAsks {
     const stillAllowed = () =>
       this.gate(machine) ?? (this.host.store.projects.listProjects().some((x) => x.id === target.id) ? null : `${target.name} was removed from ${this.selfName()}, so it was not reached.`)
     try {
-      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
+      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task, { name: from.name }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
     } catch (e) {
       given.wait.fail(e as Error)
       this.given.delete(key)

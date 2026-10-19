@@ -33,7 +33,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     read: async () => ({ ok: true, state, lines: [] }),
     list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
     machineLinked: () => true,
-    lastWords: async () => 'done there',
+    lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
     lastUserMessage: async () => ({ ok: true, message: lastUser }),
   } as unknown as LinkedSessions
   const host = {
@@ -100,7 +100,7 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
     const delivered: string[] = []
     const reports = new LinkedReports({
       children,
-      linkedReader: { describe: () => ({ name: 'Child', project: 'app' }), lastWords: async () => '' } as unknown as LinkedSessions,
+      linkedReader: { describe: () => ({ name: 'Child', project: 'app' }), lastWords: async () => ({ ok: true as const, text: '', length: 0, seq: null }) } as unknown as LinkedSessions,
       hasSession: () => true,
       closing: false,
       deliverReport: async (_to: string, sessionId: string) => void delivered.push(sessionId),
@@ -127,7 +127,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
   let holdSend: Promise<void> | null
   const q = { requestId: 'r1', questions: [{ question: 'Delete prod?', header: 'Delete', multiSelect: false, options: [{ label: 'yes', description: '' }, { label: 'no', description: '' }] }] }
 
-  function following(): RemoteAgents {
+  function following(words: LinkedSessions['lastWords'] = async () => ({ ok: true as const, text: "the person's private answer", length: 0, seq: null })): RemoteAgents {
     answered = []
     sentTexts = []
     holdSend = null
@@ -137,7 +137,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       read: async () => ({ ok: true, state, lines: [] }),
       list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
-      lastWords: async () => "the person's private answer",
+      lastWords: words,
       lastUserMessage: async () => ({ ok: true, message: lastUser }),
       cards: async () => ({ ok: true, approval: null, questions: [q] }),
       answerQuestion: async (_s: string, id: string) => {
@@ -263,6 +263,25 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     await Promise.resolve()
     ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
     expect(JSON.stringify(await waiting)).not.toContain('private answer')
+  })
+
+  // #1186: a read of its answer that failed came back as an empty answer, which read as "it said nothing"
+  it('says its answer could not be read there, and how to read it, rather than answering empty', async () => {
+    const ra = following(async () => ({ ok: false as const, error: 'the link closed' }))
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    state = 'idle'
+    const r = await act(ra, 'status')
+    expect(r).toMatchObject({ ok: true, state: 'at_rest', answer: '' })
+    expect((r as { notice?: string }).notice).toBe(`Its answer could not be read there (the link closed): read_session(sessionId="${child.sessionId}") reads it once the machine answers.`)
+  })
+
+  it("cuts a long answer with the read there that shows the rest, at the answer's own seq", async () => {
+    const long = `${'a'.repeat(7000)}`
+    const ra = following(async () => ({ ok: true as const, text: long, length: long.length, seq: 17 }))
+    ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    state = 'idle'
+    const r = await act(ra, 'status')
+    expect((r as { answer: string }).answer).toContain(`read_session(sessionId="${child.sessionId}", around=17, offset=4500)`)
   })
 
   // RV13-C: after the notice that it ended unwatched, status at rest read the person's words
