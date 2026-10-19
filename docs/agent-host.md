@@ -2492,7 +2492,7 @@ answers a hello, so the caller can connect at once:
 |---|---|---|
 | Linux, macOS | A new session (`setsid`) with no terminal and no stdio; reparented to init once `--detach` exits | Nothing of the ssh session's process group or terminal reaches it (`tooling/launcher-serve.test.ts` kills the whole group and the host still answers) |
 | Windows, someone signed in | The data folder's scheduled task (`Centralu host (<user>)`, the one `--autostart` writes), registered without its trigger when it is not there, and registered again when its action or its principal is not what this serve would write (a launcher that moved, a task another account wrote under the name), keeping a trigger only when the task was this user's; then started with `Start-ScheduledTask` (#1224). `detach.how` is `task` | Its principal is `Interactive`, so it runs in the person's own session with their sign-in's token, also when asked from an ssh session. Measured on a linked Windows 11 PC (2026-10-19): started from the hub's ssh logon it ran in session 1, interactive logon, medium integrity, and saw the user's Credential Manager entries; the ssh logon's own processes ran in session 0, network logon, and saw none (`cmdkey /list`: `* NONE *`) |
-| Windows, nobody signed in (no Explorer of this user outside session 0), the task's host not answering in 20 s, or `CENTRALU_SIGNIN_TASK=off` | `Win32_Process.Create` through WMI (`Invoke-CimMethod`), from Windows PowerShell 5.1 by full path | Windows' OpenSSH ends every process of a session with it, `Start-Process` included; a process WMI creates is not in the session. It keeps the caller's network logon: Git there cannot use the credentials saved in Windows, and the host says so (`hello_ok.logon`) |
+| Windows, nobody signed in (no Explorer outside session 0 whose owner has this account's SID; matched by SID, since an ssh logon on a PC in a workgroup says `USERDOMAIN=WORKGROUP` where WMI names the PC, #1223), the task's host not answering in 20 s, or `CENTRALU_SIGNIN_TASK=off` | `Win32_Process.Create` through WMI (`Invoke-CimMethod`), from Windows PowerShell 5.1 by full path | Windows' OpenSSH ends every process of a session with it, `Start-Process` included; a process WMI creates is not in the session. It keeps the caller's network logon: Git there cannot use the credentials saved in Windows, and the host says so (`hello_ok.logon`) |
 | WSL (`WSL_DISTRO_NAME` set and interop on) | The same WMI call, from `powershell.exe` reached through the drive WSL mounts, creating `wsl.exe -d <distro> -u <user> --cd <folder> --exec <node> <centralu.mjs> serve …` | WSL stops a distro about 15 s after its last `wsl.exe` client exits; this `wsl.exe` is one for as long as the host runs. On the test laptop a WMI-created `wsl.exe` later hung without running anything (plan §10.4); that is reported as `wmi_blocked`, and the hub runs the host link-bound |
 
 A process WMI creates gets the account's default environment, not the session's, so what the launcher needs from the
@@ -2501,7 +2501,11 @@ A process WMI creates gets the account's default environment, not the session's,
 ssh client's address the `--detach` saw, for `host.lock`, #1223). Never the token, which stays in `serve.json`.
 The launcher writes `<data>/serve.log` (its own lines and the host's stderr until the host is ready; `host.log` has
 the rest, so it stops growing; the previous start's is kept as `serve.log.1`) and `<data>/serve.pid`
-(`{ pid, hostPid, port }`, removed when it exits).
+(`{ pid, hostPid, port }`, removed when it exits). Its first line says how it was started and, on Windows, why not in
+the sign-in (`started in the background through WMI: no Windows sign-in of this user was found (none of the 2 Explorers
+in desktop sessions is this account's)`, or `the sign-in task failed: <reason>`, or that the task's host did not answer);
+the reason travels in the same internal argument. A start through the task leaves one line of its own, written by
+`--detach`, since the task's `serve` writes no `serve.log` (#1223).
 
 `--detach` prints the connection line with `hostRunning: true` and `detach: { ok: true, how, already }`, or
 `{ "v": 1, "detach": { "ok": false, "how", "reason", "message" } }`. `reason` is `wmi_blocked` when WMI refused, or

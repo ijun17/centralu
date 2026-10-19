@@ -841,6 +841,51 @@ describe('starting through WMI', () => {
     expect(Date.now() - t0).toBeGreaterThanOrEqual(500)
   })
 
+  /*
+   * #1223: a host that started through WMI on a laptop where someone was signed in left no trace of why. serve.log says
+   * which way the host was started and why: the task's line is written by --detach (the task's serve writes no
+   * serve.log), a WMI launcher's by the launcher, from what --detach passed it
+   */
+  describe('the serve.log line that says how the host was started and why (#1223)', () => {
+    /** The `start` a stand-in WMI was handed for its launcher's serve.log line, refused so nothing runs */
+    async function wmiStart(signIn: (...a: unknown[]) => Promise<unknown>) {
+      let start: string | undefined
+      const r = await detachWith(async (...a: unknown[]) => {
+        const { args } = a[0] as { args: (string | null)[] }
+        const flag = args.find((x) => typeof x === 'string' && x.startsWith('--detached-child='))!
+        start = (decodeChildSpec(flag.slice('--detached-child='.length)) as { start?: string }).start
+        return { ok: false, blocked: true, message: 'not run' }
+      }, signIn)
+      return { start, dataDir: r.dataDir }
+    }
+
+    it('says through WMI, and that this user’s sign-in was not found, with how many desktops there were', async () => {
+      expect((await wmiStart(async () => ({ started: false, reason: 'nosession', desktops: 1 }))).start).toBe(
+        "through WMI: no Windows sign-in of this user was found (none of the 1 Explorer in desktop sessions is this account's)",
+      )
+      expect((await wmiStart(async () => ({ started: false, reason: 'nosession', desktops: 0 }))).start).toBe('through WMI: no Windows sign-in of this user was found (no Explorer in any desktop session)')
+      expect((await wmiStart(async () => ({ started: false, reason: 'nosession' }))).start).toBe('through WMI: no Windows sign-in of this user was found (no Explorer of this account in a desktop session)')
+    })
+
+    it('says the task failed and why, or that it is turned off', async () => {
+      expect((await wmiStart(async () => ({ started: false, reason: 'error', message: 'Access is denied.' }))).start).toBe('through WMI: the sign-in task failed: Access is denied.')
+      expect((await wmiStart(async () => ({ started: false, reason: 'off' }))).start).toBe('through WMI: the sign-in task is turned off (CENTRALU_SIGNIN_TASK=off)')
+    })
+
+    it('says the task was started; when its host does not answer, the WMI launcher says so and the task’s line is kept', async () => {
+      const r = await wmiStart(async () => ({ started: true, name: 'Centralu host (me)' }))
+      expect(r.start).toBe('through WMI: the host the sign-in task "Centralu host (me)" started did not answer within 1 s')
+      expect(readFileSync(join(r.dataDir, 'serve.log.1'), 'utf8')).toBe(
+        '[centralu serve] started centralu serve in the Windows sign-in (the scheduled task "Centralu host (me)"); waiting for its host\n',
+      )
+    })
+
+    it('carries the line to the launcher in its --detached-child spec', () => {
+      const spec = decodeChildSpec(encodeChildSpec({ env: {}, log: '/d/serve.log', start: 'through WMI: why' }))
+      expect(spec).toEqual({ log: '/d/serve.log', env: {}, start: 'through WMI: why' })
+    })
+  })
+
   it('reports a start WMI refused as wmi_blocked', async () => {
     const r = await detachWith(async () => ({ ok: false, blocked: true, message: 'Windows did not start Centralu through WMI (returned 2)' }))
     expect(r.code).toBe(1)
@@ -1282,7 +1327,8 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         expect((await connection(d)).hostRunning).toBe(false)
         // serve.log has the launcher's start, and not the token
         const serveLog = readFileSync(join(d, 'serve.log'), 'utf8')
-        expect(serveLog).toContain('started in the background')
+        // How it was started, and on Windows why not in the sign-in (#1223)
+        expect(serveLog).toMatch(POSIX ? /started in the background through setsid \(pid \d+/ : /started in the background through WMI: the sign-in task is turned off \(CENTRALU_SIGNIN_TASK=off\) \(pid \d+/)
         expect(serveLog).not.toContain(String(started.line.token))
 
         expect((await cli(d, ['--stop'])).line).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
