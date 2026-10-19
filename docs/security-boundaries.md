@@ -375,6 +375,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `forget_app_answer` | yes | — | — | — | — |
 | `revoke_project_consent` | yes | — | — | — | — |
 | `share_app` | yes | — | — | — | — |
+| `set_agent_limits` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -578,6 +579,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `list_approval_rules`, `remove_approval_rule` (the orchestrator reads the approval rules, or removes one, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`approvals.rules`, `approvals.deleteRule`; a linked machine's rule by its folded id). Removing only narrows: that action asks again. No command adds or widens a rule; a rule comes only from the person answering a card "always". The central orchestrator only, as rare commands behind `centralu_run` |
 | `list_app_grants`, `forget_app_answer`, `revoke_project_consent`, and `share_app` with `shared: false` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`apps.list`, `apps.permissions`, `apps.forgetPermission`, `projectConsents.list`, `projectConsents.revoke`, `apps.setShared`). Each only narrows: a forgotten answer or a revoked consent asks the person again next time, and an app no longer shared is detached from other projects' sessions. The central orchestrator only |
 | `share_app` with `shared: true` (#1219) | asks (a card naming the app, its project and what it may ask for, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `apps.setShared`. A root app or a user-folder app has no share switch and is refused before the card. After Allow the app is read again: one removed, already shared, or whose `uses` changed meanwhile is not shared. Sharing still needs the person's consent for each pair of projects before another project's session attaches it. The central orchestrator only |
+| `set_agent_limits` (the orchestrator changes the limits on agents: read-only tools in ordinary sessions, running agents per project, levels that may start agents, #1219) | asks (a card naming each limit as it is and as it becomes, every change, narrowing too, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `prefs.set` with exactly the named fields. Values are checked with the window's own patch schema before the card; nothing to change asks nothing. After Allow the limits are read again: one the person changed in Settings while the card stood leaves everything as it is. `set_preferences` has no field for them, and the agent models stay the person's. The central orchestrator only |
 | `set_project_trust` with `trusted: true` (#1219) | asks (a card naming the project, its folder and machine, and each of its apps with what it may ask for, in the window's trust card's words, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `projects.setTrusted`. After Allow the project and its apps are read again: a project removed meanwhile, or whose apps changed (one added by a pull, or what one may ask for), is not what the card named and is not trusted; one the person trusted meanwhile is left as it is. Refused before the card: a name no project has, or one two projects share (their ids are named). The central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
@@ -686,7 +688,8 @@ window's Settings changes, through the window's own calls, so the same schemas a
 settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
 at once. What widens what agents may do or cost (the agent ceiling, depth and models), trust, approval rules and app
 grants have no field: an unknown field is refused by name, and so is `sessionTools`, which is not a setting any more (the
-reader set is always on, owner decision 2026-10-20). "Automatic updates" turned on (`autoUpdate`) is a
+reader set is always on, owner decision 2026-10-20); the trust commands below handle trust, rules, grants and the limits,
+each behind its own card where it widens. "Automatic updates" turned on (`autoUpdate`) is a
 setting that asks (as is turning off the approval notification, below): with both on, code arrives and the window relaunches without a later question, which is what
 `update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
 is read as allow, once). Turning off the notification for an approval asks too, and so does turning off the sound while it still
@@ -706,7 +709,9 @@ project whose apps changed while the card stood is not trusted on an answer abou
 narrow from the orchestrator: it may list and remove them, and no command adds one, so a standing "allow" still comes
 only from the person's own "always" on a card. An app's remembered answers and the consents between projects can only
 be forgotten or revoked from the orchestrator, which makes the next attempt ask the person; sharing an app with other
-projects asks, and an app's own capability question is still answered by the person alone.
+projects asks, and an app's own capability question is still answered by the person alone. The limits on agents
+(read-only tools in ordinary sessions, running agents per project, levels that may start agents) bound the
+orchestrator's own children too, so every change to them asks, narrowing as well as widening.
 
 ### Turning things off
 

@@ -1395,7 +1395,7 @@ the params with the method's schema and reads the answer with its result schema,
 
 - `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
-  It also lists what no command changes (send key, session tools, agent ceiling and depth).
+  It also lists the send key, which no command changes, and the limits on agents, which `set_agent_limits` changes behind a card.
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `autoUpdate` ("Automatic updates", below), and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
@@ -1488,6 +1488,14 @@ ids).
   may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
   stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
   person's answer to an app's own capability question is not given from here: the app asks the person.
+- `set_agent_limits { sessionTools?, agentCeiling?, agentDepth? }` changes the person's limits on agents: Centralu's
+  read-only tools in ordinary sessions, the running agents per project (a number, 0 unlimited, or `"preset"` for the
+  preset's own) and the levels of sessions that may start agents (1 to 3). They bound what agents do and cost, the
+  orchestrator's own children included, so **every change asks**, narrowing too, in every preset: the card names each
+  limit as it is and as it becomes (`→`). Values are checked with `prefs.set`'s own schema before the card; nothing to
+  change asks nothing. After Allow the limits are read again, and when the person changed one in Settings while the card
+  stood nothing is changed (the card's "from" is not what is set); otherwise one `prefs.set` with exactly the named fields.
+  `set_preferences` still has no field for them. The agent models (`agentModels`) stay the person's.
 
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
@@ -1511,7 +1519,7 @@ window's channel), grouped, and for each group one of three states.
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`: has it (#1219, third slice), `set_agent_limits`, every change behind a card. `agentModels`: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
 | Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "Automatic updates" **on** (`autoUpdate`, both halves) asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |

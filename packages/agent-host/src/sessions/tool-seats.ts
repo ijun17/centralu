@@ -129,6 +129,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'forget_app_answer',
     'revoke_project_consent',
     'share_app',
+    'set_agent_limits',
     'find_apps',
     'attach_app',
     'detach_app',

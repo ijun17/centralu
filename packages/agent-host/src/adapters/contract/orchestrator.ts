@@ -67,6 +67,17 @@ export type TrustRequest =
   | { action: 'forget_app_answer'; app: string; project?: string; capability: string }
   | { action: 'revoke_consent'; from: string; to: string; kind: 'delegate' | 'apps' | 'agents' }
   | { action: 'share_app'; app: string; project?: string; shared: boolean }
+  | { action: 'set_limits'; changes: AgentLimitChanges }
+
+/** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
+export type AgentLimitChanges = {
+  /** Centralu's read-only tools in ordinary sessions */
+  sessionTools?: boolean
+  /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
+  agentCeiling?: number | 'preset'
+  /** How many levels of sessions may start agents, 1 to 3 */
+  agentDepth?: number
+}
 
 export type OrchestratedSession = {
   sessionId: string

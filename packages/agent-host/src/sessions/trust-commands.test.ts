@@ -20,7 +20,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * on a real store, so the host checks it as it checks the window. Widening trust waits for the person's card, which
  * names exactly what changes and is checked again after Allow; narrowing acts at once.
  */
-const COMMANDS = ['list_projects', 'set_project_trust', 'list_approval_rules', 'remove_approval_rule', 'list_app_grants', 'forget_app_answer', 'revoke_project_consent', 'share_app'] as const
+const COMMANDS = ['list_projects', 'set_project_trust', 'list_approval_rules', 'remove_approval_rule', 'list_app_grants', 'forget_app_answer', 'revoke_project_consent', 'share_app', 'set_agent_limits'] as const
 type Command = (typeof COMMANDS)[number]
 
 let root: string
@@ -403,6 +403,76 @@ describe('app grants', () => {
   })
 })
 
+describe('set_agent_limits', () => {
+  type Prefs = { sessionTools: boolean; agentCeiling?: number | null; agentDepth?: number }
+  const prefs = async () => (await rpc('prefs.get', {})) as Prefs
+
+  it('asks before any change, naming each limit as it is and as it becomes, and changes them once allowed', async () => {
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'set_agent_limits', { agentCeiling: 8, agentDepth: 2 }, 'allow')
+    expect(question).toContain('Change the limits on what agents may do?')
+    expect(question).toContain('- Running agents per project: by preset (auto unlimited, otherwise 4) → 8.')
+    expect(question).toContain('- Levels of sessions that may start agents: 1 → 2.')
+    expect(question).not.toContain('read-only tools')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toBe('Changed: Running agents per project 8; Levels of sessions that may start agents 2. A session reads them when it starts or calls a tool.')
+    expect(await prefs()).toMatchObject({ agentCeiling: 8, agentDepth: 2 })
+  })
+
+  it('asks for a change that narrows too, and changes nothing when the person denies it', async () => {
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'set_agent_limits', { sessionTools: false }, 'deny')
+    expect(question).toContain("- Centralu's read-only tools in ordinary sessions: on → off.")
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('The person did not approve it, so nothing was changed.')
+    expect((await prefs()).sessionTools).toBe(true)
+  })
+
+  it('puts the ceiling back to the preset\'s own with "preset"', async () => {
+    await rpc('prefs.set', { patch: { agentCeiling: 0 } })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'set_agent_limits', { agentCeiling: 'preset' }, 'allow')
+    expect(question).toContain('- Running agents per project: unlimited → by preset (auto unlimited, otherwise 4).')
+    expect(r.isError).toBeFalsy()
+    expect((await prefs()).agentCeiling ?? null).toBeNull()
+  })
+
+  it('asks nothing when the limits already are as asked', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_agent_limits', { sessionTools: true, agentDepth: 1 })
+    expect(card(orc.id)).toBeUndefined()
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('The limits already are as asked')
+  })
+
+  it('refuses a value the window would not take, before any card', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_agent_limits', { agentDepth: 4 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('agentDepth')
+    expect(card(orc.id)).toBeUndefined()
+    expect((await run(orc.id, 'set_agent_limits', {})).isError).toBe(true)
+    expect((await prefs()).agentDepth ?? 1).toBe(1)
+  })
+
+  it('changes nothing when the person changed a limit in Settings while the card stood', async () => {
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'set_agent_limits', { agentDepth: 3 }, 'allow', async () => {
+      await rpc('prefs.set', { patch: { agentDepth: 2 } })
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('Levels of sessions that may start agents changed while the card stood')
+    expect((await prefs()).agentDepth).toBe(2)
+  })
+
+  it('leaves set_preferences without these fields', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { sessionTools: false } })
+    expect(r.isError).toBe(true)
+    expect((await prefs()).sessionTools).toBe(true)
+  })
+})
+
 describe('who may run them', () => {
   it('are found through centralu_commands', async () => {
     const orc = await mgr.orchestrator()
@@ -411,6 +481,7 @@ describe('who may run them', () => {
       (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'rule' })).text,
       (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'app' })).text,
       (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'consent' })).text,
+      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'limits' })).text,
     ].join('\n')
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
   })
@@ -440,7 +511,9 @@ describe('who may run them', () => {
           ? { app: 'x', shared: true }
           : name === 'forget_app_answer'
             ? { app: 'x', capability: 'agent:claude' }
-            : name === 'revoke_project_consent'
+            : name === 'set_agent_limits'
+              ? { agentDepth: 3 }
+              : name === 'revoke_project_consent'
               ? { from: target.id, to: p.id, kind: 'apps' }
               : { project: target.id, trusted: true }
       await expect(mgr.runOrchestratorTool(caller.id, name, args), name).rejects.toThrow(`Not a tool of this session: ${name}`)
@@ -448,5 +521,6 @@ describe('who may run them', () => {
     }
     expect(await trusted(target.id)).toBe(false)
     expect((await rpc('approvals.rules', {})) as unknown[]).toHaveLength(1)
+    expect(((await rpc('prefs.get', {})) as { agentDepth?: number }).agentDepth ?? 1).toBe(1)
   })
 })

@@ -1,8 +1,8 @@
-import { ORCHESTRATOR_CHANGE, usesLines, type ExternalAppInfo, type MachineInfo, type ProjectInfo, type RpcResult } from '@cc/protocol'
-import type { TrustRequest } from '../adapters/contract.js'
+import { DEFAULT_AGENT_DEPTH, ORCHESTRATOR_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type MachineInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
+import type { AgentLimitChanges, TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
-import { callWindow, type WindowRpc } from './window-rpc.js'
+import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
 export type { TrustRequest }
 
@@ -38,6 +38,40 @@ function appLines(a: ExternalAppInfo): string[] {
   out.push(...(asks.length ? asks.map((l) => `  May ask to: ${l.charAt(0).toLowerCase()}${l.slice(1)}`) : ['  Asks for nothing beyond its own tools.']))
   return out
 }
+
+/** One of the limits on agents (`UiPreferences`): how it reads, as the card and the answer name it */
+type Limit = {
+  key: 'sessionTools' | 'agentCeiling' | 'agentDepth'
+  name: string
+  /** The value as compared: an absent ceiling and a null one are the same (the preset's own); an absent depth is the default */
+  value: (p: Partial<UiPreferences>) => string
+  words: (v: string) => string
+  means: string
+}
+
+const LIMITS: Limit[] = [
+  {
+    key: 'sessionTools',
+    name: "Centralu's read-only tools in ordinary sessions",
+    value: (p) => (p.sessionTools === undefined ? '' : p.sessionTools ? 'on' : 'off'),
+    words: (v) => v,
+    means: "With them on, a session can read its own project's other sessions and search their past conversations.",
+  },
+  {
+    key: 'agentCeiling',
+    name: 'Running agents per project',
+    value: (p) => (p.agentCeiling === undefined || p.agentCeiling === null ? 'preset' : String(p.agentCeiling)),
+    words: (v) => (v === 'preset' ? 'by preset (auto unlimited, otherwise 4)' : v === '0' ? 'unlimited' : v),
+    means: 'How many started agents may run at once in one project.',
+  },
+  {
+    key: 'agentDepth',
+    name: 'Levels of sessions that may start agents',
+    value: (p) => String(p.agentDepth ?? DEFAULT_AGENT_DEPTH),
+    words: (v) => v,
+    means: 'At 1 only a session the person started starts agents; at 2 its children do too, at 3 its grandchildren.',
+  },
+]
 
 /** What a remembered consent of one project reaching another allows, in words */
 function consentWords(kind: 'delegate' | 'apps' | 'agents'): string {
@@ -89,6 +123,8 @@ export class TrustFlow {
           return await this.revokeConsent(rpc, req.from, req.to, req.kind)
         case 'share_app':
           return await this.shareApp(rpc, sessionId, req.app, req.project, req.shared, signal)
+        case 'set_limits':
+          return await this.setLimits(rpc, sessionId, req.changes, signal)
       }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -356,6 +392,42 @@ export class TrustFlow {
     if (appsKey([now]) !== appsKey([a])) return { ok: false, error: `What ${label} may ask for changed while the card stood, so it is not what the card named and nothing was shared. Ask again to show the person what it asks for now.` }
     await callWindow(rpc, 'apps.setShared', { ...ref, shared: true })
     return { ok: true, text: `${label} is shared now: a session in another project can attach it once the person allows that pair of projects.` }
+  }
+
+  // ── The limits on agents ──
+  //
+  // Whether ordinary sessions get Centralu's read-only tools, how many agents may run per project, and how many levels of
+  // sessions may start agents. They bound what agents do and cost, the orchestrator's own children included, so every
+  // change asks, either way: the card names each limit with what it is and what it becomes, and after Allow the host
+  // reads them again and changes nothing when one moved while the card stood.
+
+  private async setLimits(rpc: WindowRpc, caller: string, changes: AgentLimitChanges, signal?: AbortSignal): Promise<TrustAnswer> {
+    const patch: Record<string, unknown> = {}
+    if (changes.sessionTools !== undefined) patch.sessionTools = changes.sessionTools
+    if (changes.agentCeiling !== undefined) patch.agentCeiling = changes.agentCeiling === 'preset' ? null : changes.agentCeiling
+    if (changes.agentDepth !== undefined) patch.agentDepth = changes.agentDepth
+    if (!Object.keys(patch).length) return { ok: false, error: 'Give at least one of sessionTools, agentCeiling, agentDepth.' }
+    // The window's own check of the values, before any card
+    const checked = UiPreferencesPatch.safeParse(patch)
+    if (!checked.success) return { ok: false, error: issuesOf(checked.error) }
+    const before = await callWindow(rpc, 'prefs.get', {})
+    const changed = LIMITS.filter((l) => l.key in patch && l.value(before) !== l.value(patch as Partial<UiPreferences>))
+    if (!changed.length) return { ok: true, text: `The limits already are as asked: ${LIMITS.map((l) => `${l.name} ${l.words(l.value(before))}`).join('; ')}. Nothing changed.` }
+    const question = [
+      'Change the limits on what agents may do?',
+      ...changed.map((l) => `- ${l.name}: ${l.words(l.value(before))} → ${l.words(l.value(patch as Partial<UiPreferences>))}. ${l.means}`),
+      'You can change them back in Settings.',
+    ].join('\n')
+    const refused = await this.ask(caller, question, signal, 'changed')
+    if (refused) return { ok: false, error: refused }
+    // Still what the card named "from": a limit the person changed in Settings meanwhile is not overwritten
+    const now = await callWindow(rpc, 'prefs.get', {})
+    const moved = changed.filter((l) => l.value(now) !== l.value(before))
+    if (moved.length) {
+      return { ok: false, error: `${moved.map((l) => l.name).join(' and ')} changed while the card stood, so the card's "from" is not what is set and nothing was changed. Ask again to show the person the limits as they are now.` }
+    }
+    const after = await callWindow(rpc, 'prefs.set', { patch: Object.fromEntries(changed.map((l) => [l.key, patch[l.key]])) as UiPreferencesPatch })
+    return { ok: true, text: `Changed: ${changed.map((l) => `${l.name} ${l.words(l.value(after))}`).join('; ')}. A session reads them when it starts or calls a tool.` }
   }
 
   // ── The card ──

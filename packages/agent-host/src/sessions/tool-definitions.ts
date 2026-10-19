@@ -306,6 +306,17 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
   },
   {
+    name: 'set_agent_limits',
+    description: "Changes the limits on agents: read-only tools in ordinary sessions, running agents per project, levels that may start agents. Waits for the person's card.",
+    schema: z
+      .object({
+        sessionTools: z.boolean().optional(),
+        agentCeiling: z.union([z.number().int().min(0), z.literal('preset')]).optional().describe('0 is unlimited; "preset" uses the preset\'s own.'),
+        agentDepth: z.number().int().optional().describe('1 to 3.'),
+      })
+      .strict(),
+  },
+  {
     name: 'create_session',
     description:
       'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it is the person\'s job.',

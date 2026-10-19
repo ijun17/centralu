@@ -330,6 +330,7 @@ const HANDLERS: ToolHandlers = {
   list_app_grants: ({ app, project }, call) => trustCommand({ action: 'list_app_grants', ...(trimmed(app) ? { app: trimmed(app) } : {}), ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
   forget_app_answer: ({ app, project, capability }, call) => trustCommand({ action: 'forget_app_answer', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), capability }, call),
   revoke_project_consent: ({ from, to, kind }, call) => trustCommand({ action: 'revoke_consent', from, to, kind }, call),
+  set_agent_limits: (changes, call) => trustCommand({ action: 'set_limits', changes }, call),
   share_app: ({ app, project, shared }, call) => trustCommand({ action: 'share_app', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), shared }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
