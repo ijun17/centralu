@@ -244,6 +244,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     gridPanels: [] as GridPanel[],
     builderPaneSessionId: null,
     builderPaneFor: null as string | null,
+    runsPanelFor: null as string | null,
     orchestratorId: null as string | null,
     orchestratorWaking: false,
     introSeen: false,
