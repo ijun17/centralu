@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import type { MachineInfo } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
+import { machineLine, type MachineRequest } from './machine-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type AgentToolName, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, notAToolText, profileAllows } from './tool-seats.js'
@@ -301,6 +301,15 @@ const HANDLERS: ToolHandlers = {
     if (!machines.length) return { text: 'No machine is linked to this computer. The person links one in Settings, Machines.' }
     return { text: `${machines.map(machineLine).join('\n')}\nPass a machine's name as machine to create_project or add_project.` }
   },
+
+  // The machine commands (#1219): the flow writes each answer, with the machine as it is after the change
+  add_machine: ({ sshTarget, name, wslDistro }, call) =>
+    machineCommand({ action: 'add', sshTarget, ...(trimmed(name) ? { name: trimmed(name) } : {}), ...(trimmed(wslDistro) ? { wslDistro: trimmed(wslDistro) } : {}) }, call),
+  install_machine: ({ machine, action }, call) => machineCommand({ action: action ?? 'install', machine }, call),
+  remove_machine: ({ machine }, call) => machineCommand({ action: 'remove', machine }, call),
+  reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
+  set_machine_connect: ({ machine, connect }, call) => machineCommand({ action: 'connect', machine, connect }, call),
+  set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
@@ -609,34 +618,10 @@ function logRun(caller: ToolCaller, command: string, outcome: 'ran' | 'wrong arg
   console.error(`[commands] ${caller.sessionId ?? '-'} centralu_run ${JSON.stringify(command.slice(0, 64))}: ${outcome}`)
 }
 
-/** A linked machine's status in words (#1220); a status this build does not name reads as itself */
-const MACHINE_STATUS: Record<string, string> = {
-  connected: 'connected',
-  connecting: 'connecting',
-  starting: 'connecting (starting Centralu there)',
-  updating: 'updating Centralu there',
-  unreachable: 'unreachable',
-  disconnected: 'disconnected',
-  not_running: 'unreachable (Centralu is not running there)',
-  versions_differ: 'not connected (waiting for the person to align versions)',
-  refused: 'not connected (it refused the link)',
-}
 
-/**
- * One linked machine for list_machines (#1220): its name as the person gave it (quoted, since it is theirs), status,
- * OS and shell, and when its link is opened. The OS follows from the shell the hub reaches it with: PowerShell is
- * Windows, WSL a Linux distro on Windows, a Unix shell macOS or Linux (Linux when it starts at boot with systemd).
- * `connect` is the person's choice (#1134).
- */
-function machineLine(m: MachineInfo): string {
-  const os =
-    m.shell === 'powershell'
-      ? 'Windows, PowerShell'
-      : m.shell === 'wsl'
-        ? `Linux in WSL${m.wslDistro ? ` (${m.wslDistro})` : ''} on Windows`
-        : m.autostart?.how === 'systemd'
-          ? 'Linux, Unix shell'
-          : 'macOS or Linux, Unix shell'
-  const connect = m.connect === 'when_needed' ? 'connects when needed' : 'connects at start'
-  return `- ${trustedJsonText(m.name)} [${m.id}]: ${MACHINE_STATUS[m.status] ?? m.status}; ${os}; ${connect}`
+/** One machine command (#1219), through the seat's `machine`; a seat without it is told so */
+async function machineCommand(req: MachineRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.machine) return { text: 'This session cannot change linked machines.', isError: true }
+  const r = await tools.machine(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
