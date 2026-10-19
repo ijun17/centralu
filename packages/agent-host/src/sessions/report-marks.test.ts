@@ -156,7 +156,11 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
   })
 
-  it('is dropped when the kept child finished its turn while the old host let go, so a later turn of the person is not reported (#166)', async () => {
+  /*
+   * The mark goes, so a later turn of the person is not reported (#166); the parent is told once that a turn ended in
+   * the swap and where to read it (#1186), where it used to hear nothing of the work it was promised the end of
+   */
+  it('is dropped when the kept child finished its turn while the old host let go, and the parent is told once that a turn ended then', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
@@ -169,11 +173,17 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(b.mgr.waitsOn(parent)).not.toContain(child)
     // The answer it finished with is there for the parent to read
     expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
+    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
+    const told = reports(b.claude.handles.get(parent), child)[0]!
+    expect(told).toContain('ended a turn while Centralu was restarting')
+    expect(told).toMatch(new RegExp(`read_session\\(sessionId="${child}", around=\\d+\\)`))
+    // Not called finished: a turn that had not started yet would look the same
+    expect(stored(parent)).toEqual([])
     // The person's own turn in the child afterwards is the child's, not the assigned work
     await b.mgr.send(child, 'person work')
     b.claude.handles.get(child)!.answer('person answer')
     await new Promise((r) => setTimeout(r, 20))
-    expect(reports(b.claude.handles.get(parent), child)).toEqual([])
+    expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
     expect(stored(parent)).toEqual([])
   })
 
