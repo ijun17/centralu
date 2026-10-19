@@ -144,6 +144,14 @@ export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
   }
 }
 
+/**
+ * The listed apps by the key a sidebar row (and so a dragged panel) carries: `ExternalCatalogApp.key`, which names a
+ * linked machine's user-folder app by its machine. A drop on the grid is looked up here, wherever it lands.
+ */
+export function catalogByKey(external: readonly ExternalAppInfo[]): Map<string, ExternalCatalogApp> {
+  return new Map(buildCatalog(external).external.map((a) => [a.key, a] as const))
+}
+
 export function useAppCatalog(): AppCatalog {
   const external = useStore((s) => s.externalApps)
   return useMemo(() => buildCatalog(external), [external])

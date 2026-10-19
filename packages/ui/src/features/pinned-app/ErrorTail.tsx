@@ -50,6 +50,8 @@ export function ErrorTail({
   const platform = usePlatform()
   const appId = app?.appId
   const projectId = app?.projectId ?? null
+  // A linked machine's user-folder app (#82): its errors, and where they are sent, are that machine's
+  const machine = app ? userAppMachine(app.info) : undefined
   const status = app?.info.status
   // This value in the list changes whenever the host records a new bundle — including a read-only tool's failure (which does not emit "changed")
   const lastErrorAt = app?.info.lastErrorAt
@@ -64,14 +66,14 @@ export function ErrorTail({
     if (!appId) return
     let alive = true
     platform.apps
-      .errors(appId, projectId)
+      .errors(appId, projectId, machine)
       .then((r) => alive && setBundle(r.latest))
       // On a failed read, the old value is left in place — the next signal will trigger a re-read
       .catch(() => {})
     return () => {
       alive = false
     }
-  }, [platform, appId, projectId, lastErrorAt, status])
+  }, [platform, appId, projectId, machine, lastErrorAt, status])
 
   if (!app || !bundle || dismissed === bundle.at) return null
   const stopped = status === 'crashed' || status === 'failed'
@@ -81,9 +83,9 @@ export function ErrorTail({
     setBusy(true)
     setError(null)
     try {
-      await platform.apps.sendError(app.appId, app.projectId, bundle.at, userAppMachine(app.info))
+      await platform.apps.sendError(app.appId, app.projectId, bundle.at, machine)
       // The fact that it was sent is recorded by the host — re-reading draws it from that answer (sentAt)
-      const r = await platform.apps.errors(app.appId, app.projectId, userAppMachine(app.info))
+      const r = await platform.apps.errors(app.appId, app.projectId, machine)
       setBundle(r.latest)
     } catch (e) {
       setError((e as Error).message)
