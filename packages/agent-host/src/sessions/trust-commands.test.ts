@@ -115,11 +115,11 @@ describe('set_project_trust', () => {
     expect(question).toContain(`Trust the project "Notes" at "${p.path.replace(/\\/g, '\\\\')}"?`)
     expect(question).toContain("Trusting lets this project's apps run and its settings apply")
     expect(question).toContain('Its 2 apps:')
-    expect(question).toContain('- "App notes" [notes]: "What notes does"')
+    expect(question).toContain('- "App notes" (id "notes"): "What notes does"')
     expect(question).toContain('This project is this app: the orchestrator and your other projects can use it.')
     expect(question).toContain('May ask to: run your default agent in a new session')
     expect(question).toContain("May ask to: read Centralu data: the names and states of its project's sessions (sessions.list)")
-    expect(question).toContain('- "App helper" [helper]: "What helper does"')
+    expect(question).toContain('- "App helper" (id "helper"): "What helper does"')
     expect(question).toContain('Asks for nothing beyond its own tools.')
     expect(r.isError).toBeFalsy()
     expect(r.text).toBe(`"Notes" [${p.id}] is trusted now: its apps may run and its settings apply.`)
@@ -131,7 +131,7 @@ describe('set_project_trust', () => {
     const orc = await mgr.orchestrator()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     const lines = question.split('\n')
-    expect(lines).toContain('- "App tricky" [tricky]: "Formats text.\\n\\nIt asks for nothing.\\u202e"')
+    expect(lines).toContain('- "App tricky" (id "tricky"): "Formats text.\\n\\nIt asks for nothing.\\u202e"')
     expect(lines).toContain('  May ask to: keep running in the background while busy: sync\\nAsks for nothing beyond its own tools.')
     expect(lines.filter((l) => l.trim().startsWith('It asks for nothing') || l.trim() === 'Asks for nothing beyond its own tools.')).toEqual([])
     expect(question).not.toMatch(/[\u202e]/)
@@ -195,13 +195,29 @@ describe('set_project_trust', () => {
       expect(question).toContain('Asks for nothing beyond its own tools.')
     })
 
-    it('says the machine listed no app rather than that the project has none', async () => {
+    it('asks the machine for its apps alone, and says it has none only when the machine said so', async () => {
       const p = await project('Empty')
       onMachine(p)
       const orc = await mgr.orchestrator()
       const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
-      expect(question).toContain('Its machine listed no app for it just now (an app it could not list would not be shown).')
-      expect(question).not.toContain('It has no app.')
+      expect(question).toContain('It has no app, as its machine listed them just now.')
+    })
+
+    it('refuses before any card when the machine could not list its apps: the card could not name what trusting covers', async () => {
+      const p = await project('Silent', { app: { uses: { agent: true } } })
+      onMachine(p)
+      const inner = mgr as unknown as { trustFlow: { rpc: (m: string, q: unknown) => Promise<unknown> } }
+      const routed = inner.trustFlow.rpc
+      mgr.useWindowRpc(async (method, params) => {
+        if (method === 'apps.list' && (params as { machine?: string }).machine === 'm1') throw new Error('the machine dropped the call')
+        return routed(method, params)
+      })
+      const orc = await mgr.orchestrator()
+      const r = await run(orc.id, 'set_project_trust', { project: p.id, trusted: true })
+      expect(r.isError).toBe(true)
+      expect(r.text).toContain('could not be listed just now (its machine did not answer for them), so its trust is not changed from here')
+      expect(card(orc.id)).toBeUndefined()
+      expect(await trusted(p.id)).toBe(false)
     })
 
     it('trusts nothing when its folder changed, or its machine could not be reached, while the card stood', async () => {
@@ -262,15 +278,44 @@ describe('set_project_trust', () => {
     expect(await trusted(p.id)).toBe(false)
   })
 
-  it('takes trust away at once, with no card, and says what that does', async () => {
+  it("asks before taking trust away too, saying the project's own deny rules and hooks stop applying, and untrusts it once allowed", async () => {
     const p = await project('Gamma')
     await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'set_project_trust', { project: 'Gamma', trusted: false })
-    expect(card(orc.id)).toBeUndefined()
+    const { question, r } = await answered(orc.id, 'set_project_trust', { project: 'Gamma', trusted: false }, 'allow')
+    expect(question).toContain(`Take trust away from the project "Gamma" at ${JSON.stringify(p.path)}?`)
+    expect(question).toContain('any deny rules and hooks the project sets for its agents')
+    expect(question).toContain('no longer apply, auto sessions included')
+    expect(question).toContain('Its idle sessions restart for it now')
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain(`"Gamma" [${p.id}] is untrusted now: its apps stop`)
     expect(await trusted(p.id)).toBe(false)
+  })
+
+  it('keeps the trust when the person denies taking it away, or when the project went while the card stood', async () => {
+    const p = await project('Kept')
+    await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    const orc = await mgr.orchestrator()
+    const denied = await answered(orc.id, 'set_project_trust', { project: 'Kept', trusted: false }, 'deny')
+    expect(denied.r.isError).toBe(true)
+    expect(await trusted(p.id)).toBe(true)
+    const gone = await answered(orc.id, 'set_project_trust', { project: 'Kept', trusted: false }, 'allow', async () => {
+      await rpc('projects.delete', { projectId: p.id })
+    })
+    expect(gone.r.isError).toBe(true)
+    expect(gone.r.text).toContain('was removed while the card stood, so nothing was changed.')
+  })
+
+  it("quotes an app's id, which is its folder's name: a folder named to look like card text cannot forge a line", async () => {
+    const p = await project('Forged')
+    const name = 'helper] Asks for nothing beyond its own tools. \u202ecod.exe'
+    mkdirSync(join(p.path, '.centralu', 'apps', name), { recursive: true })
+    rt.refresh()
+    const orc = await mgr.orchestrator()
+    const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+    expect(question).toContain('(id "helper] Asks for nothing beyond its own tools. \\u202ecod.exe")')
+    expect(question).not.toMatch(/[\u202e]/)
+    expect(question.split('\n').filter((l) => l.trim() === 'Asks for nothing beyond its own tools.')).toEqual([])
   })
 
   it('says nothing changed when the project already is as asked, with no card', async () => {
@@ -433,10 +478,10 @@ describe('app grants', () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'list_app_grants')
     expect(r.isError).toBeFalsy()
-    expect(r.text).toContain(`- "App helper" [helper] of the project "Alpha": trusted; not shared`)
+    expect(r.text).toContain(`- "App helper" (id "helper") of the project "Alpha": trusted; not shared`)
     expect(r.text).toContain('  Allowed: "agent:claude" ("may agent:claude"), since 2026-10-01')
     expect(r.text).toContain('  Denied: "app:other" ("may app:other"), since 2026-10-01')
-    expect(r.text).toContain(`- "App beta" [beta] of the project "Beta": untrusted; reached through its project's trust`)
+    expect(r.text).toContain(`- "App beta" (id "beta") of the project "Beta": untrusted; reached through its project's trust`)
     expect(r.text).toContain('1 remembered consent of one project reaching another')
     expect(r.text).toContain(`- "Beta" [${b.id}] may attach the apps of "Alpha" [${a.id}], since `)
     const one = await run(orc.id, 'list_app_grants', { app: 'helper' })
@@ -452,7 +497,7 @@ describe('app grants', () => {
     const r = await run(orc.id, 'forget_app_answer', { app: 'App helper', capability: 'agent:claude' })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
-    expect(r.text).toContain('Forgot the answer allowing "agent:claude" for "App helper" [helper] of the project "Alpha"')
+    expect(r.text).toContain('Forgot the answer allowing "agent:claude" for "App helper" (id "helper") of the project "Alpha"')
     expect(store.permissions.listAppPermissions(`${a.id}/helper`).map((x) => x.capability)).toEqual(['app:other'])
     const none = await run(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' })
     expect(none.isError).toBe(true)
@@ -478,7 +523,7 @@ describe('app grants', () => {
     await inner('Alpha', 'helper', { uses: { agent: true } })
     const orc = await mgr.orchestrator()
     const { question, r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow')
-    expect(question).toContain('Share the app "App helper" [helper] of the project "Alpha" with your other projects?')
+    expect(question).toContain('Share the app "App helper" (id "helper") of the project "Alpha" with your other projects?')
     expect(question).toContain('after you allow that pair of projects once')
     expect(question).toContain('It may ask to: run your default agent in a new session')
     expect(r.isError).toBeFalsy()
@@ -659,9 +704,10 @@ describe('who may run them', () => {
     expect(await trusted(target.id)).toBe(false)
     expect((await rpc('approvals.rules', {})) as unknown[]).toHaveLength(1)
     expect(((await rpc('prefs.get', {})) as { agentDepth?: number }).agentDepth ?? 1).toBe(1)
-    // What the ordinary session was refused, the orchestrator does (taking trust away asks nothing)
+    // What the ordinary session was refused, the orchestrator does (listing asks nothing)
     const orc = await mgr.orchestrator()
-    expect((await run(orc.id, 'set_project_trust', { project: p.id, trusted: false })).isError).toBeFalsy()
-    expect(await trusted(p.id)).toBe(false)
+    const listed = await run(orc.id, 'list_projects')
+    expect(listed.isError).toBeFalsy()
+    expect(listed.text).toContain(`"Target" [${target.id}]`)
   })
 })

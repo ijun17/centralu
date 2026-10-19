@@ -57,7 +57,7 @@ function asksLines(a: ExternalAppInfo, indent: string, lead: string): string[] {
 function appLines(a: ExternalAppInfo): string[] {
   const title = a.name?.trim() ? a.name : a.appId
   const description = a.description?.trim() ? `: ${plainQuoted(a.description.trim(), 2000)}` : ''
-  const out = [`- ${shown(title)} [${a.appId}]${description}`]
+  const out = [`- ${shown(title)} (id ${shown(a.appId)})${description}`]
   if (a.root) out.push('  This project is this app: the orchestrator and your other projects can use it.')
   out.push(...asksLines(a, '  ', 'May ask to: '))
   return out
@@ -108,7 +108,8 @@ const appsKey = (apps: readonly ExternalAppInfo[]): string =>
  * apply, so it raises a card naming the project, its folder and each app with what it may ask for (the window's trust
  * card's words), every time, allow or deny only (`ORCHESTRATOR_CHANGE`). After Allow the project is read again: one
  * removed, already trusted, or whose apps changed while the card stood (a pull brought a manifest) is not what the card
- * named, and nothing is trusted. Taking trust away acts at once, as the window's switch does.
+ * named, and nothing is trusted. Taking trust away asks too: the project's own deny rules and blocking hooks stop
+ * applying with it (`untrust`).
  */
 export class TrustFlow {
   private rpc: WindowRpc | null = null
@@ -194,10 +195,18 @@ export class TrustFlow {
     return { ok: true, text: [`${all.projects.length} ${all.projects.length === 1 ? 'project' : 'projects'} (set_project_trust changes trust):`, ...rows(all.projects, line), ...away].join('\n') }
   }
 
-  /** The apps of one project, as the window's catalog groups them */
-  private async appsOf(rpc: WindowRpc, p: ProjectInfo): Promise<ExternalAppInfo[]> {
-    const apps = await callWindow(rpc, 'apps.list', {})
-    return apps.filter((a) => a.projectId === p.id && (a.machine ?? null) === (p.machine ?? null))
+  /**
+   * The apps of one project, as the window's catalog groups them; null when they could not be listed. A linked machine's
+   * are asked of that machine alone (`apps.list` with `machine`): the merged list leaves out a machine that does not
+   * answer, which would read as a project with no app, and a trust card has to name what trusting covers.
+   */
+  private async appsOf(rpc: WindowRpc, p: ProjectInfo): Promise<ExternalAppInfo[] | null> {
+    try {
+      const apps = await callWindow(rpc, 'apps.list', p.machine ? { machine: p.machine } : {})
+      return apps.filter((a) => a.projectId === p.id && (a.machine ?? null) === (p.machine ?? null))
+    } catch {
+      return null
+    }
   }
 
   private async projectTrust(rpc: WindowRpc, caller: string, named: string, trusted: boolean, signal?: AbortSignal): Promise<TrustAnswer> {
@@ -209,23 +218,17 @@ export class TrustFlow {
     // A machine not reachable: its row is what the hub last knew, and nothing there can be changed or listed now
     if (p.unreachable) return { ok: false, error: `The machine of ${label} cannot be reached just now, so its trust is not changed from here; list_projects shows it as last known.` }
     if (p.trusted === trusted) return { ok: true, text: `${label} is already ${trusted ? 'trusted' : 'untrusted'}; nothing changed.` }
-    if (!trusted) {
-      // Narrowing acts at once, as the window's switch does
-      await callWindow(rpc, 'projects.setTrusted', { projectId: p.id, trusted: false })
-      return {
-        ok: true,
-        text: `${label} is untrusted now: its apps stop and attach nowhere, and its agents stop reading the folder's own setting files (an idle session restarts for it now, a busy one when its turn ends). set_project_trust with trusted true asks the person to trust it again.`,
-      }
-    }
+    if (!trusted) return this.untrust(rpc, caller, p, label, all, signal)
     const apps = await this.appsOf(rpc, p)
-    // A linked machine's apps are what it listed just now: one it could not list is not shown, and the card says so
+    if (!apps) return { ok: false, error: `The apps of ${label} could not be listed just now (its machine did not answer for them), so its trust is not changed from here: the card has to name what trusting covers.` }
+    // A linked machine's apps are what it listed just now, asked of it alone
     const listed = p.machine ? ', as its machine listed them just now' : ''
     const question = [
       `Trust the project ${shown(p.name)}${this.where(p, all.machines)} at ${shownPath(p.path)}?`,
       "Trusting lets this project's apps run and its settings apply: its agents read the folder's own setting files. Trust it only if you trust the code in this folder.",
       ...(apps.length
         ? [`${apps.length === 1 ? 'Its app' : `Its ${apps.length} apps`}${listed}:`, ...apps.flatMap(appLines)]
-        : [p.machine ? 'Its machine listed no app for it just now (an app it could not list would not be shown).' : 'It has no app.']),
+        : [p.machine ? 'It has no app, as its machine listed them just now.' : 'It has no app.']),
     ].join('\n')
     const refused = await this.ask(caller, question, signal, 'trusted')
     if (refused) return { ok: false, error: refused }
@@ -237,11 +240,39 @@ export class TrustFlow {
     }
     if (now.unreachable) return { ok: false, error: `The machine of ${label} could not be reached after the card was answered, so nothing was trusted.` }
     if (now.trusted) return { ok: true, text: `${label} was trusted while the card stood; nothing more changed.` }
-    if (appsKey(await this.appsOf(rpc, now)) !== appsKey(apps)) {
+    const appsNow = await this.appsOf(rpc, now)
+    if (!appsNow) return { ok: false, error: `The apps of ${label} could not be listed again after the card was answered, so nothing was trusted.` }
+    if (appsKey(appsNow) !== appsKey(apps)) {
       return { ok: false, error: `The apps of ${label} changed while the card stood, so it is not what the card named and nothing was trusted. Ask again to show the person its apps as they are now.` }
     }
     await callWindow(rpc, 'projects.setTrusted', { projectId: p.id, trusted: true })
     return { ok: true, text: `${label} is trusted now: its apps may run and its settings apply.` }
+  }
+
+  /**
+   * Taking trust away asks too (RVIA's review of #1325, the reviewer's decision): it is not only narrowing. An untrusted
+   * project's sessions read the person's own settings only (`settingSourcesFor`), so the project's own deny rules and
+   * the hooks that block tools stop applying to its agents, `auto` sessions included; and its idle sessions restart.
+   */
+  private async untrust(rpc: WindowRpc, caller: string, p: ProjectInfo, label: string, all: Projects, signal?: AbortSignal): Promise<TrustAnswer> {
+    const question = [
+      `Take trust away from the project ${shown(p.name)}${this.where(p, all.machines)} at ${shownPath(p.path)}?`,
+      "Its apps stop and attach nowhere, and its agents stop reading the folder's own setting files: any deny rules and hooks the project sets for its agents (its .claude settings and the like) then no longer apply, auto sessions included.",
+      'Its idle sessions restart for it now, a busy one when its turn ends.',
+    ].join('\n')
+    const refused = await this.ask(caller, question, signal, 'changed')
+    if (refused) return { ok: false, error: refused }
+    // Still what the card named: the same project, in the same folder, trusted, reachable
+    const now = (await this.projects(rpc)).projects.find((x) => x.id === p.id)
+    if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was changed.` }
+    if (now.path !== p.path || (now.machine ?? null) !== (p.machine ?? null)) return { ok: false, error: `${label} is not in the folder the card named any more, so nothing was changed.` }
+    if (now.unreachable) return { ok: false, error: `The machine of ${label} could not be reached after the card was answered, so nothing was changed.` }
+    if (!now.trusted) return { ok: true, text: `${label} was untrusted while the card stood; nothing more changed.` }
+    await callWindow(rpc, 'projects.setTrusted', { projectId: p.id, trusted: false })
+    return {
+      ok: true,
+      text: `${label} is untrusted now: its apps stop and attach nowhere, and its agents stop reading the folder's own setting files (an idle session restarts for it now, a busy one when its turn ends). set_project_trust with trusted true asks the person to trust it again.`,
+    }
   }
 
   // ── Approval rules ──
@@ -335,7 +366,7 @@ export class TrustFlow {
     const title = a.name?.trim() ? a.name : a.appId
     const project = a.projectId ? all.projects.find((p) => p.id === a.projectId) : undefined
     const home = a.projectId ? (project ? `of the project ${shown(project.name)}` : `of the project [${a.projectId}]`) : 'in the user folder'
-    return `${shown(title)} [${a.appId}] ${home}${this.where(a, all.machines)}`
+    return `${shown(title)} (id ${shown(a.appId)}) ${home}${this.where(a, all.machines)}`
   }
 
   /** The window's call for one app's remembered answers, routed to its machine as the window routes it */

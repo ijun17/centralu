@@ -262,8 +262,8 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({}),
   },
   /*
-   * #1219, third slice: trust. Rare commands. Listing and taking trust away act at once; trusting waits for the
-   * person's card naming the project and its apps.
+   * #1219, third slice: trust. Rare commands. Listing acts at once; trusting and taking trust away wait for the
+   * person's card (untrusting drops the project's own deny rules and hooks).
    */
   {
     name: 'list_projects',
@@ -272,7 +272,7 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'set_project_trust',
-    description: "Trusts a project (its apps run, its settings apply) or takes trust away. Trusting waits for the person's card naming its apps; untrusting acts at once.",
+    description: "Trusts a project (its apps run, its settings apply) or takes trust away. Either waits for the person's card.",
     schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), trusted: z.boolean() }).strict(),
   },
   {

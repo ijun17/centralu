@@ -119,6 +119,10 @@ export class Router {
       case 'machine':
         return this.byMachine(method, params, route, ctx)
       case 'merge':
+        // One machine's apps alone (#1219): its failure is the caller's to see, not a list quietly without it
+        if (method === 'apps.list' && isObj(params) && typeof params.machine === 'string') {
+          return this.byMachine(method, params, { result: (r, q) => (Array.isArray(r) ? r.map((a) => q.app(a)) : r) }, ctx)
+        }
         return this.merge(method as RpcMethodName, params)
     }
   }

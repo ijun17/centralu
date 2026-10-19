@@ -1465,8 +1465,11 @@ trust covers and where). `project` is an id, or a name exactly one project has (
 ids). The orchestrator's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
 
 - `list_projects`: each project with its id, folder, machine and whether it is trusted.
-- `set_project_trust` with `trusted: false` acts at once, as the window's switch does: the project's apps stop and its
-  idle sessions restart without the folder's own setting files (a busy one when its turn ends, #663).
+- `set_project_trust` with `trusted: false` asks too, in every preset (the reviewer's decision on #1325): it is not only
+  narrowing. An untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's
+  own deny rules and the hooks that block tools stop applying to its agents, `auto` sessions included; its apps stop and
+  its idle sessions restart (a busy one when its turn ends, #663). The card says so; after Allow the project is read again
+  (removed, moved, unreachable, or untrusted meanwhile: nothing more changes).
 - With `trusted: true` it asks first, in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only): the card names the
   project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
   in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
@@ -1475,8 +1478,10 @@ ids). The orchestrator's instructions point to these and the machine commands in
   manifest supplies (name, description, the declared background work) is quoted with control and format characters
   escaped, the folder is named whole, and an app whose manifest could not be read, or that a linked machine listed without
   `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
-  reachable (its row is the hub's last copy) is refused before the card; a linked machine's project's card says its apps are
-  as that machine listed them just now, and after Allow its folder and machine are checked too.
+  reachable (its row is the hub's last copy) is refused before the card. A linked machine's project's apps are asked of
+  that machine alone (`apps.list` with `machine`, which the router sends to that machine only, so a machine that does not
+  answer is an error, not a list without its apps); when they cannot be listed, trust is refused before the card. Every
+  app is named with its id quoted (an id is a folder's name). After Allow its folder and machine are checked too.
 - The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, or
   that the machines could not be read at all, so a list without them does not read as complete.
 - `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
@@ -1539,7 +1544,7 @@ window's channel), grouped, and for each group one of three states.
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
 | `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
 | `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | Read only |
-| Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: taking trust away acts at once; trusting asks, with a card naming the folder and each app with what it may ask for, checked again after Allow |
+| Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: both ways ask (taking trust away drops the project's own deny rules and hooks); trusting's card names the folder and each app with what it may ask for; both checked again after Allow |
 | Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
