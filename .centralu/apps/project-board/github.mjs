@@ -337,7 +337,7 @@ export async function readRepo(repo) {
 const PR_FIELDS = 'number,title,body,state,isDraft,mergeable,headRefOid,headRefName,baseRefName,isCrossRepository,url,mergeCommit'
 
 // The merge queue also reads how GitHub would merge it (DIRTY, BEHIND, BLOCKED, CLEAN, …)
-export const QUEUE_PR_FIELDS = `${PR_FIELDS},mergeStateStatus`
+export const QUEUE_PR_FIELDS = `${PR_FIELDS},mergeStateStatus,labels`
 
 /** One pull request, as `gh pr view --json` gives it. */
 export async function readPr(repo, number, fields = PR_FIELDS) {

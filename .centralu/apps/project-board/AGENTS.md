@@ -643,6 +643,21 @@ model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
   address), the item marked `auto` (`branch`, the `head` and `main` it judged, the Tier `line`, `at`); from
   there it is any item: kept on main, batched for the quick tier, squashed as "Title (#N)", its branch
   deleted, its news posted into the session.
+- **Judged again by the queue** (`judgeHead`): on each new head a poll reads (`pollItem`, before its CI is
+  read), kept on the item as `tierAt` (`head`, `main`, `tier`, `line`, `reason`), and once more inside `land`,
+  right before the squash, against main as it is then (its rules may have moved since). Not auto → attention
+  `tier`, once per head, to the session that handed it over: the files, and to take out what is not auto and
+  push, or get its tier's review and `queue_merge` it. Such a head goes to no CI read and no batch; one stopped
+  at landing ends its batch's landing as any refused merge does and keeps the judgment, so polls do not land it
+  again, and gets no "Passed CI in queue/batch-N" status (`land`'s `beforeMerge` posts it once its checks
+  passed). A head that **could not be judged** (a fetch that failed, the branch gone, no checkout, a fork's pull
+  request) throws, so it counts as a failed poll: nothing lands meanwhile, it is tried again, and the session
+  hears only after three in a row (`errorReason`); in a batch, three such failures end the batch.
+  Queued with `queue_merge`, a record is an ordinary pull request again (`auto` and `tierAt` dropped).
+- **Labels**: a `tier:<name>` label above auto (a person's, raised by hand) stops an integrated item on every poll
+  and at the squash (`labelReason`; the queue reads labels with each pull request, `QUEUE_PR_FIELDS`).
+- **Older drivers**: a watch command or app server started from a board older than this judges nothing, but it
+  never lands a draft, and the record is one until this code squashes it (above), so it cannot land a record.
 - Tests: `tooling/project-board-queue.test.ts` ("the integrator …"), with a real git checkout whose main
   carries this repository's judge and rules, and the fake `gh`.
 

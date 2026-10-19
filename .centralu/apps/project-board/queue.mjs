@@ -534,7 +534,7 @@ export function attentionText(item, reason, ref = refIn(item.repo)) {
 /** One line for an item in answers and on the screen. */
 export function itemLine(item, ref = refIn(item.repo)) {
   const stack = item.lowers?.length ? ` (stack over ${item.lowers.map((l) => ref(item.repo, l)).join(', ')})` : ''
-  const title = item.title ? ` ${item.title}` : ''
+  const title = `${item.title ? ` ${item.title}` : ''}${item.auto ? ' (integrated)' : ''}`
   const what =
     item.state === 'attention'
       ? `needs attention: ${item.reason?.kind ?? '?'} — ${item.reason?.text ?? ''}`

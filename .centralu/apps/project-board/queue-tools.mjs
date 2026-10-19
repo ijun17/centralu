@@ -229,7 +229,12 @@ function enqueueFor({ repo, number, lowers = [], owner, author, deleteBranch = t
   const r = updateQueue(dataDir(), (q) => {
     const who = given ?? findItem(q, repo, number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
     const out = enqueue(q, { repo, pr: number, lowers, owner: who, author: authorGiven, notice, deleteBranch, title, at }, queueRef)
+    // Queued with queue_merge, an integrated record is a pull request of its own tier again: no longer judged as auto
     if (out.item && mark) Object.assign(out.item, mark)
+    else if (out.item) {
+      delete out.item.auto
+      delete out.item.tierAt
+    }
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length, notice }
   })
   if (!r.error) holdWhileWork()
@@ -319,11 +324,11 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
   }
   const recordTitle = open ? (await readPr(repo, number)).title : title
   const at = new Date().toISOString()
-  const r = enqueueFor({ repo, number, owner, author: owner, title: recordTitle, mark: { auto: { branch: name, head: j.head, main: j.main, line: j.line, at } } })
+  const r = enqueueFor({ repo, number, owner, author: owner, title: recordTitle, mark: { auto: { branch: name, head: j.head, main: j.main, line: j.line, at }, tierAt: null } })
   if (r.error) return refused(`${r.error}${opened ? ` ${queueRef(repo, number)} was opened as its record and is not queued: integrate again once that is cleared.` : ''}`, { kind: 'conflict', pr: number })
   const ref = queueRef(repo, number)
   const record = opened ? `Opened ${ref} as its record (${url})` : `${ref}, open from it already, is its record (${url})`
-  const summary = `Integrated ${name}: ${j.line} ${record}, and ${r.replaced ? 'queued it again' : 'queued it'} for ${r.item.owner}. It lands after the fast gate (a batch's quick tier on ${defaultBranch}) as "${recordTitle} (#${number})", and its branch is deleted. The record stays a draft until then: should a merge-queue message say it is a draft and to mark it ready, leave it (that message is an older board's), as the queue readies it itself. ${plural(r.active, 'item')} in the queue.`
+  const summary = `Integrated ${name}: ${j.line} ${record}, and ${r.replaced ? 'queued it again' : 'queued it'} for ${r.item.owner}. It lands after the fast gate (a batch's quick tier on ${defaultBranch}) as "${recordTitle} (#${number})", and its branch is deleted. The queue judges its tier again on each new head and right before it lands: a push that is no longer auto is stopped and comes back to you. The record stays a draft until then: should a merge-queue message say it is a draft and to mark it ready, leave it (that message is an older board's), as the queue readies it itself. ${plural(r.active, 'item')} in the queue.`
   return queuedAnswer(summary, r, { integrated: true, pr: number, url, opened, tier: j.tier, line: j.line })
 }
 

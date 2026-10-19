@@ -3256,3 +3256,137 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(itemsOnDisk().map((i) => i.pr)).toEqual([600])
   })
 })
+
+describe('the queue judges an integrated change again on each new head and before it lands (#1259 step 3)', { timeout: 240_000 * SLOW }, () => {
+  /** Its own run still going: nothing lands until the test says CI passed */
+  const pending = (head: string) => ({ checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+  /**
+   * CI passed on `head` (its own quick run), and a batch of it passes the quick tier: whenever its batch was started,
+   * before this or after (it may have been batched while its own run was still going)
+   */
+  const passes = (s: Gh, head: string) => {
+    const one = `batch-${head}`
+    s.checks[head] = integrateQuick()
+    s.runs[head] = [ghRun('success', 1, head, { head_branch: 'docs/guide' })]
+    // The batch is queue/batch-1, or a later one when an earlier batch was dropped (its head moved): runs are read on its branch
+    s.runs[one] = [1, 2, 3].map((n) => ghRun('success', 1, one, { id: 950 + n, head_branch: `queue/batch-${n}`, event: 'workflow_dispatch', check_suite_id: 6000 }))
+    s.checks[one] = integrateBatch(6000)
+  }
+  const tierNotices = () => notices().filter((e) => e.kind === 'attention' && e.text.includes('needs attention: tier'))
+
+  it('stops a head pushed after the hand-over that is no longer auto: attention for the session with the files, never batched or landed', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 600 })
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // The session pushes code to the same branch, and CI passes on it
+    const code = pushTo(repo, 'docs/guide', { 'packages/ui/src/x.ts': 'export const x = 1\n' })
+    patchGh((s) => {
+      s.prs['600'].headRefOid = code
+      passes(s, code)
+    })
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
+    expect(item.reason.kind).toBe('tier')
+    expect(item.reason.text).toContain(`#600 was handed over with integrate as an auto-tier change, but at ${code.slice(0, 7)} its tier is now light, from packages/ui/src/x.ts (no rule names it).`)
+    expect(item.reason.text).toContain('queue it with queue_merge')
+    // Once, to the session that handed it over; the new head in no batch (the first one may have been), nothing landed
+    await morePolls(3)
+    expect(tierNotices()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'merge-into' && w[1] === code)).toEqual([])
+    expect(writes().map(short2)).not.toContain('merge 600')
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: code, tier: 'light', main: repo.main })
+  })
+
+  it('judges it once more right before the squash, against main as it is then: rules main changed since make it deep, and it does not land', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // Main moves on after that judgment: its rules now call docs deep
+    const rules = JSON.parse(readFileSync(join(REPO_ROOT, '.centralu/tiers.json'), 'utf8'))
+    rules.rules.find((r: any) => r.id === 'docs').tier = 'deep'
+    pushTo(repo, 'main', { '.centralu/tiers.json': `${JSON.stringify(rules, null, 2)}\n` })
+    patchGh((s) => passes(s, head))
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    // It was batched on the poll's judgment of its head, and stopped at the squash
+    expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
+    expect(writes().map(short2)).not.toContain('merge 600')
+    // No "Passed CI in the batch" status on a head that does not land
+    expect(writes().filter((w) => w[0] === 'status')).toEqual([])
+    expect(tierNotices().map((e) => e.text)).toEqual([expect.stringContaining(`but at ${head.slice(0, 7)} its tier is now deep, from docs/guide.md (docs)`)])
+    // The judgment stays on the item for that head: polls do not try to land it again
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head, tier: 'deep' })
+    await morePolls(2)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+  })
+
+  it('retries a head it could not judge (GitHub out of reach) as a failed poll, tells nobody on a blip, and lands it once judged', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // A new auto head, read while GitHub's copy cannot be fetched
+    const more = pushTo(repo, 'docs/guide', { 'docs/more.md': 'more\n' })
+    renameSync(repo.origin, `${repo.origin}.away`)
+    patchGh((s) => (s.prs['600'].headRefOid = more))
+    await until(() => /the integrator could not judge #600/.test(itemsOnDisk()[0]?.lastError ?? ''), 'a poll that could not judge it')
+    expect(stateOf((await call('merge_queue')).data, 600)).not.toBe('attention')
+    expect(tierNotices()).toEqual([])
+    // Back in reach, and CI passed: judged auto, and it lands
+    renameSync(`${repo.origin}.away`, repo.origin)
+    patchGh((s) => passes(s, more))
+    await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: more, tier: 'auto' })
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  it('stops it when a person labels it above auto after the hand-over, whatever the judge said, and lands nothing', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // The owner raises it by hand, and CI passes
+    patchGh((s) => {
+      s.prs['600'].labels = [{ name: 'tier:auto' }, { name: 'tier:deep' }]
+      passes(s, head)
+    })
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
+    expect(item.reason.kind).toBe('tier')
+    expect(item.reason.text).toContain('#600 was handed over with integrate, but it is labelled tier:deep')
+    await morePolls(2)
+    expect(writes().map(short2)).not.toContain('merge 600')
+    expect(writes().map(short2)).not.toContain('ready 600')
+    expect(gh().prs['600'].isDraft).toBe(true)
+  })
+
+  it('lands a record as a pull request of its own tier only after it is taken out, marked ready and queued with queue_merge', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    expect(itemsOnDisk()[0].auto).toBeTruthy()
+    // Still the integrator's: a draft, which queue_merge refuses like any draft
+    const refused = await call('queue_merge', { pr: 600, owner: 'writer' })
+    expect(refused.text).toContain('#600 is a draft')
+    await call('unqueue', { pr: 600 })
+    // Marked ready by the session (the fake's state is written whole by both sides: set it until it holds)
+    let queued = { isError: true, text: '' }
+    for (let i = 0; i < 20 && queued.isError; i++) {
+      patchGh((st) => Object.assign(st.prs['600'], { isDraft: false, mergeStateStatus: 'CLEAN' }))
+      queued = await call('queue_merge', { pr: 600, owner: 'writer' })
+    }
+    expect(queued.text).toContain('Queued #600')
+    const item = itemsOnDisk().find((i) => i.state !== 'removed' && i.pr === 600)
+    expect(item.auto).toBeUndefined()
+    expect(item.tierAt).toBeUndefined()
+    // Not the integrator's any more: never turned back into a draft
+    await morePolls(2)
+    expect(writes().map(short2)).not.toContain('draft 600')
+  })
+})

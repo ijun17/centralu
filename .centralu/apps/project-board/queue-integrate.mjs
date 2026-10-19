@@ -15,6 +15,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchRefs, git, GitError, remoteFor, showFile, topLevel } from './git.mjs'
+import { GitHubError } from './github.mjs'
 import { short } from './util.mjs'
 
 /** main's judge and rules (#1259 step 2) */
@@ -143,4 +144,42 @@ export function recordVerified(j, { branch, defaultBranch, owner, verified }) {
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/**
+ * Why the queue does not land an integrated item at `head` (#1259 step 3): `j` is judgeBranch's answer for it, not
+ * auto. As attention (kind `tier`) for the session that handed it over, with the files and what to do.
+ */
+export function tierReason(n, j, { branch, head }) {
+  const files = becauseLines(j, 6)
+  const why = j.unjudged ? `it could not be judged (${j.unjudged}), so it counts as deep` : `its tier is now ${j.tier}${files.length ? `, from ${files.join(', ')}` : ''}`
+  return {
+    kind: 'tier',
+    text: `${n} was handed over with integrate as an auto-tier change, but at ${short(head)} ${why}. The queue lands nothing through integrate that is not auto. Take what is not auto out of ${branch} and push (the queue judges the new head), or take it out (unqueue), get the review its tier asks for, mark it ready and queue it with queue_merge, which lands it as a pull request of its tier.`,
+  }
+}
+
+/**
+ * Why the queue does not land an integrated item a label puts above auto (#1259 review): a tier:<name> label set by a
+ * person (or open_pr) only raises, so the judge's auto does not outrank it. Null when its labels say auto or nothing.
+ */
+export function labelReason(n, labels) {
+  const labelled = labelTier(labels)
+  if (!labelled || labelled === 'auto') return null
+  return { kind: 'tier', text: `${n} was handed over with integrate, but it is labelled tier:${labelled}, and the queue lands nothing through integrate above auto. Take the label off if it was wrong, or take it out (unqueue), get the review its tier asks for, mark it ready and queue it with queue_merge, which lands it as a pull request of its tier.` }
+}
+
+/**
+ * An integrated item's head judged (#1259 step 3), as the queue keeps it on the item (`tierAt`): the head and main it
+ * was judged at, the tier and its line, and the attention reason when it is not auto. One that could not be judged (a
+ * fetch that failed, the branch gone, no checkout) throws, so the queue counts it as any failure to read an item: it
+ * tries again, lands nothing meanwhile, and tells the session only after three in a row, not on a blip.
+ */
+export async function judgeHead({ dir, repo, n, pr, defaultBranch }) {
+  const j = pr.isCrossRepository
+    ? unjudged(`${n} is a fork's pull request, which integrate never lands`)
+    : await judgeBranch({ dir, repo, branch: pr.headRefName, defaultBranch, head: pr.headRefOid })
+  if (j.unjudged) throw new GitHubError('github', `the integrator could not judge ${n} at ${short(pr.headRefOid)}: ${j.unjudged}.`)
+  const reason = j.tier === 'auto' ? null : tierReason(n, j, { branch: pr.headRefName, head: pr.headRefOid })
+  return { head: pr.headRefOid, main: j.main ?? null, tier: j.tier, line: j.line, reason }
 }
