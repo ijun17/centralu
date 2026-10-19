@@ -1,9 +1,6 @@
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
-import { orchestratorHome } from './orchestrator-home.js'
 import { windowAround } from './snippet.js'
-import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
-import { hubAskDepthKey } from './agent-depth.js'
 import { withHubMark } from './hub-preset.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -29,12 +26,14 @@ import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
+import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
-import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
-import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
+import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
+import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
+import { LinkedHost, type LinkedHostHost } from './linked-host.js'
+import { SessionSettings, type SessionSettingsHost } from './session-settings.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
-import { lastResponse, lastResponseSeq } from './turn-answer.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -42,7 +41,6 @@ import type {
   ApprovalDecision,
   Attachment,
   ApprovalScope,
-  GridPanel,
   MachineInfo,
   NormalizedEvent,
   PermissionPreset,
@@ -50,19 +48,15 @@ import type {
   SessionInfo,
   SessionState,
   ToolName,
-  SettingsApplied,
   MachineAskConsent,
 } from '@cc/protocol'
 import {
-  applyBackgroundTasks,
   sessionOnlyAlways,
   DATA_DIR,
-  oneLineText,
   withoutToolRecord,
-  appKeyOf,
   alwaysAllowKey,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -90,7 +84,7 @@ import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
 import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
-import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
+import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, agentStartPersonText } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
@@ -110,20 +104,10 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & OrchestratorSlotHost & LinkedHostHost & SessionSettingsHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
-/**
- * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
- * and hits of one search. Five times the tools' defaults (40 and 12), so no read a model makes is cut, while one call
- * cannot ask for a whole store over the link
- */
-const HOST_READ_MAX_LINES = 200
-/** The longest last response a hub reads of this host in one call (`host.lastAnswer`, #1186) */
-const HOST_ANSWER_MAX_CHARS = 100_000
-const HOST_RECALL_MAX_HITS = 50
-
 /*
  * What the value means: **everything in the external transcript up to this moment is something I
  * already know.** Two hands write it — catch-up, after it reads (the `updatedAt` the tool gave),
@@ -137,7 +121,8 @@ const HOST_RECALL_MAX_HITS = 50
  */
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
-  private meta = new Map<string, SessionInfo>()
+  /** Every session this host knows, in sidebar order; never replaced, so a module may read it through `parts()` */
+  private readonly meta = new Map<string, SessionInfo>()
   /**
    * **The configuration the currently running process actually holds.**
    *
@@ -163,6 +148,12 @@ export class SessionManager {
   private readonly projectRegistry: ProjectRegistry
   /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
   private readonly launchInputs: LaunchInputs
+  /** The sidebar order of sessions and the grid's panels (session-layout.ts) */
+  private readonly layout: SessionLayout
+  /** A linked machine's events and work owed there, and what a hub reads of and sends to this host (linked-host.ts) */
+  private readonly linkedHost: LinkedHost
+  /** What is changed on a session: settings, name, read mark, background tasks, CLI move notices (session-settings.ts) */
+  private readonly sessionSettings: SessionSettings
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -255,8 +246,8 @@ export class SessionManager {
    * that had joined the wake and was waiting is also not sent.
    */
   private leaving = new Map<string, string>()
-  /** The orchestrator's MCP-server and skill proposals and its approved skills (#71, M4 A-7) */
-  private readonly proposals: OrchestratorProposals
+  /** The central orchestrator: its making, its proposals and skills, the bridge's door to its tools (orchestrator-slot.ts) */
+  private readonly orchestratorSlot: OrchestratorSlot
   /**
    * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
    * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
@@ -320,6 +311,9 @@ export class SessionManager {
     this.toolRegistry = new ToolRegistry(this.parts())
     this.projectRegistry = new ProjectRegistry(this.parts())
     this.launchInputs = new LaunchInputs(this.parts())
+    this.layout = new SessionLayout(this.parts())
+    this.linkedHost = new LinkedHost(this.parts())
+    this.sessionSettings = new SessionSettings(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
@@ -355,12 +349,7 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
-    this.proposals = new OrchestratorProposals(
-      this.store.settings,
-      () => this.apps.appsHub?.rt,
-      // `this.emit` is wrapped just below; the callback looks it up when a list changes, not now
-      () => this.emit({ type: 'orchestrator_proposals_changed' }),
-    )
+    this.orchestratorSlot = new OrchestratorSlot(this.parts())
     const rawEmit = this.emit
     this.emit = (full) => {
       /*
@@ -674,94 +663,29 @@ export class SessionManager {
     return this.projectRegistry.reorderProjects(...a)
   }
 
-  reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
-    /*
-     * The order is **a single global one** (sidebar_order). Renumbering just this project's own
-     * from 0 would collide with other projects' values, so sorting one project would scramble the
-     * whole list. So only **the slots this project occupied** in the global order are swapped in
-     * with the new order, and every other session is left exactly where it was.
-     */
-    const all = this.listSessions()
-    const mine = new Set(all.filter((s) => s.projectId === projectId).map((s) => s.id))
-    const rest = [...mine].filter((id) => !orderedIds.includes(id))
-    const replacement = [...orderedIds.filter((id) => mine.has(id)), ...rest]
-    let k = 0
-    const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
-    this.store.sessions.setSessionOrder(globalOrder)
-    // Reorder the in-memory copy too — saving alone leaves it out of sync with the screen until the next
-    // launch
-    const rank = new Map(globalOrder.map((id, i) => [id, i]))
-    const sorted = [...this.meta.entries()].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))
-    this.meta = new Map(sorted)
-    return this.listSessions()
+  /** `SessionLayout.reorderSessions` (session-layout.ts), kept on the manager for its callers */
+  reorderSessions(...a: Parameters<SessionLayout['reorderSessions']>): ReturnType<SessionLayout['reorderSessions']> {
+    return this.layout.reorderSessions(...a)
   }
 
-  /** Grid layout — sessions and apps, in order (#288) */
-  grid(): GridPanel[] {
-    return this.store.grid.listGridView()
+  /** `SessionLayout.grid` (session-layout.ts), kept on the manager for its callers */
+  grid(...a: Parameters<SessionLayout['grid']>): ReturnType<SessionLayout['grid']> {
+    return this.layout.grid(...a)
   }
 
-  /**
-   * Saves the layout.
-   *
-   * **Unknown sessions are filtered out.** If a deleted session's id stays in the layout and comes
-   * back, the screen tries to draw something that no longer exists — filtering once at save time
-   * means nobody has to worry about it afterward. An app panel is kept while its project is
-   * registered (a user-folder app has none). Whether the app itself exists is the screen's
-   * question: the app list is read from folders and can lag behind, and a panel dropped here for
-   * that reason would not come back once the list caught up.
-   */
-  setGridView(panels: readonly GridPanel[]): GridPanel[] {
-    const known = new Set(this.meta.keys())
-    const projects = new Set(this.store.projects.listProjects().map((p) => p.id))
-    // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
-    const remote = (id: string) => !known.has(id) && this.linkedSession(id)
-    /*
-     * Another machine's app (#82, remote-hub.md §11.8) is kept while that machine is linked and, for a project app,
-     * while the hub's mirror knows its project: the machine of a user-folder app is named by `machine`, a project
-     * app's by its qualified project. A `machine` on a panel of this host's own app is dropped: it would name nothing.
-     */
-    const appMachine = (p: Extract<GridPanel, { kind: 'app' }>): string | null =>
-      p.projectId === null ? (p.machine && this.linkedApps.linked(p.machine) ? p.machine : null) : this.linkedApps.projectMachine(p.projectId)
-    const seen = new Set<string>()
-    const clean: GridPanel[] = []
-    for (const p of panels) {
-      if (p.kind === 'session') {
-        const key = `session:${p.sessionId}`
-        if (seen.has(key) || !(known.has(p.sessionId) || remote(p.sessionId))) continue
-        seen.add(key)
-        clean.push(p)
-        continue
-      }
-      const { machine: _machine, ...own } = p
-      const elsewhere = projects.has(p.projectId ?? '') ? null : appMachine(p)
-      // A panel naming a machine this host does not link is nobody's app here
-      if (!elsewhere && (p.machine || (p.projectId !== null && !projects.has(p.projectId)))) continue
-      const panel: GridPanel = elsewhere && p.projectId === null ? { ...own, machine: elsewhere } : own
-      const key = `app:${appKeyOf(p.projectId, p.appId, elsewhere)}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      clean.push(panel)
-    }
-    this.store.grid.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
-    return clean
+  /** `SessionLayout.setGridView` (session-layout.ts), kept on the manager for its callers */
+  setGridView(...a: Parameters<SessionLayout['setGridView']>): ReturnType<SessionLayout['setGridView']> {
+    return this.layout.setGridView(...a)
   }
 
-  /** Whether a machine-qualified id names a session of a linked machine the hub knows (#82). None without links */
-  private linkedSession: (sessionId: string) => boolean = () => false
-
-  useLinkedSessions(known: (sessionId: string) => boolean): void {
-    this.linkedSession = known
+  /** `SessionLayout.useLinkedSessions` (session-layout.ts), kept on the manager for its callers */
+  useLinkedSessions(...a: Parameters<SessionLayout['useLinkedSessions']>): ReturnType<SessionLayout['useLinkedSessions']> {
+    return this.layout.useLinkedSessions(...a)
   }
 
-  /** The linked machines, for grid panels of their apps (#82). None without links */
-  private linkedApps: { linked(machine: string): boolean; projectMachine(projectId: string): string | null } = {
-    linked: () => false,
-    projectMachine: () => null,
-  }
-
-  useLinkedApps(lookup: { linked(machine: string): boolean; projectMachine(projectId: string): string | null }): void {
-    this.linkedApps = lookup
+  /** `SessionLayout.useLinkedApps` (session-layout.ts), kept on the manager for its callers */
+  useLinkedApps(...a: Parameters<SessionLayout['useLinkedApps']>): ReturnType<SessionLayout['useLinkedApps']> {
+    return this.layout.useLinkedApps(...a)
   }
 
   /** The linked machines' sessions, for the central orchestrator's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
@@ -814,117 +738,29 @@ export class SessionManager {
     if (this.store.machines.forgetMachineAskConsent(machineId, sessionId, projectId)) this.emit({ type: 'project_consents_changed' })
   }
 
-  /**
-   * Whether a session here still waits on a session of that linked machine (#1134): the report of a child there is
-   * owed, its turn running or paused over its background work (`ChildOwnership.linkedReports`, restored at start). The
-   * link of a machine that connects when needed stays up for it (`LinkDeps.workOwed`)
-   */
-  linkedWorkOwed(machineId: string): boolean {
-    const prefix = `${machineId}.`
-    for (const id of this.children.linkedReports.keys()) if (id.startsWith(prefix)) return true
-    return false
+  /** `LinkedHost.linkedWorkOwed` (linked-host.ts), kept on the manager for its callers */
+  linkedWorkOwed(...a: Parameters<LinkedHost['linkedWorkOwed']>): ReturnType<LinkedHost['linkedWorkOwed']> {
+    return this.linkedHost.linkedWorkOwed(...a)
   }
 
-  /**
-   * The session here that started a linked machine's session with start_agent (#1038), by its hub-side id; none for any
-   * other. The links name it as the session's `askedBy` (`LinkDeps.ownerOf`), so the sidebar hangs it under its parent.
-   */
-  remoteAgentParent(sessionId: string): string | undefined {
-    return this.delegationFlow.remote.of(sessionId)?.callerId
+  /** `LinkedHost.remoteAgentParent` (linked-host.ts), kept on the manager for its callers */
+  remoteAgentParent(...a: Parameters<LinkedHost['remoteAgentParent']>): ReturnType<LinkedHost['remoteAgentParent']> {
+    return this.linkedHost.remoteAgentParent(...a)
   }
 
-  /**
-   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the orchestrator is waiting on becomes its report, as
-   * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work
-   * (#723, `LinkedReports`).
-   */
-  observeLinked(e: LinkedEvent): void {
-    if (e.type === 'machine_status') this.askProjectFlow.observeLinkLoss(e.machine)
-    else if (typeof e.sessionId === 'string') {
-      const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
-      if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
-    }
-    // A call waiting on a child there reads its turn's end; no report is armed while it waits, so nothing comes twice (#1038)
-    this.delegationFlow.remote.observe(e)
-    this.linkedReports.observe(e)
+  /** `LinkedHost.observeLinked` (linked-host.ts), kept on the manager for its callers */
+  observeLinked(...a: Parameters<LinkedHost['observeLinked']>): ReturnType<LinkedHost['observeLinked']> {
+    return this.linkedHost.observeLinked(...a)
   }
 
-  /**
-   * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
-   * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
-   * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
-   * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
-   */
-  /**
-   * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
-   * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
-   *
-   * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
-   * same text as the person; marking it as a relay would only hide the words from a manager it was meant for.
-   */
-  async sendFromHub(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<void> {
-    const target = this.meta.get(sessionId)
-    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
-      throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
-    }
-    const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
-    /*
-     * An ask_project task from the hub (#838 item 12): the session works on it at the depth the hub counts, until the
-     * turn that consumes it is recorded (`hubAskDepthKey`), so its start_agent and ask_project read the same depth as a
-     * session asked here. Marked before the send, as the turn may end before it returns; taken back if the send fails.
-     * The input is tracked where the adapter can (`sendTracked`), so the mark goes with that turn and not with another
-     * turn that happens to end first; without tracking (or after a host swap) the next turn end takes it.
-     */
-    if (!ask) return this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
-    const key = hubAskDepthKey(sessionId)
-    this.store.settings.setAppSetting(key, String(ask.depth))
-    const done = () => {
-      this.hubAskTurns.delete(sessionId)
-      this.store.settings.deleteAppSetting(key)
-    }
-    try {
-      await this.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t) => {
-        if (!h.sendTracked) return h.send(t)
-        this.hubAskTurns.add(sessionId)
-        void h.sendTracked(t, { complete: done, fail: done }).catch(() => {})
-      })
-    } catch (e) {
-      done()
-      throw e
-    }
+  /** `LinkedHost.sendFromHub` (linked-host.ts), kept on the manager for its callers */
+  sendFromHub(...a: Parameters<LinkedHost['sendFromHub']>): ReturnType<LinkedHost['sendFromHub']> {
+    return this.linkedHost.sendFromHub(...a)
   }
 
-  /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
-  private readonly hubAskTurns = new Set<string>()
-
-  hostReader(): {
-    sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
-    recall(query: string, limit?: number): Promise<RecallHit[]>
-    lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
-  } {
-    const view = this.orchestratorToolsFor('', undefined, undefined, true)
-    return {
-      /*
-       * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
-       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown
-       */
-      lastAnswer: async (sessionId, maxChars) => {
-        const m = this.meta.get(sessionId)
-        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
-        const rows = this.store.messages.loadMessages(sessionId, 200)
-        const text = lastResponse(rows)
-        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows) }
-      },
-      sessions: () => view.listSessions(),
-      read: async (sessionId, limit, opts) => {
-        const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
-        if (!r.ok) throw rpcError(r.error ?? 'Could not read it')
-        return { state: r.state ?? 'idle', lines: r.lines ?? [] }
-      },
-      recall: async (query, limit) => (await view.recall(query, Math.min(limit ?? 12, HOST_RECALL_MAX_HITS))).hits,
-    }
+  /** `LinkedHost.hostReader` (linked-host.ts), kept on the manager for its callers */
+  hostReader(...a: Parameters<LinkedHost['hostReader']>): ReturnType<LinkedHost['hostReader']> {
+    return this.linkedHost.hostReader(...a)
   }
 
   /** `ProjectRegistry.listProjects` (project-registry.ts), kept on the manager for its callers */
@@ -1186,105 +1022,9 @@ export class SessionManager {
     return this.trash.subagentTrashed(...a)
   }
 
-  async updateSettings(
-    sessionId: string,
-    s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
-    by: 'person' | 'orchestrator' = 'person',
-  ): Promise<SessionInfo & { applied: SettingsApplied }> {
-    const m = this.openSession(sessionId)
-
-    // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
-    if (s.model !== undefined && s.model !== m.model) this.cacheLedger.note(sessionId, 'model_change')
-    if (s.model !== undefined) m.model = s.model
-    if (s.effort !== undefined) m.effort = s.effort
-    if (s.verbosity !== undefined) m.verbosity = s.verbosity
-    if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
-    const wasAuto = m.permissionPreset === 'auto'
-    if (s.permissionPreset) m.permissionPreset = s.permissionPreset
-    this.store.sessions.upsertSession(m)
-    if (wasAuto && m.permissionPreset !== 'auto') this.queue.dropOpenedByAuto(sessionId)
-    /*
-     * The model and effort chosen most recently become this project's default (#69, item 5). The
-     * same lesson default_tool learned: instead of building a settings screen, the fact is recorded
-     * that the act of choosing already told us. This is where the repetition ends for someone using
-     * Opus/high who had to click through the same four clicks on every new session.
-     *
-     * **Recorded under this session's own tool slot** (#107). There used to be only one slot, which
-     * had to be guarded with the condition "only record a choice from a session using the project's
-     * default tool" — and that condition broke the moment the default tool changed: a single codex
-     * session switching the default back to codex would let the next codex choice overwrite the value
-     * saved for claude. Now that the tool is part of the key, no condition is needed: any tool's
-     * choice lands only in its own slot.
-     */
-    if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
-      const before = this.store.projects.projectToolDefaults(m.projectId)[m.tool]
-      this.store.projects.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
-      // Another window starts its next session on what this one chose last (#719)
-      if ((before?.model ?? null) !== (m.model || null) || (before?.effort ?? null) !== (m.effort || null)) this.emit({ type: 'projects_changed' })
-    }
-    /*
-     * **Every client hears about a saved change** (#659). The caller gets the answer, but another window, a linked
-     * machine, or the person's own window when an agent made the call only learned the new values from a re-list.
-     * The permission preset is among them, and it is shown on screen as a safety fact. Sent as soon as the change is
-     * saved, with the full snapshot, before the wait below: whether the process takes it now, after the turn or on
-     * the next wake does not change what the session is set to.
-     */
-    this.emit({
-      type: 'settings_changed',
-      sessionId,
-      model: m.model,
-      effort: m.effort,
-      verbosity: m.verbosity,
-      serviceTier: m.serviceTier,
-      permissionPreset: m.permissionPreset,
-      ...(by === 'person' ? { person: true } : { by }),
-    })
-
-    /*
-     * **If a wake is in progress, this waits for it before comparing** (#162). While that wait is in
-     * flight there is no handle, so the comparison below would do nothing, and the process that comes
-     * up would run with the value from before the change — the screen says safe, the process runs
-     * auto. A second change arriving mid-restart lands in the same window too (while restartSession is
-     * tearing down and re-creating the handle). Since the save already happened above, even if this
-     * call is interrupted while waiting, the next time it comes up it comes up with the new value.
-     */
-    await this.resuming.get(sessionId)?.catch(() => {})
-
-    const handle = this.handles.get(sessionId)
-    handle?.updateSettings?.(s)
-
-    // The comparison baseline is not the screen's value (meta) but **the configuration the running process
-    // actually has**
-    const drifted = this.restartPolicy.settingsDrifted(sessionId)
-
-    /**
-     * Permissions and model are **fixed the moment the tool process is launched.**
-     * Claude receives permissionMode at the start of query(), and Codex receives approvalPolicy at
-     * thread/start. So fixing only the metadata of a living session leaves the screen saying "auto"
-     * while it keeps asking for approval anyway — this surfaced during dogfooding as "I changed
-     * permissions to auto, so why does it keep asking".
-     *
-     * If the adapter does not support applying it live, **the process itself is swapped.**
-     * The conversation is not interrupted, since resume carries it forward. Better than silently
-     * ignoring the change.
-     */
-    let applied: SettingsApplied = 'saved'
-    if (drifted && handle && !handle.updateSettings) {
-      /*
-       * **A running turn is never interrupted** (#164) — the change is only saved, and the swap
-       * happens when the turn ends (completed, error, canceled — in onEvent). This keeps what the
-       * person is told ("starting next turn") consistent with what actually happens. The
-       * orchestrator's own settings tool goes through this same path too.
-       */
-      if (inTurn(m.state)) {
-        this.restartPolicy.restartAfterTurn.add(sessionId)
-        applied = 'after_turn'
-      } else {
-        applied = (await this.restartSession(sessionId, this.restartPolicy.restartCause(sessionId))).resumed ? 'restarted' : 'saved'
-      }
-    }
-
-    return { ...m, live: this.handles.has(sessionId), applied }
+  /** `SessionSettings.updateSettings` (session-settings.ts), kept on the manager for its callers */
+  updateSettings(...a: Parameters<SessionSettings['updateSettings']>): ReturnType<SessionSettings['updateSettings']> {
+    return this.sessionSettings.updateSettings(...a)
   }
 
   /** Whether a session's process is alive (what the UI uses to know if it can be continued) */
@@ -1799,27 +1539,14 @@ export class SessionManager {
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
-  /**
-   * Stops one of the session's background tasks (#290). Only a task the adapter listed as running and stoppable is
-   * asked for — an id from an old list, or a task the tool cannot stop alone, is refused with a reason instead of
-   * being sent. The ending arrives as the session's next `background_tasks` event.
-   */
-  async stopBackgroundTask(sessionId: string, taskId: string): Promise<void> {
-    const handle = this.requireHandle(sessionId)
-    const task = this.meta.get(sessionId)?.backgroundTasks.find((t) => t.id === taskId && t.status === 'running')
-    if (!task) throw rpcError('That background task is no longer running')
-    if (!task.stoppable || !handle.stopBackgroundTask) {
-      throw rpcError('This task cannot be stopped on its own')
-    }
-    await handle.stopBackgroundTask(taskId)
+  /** `SessionSettings.stopBackgroundTask` (session-settings.ts), kept on the manager for its callers */
+  stopBackgroundTask(...a: Parameters<SessionSettings['stopBackgroundTask']>): ReturnType<SessionSettings['stopBackgroundTask']> {
+    return this.sessionSettings.stopBackgroundTask(...a)
   }
 
-  /** Takes the ended tasks off the session's list (#290); the running ones stay. */
-  clearBackgroundTasks(sessionId: string): void {
-    const m = this.sessionOf(sessionId)
-    const e: NormalizedEvent = { type: 'background_tasks', sessionId, live: m.backgroundTasks.filter((t) => t.status === 'running'), clearEnded: true }
-    m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
-    this.emit(e)
+  /** `SessionSettings.clearBackgroundTasks` (session-settings.ts), kept on the manager for its callers */
+  clearBackgroundTasks(...a: Parameters<SessionSettings['clearBackgroundTasks']>): ReturnType<SessionSettings['clearBackgroundTasks']> {
+    return this.sessionSettings.clearBackgroundTasks(...a)
   }
 
   /**
@@ -1992,7 +1719,8 @@ export class SessionManager {
    * What the modules moved out of this manager reach of it (#428), one object for all of them, made once on first use.
    * Each module's own host type (`HandoffFlowHost`, `HostCardsHost`, `DelegationHost`, …) picks what it may use; this
    * is the one place that says how each name reaches the manager. Its fields are getters, read when used and never
-   * kept: `reorderSessions` replaces `meta`, and a kept map would leave a module on the old one (#757 review). Each
+   * kept: `emit` is re-wrapped in the constructor, and a kept value would leave a module on the old one (#757 review:
+   * `reorderSessions` used to replace `meta`; it sorts it in place since #1143). Each
    * module used to get an object of its own, twelve of them repeating the same getters.
    */
   private parts(): ManagerParts {
@@ -2110,7 +1838,13 @@ export class SessionManager {
       },
       hasSession: (id) => self.meta.has(id),
       get hubAskTurns() {
-        return self.hubAskTurns
+        return self.linkedHost.hubAskTurns
+      },
+      get askProjectFlow() {
+        return self.askProjectFlow
+      },
+      get linkedReports() {
+        return self.linkedReports
       },
       get hostCards() {
         return self.hostCards
@@ -2136,7 +1870,7 @@ export class SessionManager {
       listCommands: (...a) => self.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
-      migrateApprovedMcpServers: (...a) => self.proposals.migrateApprovedMcpServers(...a),
+      migrateApprovedMcpServers: (...a) => self.orchestratorSlot.proposals.migrateApprovedMcpServers(...a),
       mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
         return self.memoryGate
@@ -2156,7 +1890,7 @@ export class SessionManager {
       pauseReport: (...a) => self.reports.pauseReport(...a),
       pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
       get proposals() {
-        return self.proposals
+        return self.orchestratorSlot.proposals
       },
       get prLookup() {
         return self.prLookup
@@ -2281,7 +2015,8 @@ export class SessionManager {
   private seatHost: OrchestratorSeatHost | undefined
   /**
    * What the orchestrator tools reach of this manager (#428), made once on first use. Its fields are read when a tool
-   * runs, never kept: `reorderSessions` replaces `meta`, and a kept map would leave the tools on the old one (#757 review).
+   * runs, never kept: a kept value would leave the tools on an old one (#757 review, when `reorderSessions` still replaced
+   * `meta`; it sorts it in place since #1143).
    */
   private seat(): OrchestratorSeatHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -2297,7 +2032,7 @@ export class SessionManager {
         return self.children
       },
       get proposals() {
-        return self.proposals
+        return self.orchestratorSlot.proposals
       },
       linkedReader: () => this.linkedReader,
       linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
@@ -2444,74 +2179,39 @@ export class SessionManager {
     return this.appSessions.runAppAgent(...a)
   }
 
-  /** MCP server proposals waiting on the person's approval */
-  mcpProposals(): ReturnType<OrchestratorProposals['mcpProposals']> {
-    return this.proposals.mcpProposals()
+  /** `OrchestratorSlot.mcpProposals` (orchestrator-slot.ts), kept on the manager for its callers */
+  mcpProposals(...a: Parameters<OrchestratorSlot['mcpProposals']>): ReturnType<OrchestratorSlot['mcpProposals']> {
+    return this.orchestratorSlot.mcpProposals(...a)
   }
 
-  /** Skill proposals waiting on the person's approval (#71) */
-  skillProposals(): ReturnType<OrchestratorProposals['skillProposals']> {
-    return this.proposals.skillProposals()
+  /** `OrchestratorSlot.skillProposals` (orchestrator-slot.ts), kept on the manager for its callers */
+  skillProposals(...a: Parameters<OrchestratorSlot['skillProposals']>): ReturnType<OrchestratorSlot['skillProposals']> {
+    return this.orchestratorSlot.skillProposals(...a)
   }
 
-  /** Skills that have been approved and loaded into the orchestrator's role prompt (#71) */
-  orchestratorSkills(): ReturnType<OrchestratorProposals['orchestratorSkills']> {
-    return this.proposals.orchestratorSkills()
+  /** `OrchestratorSlot.orchestratorSkills` (orchestrator-slot.ts), kept on the manager for its callers */
+  orchestratorSkills(...a: Parameters<OrchestratorSlot['orchestratorSkills']>): ReturnType<OrchestratorSlot['orchestratorSkills']> {
+    return this.orchestratorSlot.orchestratorSkills(...a)
   }
 
-  /** The person's answer to a skill proposal (#71) — if approved, it is saved and the orchestrator is
-   * restarted */
-  async resolveSkillProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
-    return this.afterProposal(this.proposals.resolveSkillProposal(name, approve))
+  /** `OrchestratorSlot.resolveSkillProposal` (orchestrator-slot.ts), kept on the manager for its callers */
+  resolveSkillProposal(...a: Parameters<OrchestratorSlot['resolveSkillProposal']>): ReturnType<OrchestratorSlot['resolveSkillProposal']> {
+    return this.orchestratorSlot.resolveSkillProposal(...a)
   }
 
-  /** Deletes a skill — the orchestrator is restarted so the deleted skill leaves its prompt */
-  async deleteOrchestratorSkill(name: string): Promise<{ ok: boolean; error?: string }> {
-    return this.afterProposal(this.proposals.deleteOrchestratorSkill(name))
+  /** `OrchestratorSlot.deleteOrchestratorSkill` (orchestrator-slot.ts), kept on the manager for its callers */
+  deleteOrchestratorSkill(...a: Parameters<OrchestratorSlot['deleteOrchestratorSkill']>): ReturnType<OrchestratorSlot['deleteOrchestratorSkill']> {
+    return this.orchestratorSlot.deleteOrchestratorSkill(...a)
   }
 
-  /** Restarts the orchestrator if it is alive — the shared path for reflecting a skill or MCP change
-   * immediately */
-  private async restartOrchestrator(): Promise<void> {
-    const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (orch) await this.restartSession(orch.id, 'instructions').catch(() => {})
+  /** `OrchestratorSlot.resolveMcpProposal` (orchestrator-slot.ts), kept on the manager for its callers */
+  resolveMcpProposal(...a: Parameters<OrchestratorSlot['resolveMcpProposal']>): ReturnType<OrchestratorSlot['resolveMcpProposal']> {
+    return this.orchestratorSlot.resolveMcpProposal(...a)
   }
 
-  /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app and the
-   * orchestrator is restarted (OrchestratorProposals.resolveMcpProposal) */
-  async resolveMcpProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
-    return this.afterProposal(this.proposals.resolveMcpProposal(name, approve))
-  }
-
-  /** Restarts the orchestrator when a proposal answer asks for it — the change is already saved by then */
-  private async afterProposal({ restart, ...result }: ProposalOutcome): Promise<{ ok: boolean; error?: string }> {
-    if (restart) await this.restartOrchestrator()
-    return result
-  }
-
-  /**
-   * A tool execution called through the bridge (the Codex path).
-   *
-   * **Only the orchestrator itself can call this.** The bridge is a separate process, so anyone
-   * holding its token could call anything at all — leaving that door open to let one session instruct
-   * another session that is not its own would turn access scope into a promise instead of something
-   * structurally guaranteed.
-   */
-  async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
-    const m = this.meta.get(sessionId)
-    const { profile, tools } = m ? this.tools.toolChoice(m) : { profile: null, tools: () => undefined }
-    if (!m || !profile) {
-      throw rpcError('Only the orchestrator can use this tool')
-    }
-    /*
-     * Narrowing only what is exposed still lets anyone who knows the name just call it anyway (#69) —
-     * the bridge is a separate process and can ask for anything at all with just the token. The same
-     * check is made again on the execution side too.
-     */
-    if (!profileAllows(profile, name)) {
-      throw rpcError(notAToolText(profile, name))
-    }
-    return runOrchestratorTool(tools()!, name, args, { sessionId, profile })
+  /** `OrchestratorSlot.runOrchestratorTool` (orchestrator-slot.ts), kept on the manager for its callers */
+  runOrchestratorTool(...a: Parameters<OrchestratorSlot['runOrchestratorTool']>): ReturnType<OrchestratorSlot['runOrchestratorTool']> {
+    return this.orchestratorSlot.runOrchestratorTool(...a)
   }
 
   /**
@@ -2537,35 +2237,14 @@ export class SessionManager {
     this.updatesAsked.updateApply = broker
   }
 
-  /**
-   * Says in the conversation that the session moved to a newer CLI (#297): restarting a process by itself is never
-   * silent. A notice from Centralu, not from the tool, so it reads as what happened rather than as something to fix.
-   */
-  noteAgentMoved(sessionId: string, from: string, to: string): void {
-    const m = this.meta.get(sessionId)
-    if (!m) return
-    const label = this.toolRegistry.toolLabel(m.tool)
-    this.onEvent({
-      type: 'notice',
-      sessionId,
-      level: 'info',
-      from: 'Centralu',
-      label: 'agent update',
-      text: `${label} restarted on ${to} (was ${from}). The conversation continues.`,
-    })
+  /** `SessionSettings.noteAgentMoved` (session-settings.ts), kept on the manager for its callers */
+  noteAgentMoved(...a: Parameters<SessionSettings['noteAgentMoved']>): ReturnType<SessionSettings['noteAgentMoved']> {
+    return this.sessionSettings.noteAgentMoved(...a)
   }
 
-  noteAgentMoveFailed(sessionId: string, to: string, why: string): void {
-    const m = this.meta.get(sessionId)
-    if (!m) return
-    this.onEvent({
-      type: 'notice',
-      sessionId,
-      level: 'warning',
-      from: 'Centralu',
-      label: 'agent update',
-      text: `${this.toolRegistry.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
-    })
+  /** `SessionSettings.noteAgentMoveFailed` (session-settings.ts), kept on the manager for its callers */
+  noteAgentMoveFailed(...a: Parameters<SessionSettings['noteAgentMoveFailed']>): ReturnType<SessionSettings['noteAgentMoveFailed']> {
+    return this.sessionSettings.noteAgentMoveFailed(...a)
   }
 
   /** `SessionAppWiring.useExternalApps` (session-app-wiring.ts), kept on the manager for its callers */
@@ -2621,117 +2300,29 @@ export class SessionManager {
     return this.merges.refreshMergedWorktrees(...a)
   }
 
-  /**
-   * The app's one and only orchestrator. Created on the spot if none exists.
-   *
-   * **Only comes into existence when called.** Creating it ahead of time when the app is turned on
-   * would leave a session nobody ever uses holding onto a tool process — too expensive a price just to
-   * turn on the control tower.
-   *
-   * Returned as-is even if its process is dead. Bringing it back to life is send()'s own job (FR-10),
-   * and reviving it here would mean a tool process comes up just from drawing the sidebar.
-   */
-  /**
-   * Returns it if it exists, and **never creates one** if it does not (#63).
-   *
-   * Once onboarding started showing the orchestrator screen first, "opening the screen" stopped
-   * meaning "creating the process". This only ever asks — the actual creation happens inside
-   * orchestrator(), the moment the first question is sent. Creating it before that would spin up a
-   * tool process on behalf of someone who never even asked for it.
-   */
-  orchestratorPeek(): SessionInfo | null {
-    const known = this.store.sessions.orchestratorId()
-    return known ? (this.meta.get(known) ?? null) : null
+  /** `OrchestratorSlot.orchestratorPeek` (orchestrator-slot.ts), kept on the manager for its callers */
+  orchestratorPeek(...a: Parameters<OrchestratorSlot['orchestratorPeek']>): ReturnType<OrchestratorSlot['orchestratorPeek']> {
+    return this.orchestratorSlot.orchestratorPeek(...a)
   }
 
-  /**
-   * The tool the central orchestrator runs on (#63, the card choice on the onboarding screen).
-   *
-   * **Only settings for before a session exists.** Because there is a gap between choosing and
-   * actually creating it (clicking the card -> ... at some point later ... -> the first question),
-   * the choice has to be recorded somewhere, and since this is a property of the install itself,
-   * app_settings is the right place for it. Once it has actually been created, switching agents in the
-   * session's own settings takes over — this value is never read again after that.
-   */
-  configureOrchestrator(tool: ToolName): void {
-    this.store.settings.setAppSetting('orchestrator_tool', tool)
+  /** `OrchestratorSlot.configureOrchestrator` (orchestrator-slot.ts), kept on the manager for its callers */
+  configureOrchestrator(...a: Parameters<OrchestratorSlot['configureOrchestrator']>): ReturnType<OrchestratorSlot['configureOrchestrator']> {
+    return this.orchestratorSlot.configureOrchestrator(...a)
   }
 
-  /** The orchestrator being created (#839): a second ask while it is made waits on this one, never makes another */
-  private orchestratorCreating: Promise<SessionInfo> | null = null
-
-  async orchestrator(): Promise<SessionInfo> {
-    const known = this.store.sessions.orchestratorId()
-    if (known) {
-      const m = this.meta.get(known)
-      if (m) return m
-      // The id remains but the session is gone — the marker alone is cleared, and a new one is created
-    }
-    if (this.orchestratorCreating) return this.orchestratorCreating
-    const creating = this.createOrchestrator().finally(() => {
-      if (this.orchestratorCreating === creating) this.orchestratorCreating = null
-    })
-    this.orchestratorCreating = creating
-    return creating
+  /** `OrchestratorSlot.orchestrator` (orchestrator-slot.ts), kept on the manager for its callers */
+  orchestrator(...a: Parameters<OrchestratorSlot['orchestrator']>): ReturnType<OrchestratorSlot['orchestrator']> {
+    return this.orchestratorSlot.orchestrator(...a)
   }
 
-  private async createOrchestrator(): Promise<SessionInfo> {
-
-    /*
-     * The tool follows the choice made on the onboarding screen (configureOrchestrator) — hardcoding
-     * 'claude' created a contradiction where someone with only Codex installed could pass through
-     * onboarding ("Codex is ready") and still be unable to open the orchestrator (#63). The wiring on
-     * the Codex side (the stdio bridge) was already laid down and measured by the project orchestrator (#13).
-     */
-    const configured = this.store.settings.appSetting('orchestrator_tool')
-    const info = await this.createSession({
-      projectId: null,
-      // The marker is born together with the session — stamping it separately would leave a window with no
-      // marker at all
-      kind: 'orchestrator',
-      cwd: orchestratorHome(),
-      tool: this.toolRegistry.firstTool(configured),
-      permissionPreset: 'normal',
-    })
-    // Kept as a name the person set, so the auto-name (FR-18) never overwrites it with the first prompt
-    this.rename(info.id, 'Orchestrator')
-    return this.meta.get(info.id)!
+  /** `SessionSettings.rename` (session-settings.ts), kept on the manager for its callers */
+  rename(...a: Parameters<SessionSettings['rename']>): ReturnType<SessionSettings['rename']> {
+    return this.sessionSettings.rename(...a)
   }
 
-  /**
-   * The person sets a name (FR-18).
-   *
-   * **autoNamed is cleared so an auto-name can never overwrite it again.** An auto-name cuts down the
-   * first prompt, but a session created by resuming or importing all share the same first line, so
-   * four sessions named `This session is being continued…` once stood side by side in the list — the
-   * name alone could not distinguish anything, and the body itself had to be searched (issue #5). So a
-   * name the person has chosen once must survive no matter what happens.
-   *
-   * **Never silently passes through.** This used to just `return` when the session did not exist, and
-   * the RPC still reported `{ ok: true }` — the name never changed, but the screen wore the face of success.
-   */
-  rename(sessionId: string, name: string): void {
-    const m = this.sessionOf(sessionId)
-    // One line (#838): a name goes into the model's text (list_sessions, cards, reports), where a line break started a line of its own
-    const next = oneLineText(name)
-    // An empty name becomes a row in the list that points at nothing at all — accepting it would create a
-    // nameless session
-    if (!next) throw rpcError('Session name cannot be empty')
-    m.name = next
-    m.autoNamed = false
-    this.store.sessions.upsertSession(m)
-    // auto:false — the receiving side needs to know "the person set this" in order to block the next
-    // auto-name
-    this.emit({ type: 'session_title', sessionId, title: next, auto: false })
-  }
-
-  markRead(sessionId: string, seq: number): void {
-    const m = this.meta.get(sessionId)
-    if (!m) return
-    // The person has this session open (#378): an app's agent session they read becomes theirs
-    this.appSessions.noteTookPart(sessionId, 'opened')
-    m.lastReadSeq = Math.max(m.lastReadSeq, seq)
-    this.store.sessions.markRead(sessionId, seq)
+  /** `SessionSettings.markRead` (session-settings.ts), kept on the manager for its callers */
+  markRead(...a: Parameters<SessionSettings['markRead']>): ReturnType<SessionSettings['markRead']> {
+    return this.sessionSettings.markRead(...a)
   }
 
   /** `SessionRecord.messageImage` (session-record.ts), kept on the manager for its callers */

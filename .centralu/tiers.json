@@ -51,6 +51,8 @@
         "packages/agent-host/src/sessions/*-consents.ts",
         "packages/agent-host/src/sessions/app-access.ts",
         "packages/agent-host/src/sessions/agent-start-gates.ts",
+        "packages/agent-host/src/sessions/{orchestrator-slot,session-settings,approval-rules,launch-inputs,project-registry}.ts",
+        "packages/agent-host/src/dev-services/project-files.ts",
         "packages/agent-host/src/adapters/always-allow.ts",
         "packages/agent-host/src/adapters/claude/permissions.ts",
         "packages/agent-host/src/adapters/codex/launch-config.ts",
@@ -78,6 +80,7 @@
       "tier": "deep",
       "paths": [
         "packages/agent-host/src/links/**",
+        "packages/agent-host/src/sessions/linked-host.ts",
         "packages/agent-host/src/keeper/**",
         "packages/agent-host/src/keeper-link.ts",
         "packages/agent-host/src/swap-control.ts",
