@@ -21,6 +21,7 @@ import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
+import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -58,7 +59,6 @@ import {
   alwaysAllowKey,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
-import { registeredTool } from '../adapters/registry.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -107,7 +107,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -150,6 +150,8 @@ export class SessionManager {
   private readonly cacheLedger = new CacheLedger()
   /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
   private readonly files: ProjectFiles
+  /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
+  private readonly toolRegistry: ToolRegistry
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -300,6 +302,7 @@ export class SessionManager {
       // `this.emit` is wrapped below; looked up when a change goes out, not now
       emit: (e) => this.emit(e),
     })
+    this.toolRegistry = new ToolRegistry(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
@@ -696,7 +699,7 @@ export class SessionManager {
     const git = await gitSummary(path, { trusted: row?.trusted ?? false })
     const stored = row?.defaultTool
     return {
-      id, path, name: basename(path), defaultTool: this.firstTool(stored),
+      id, path, name: basename(path), defaultTool: this.toolRegistry.firstTool(stored),
       // Trust (M4, decision 3) — reads the same column as the app runtime. The trust toggle on screen shows
       // this value
       trusted: row?.trusted ?? false,
@@ -1696,11 +1699,9 @@ export class SessionManager {
     return this.toolQueries.usageFor(...a)
   }
 
-  /** Which account `tool` is logged in to here, as the hub compares it with a linked machine's (#726) */
-  async accountFor(tool: ToolName): Promise<{ loggedIn: boolean | null; fingerprint: string | null }> {
-    const adapter = this.adapters.get(tool)
-    if (!adapter?.account) return { loggedIn: null, fingerprint: null }
-    return adapter.account().catch(() => ({ loggedIn: null, fingerprint: null }))
+  /** `ToolRegistry.accountFor` (tool-registry.ts), kept on the manager for its callers */
+  accountFor(...a: Parameters<ToolRegistry['accountFor']>): ReturnType<ToolRegistry['accountFor']> {
+    return this.toolRegistry.accountFor(...a)
   }
 
   /** `ToolQueries.listModels` (tool-queries.ts), kept on the manager for its callers */
@@ -2230,7 +2231,7 @@ export class SessionManager {
       createSession: (...a) => self.createSession(...a),
       cwdFor: (...a) => self.cwdFor(...a),
       cwdOf: (...a) => self.cwdOf(...a),
-      defaultToolFor: (...a) => self.defaultToolFor(...a),
+      defaultToolFor: (...a) => self.toolRegistry.defaultToolFor(...a),
       get delegationFlow() {
         return self.delegationFlow
       },
@@ -2253,7 +2254,7 @@ export class SessionManager {
       get externals() {
         return self.externals
       },
-      firstTool: (...a) => self.firstTool(...a),
+      firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.gitTrust(...a),
@@ -2397,17 +2398,12 @@ export class SessionManager {
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.toolProfileOf(...a),
-      toolLabel: (...a) => self.toolLabel(...a),
+      toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools
       },
       nameOf: (...a) => self.reports.nameOf(...a),
-      toolProblem: async (tool) => {
-        const adapter = self.adapters.get(tool)
-        if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
-        const d = await adapter.detect().catch((e: Error) => ({ installed: false, loggedIn: false, detail: e.message }))
-        return d.installed && d.loggedIn ? null : `${tool} cannot start a session here: ${d.detail}`
-      },
+      toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),
@@ -2472,7 +2468,7 @@ export class SessionManager {
       updateCentraluAsked: (sessionId, action, signal) => this.updatesAsked.updateCentraluAsked(sessionId, action, signal),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       createSession: (params) => this.createSession(params),
-      firstTool: (preferred) => this.firstTool(preferred),
+      firstTool: (preferred) => this.toolRegistry.firstTool(preferred),
       rename: (sessionId, name) => this.rename(sessionId, name),
       send: (sessionId, text, attachments, from) => this.send(sessionId, text, attachments, from),
       routedCards: (sessionId, callerId) => this.cards.routedCards(sessionId, callerId),
@@ -2539,19 +2535,6 @@ export class SessionManager {
   /** `AppSessions.checkApp` (app-sessions.ts), kept on the manager for its callers */
   checkApp(...a: Parameters<AppSessions['checkApp']>): ReturnType<AppSessions['checkApp']> {
     return this.appSessions.checkApp(...a)
-  }
-
-  /**
-   * The default agent tool for this scope — a project's default tool if it has one, or the
-   * orchestrator's own tool if there is no project (a user-folder app). A builder session (C-2) and an
-   * agent an app asked for (D-1) both use this same rule.
-   */
-  private defaultToolFor(projectId: string | null): ToolName | null {
-    if (projectId !== null) {
-      const project = this.projectRow(projectId)
-      return this.firstTool(project?.defaultTool)
-    }
-    return this.firstTool(this.store.settings.appSetting('orchestrator_tool'))
   }
 
   /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
@@ -2733,7 +2716,7 @@ export class SessionManager {
   noteAgentMoved(sessionId: string, from: string, to: string): void {
     const m = this.meta.get(sessionId)
     if (!m) return
-    const label = this.toolLabel(m.tool)
+    const label = this.toolRegistry.toolLabel(m.tool)
     this.onEvent({
       type: 'notice',
       sessionId,
@@ -2753,7 +2736,7 @@ export class SessionManager {
       level: 'warning',
       from: 'Centralu',
       label: 'agent update',
-      text: `${this.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
+      text: `${this.toolRegistry.toolLabel(m.tool)} could not restart on ${to}: ${why}. The session stays on its current version; restart it to try again.`,
     })
   }
 
@@ -2858,22 +2841,6 @@ export class SessionManager {
    * app_settings is the right place for it. Once it has actually been created, switching agents in the
    * session's own settings takes over — this value is never read again after that.
    */
-  /**
-   * The tool to use when nothing has chosen one — the first registered adapter, or none.
-   *
-   * A project's `defaultTool` is nullable because only the host knows which tools exist, so
-   * a project created before any tool was picked has none. Falling back to a literal
-   * `'claude'` here would put a vendor name back into code that is meant not to know any.
-   */
-  private firstTool(preferred?: ToolName | null): ToolName | null {
-    return registeredTool(this.adapters, preferred)
-  }
-
-  /** A tool's display name, from whichever adapter owns it — falls back to the bare id. */
-  private toolLabel(tool: ToolName): string {
-    return this.adapters.get(tool)?.descriptor.label ?? tool
-  }
-
   configureOrchestrator(tool: ToolName): void {
     this.store.settings.setAppSetting('orchestrator_tool', tool)
   }
@@ -2911,7 +2878,7 @@ export class SessionManager {
       // marker at all
       kind: 'orchestrator',
       cwd: orchestratorHome(),
-      tool: this.firstTool(configured),
+      tool: this.toolRegistry.firstTool(configured),
       permissionPreset: 'normal',
     })
     // Kept as a name the person set, so the auto-name (FR-18) never overwrites it with the first prompt
