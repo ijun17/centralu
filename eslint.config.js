@@ -33,6 +33,7 @@ export const PLATFORM_MODULES = [
   'packaging/npm/centralu/bin/serve-autostart.mjs',
   'packaging/npm/centralu/bin/serve-detach.mjs',
   'packaging/npm/centralu/bin/serve-files.mjs',
+  'packaging/npm/centralu/bin/serve-handover.mjs',
   'packaging/npm/centralu/bin/serve-host.mjs',
   'packaging/npm/centralu/bin/serve-install.mjs',
   'packaging/npm/centralu/bin/serve-run.mjs',

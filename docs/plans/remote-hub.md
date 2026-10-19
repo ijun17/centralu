@@ -423,7 +423,11 @@ logon at medium integrity and saw the user's entries. So `serve --detach` on Win
 Explorer outside session 0; with one, it registers the data folder's task without a trigger (the one `--autostart on`
 gives an `AtLogOn` trigger; a task with no trigger reads as autostart off) and starts it. WMI stays the start when
 nobody is signed in, and the host then says which logon it runs in (`hello_ok.logon`), which the machine's row turns
-into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out.
+into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out. **The hand-over**: when the person later signs in
+(the task's trigger, with autostart on) or a `--detach` starts the task while such a network-logon host still holds the
+folder, the task's `serve` waits until that host has nothing running a person would lose (its `host.activity`, all
+zero), stops it in order and starts its own. Waiting rather than asking: without a keeper on Windows a stop ends what
+runs, and an idle host loses nothing.
 
 **Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.

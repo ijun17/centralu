@@ -281,6 +281,8 @@ export function probeHost({ port, token, protocolVersion, prove = false, timeout
             running: true,
             protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
             version: typeof m.build?.version === 'string' ? m.build.version : undefined,
+            // Which Windows logon it runs in (#1224): a `network` one is moved into the sign-in (serve-handover.mjs)
+            ...(HOST_LOGONS.includes(m.logon) ? { logon: m.logon } : {}),
           })
         } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
           // The token was right (it is checked first), so this is our host, on another protocol
@@ -329,6 +331,31 @@ function tcpProbe(port, timeoutMs) {
     s.setTimeout(timeoutMs, () => done(false))
     s.once('connect', () => done(true))
     s.once('error', () => done(false))
+  })
+}
+
+/** The logons a host's `hello_ok.logon` may name (#1224) */
+const HOST_LOGONS = ['interactive', 'network', 'batch', 'service']
+
+/**
+ * What a running host would stop if it stopped now (`host.activity`, the counts of the host's one idle rule), or null
+ * when it did not answer: a hello with the token, then the call, as `askHostToStop` does
+ */
+export function askHostActivity({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+  if (typeof WebSocketImpl !== 'function') return Promise.resolve(null)
+  return helloExchange({
+    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    timedOut: null,
+    failed: () => null,
+    on: (done) => ({
+      unproven: () => done(null),
+      gone: () => done(null),
+      message: (m, ws) => {
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'activity', method: 'host.activity', params: {} }))
+        else if (m.kind === 'res' && m.id === 'activity') done(m.ok && m.result && typeof m.result === 'object' ? m.result : null)
+        else if (m.kind === 'res' && m.ok === false) done(null)
+      },
+    }),
   })
 }
 

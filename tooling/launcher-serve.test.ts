@@ -50,6 +50,9 @@ import {
   lockHolderIsAlive,
   lockHolderPid,
   lockHolder,
+  moveIntoSignIn,
+  nothingRunning,
+  runServe,
   serveFrom,
   processStartTime,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -854,6 +857,132 @@ describe('starting through WMI', () => {
     // What it created is ended, not left waiting
     expect(ended).toBe(1)
   })
+})
+
+/*
+ * #1224: a host the hub's ssh started before anyone signed in runs in a network logon, where Git cannot use the
+ * credentials saved in Windows. The serve the sign-in task starts takes the folder over, but only once that host has
+ * nothing running a person would lose: Windows has no keeper, so stopping it ends what runs in it
+ */
+describe('moving a host that runs in a network logon into the Windows sign-in', () => {
+  const idle = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
+
+  /** A host on a data folder's recorded port, with its token: it says `logon`, answers `host.activity` from `counts`, and goes on `host.stop` */
+  async function heldFolder(logon: 'network' | 'interactive' | null, counts: Record<string, number>[]) {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const state = readServeState(d)!
+    const calls: string[] = []
+    const server: HostServer = new HostServer({
+      port: state.port!,
+      token: state.token,
+      ...(logon ? { logon: () => logon } : {}),
+      build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
+      onRpc: async (method) => {
+        calls.push(method)
+        if (method === 'host.activity') return counts.length > 1 ? counts.shift() : counts[0]
+        if (method === 'host.stop') {
+          setTimeout(() => void server.close(), 20)
+          return { ok: true }
+        }
+        return {}
+      },
+    })
+    await server.listen()
+    const existing = await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })
+    return { d, server, calls, existing }
+  }
+
+  it('reads the logon a host says in its hello', async () => {
+    const h = await heldFolder('network', [idle])
+    try {
+      expect(h.existing).toMatchObject({ running: true, logon: 'network' })
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  it('waits while the host has work running, then stops it in order and frees the folder', async () => {
+    const h = await heldFolder('network', [{ ...idle, working: 1 }, { ...idle, terminals: 1 }, idle])
+    try {
+      const moved = await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform: 'win32', logonOf: async () => 'interactive', pollMs: 50 })
+      expect(moved).toBe(true)
+      // Asked three times; stopped only after the answer with nothing running
+      expect(h.calls.filter((c) => c === 'host.activity')).toHaveLength(3)
+      expect(h.calls.indexOf('host.stop')).toBe(h.calls.length - 1)
+      expect((await probeHost({ port: readServeState(h.d)!.port!, token: readServeState(h.d)!.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(false)
+    } finally {
+      await h.server.close()
+    }
+  })
+
+  it('moves nothing that is not a network logon, nor from a serve that is not in the sign-in itself, nor off Windows', async () => {
+    for (const [logon, mine, platform] of [
+      ['interactive', 'interactive', 'win32'],
+      [null, 'interactive', 'win32'],
+      ['network', 'network', 'win32'],
+      ['network', null, 'win32'],
+      ['network', 'interactive', 'linux'],
+    ] as const) {
+      const h = await heldFolder(logon, [idle])
+      try {
+        expect(await moveIntoSignIn({ dataDir: h.d, entry: SOURCE_HOST, env: {}, existing: h.existing, platform, logonOf: async () => mine, pollMs: 50 }), `${logon} ${mine} ${platform}`).toBe(false)
+        expect(h.calls).not.toContain('host.stop')
+      } finally {
+        await h.server.close()
+      }
+    }
+  })
+
+  it('counts every kind of work as running, and an unreadable answer as running too', () => {
+    expect(nothingRunning(idle)).toBe(true)
+    for (const k of Object.keys(idle)) expect(nothingRunning({ ...idle, [k]: 1 }), k).toBe(false)
+    expect(nothingRunning(null)).toBe(false)
+  })
+
+  /** What the sign-in task runs: `serve` in the foreground, which used to give up on a folder another host held */
+  it('starts its own host once the hand-over freed the folder, where it used to refuse', async () => {
+    const h = await heldFolder('network', [idle])
+    const fake = join(tempDir(), 'host.mjs')
+    const ran = `${fake}.ran`
+    // As a bundle says it: its protocol, and that it reads the token on stdin
+    writeFileSync(join(fake, '..', 'bundle-info.json'), JSON.stringify({ protocolVersion: PROTOCOL_VERSION, tokenOnStdin: 1 }))
+    // A stand-in host: reads its token line, says it is ready on the port it was given, then ends
+    writeFileSync(
+      fake,
+      `import { writeFileSync } from 'node:fs'
+process.stdin.once('data', () => {
+  const port = Number(process.argv[process.argv.indexOf('--port') + 1])
+  writeFileSync(${JSON.stringify(ran)}, String(port))
+  console.log(JSON.stringify({ ready: true, port, token: 'x' }))
+  setTimeout(() => process.exit(0), 50)
+})
+`,
+    )
+    let asked = 0
+    try {
+      const code = await runServe({
+        env: { CC_DATA_DIR: h.d },
+        home: h.d,
+        entry: fake,
+        version: '1.0.0',
+        cliPath: null,
+        platform: 'win32',
+        handOver: async (o: { existing: { logon?: string } }) => {
+          asked++
+          expect(o.existing.logon).toBe('network')
+          await h.server.close()
+          return true
+        },
+      })
+      expect(asked).toBe(1)
+      expect(code).toBe(0)
+      expect(existsSync(ran)).toBe(true)
+    } finally {
+      await h.server.close()
+    }
+  }, 60_000 * SLOW)
 })
 
 describe('the install field and the managed launcher (remote-hub.md §10.1)', () => {

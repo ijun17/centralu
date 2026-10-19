@@ -9,6 +9,7 @@ import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, win
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
+import { moveIntoSignIn } from './serve-handover.mjs'
 
 /**
  * The data folder a command that may start or describe a host works in: its state, created on first use, and the
@@ -70,7 +71,7 @@ export async function printConnection({ env, home, entry, version, cliPath }) {
  * from a newer build) says why in a file `--detach` can quote. From then on host.log has every line,
  * and serve.log stops growing.
  */
-export async function runServe({ env, home, entry, version, cliPath, port: askedPort, from = null, platform = process.platform, execPath = process.execPath, logFd = null }) {
+export async function runServe({ env, home, entry, version, cliPath, port: askedPort, from = null, platform = process.platform, execPath = process.execPath, logFd = null, handOver = moveIntoSignIn }) {
   const { dataDir, state } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry)
 
@@ -78,7 +79,8 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT
   const existing = await probeHost({ port: recorded, token: state.token, protocolVersion, prove: hostProvesOf(entry) })
-  if (heldHere(existing, dataDir)) {
+  // A host the hub's ssh started before anyone signed in moves into this sign-in, once idle (#1224, serve-handover.mjs)
+  if (heldHere(existing, dataDir) && !(await handOver({ dataDir, entry, env, existing, platform }))) {
     const pid = lockHolderPid(dataDir)
     say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${recorded}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
     return 1
