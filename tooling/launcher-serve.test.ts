@@ -49,6 +49,8 @@ import {
   heldHere,
   lockHolderIsAlive,
   lockHolderPid,
+  lockHolder,
+  serveFrom,
   processStartTime,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
@@ -119,6 +121,15 @@ describe('serve arguments', () => {
 
   it('shows help for --help', () => {
     expect(parseServeArgs(['--help']).mode).toBe('help')
+  })
+
+  /** The hub's name, for the host.lock a second Centralu on the folder reads (#1223) */
+  it('takes --from <hub> with serve and --detach only, and only a name that cannot break a sentence or a command line', () => {
+    expect(parseServeArgs(['--detach', '--from', 'Mac-mini.local'])).toEqual({ mode: 'detach', port: null, from: 'Mac-mini.local' })
+    expect(parseServeArgs(['--from=Mac'])).toEqual({ mode: 'serve', port: null, from: 'Mac' })
+    expect(parseServeArgs(['--detach', '--from', 'a b']).error).toMatch(/--from needs a computer's name/)
+    expect(parseServeArgs(['--detach', '--from']).error).toMatch(/got nothing/)
+    expect(parseServeArgs(['--connection', '--from', 'Mac']).error).toMatch(/--from goes with/)
   })
 })
 
@@ -268,7 +279,8 @@ describe('replacing a file that a reader holds open (#1041)', () => {
 describe('the connection line', () => {
   it('has exactly the fields the client reads, in one JSON object', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
+    // `takes`: the options an older serve refuses, so a hub sends them only to one that says so (#1223)
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from'] })
     expect(line).not.toContain('\n')
   })
 
@@ -292,6 +304,27 @@ describe('how the host is started', () => {
    * #538: a process's start environment stays readable to every process of its user while it runs (#502), and its
    * arguments to every user. The token goes as the first line on the host's stdin, a pipe to this launcher.
    */
+  /*
+   * #1223: the host writes who asked for it to its host.lock (`CC_SERVE_FROM`, which it takes out of its environment
+   * before it starts anything). A `--detach` runs in the ssh session and its launcher does not, so it carries what it found
+   */
+  it('tells the host who asked for it: the hub --from named and the ssh client, carried past --detach', () => {
+    const ssh = { SSH_CLIENT: '192.168.0.5 52344 22' }
+    expect(serveFrom(ssh, 'Mac-mini')).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    expect(serveFrom({ SSH_CONNECTION: 'fe80::1 52344 fe80::2 22' })).toEqual({ ssh: 'fe80::1' })
+    expect(serveFrom({})).toBeNull()
+    expect(serveFrom({ SSH_CLIENT: '$(rm) 1 22' }, 'a b')).toBeNull()
+    const carried = { CENTRALU_STARTED_FROM: JSON.stringify({ hub: 'Mac-mini', ssh: '192.168.0.5' }) }
+    expect(serveFrom(carried)).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    const spec = decodeChildSpec(encodeChildSpec({ env: { ...carried, SSH_CLIENT: 'x' }, log: '/d/serve.log' }))
+    expect(spec.env).toEqual(carried)
+    const e = hostEnv({ ...carried, CC_STARTED_BY: 'app' }, { dataDir: '/d', version: '1.0.0', hostDir: '/h', from: serveFrom(carried) })
+    expect(JSON.parse(e.CC_SERVE_FROM)).toEqual({ hub: 'Mac-mini', ssh: '192.168.0.5' })
+    expect(e.CENTRALU_STARTED_FROM).toBeUndefined()
+    expect(e.CC_STARTED_BY).toBeUndefined()
+    expect(hostEnv({ CC_SERVE_FROM: 'stale' }, { dataDir: '/d', version: '1.0.0', hostDir: '/h' }).CC_SERVE_FROM).toBeUndefined()
+  })
+
   it('hands the token over on stdin, never in the environment or on the command line', () => {
     const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: '/h' })
     expect(e.CC_HOST_TOKEN).toBeUndefined()
@@ -1081,6 +1114,20 @@ describe('the pid host.lock names', () => {
     expect(at(JSON.stringify({ pid: 4242, started: 'Thu Oct 16 10:00:00 2026' }))).toBe(4242)
     expect(at(JSON.stringify({ pid: 4242 }))).toBe(4242)
     for (const bad of ['0', '{"pid":0}', '{"pid":-3}', '{"pid":"4242"}', '{"pid":4.5}', '"4242"', '4.0', 'null', 'not a lock', '']) expect(at(bad), bad).toBeNull()
+  })
+
+  // So a serve refused on a folder says whose host holds it (#1223): what it says, never what it does not
+  it('reads who started that host when the lock says, and nothing it does not know', () => {
+    const d = tempDir()
+    const at = (v: unknown) => {
+      writeFileSync(join(d, 'host.lock'), JSON.stringify(v))
+      return lockHolder(d)
+    }
+    expect(at({ pid: 4242, started: null, by: 'app', at: 1 })).toEqual({ pid: 4242, started: null, by: 'app' })
+    expect(at({ pid: 4242, started: null, by: 'serve', from: { hub: 'Mac' } })).toEqual({ pid: 4242, started: null, by: 'serve' })
+    expect(at({ pid: 4242, started: null, by: 'robot' })).toEqual({ pid: 4242, started: null })
+    writeFileSync(join(d, 'host.lock'), '77')
+    expect(lockHolder(d)).toEqual({ pid: 77, started: null })
   })
 })
 

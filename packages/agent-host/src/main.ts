@@ -244,14 +244,18 @@ if (swapping) {
 start.at('lock')
 let lock: ReturnType<typeof acquireInstanceLock>
 try {
-  lock = acquireInstanceLock(dbPath)
+  // Who started it, for the message a second host on this folder prints (#1223)
+  lock = acquireInstanceLock(dbPath, undefined, {
+    ...(launch.startedBy ? { by: launch.startedBy } : {}),
+    ...(launch.serveFrom ? { from: launch.serveFrom } : {}),
+  })
 } catch (err) {
   // Ownership could not be checked at all (an unreadable ownership file): not starting is the safe answer (#82)
   refuse(`[agent-host] ${(err as Error).message}`)
   throw err
 }
 if (!lock.ok) {
-  refuse(lockConflictMessage(lock.heldByPid, lock.lockPath))
+  refuse(lockConflictMessage(lock.holder ?? lock.heldByPid, lock.lockPath))
   process.exit(1)
 }
 /*

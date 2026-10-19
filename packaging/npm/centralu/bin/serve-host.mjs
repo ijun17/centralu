@@ -35,6 +35,11 @@ export function protocolVersionOf(entry) {
  * is added by `--detach` only.
  */
 export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof }) {
+  /*
+   * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
+   * when the line says so, since an older serve answers an option it does not know with an error
+   */
+  const takes = ['from']
   return JSON.stringify({
     v: 1,
     port,
@@ -48,7 +53,43 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
     ...(detach ? { detach } : {}),
     // The running host proves it holds the token before the hub sends it (#838); absent: the hub sends hello as before
     ...(proof ? { proof: true } : {}),
+    takes,
   })
+}
+
+/**
+ * Where a `serve` was asked for from (#1223), for the host's `host.lock` (`CC_SERVE_FROM`): the hub's name `--from`
+ * gave, and the ssh client's address when this runs in an ssh session (OpenSSH's `SSH_CLIENT`, on Windows too). What a
+ * `--detach` found is carried to the launcher it starts (`CENTRALU_STARTED_FROM`), which runs outside the ssh session.
+ * Null when neither is known.
+ */
+export function serveFrom(env, hub = null) {
+  const carried = parseStartedFrom(env.CENTRALU_STARTED_FROM)
+  if (carried) return carried
+  const ssh = String(env.SSH_CLIENT ?? env.SSH_CONNECTION ?? '').trim().split(/\s+/)[0] ?? ''
+  const from = {
+    ...(typeof hub === 'string' && FROM_NAME_RE.test(hub) ? { hub } : {}),
+    ...(SSH_ADDRESS_RE.test(ssh) ? { ssh } : {}),
+  }
+  return from.hub || from.ssh ? from : null
+}
+
+const FROM_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/
+/** An IPv4 or IPv6 address as OpenSSH writes it: digits, hex, dots and colons */
+const SSH_ADDRESS_RE = /^[0-9A-Fa-f.:]{2,64}$/
+
+function parseStartedFrom(raw) {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw)
+    const from = {
+      ...(typeof v?.hub === 'string' && FROM_NAME_RE.test(v.hub) ? { hub: v.hub } : {}),
+      ...(typeof v?.ssh === 'string' && SSH_ADDRESS_RE.test(v.ssh) ? { ssh: v.ssh } : {}),
+    }
+    return from.hub || from.ssh ? from : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -69,9 +110,11 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
  *   `CENTRALU_MANAGED`, which is the launcher's business and would otherwise reach every agent.
  * - `CC_SERVE=1` lets the host take `host.stop` (`--stop`); a host the app runs refuses it.
  */
-export function hostEnv(env, { dataDir, version, hostDir, legacyToken }) {
+export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = null }) {
   const out = { ...env }
-  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED']) delete out[k]
+  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CC_SERVE_FROM', 'CC_STARTED_BY']) delete out[k]
+  // Who asked for this host, for its host.lock (#1223): a second host on the folder names it when refused
+  if (from) out.CC_SERVE_FROM = JSON.stringify(from)
   out.CC_DATA_DIR = dataDir
   // The host `host.stop` may end (`centralu serve --stop`): nothing else stops it in order on Windows
   out.CC_SERVE = '1'

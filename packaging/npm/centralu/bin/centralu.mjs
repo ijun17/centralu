@@ -655,11 +655,11 @@ switch (cmd) {
       // realpath: npm's bin is a symlink to this file, and the launcher must not depend on the link
       const opts = { env: process.env, home: HOME, entry: requireHostEntry(), version: pkg.version, cliPath: realpathSync(process.argv[1]) }
       if (args.mode === 'connection') process.exitCode = await printConnection(opts)
-      else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port })
+      else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port, from: args.from })
       else if (args.mode === 'stop') process.exitCode = await runStop(opts)
       else if (args.mode === 'autostart') process.exitCode = await runAutostart({ ...opts, action: args.autostart })
       else if (spec) process.exitCode = await runDetachedChild({ ...opts, spec, port: args.port })
-      else process.exitCode = await runServe({ ...opts, port: args.port })
+      else process.exitCode = await runServe({ ...opts, port: args.port, from: args.from })
     } catch (e) {
       // A state file that cannot be read or written: one sentence, not a stack, and nothing on stdout
       console.error(`centralu serve: ${e?.message ?? e}`)

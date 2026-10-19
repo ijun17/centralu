@@ -4,10 +4,10 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolderPid, removeServePid } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 
 /**
@@ -70,7 +70,7 @@ export async function printConnection({ env, home, entry, version, cliPath }) {
  * from a newer build) says why in a file `--detach` can quote. From then on host.log has every line,
  * and serve.log stops growing.
  */
-export async function runServe({ env, home, entry, version, cliPath, port: askedPort, platform = process.platform, execPath = process.execPath, logFd = null }) {
+export async function runServe({ env, home, entry, version, cliPath, port: askedPort, from = null, platform = process.platform, execPath = process.execPath, logFd = null }) {
   const { dataDir, state } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry)
 
@@ -100,7 +100,7 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   const onStdin = takesTokenOnStdin(entry)
   const child = spawn(plan.command, plan.args, {
     stdio: ['pipe', 'pipe', logFd === null ? 'inherit' : 'pipe'],
-    env: hostEnv(env, { dataDir, version, hostDir: dirname(entry), ...(onStdin ? {} : { legacyToken: state.token }) }),
+    env: hostEnv(env, { dataDir, version, hostDir: dirname(entry), from: serveFrom(env, from), ...(onStdin ? {} : { legacyToken: state.token }) }),
     detached: plan.detached,
     windowsHide: true,
   })
@@ -168,12 +168,11 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
       for (const s of signals) process.off(s, forward)
       removeServePid(dataDir, process.pid)
       if (!ready && code !== 0) {
-        const pid = lockHolderPid(dataDir)
-        if (pid && pid !== child.pid && isAlive(pid)) {
-          say(
-            `the host did not start. ${dataDir} belongs to another Centralu host (pid ${pid}), ` +
-              'probably the Centralu app on this machine. Quit it, or point CC_DATA_DIR at another folder.',
-          )
+        const holder = lockHolder(dataDir)
+        if (holder && holder.pid !== child.pid && isAlive(holder.pid)) {
+          // Who it is, when its host.lock says (#1223)
+          const who = { app: 'the Centralu window on this machine', keeper: "Centralu's keeper on this machine", serve: 'another centralu serve' }[holder.by] ?? 'probably the Centralu app on this machine'
+          say(`the host did not start. ${dataDir} belongs to another Centralu host (pid ${holder.pid}), ${who}. Quit it, or point CC_DATA_DIR at another folder.`)
         }
       }
       if (logFd !== null) say(`the host exited (${signal ?? code})`)

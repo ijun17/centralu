@@ -34,7 +34,7 @@ import { hasPs } from '../os.js'
  * are not reliable.
  */
 
-export type LockResult = { ok: true; release: () => void } | { ok: false; heldByPid: number | null; lockPath: string }
+export type LockResult = { ok: true; release: () => void } | { ok: false; heldByPid: number | null; holder: Holder | null; lockPath: string }
 
 /** The file whose exclusive lock is the ownership */
 export const OWNERSHIP_FILE = 'host-ownership.sqlite'
@@ -45,8 +45,18 @@ export const OWNERSHIP_FILE = 'host-ownership.sqlite'
  */
 const held = new Set<Database.Database>()
 
-/** The lock file's contents. A file an older host wrote is just a bare pid number */
-type Holder = { pid: number; started: string | null }
+/**
+ * Who started a host, as `host.lock` describes it (#1223): the desktop window (`app`), the keeper, or `centralu serve`
+ * (with where it was asked for from: a hub's link names its hub, an ssh session its client's address)
+ */
+export type HolderDescription = { by?: 'app' | 'keeper' | 'serve'; from?: { hub?: string; ssh?: string } }
+
+/**
+ * The lock file's contents. A file an older host wrote is just a bare pid number, or `{ pid, started }`; `at` (when it
+ * took the folder, as epoch milliseconds: `started` is null on Windows, which has no `ps`), `by` and `from` are
+ * additive (#1223), and a field of the wrong shape is read as absent
+ */
+export type Holder = { pid: number; started: string | null; at?: number } & HolderDescription
 
 /**
  * That pid's start time. null if it is unknown.
@@ -71,15 +81,26 @@ export function processStartTime(pid: number): string | null {
   }
 }
 
+const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
+
 function parseHolder(raw: string): Holder {
   const text = raw.trim()
   if (/^\d+$/.test(text)) return { pid: Number(text), started: null }
   try {
-    const v = JSON.parse(text) as { pid?: unknown; started?: unknown }
-    return {
+    const v = JSON.parse(text) as { pid?: unknown; started?: unknown; at?: unknown; by?: unknown; from?: unknown }
+    const holder: Holder = {
       pid: typeof v.pid === 'number' ? v.pid : NaN,
       started: typeof v.started === 'string' ? v.started : null,
     }
+    if (typeof v.at === 'number' && Number.isFinite(v.at)) holder.at = v.at
+    if (v.by === 'app' || v.by === 'keeper' || v.by === 'serve') holder.by = v.by
+    const f = (v.from && typeof v.from === 'object' ? v.from : {}) as Record<string, unknown>
+    const from = {
+      ...(typeof f.hub === 'string' && NAME_RE.test(f.hub) ? { hub: f.hub } : {}),
+      ...(typeof f.ssh === 'string' && NAME_RE.test(f.ssh) ? { ssh: f.ssh } : {}),
+    }
+    if (from.hub || from.ssh) holder.from = from
+    return holder
   } catch {
     return { pid: NaN, started: null }
   }
@@ -92,6 +113,8 @@ function parseHolder(raw: string): Holder {
 export function acquireInstanceLock(
   dbPath: string,
   startOf: (pid: number) => string | null = processStartTime,
+  describe: HolderDescription = {},
+  now: () => number = Date.now,
 ): LockResult {
   // an in-memory database is never shared
   if (dbPath === ':memory:') return { ok: true, release: () => {} }
@@ -109,11 +132,15 @@ export function acquireInstanceLock(
   if (!owner) {
     // Another host holds it. The file says who, when it can; the lock is the authority either way
     const holder = readHolder()
-    return { ok: false, heldByPid: holder && Number.isInteger(holder.pid) && holder.pid > 0 ? holder.pid : null, lockPath }
+    const pid = holder && Number.isInteger(holder.pid) && holder.pid > 0 ? holder.pid : null
+    return { ok: false, heldByPid: pid, holder: holder && pid !== null ? holder : null, lockPath }
   }
 
   // Whatever the file says, its writer no longer holds the folder: the file is overwritten
-  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, started: startOf(process.pid) }))
+  const own: Holder = { pid: process.pid, started: startOf(process.pid), at: now() }
+  if (describe.by) own.by = describe.by
+  if (describe.from && (describe.from.hub || describe.from.ssh)) own.from = describe.from
+  writeFileSync(lockPath, JSON.stringify(own))
   let released = false
   return {
     ok: true,
@@ -166,12 +193,41 @@ function giveUp(db: Database.Database): void {
   }
 }
 
-/** The message shown when blocked by the lock. Names the lock file's location so even a person with no window to close can get unstuck (#184) */
-export function lockConflictMessage(heldByPid: number | null, lockPath: string): string {
-  return (
-    `[agent-host] Another Centralu is already using this data (pid ${heldByPid ?? 'unknown'}).\n` +
-    `  Two hosts on the same folder will desync session lists.\n` +
-    `  Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).\n` +
-    `  Lock file: ${lockPath}`
-  )
+/**
+ * The message shown when blocked by the lock. Names the lock file's location so even a person with no window to close
+ * can get unstuck (#184), and who holds the folder when `host.lock` says (#1223): on a linked Windows machine the
+ * holder is often the host a hub's link started, and "close the running window" sent the person looking for a window
+ * that was not there. "already using this data" is matched by the window's supervisor (`is_final_refusal`): kept.
+ */
+export function lockConflictMessage(holder: Holder | number | null, lockPath: string): string {
+  const h: Holder | null = typeof holder === 'number' ? { pid: holder, started: null } : holder
+  const since = typeof h?.at === 'number' ? `, since ${new Date(h.at).toISOString().replace(/\.\d{3}Z$/, 'Z')}` : ''
+  return [
+    `[agent-host] Another Centralu is already using this data: ${holderName(h)} (pid ${h?.pid ?? 'unknown'}${since}).`,
+    '  Two hosts on the same folder will desync session lists.',
+    `  ${holderAdvice(h)}`,
+    `  Lock file: ${lockPath}`,
+  ].join('\n')
+}
+
+/** Who holds the folder, in words */
+function holderName(h: Holder | null): string {
+  if (h?.by === 'serve') {
+    const link = h.from?.hub ? ` for the link from ${h.from.hub}` : ''
+    const ssh = h.from?.ssh ? ` (asked for over ssh from ${h.from.ssh})` : ''
+    return `the host \`centralu serve\` runs${link}${ssh}`
+  }
+  if (h?.by === 'app') return 'the host of the Centralu window on this computer'
+  if (h?.by === 'keeper') return "the host Centralu's keeper runs on this computer"
+  return 'another host'
+}
+
+/** What frees it, and what that costs */
+function holderAdvice(h: Holder | null): string {
+  if (h?.by === 'serve') {
+    const link = h.from?.hub ? `the link from ${h.from.hub}` : 'a hub linked to this computer'
+    return `A Centralu window of this version or later uses that host instead of starting its own. To free the folder, run \`centralu serve --stop\` here: ${link} loses this computer until it reconnects.`
+  }
+  if (h?.by === 'keeper') return 'Quit Centralu completely first, or use pnpm app:dev while developing (it uses a separate data folder).'
+  return 'Close the running window first, or use pnpm app:dev while developing (it uses a separate data folder).'
 }

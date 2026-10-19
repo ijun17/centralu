@@ -9,6 +9,8 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
   centralu serve --stop           Ask the running host to stop, and wait until it has
   centralu serve --connection     Print how to reach it as one JSON line, then exit
   centralu serve --rotate-token   Replace the token (a running serve keeps the old one until restarted)
+  centralu serve --from <hub>     With serve or --detach: the name of the computer whose link asks,
+                                  said by a second Centralu on this data folder when it is refused
   centralu serve --autostart on|off|status
                                   Start it when this machine starts (Linux: a systemd user unit;
                                   Windows and WSL: a scheduled task at sign-in), stop doing that,
@@ -39,6 +41,12 @@ export const AUTOSTART_ACTIONS = ['on', 'off', 'status']
 export const CHILD_FLAG = '--detached-child='
 
 /**
+ * What `--from` takes (#1223): a hub's name, short and of characters that cannot break the sentence a refused host says
+ * it in, nor a command line. The hub sends its own host name, cleaned the same way (`hubNameForRemote`, links/tunnel.ts)
+ */
+export const FROM_RE = /^[A-Za-z0-9._-]{1,64}$/
+
+/**
  * What the arguments after `serve` ask for: `{ mode, port }` (plus `child` for a detached launcher,
  * `autostart` for `--autostart`) or `{ error }`.
  *
@@ -53,6 +61,7 @@ export function parseServeArgs(argv) {
   let help = false
   let child = null
   let autostart = null
+  let from = null
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--autostart' || a.startsWith('--autostart=')) {
@@ -72,12 +81,17 @@ export function parseServeArgs(argv) {
       const n = parsePort(raw)
       if (n === null) return { error: `--port needs a port number between 1 and 65535 (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
       port = n
+    } else if (a === '--from' || a.startsWith('--from=')) {
+      const raw = a === '--from' ? argv[++i] : a.slice('--from='.length)
+      if (typeof raw !== 'string' || !FROM_RE.test(raw)) return { error: `--from needs a computer's name: letters, digits, '.', '_' and '-' (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
+      from = raw
     } else return { error: `unknown option for serve: ${a}\n\n${SERVE_HELP}` }
   }
   if (help) return { mode: 'help', port }
+  if (from !== null && mode !== 'serve' && mode !== 'detach') return { error: `--from goes with \`centralu serve\` and --detach, which start a host; not with ${FLAG_OF[mode]}` }
   if (child !== null) {
     if (mode !== 'serve') return { error: `${CHILD_FLAG.slice(0, -1)} is how --detach starts serve, not an option of ${FLAG_OF[mode]}` }
-    return { mode, port, child }
+    return { mode, port, child, ...(from !== null ? { from } : {}) }
   }
   if ((mode === 'connection' || mode === 'rotate') && port !== null) {
     return { error: '--port goes with `centralu serve`; `--connection` reports the port serve listens on' }
@@ -87,7 +101,7 @@ export function parseServeArgs(argv) {
     if (port !== null) return { error: '--autostart takes no --port: the entry it writes starts serve on the port serve recorded' }
     return { mode, port, autostart }
   }
-  return { mode, port }
+  return { mode, port, ...(from !== null ? { from } : {}) }
 }
 
 function parsePort(raw) {

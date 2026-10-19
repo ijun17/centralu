@@ -11,7 +11,7 @@ import { SERVE_LOG_FILE, serveDataDir, readServeState, ensureServeState, heldHer
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
-import { protocolVersionOf, connectionLine, hostProvesOf, probeHost, askHostToStop } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostProvesOf, probeHost, askHostToStop, serveFrom } from './serve-host.mjs'
 import { describe, runServe, serveFolder } from './serve-run.mjs'
 
 /**
@@ -19,7 +19,7 @@ import { describe, runServe, serveFolder } from './serve-run.mjs'
  * does not inherit this environment: it gets the account's default one. Everything else it needs
  * (the token, the port) is in the data folder. Never a secret.
  */
-export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED']
+export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM']
 
 export function encodeChildSpec({ env, log }) {
   const carried = {}
@@ -111,6 +111,7 @@ export async function runDetach({
   version,
   cliPath,
   port = null,
+  from = null,
   platform = process.platform,
   execPath = process.execPath,
   cwd = process.cwd(),
@@ -138,7 +139,10 @@ export async function runDetach({
   } catch {
     // there was none
   }
-  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env, log })}`]
+  // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
+  const asked = serveFrom(env, from)
+  const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
+  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log })}`]
   let started
   try {
     started = await start({ how, execPath, args, env, cwd })
