@@ -1,4 +1,5 @@
 import { initialSession } from '@cc/core'
+import type { ToolName } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { syncBadge } from './events/notices.js'
 import { replayPendingEvents } from './sessionList.js'
@@ -14,11 +15,24 @@ type OrchestratorActions = Pick<
   | 'openOrchestrator'
   | 'askOrchestrator'
   | 'completeIntro'
+  | 'chooseOrchestratorTool'
   | 'refreshMcpProposals'
   | 'resolveMcpProposal'
   | 'refreshSkillProposals'
   | 'resolveSkillProposal'
 >
+
+/** Records the tool the orchestrator will be born with; a failure is toasted */
+async function recordChoice(set: StoreSet, get: StoreGet, tool: ToolName): Promise<boolean> {
+  try {
+    await get().platform?.agents.configureOrchestrator(tool)
+    set({ orchestratorTool: tool })
+    return true
+  } catch (e) {
+    set({ toast: `Could not save the choice: ${(e as Error).message}` })
+    return false
+  }
+}
 
 export const orchestratorActions = (set: StoreSet, get: StoreGet): OrchestratorActions => ({
   async openOrchestrator() {
@@ -89,7 +103,6 @@ export const orchestratorActions = (set: StoreSet, get: StoreGet): OrchestratorA
   },
 
   async completeIntro(tool) {
-    const platform = get().platform
     /*
      * The screen is passed through first — a failed setting save must not trap the person on the intro
      * screen (it runs on the default, claude). Clicking the card only records the setting; no process
@@ -97,12 +110,24 @@ export const orchestratorActions = (set: StoreSet, get: StoreGet): OrchestratorA
      */
     set({ introSeen: true })
     get().saveWorkspace()
-    try {
-      await platform?.agents.configureOrchestrator(tool)
-    } catch (e) {
-      set({ toast: `Could not save the choice: ${(e as Error).message}` })
-    }
+    await recordChoice(set, get, tool)
     void get().openOrchestrator()
+  },
+
+  async chooseOrchestratorTool(tool) {
+    const platform = get().platform
+    if (!platform) return false
+    let id = get().orchestratorId
+    if (!id) {
+      // This run may not have opened it: the host knows whether a session exists, and a recorded choice is not read once one does
+      try {
+        id = (await platform.agents.orchestratorPeek())?.id ?? null
+      } catch (e) {
+        set({ toast: `Could not switch the agent: ${(e as Error).message}` })
+        return false
+      }
+    }
+    return id ? get().switchTool(id, tool) : recordChoice(set, get, tool)
   },
 
   async refreshMcpProposals() {

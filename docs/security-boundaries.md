@@ -349,6 +349,12 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `create_project` | yes | — | — | — | — |
 | `add_project` | yes | — | — | — | — |
 | `list_machines` | yes | — | — | — | — |
+| `add_machine` | yes | — | — | — | — |
+| `install_machine` | yes | — | — | — | — |
+| `remove_machine` | yes | — | — | — | — |
+| `reconnect_machine` | yes | — | — | — | — |
+| `set_machine_connect` | yes | — | — | — | — |
+| `set_machine_autostart` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -358,9 +364,9 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `ask_project` | — | — | — | yes | — |
 | `start_agent` | yes | — | — | yes | — |
 | `agent_session` | yes | — | — | yes | — |
-| `find_apps` | — | — | — | yes | — |
-| `attach_app` | — | — | — | yes | — |
-| `detach_app` | — | — | — | yes | — |
+| `find_apps` | yes | — | — | yes | — |
+| `attach_app` | yes | — | — | yes | — |
+| `detach_app` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
@@ -448,9 +454,10 @@ defers them behind Claude's tool search, which changes nothing here. The measure
 [tool-cost.md](tool-cost.md) §9.
 
 Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
-user-folder apps and the root apps of trusted projects (#1141: a project whose folder holds the manifest
-is an app, and its trust is the project's), a project's sessions that project's apps, and a builder its
-own app (`givesApp` in `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4). An
+user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
+`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the orchestrator adds the
+root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and
+its trust is the project's; #1205: as commands behind `centralu_run`, and never a project's inner app). An
 agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,
 #1141): its root app and the apps inside it, to no session, its own project's included, under every
 preset, `auto` too; #603's opening no longer applies to apps, and the runtime refuses them for every
@@ -508,6 +515,8 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `add_project` (the orchestrator adds a folder that already exists, here or on a linked machine, #1220) | asks (a card with the machine, the full path, that it exists and is a folder, and whether it is a git repository with its `origin`, every time) | asks | asks | asks | asks | asks | asks | asks | `ProjectCreation.addFolderAsked` / `addFolderOnMachine` (`sessions/project-creation.ts`) → `askHost` with `alwaysAsk`: `auto` does not answer it, since the folder can be anything on that disk and, once a project, the orchestrator can start sessions in it. The facts are read on the folder's machine (`projects.inspect`, git config only, none of the repository's programs); a missing path, a file or a folder already a project is refused before the card, and on Allow the folder is registered as the sidebar's Add project registers it (`addProject`; on a linked machine that machine's `projects.add`), untrusted when new. The central orchestrator only, as a rare command behind `centralu_run` |
 | `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and connect mode; the central orchestrator only |
+| `add_machine`, `install_machine` (install or update), `remove_machine`, `set_machine_autostart` (the orchestrator changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The central orchestrator only, as rare commands behind `centralu_run` |
+| `reconnect_machine`, `set_machine_connect` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setConnect`: what the Machines row's Reconnect and connect setting do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -515,6 +524,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
+| `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
 | Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
@@ -593,6 +603,21 @@ are read again and the folder is registered by the sidebar's own steps (`addProj
 `projects.add`): untrusted when new, and the window asks about trust as when the person adds a folder. Deny or a
 withdrawn card registers nothing. Only the central orchestrator has it, as a rare command behind `centralu_run`
 (`RARE_COMMANDS`); `list_machines`, beside it, only reads the hub's `machines.list`.
+
+**Linked machines from the orchestrator** (#1219). Linking a machine lets this computer, and the agents on it, reach
+that machine over the person's own ssh; installing or updating runs Centralu's installer there and, for an update, stops
+the Centralu running there; removing one drops its sessions and projects from this computer's lists; start at boot
+writes an entry in that machine's own startup. Each of these is the person's choice, so the orchestrator's commands for
+them wait for a card under every preset, `auto` included, and the card says what will run where. The card offers allow
+and deny only and nothing is remembered: a window that knows `machine_change` shows no "always", and an older window's
+"always" is read as allow, once. Reconnecting and when a machine connects change no machine and no reach, as the row's
+buttons do not ask. Linking connects nowhere before the card (security review of #1238): a probe logs in with the
+person's keys, so before the card the host only runs `ssh -G`, which opens no connection and loads no key, and the card
+shows where ssh would go (host, user, port, and a ProxyCommand or ProxyJump, which run a command or reach another host
+first). The probe comes after Allow, and a target that does not answer is linked nowhere. Before any card the host refuses
+what it can tell without connecting: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read,
+a target, name or distro with a control or format character (a bidi override would make the card read otherwise than
+what runs), a name already linked, and an install this computer cannot make.
 
 ### Turning things off
 
@@ -940,6 +965,11 @@ A host started with `centralu serve` on another machine is reached by the app th
   (`hello_ok.elevated`, from the token's integrity level) and the machine's row in Settings → Machines says it in one
   sentence with the way out: link the machine through a standard account with its own ssh key. A host running as root
   on Linux or macOS is reported the same way.
+- **A host started over ssh on Windows has no access to the person's saved sign-ins** (#1224). A key login is a network
+  logon without the password, so DPAPI cannot unlock the user's master key and Credential Manager reads as empty
+  (measured: `cmdkey /list` printed `* NONE *` there while the profile held 46 saved credentials). Git Credential
+  Manager can neither use nor save a sign-in. Centralu does not work around it (no plaintext store, no token carried
+  through Centralu): the host says which logon it runs in (`hello_ok.logon`) and the machine's row says what that means.
 - **A dev build on a linked machine** (`pnpm remote-dev`, #1036; [plans/remote-hub.md](plans/remote-hub.md) §10.11)
   sends nothing new across the link (no file travels but the installer every update sends), but it does run what is
   on that machine: the working copy there, by its own bundler on the pinned Node, at a commit the hub named in full and
@@ -1466,9 +1496,28 @@ Limits:
 - Hardlinks in a source folder are copied as the files they are; pathname checks cannot tell where
   an inode came from (the same limit as "Project files and native handoff"). Same-user races
   between checking a file and opening it remain.
-- If `app-imports.json` cannot be read, it is moved aside and the marks are lost: imported apps
-  are then treated as the user's own until they are imported again. The host logs this. The same
-  holds for `app-secrets.json`, whose values then stay in the moved-aside copy. Only a file that
+- If `app-imports.json` cannot be read, the marks cannot be used, and the file is also the only
+  record of which apps were imported (#1172). When it is gone and a moved-aside copy
+  (`app-imports.json.unreadable-<ms>`) is in the data folder, every app then in the user folder, the
+  person's own apps too, gets a mark (`lost`) in a new file written at once, and asks once before it
+  runs again, with a reason naming both files: an app asks once more rather than running unasked. The
+  new file is the record from then on, so an app made later is not held and removing the copy is
+  safe; a mended copy put back is read as soon as the file changes. The new file goes in place by a
+  hard link, which never replaces a file: one put back, or written by the other host of a swap, in
+  the moment before wins. While the file cannot be read at all, the data folder cannot be listed, or
+  the new file cannot be written (a data folder on a disk without hard links), every app without a
+  mark is held instead (`ImportBook.doubt`), tried again once a second. The host logs it
+  (`imports.test.ts` "a marks file that cannot be read holds the apps instead of running them").
+- **Only the apps in the user folder at that moment are held.** An import whose folder is not there
+  when the loss is found (moved out of the user folder for a while, or the whole `apps` folder
+  missing) gets no `lost` mark, and runs as the person's own when it comes back.
+- **An older build ignores the copy.** A build before #1172 (a rollback, or the older host still
+  serving during a swap) reads a missing `app-imports.json` as no imports and runs every imported app
+  unasked, as it always did. Once this build has written the file of `lost` marks, an older build
+  reads them as imports not yet enabled and holds those apps too. A file an older build writes in
+  the meantime, from its empty view of the marks, is taken as the record.
+- An unreadable `app-secrets.json` is moved aside the same way, and its values stay in the
+  moved-aside copy. For both files, only a file that
   does not parse, or parses to the wrong shape, is moved aside; one that cannot be read at all (no
   permission, too many open files, held by a scan on Windows) is left in place, reads as empty, and
   writes to it are refused until a read succeeds, as they are while a damaged file cannot be moved.

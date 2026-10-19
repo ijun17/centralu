@@ -174,8 +174,16 @@ describe('resolving each alias with ssh -G', () => {
       hostName: 'box.ts.net',
       user: 'me',
       port: 38222,
+      proxyCommand: null,
+      proxyJump: null,
     })
-    expect(parseSshG('')).toEqual({ hostName: null, user: null, port: null })
+    expect(parseSshG('')).toEqual({ hostName: null, user: null, port: null, proxyCommand: null, proxyJump: null })
+  })
+
+  // The orchestrator's add_machine card shows where ssh would really go, a proxy included (#1219, review of #1238)
+  it('reads the proxy ssh would go through, and none when ssh -G says none', () => {
+    expect(parseSshG('hostname box\nproxycommand ssh -W %h:%p jump\nproxyjump none\n')).toMatchObject({ proxyCommand: 'ssh -W %h:%p jump', proxyJump: null })
+    expect(parseSshG('hostname box\nproxyjump me@bastion:2200\n')).toMatchObject({ proxyCommand: null, proxyJump: 'me@bastion:2200' })
   })
 
   it('asks ssh only for -G, never to connect, and lists what it resolved', async () => {

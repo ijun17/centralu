@@ -10,7 +10,7 @@ import { autostartCommand, lastLine, NOT_FOUND, parseAutostart, type RemoteAutos
  * machine is the one writer of its own state (plan S12), so the toggle reads what it answered.
  */
 
-export type AutostartAction = 'on' | 'off' | 'status'
+export type AutostartAction = 'on' | 'off' | 'remove' | 'status'
 
 /** Why a machine could not be asked at all, as opposed to a refusal: uninstall goes on past these */
 export type AutostartUnasked = 'not_found' | 'too_old'
@@ -36,6 +36,7 @@ export function parseAutostartLine(stdout: string): { ok: boolean; state: Remote
 const FAILED: Record<AutostartAction, string> = {
   on: 'could not be set to start at boot',
   off: 'could not stop starting at boot',
+  remove: 'could not remove its start at boot',
   status: 'could not say whether it starts at boot',
 }
 
@@ -56,6 +57,9 @@ export async function autostartRemote(
     if (/unknown option for serve: --autostart/.test(r.stderr)) {
       throw unasked('too_old', `The Centralu on ${c.target} is too old to start at boot; update it first`)
     }
+    if (/--autostart needs on, off or status \(got "remove"\)/.test(r.stderr)) {
+      throw Object.assign(new Error(`The Centralu on ${c.target} predates --autostart remove`), { olderServe: true })
+    }
     const why = lastLine(r.stderr)
     throw new Error(`Centralu on ${c.target} gave no answer about starting at boot${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
   }
@@ -70,7 +74,13 @@ export async function autostartRemote(
  */
 export async function removeAutostart(c: Parameters<typeof autostartRemote>[0]): Promise<boolean> {
   try {
-    await autostartRemote(c, 'off')
+    try {
+      await autostartRemote(c, 'remove')
+    } catch (err) {
+      // A serve from before `remove` (#1224 review), where `off` removes the entry
+      if (!(err as { olderServe?: boolean }).olderServe) throw err
+      await autostartRemote(c, 'off')
+    }
     return true
   } catch (err) {
     if ((err as { reason?: AutostartUnasked }).reason) return false

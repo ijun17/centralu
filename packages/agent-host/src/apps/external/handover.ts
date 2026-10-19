@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
@@ -21,8 +21,7 @@ import {
   type StagedFiles,
 } from './imports.js'
 import type { AppManifest } from './manifest.js'
-import { appsFolderOf } from './placement.js'
-import { USER_APPS_PARTS } from './discovery.js'
+import { appFolderTaken, appsFolderOf, nameTaken } from './placement.js'
 import { folderFingerprint } from './fingerprint.js'
 import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
@@ -105,15 +104,20 @@ export class AppHandover {
    */
   gate(appId: string, dir: string, manifest: AppManifest): string | null {
     const mark = this.book.get(appId, dir)
-    if (!mark) return null
+    // No mark is the person's own app only while the marks can be trusted to be complete (#1172)
+    if (!mark) return this.book.doubt()
     if (mark.confirmed && mark.confirmed.key === reviewKey(manifest)) return null
-    return mark.confirmed ? CHANGED : NOT_ENABLED
+    if (mark.confirmed) return CHANGED
+    return mark.lost !== undefined ? this.book.lostReason(mark.lost) : NOT_ENABLED
   }
 
-  /** The mark shown in the list — absent if the app was not imported */
+  /**
+   * The mark shown in the list — absent if the app was not imported. A mark written because the marks were lost
+   * (`ImportMark.lost`, #1172) is not shown: the app may be the person's own, so the list does not call it imported
+   */
   imported(appId: string, dir: string): ExternalAppInfo['imported'] {
     const mark = this.book.get(appId, dir)
-    return mark ? { source: mark.source, at: mark.importedAt, confirmedAt: mark.confirmed?.at ?? null } : undefined
+    return mark && mark.lost === undefined ? { source: mark.source, at: mark.importedAt, confirmedAt: mark.confirmed?.at ?? null } : undefined
   }
 
   /**
@@ -212,7 +216,7 @@ export class AppHandover {
     const { manifest } = readStagedManifest(s.appDir, this.host.reservedIds)
     if (reviewKey(manifest) !== s.review.reviewKey) throw new ImportRefused('The app changed while it was waiting. Review it again')
     if (target.isDefault) mkdirSync(dirname(target.path), { recursive: true })
-    if (pathTaken(target.path)) throw new ImportRefused(`Something is already at ${target.path}. Choose another folder`)
+    if (nameTaken(target.path)) throw new ImportRefused(`Something is already at ${target.path}. Choose another folder`)
     try {
       renameSync(s.appDir, target.path)
     } catch (e) {
@@ -275,7 +279,7 @@ export class AppHandover {
     const app = this.host.userApp(appId)
     if (!app) throw new ImportRefused(`No app named "${appId}" in your apps`)
     if (!app.manifest) throw new ImportRefused("This app's manifest is invalid; fix it before enabling it")
-    if (!this.book.get(appId, app.dir)) throw new ImportRefused('This app was not imported, so it needs no enabling')
+    if (!this.book.get(appId, app.dir) && !this.book.doubt()) throw new ImportRefused('This app was not imported, so it needs no enabling')
     if (reviewKey(app.manifest) !== key) throw new ImportRefused('This app changed since you reviewed it. Review it again')
     this.book.confirm(appId, app.dir, app.manifest)
     this.host.changed()
@@ -339,18 +343,8 @@ export class AppHandover {
   /** An id that already exists — even a folder standing there with an invalid manifest belongs to the person. Never overwritten (the same rule as a new app) */
   private refuseTaken(id: string): void {
     this.host.rescanUser()
-    if (this.host.userApp(id) || existsSync(join(this.host.dataRoot, ...USER_APPS_PARTS, id))) {
+    if (this.host.userApp(id) || appFolderTaken(this.host.dataRoot, null, id)) {
       throw new ImportRefused(`An app with the id "${id}" is already in your apps. Remove it first, or change the id in its manifest`)
     }
-  }
-}
-
-/** lstat, not exists: a broken link of that name is still a name taken */
-function pathTaken(path: string): boolean {
-  try {
-    lstatSync(path)
-    return true
-  } catch {
-    return false
   }
 }

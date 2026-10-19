@@ -18,7 +18,7 @@
   },
   "queue": {
     "batch": { "min": 1, "max": 4 },
-    "flakyJobs": [],
+    "flakyJobs": ["windows tests (vitest 1/2)", "windows tests (vitest 2/2)", "host tests, remote Node (windows-2022)"],
     "conflicts": {
       "mechanical": [
         { "files": ["pnpm-lock.yaml"], "run": [["pnpm", "install", "--lockfile-only", "--ignore-scripts"]] },
