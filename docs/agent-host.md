@@ -2500,7 +2500,8 @@ A process WMI creates gets the account's default environment, not the session's,
 `CC_DATA_DIR`, `CENTRALU_HOST_ENTRY` and `CENTRALU_MANAGED` when set, and `CENTRALU_STARTED_FROM` (the `--from` hub and the
 ssh client's address the `--detach` saw, for `host.lock`, #1223). Never the token, which stays in `serve.json`.
 The launcher writes `<data>/serve.log` (its own lines and the host's stderr until the host is ready; `host.log` has
-the rest, so it stops growing; the previous start's is kept as `serve.log.1`) and `<data>/serve.pid`
+the rest, so it stops growing; the three earlier starts' are kept as `serve.log.1` to `serve.log.3`, so the log of
+the first of the at most three starts a hub makes by itself is still there, #1143) and `<data>/serve.pid`
 (`{ pid, hostPid, port }`, removed when it exits).
 
 `--detach` prints the connection line with `hostRunning: true` and `detach: { ok: true, how, already }`, or
@@ -2620,6 +2621,28 @@ instead of `-N`, and the link reads the connection line until that host answers.
 (Windows' OpenSSH ends the session's processes, and on posix the launcher takes the hangup as a stop), and the row
 says so. A start that fails (Centralu too old for `--detach`, the host exiting while it starts) is `not_running`
 with the reason, retried with the backoff.
+
+**What the link does not start by itself** (#1143, owner decision 2026-10-19). Adding the machine is consent to start a
+host that crashed or is missing, not one the person stopped:
+
+- **The person's stop is remembered there.** `centralu serve --stop` writes `<data>/stopped.json` (`by: stop`), and
+  so does a host that the desktop app's keeper stops for good when the person quits Centralu on that machine (Quit
+  completely, or the last window closing with background mode off: `by: quit`, `lifecycle/stopped-mark.ts`). The
+  desktop app shares the data folder with `serve` (`dataRoot()`); on Windows its window uses the folder's serve host
+  (`--window`), which closing the window leaves running, so there is no quit to mark there. Every host that starts in
+  the folder removes the mark: a start, by whoever, is the person's again. `--connection` reports it as
+  `stopped: { by, at }` while no host runs. The hub's own stop (an update, a rollback, an uninstall) runs `serve --stop`
+  with `CENTRALU_STOP_BY=hub` and leaves no mark.
+- **The link starts at most three hosts there within 10 minutes** (`RESTARTS`), and then none until the person's Start,
+  however long it waits: the limit is kept, not read off the starts again as they age out. A start at the person's
+  Start counts too, so a Start whose hosts stop before they answer is not repeated for good. A start that fails is
+  not counted: it is `not_running` with its reason, on the backoff, as before. A host that answered its hello and
+  then stopped again at once used to reset the backoff at every hello and was started again about every 10 s for
+  good. Now the backoff, and the limit, start over only once a host has stayed up 60 s (`STABLE_MS`).
+- **Either way the row is `stopped`**, with `error` saying which, and the link starts nothing until the person's Start
+  (the row's button, `machines.reconnect`) or the orchestrator's `reconnect_machine`, which asks with a card for a
+  stopped machine. It still reads the line on its backoff, so a host the person starts there is connected to. A
+  machine whose Centralu predates the mark says no `stopped`, and is started as before, within the same limit.
 
 **A machine whose Node is below the floor is switched to the hub's own** (#699). Before it starts a host, the link
 reads `install.node` from the connection line; a machine that is not on a managed install and runs a Node below the
@@ -2752,7 +2775,8 @@ sessions resume on the new host through their stored ids, as after any restart.
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
-it restarts); `disconnected` (#1134: closed on purpose and not tried, below).
+it restarts); `disconnected` (#1134: closed on purpose and not tried, below); `stopped` (#1143: the person stopped
+Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, above).
 
 **When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
 column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again

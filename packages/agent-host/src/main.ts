@@ -48,6 +48,7 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
+import { clearStoppedMark, markQuit } from './lifecycle/stopped-mark.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -267,6 +268,9 @@ if (!lock.ok) {
  */
 const ownership = lock
 process.on('exit', ownership.release)
+// A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
+// A host in memory has no data folder to say it in
+if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
 
 start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))
@@ -804,6 +808,10 @@ const endings = wireEndings({
   stdin: process.stdin,
   watchParent: values['watch-parent'] === true,
   log: (line) => console.error(line),
+  // The person quit Centralu here: a linked hub must not start a host in this folder by itself (#1143)
+  quit: () => {
+    if (dbPath !== ':memory:') markQuit(dirname(dbPath))
+  },
 })
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()

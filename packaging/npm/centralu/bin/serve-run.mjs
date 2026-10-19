@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, removeServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
@@ -31,6 +31,9 @@ export async function describe({ env, dataDir, state, entry, version }) {
   const probe = await probeHost({ port, token: state.token, protocolVersion: installed, prove: proof })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
+  const hostRunning = heldHere(probe, dataDir)
+  // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
+  const stopped = hostRunning ? null : readStopped(dataDir)
   return {
     proof,
     port,
@@ -38,9 +41,10 @@ export async function describe({ env, dataDir, state, entry, version }) {
     version: (probe.running ? probe.version : undefined) ?? version,
     protocolVersion,
     dataDir,
-    hostRunning: heldHere(probe, dataDir),
+    hostRunning,
     install: installInfo(dataDir, env),
     autostart: autostartInfo(dataDir, process.platform, env),
+    ...(stopped ? { stopped } : {}),
   }
 }
 

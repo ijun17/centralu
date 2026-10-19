@@ -46,7 +46,16 @@ export type ConnectionLine = {
    * (`RemoteClientOptions.proveHost`). Absent from a remote that predates it, which gets the hello as before
    */
   proof?: boolean
+  /**
+   * The person stopped Centralu there (#1143): `centralu serve --stop` (`stop`) or quitting Centralu there (`quit`), at
+   * `at` when the mark says. Said only while no host runs. The hub then starts none by itself, until the person's
+   * Start. Absent from a remote that predates it, which is started as before
+   */
+  stopped?: RemoteStop
 }
+
+/** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
+export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
 
 /**
  * The `autostart` field of the connection line, as `serve.mjs`'s `autostartInfo` writes it, and the
@@ -143,11 +152,19 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
         ...(install ? { install } : {}),
         ...(autostart ? { autostart } : {}),
         ...((o as { proof?: unknown }).proof === true ? { proof: true } : {}),
+        ...stoppedOf((o as { stopped?: unknown }).stopped),
         ...takesOf((o as { takes?: unknown }).takes),
       }
     }
   }
   throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
+}
+
+/** The `stopped` field, field by field: any object there is a stop; its `by` and `at` only as the words they can be */
+function stoppedOf(raw: unknown): { stopped?: RemoteStop } {
+  if (!raw || typeof raw !== 'object') return {}
+  const o = raw as { by?: unknown; at?: unknown }
+  return { stopped: { by: o.by === 'quit' ? 'quit' : 'stop', at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : null } }
 }
 
 /** The `takes` field: the names in it that are words, or nothing */
@@ -414,10 +431,15 @@ export function detachCommand(spec: RemoteSpec, from: string | null = null): str
 
 /**
  * `centralu serve --stop` there, found the same way (plan §10.4, S10): the running host stops in
- * order, asked over its own socket. The update, rollback and uninstall run it (update.ts)
+ * order, asked over its own socket. The update, rollback and uninstall run it (update.ts).
+ *
+ * As the hub's own stop (`CENTRALU_STOP_BY=hub`, #1143): `serve --stop` then leaves no mark of the person's stop, and
+ * the hub's next start (the update's) is not refused as one. An older serve ignores the variable and marks nothing
+ * anyway. A command of the person's own runs as given, in a shell this cannot know, so it gets no variable; the hub
+ * installs and updates nothing on such a machine
  */
 export function stopCommand(spec: RemoteSpec): string {
-  return remoteCommand(spec, 'serve --stop')
+  return remoteCommand(spec, 'serve --stop', true)
 }
 
 /** `centralu serve` in the foreground, found the same way: a host bound to the forward's own ssh session */
@@ -449,19 +471,21 @@ function remoteCommand(
     | 'serve --autostart off'
     | 'serve --autostart remove'
     | 'serve --autostart status',
+  /** The hub's own stop (`stopCommand`): said to `serve` as `CENTRALU_STOP_BY=hub` */
+  hubStop = false,
 ): string {
   const custom = spec.command?.trim() || null
   if (spec.shell === 'powershell') {
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
-      `${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
+      `${hubStop ? "$env:CENTRALU_STOP_BY = 'hub'; " : ''}${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
         `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
         "else { $l = Join-Path $d 'bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
   }
   const lookup =
-    `${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
+    `${hubStop ? 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; ' : ''}${MANAGED_SH}; if [ -x "$m" ]; then exec "$m" ${args}; ` +
     `elif command -v centralu >/dev/null 2>&1; then exec centralu ${args}; ` +
     `elif [ -x "$d/bin/centralu" ]; then exec "$d/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`

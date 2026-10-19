@@ -113,6 +113,8 @@ function fakeOps() {
     refuseInstalls: (why: string) => {
       refusal = why
     },
+    /** The first machine as the hub has it now */
+    patch: (over: Partial<MachineInfo>) => void Object.assign(machines[0]!, over),
     /** The calls that changed something, leaving out the reads and the pre-checks */
     changes: () => calls.filter((c) => !['resolve', 'probe', 'installRefusal'].includes(c[0] as string)),
   }
@@ -340,6 +342,21 @@ describe('reconnect_machine and set_machine_connect', () => {
       ['reconnect', 'laptop'],
       ['setConnect', 'laptop', 'when_needed'],
     ])
+  })
+})
+
+// #1143: a machine where Centralu is stopped is started only by the person; reconnecting it starts it, so it asks
+describe('reconnect_machine where Centralu is stopped', () => {
+  it('asks before it starts Centralu there, saying why it is stopped, and starts nothing on Deny', async () => {
+    const orc = await mgr.orchestrator()
+    ops.patch({ status: 'stopped', error: 'Centralu was stopped on Laptop with `centralu serve --stop`, so this computer does not start it by itself. Start starts it there' })
+    const denied = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
+    expect(denied.question).toContain('Start Centralu on Laptop (me@laptop)? Centralu was stopped on Laptop with `centralu serve --stop`')
+    expect(denied.r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+    const allowed = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'allow')
+    expect(allowed.r.text).toContain('Starting Centralu on Laptop.')
+    expect(ops.changes()).toEqual([['reconnect', 'laptop']])
   })
 })
 

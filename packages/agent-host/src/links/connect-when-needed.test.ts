@@ -387,15 +387,21 @@ class FlakyTunnel implements Tunnel {
 }
 
 describe('the backoff after a good connection (#1134)', () => {
-  // With a cap of 5 minutes, a link that kept its count after connecting would wait minutes after its next drop
-  it('starts again from its first step once a connection said hello', async () => {
+  /*
+   * With a cap of 5 minutes, a link that kept its count after connecting would wait minutes after its next drop. Once
+   * the connection has stayed up a while (`stableMs`, #1143), not at its hello: a host that answers and stops again at
+   * once would otherwise be started again at the first step for good
+   */
+  it('starts again from its first step once a connection stayed up a while', async () => {
     const remote = await remoteHost()
     let tunnel: FlakyTunnel | undefined
     const hub = await hubHost(() => lineFor(remote.port), {
       tunnel: (line) => (tunnel = new FlakyTunnel(line, 5)),
-      deps: { retryMs: [10, 60_000] },
+      deps: { retryMs: [10, 60_000], stableMs: 20 },
     })
     await eventually(() => hub.row().status === 'connected')
+    // A timer set after the stable one, so it runs after it whatever the load
+    await new Promise((r) => setTimeout(r, 100))
     // The drop schedules the next attempt at once (`transportDown`); its delay is the last timer set
     const timers = vi.spyOn(globalThis, 'setTimeout')
     try {

@@ -1683,7 +1683,26 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 띄우는 중. 묻지 않는다, 계획 문서 §10.9 결정 7. WMI가 막힌 기기에서는 포워드의 ssh 세션이 호스트를 돌리고 링크와 함께 끝난다);
 `not_running`(Centralu는 답하지만 `centralu serve`가 돌지 않고, 띄우기도 실패했다. `error`가 까닭. 다시 시도); `versions_differ`; `refused`(토큰이 연달아 두 번 거절됨. 연결 줄은 바로 한 번 다시 읽는다.
 `--rotate-token`은 토큰을 바꾸지만 돌고 있는 serve는 재시작할 때까지 이전 것을 쓰기 때문이다); `disconnected`(#1134: 일부러
-닫았고 다시 시도하지 않는다, 아래).
+닫았고 다시 시도하지 않는다, 아래); `stopped`(#1143: 아래).
+
+**링크가 스스로 띄우지 않는 것**(#1143, 소유자 결정 2026-10-19). 기기를 추가한 것은 죽었거나 없는 호스트를 띄워도 된다는
+동의이지, 사람이 멈춘 호스트를 다시 띄워도 된다는 동의가 아니다.
+
+- **사람이 멈춘 것은 그쪽에 기억된다.** `centralu serve --stop`은 `<data>/stopped.json`(`by: stop`)을 쓰고, 사람이 그 기기에서
+  Centralu를 끝낼 때(완전히 종료, 또는 백그라운드 모드가 꺼진 채 마지막 창을 닫을 때) 데스크톱 앱의 keeper가 호스트를 아주
+  멈추면 그 호스트도 쓴다(`by: quit`, `lifecycle/stopped-mark.ts`). 데스크톱 앱은 `serve`와 데이터 폴더를 함께 쓴다
+  (`dataRoot()`). Windows에서는 창이 폴더의 serve 호스트를 쓰고(`--window`) 창을 닫아도 그 호스트는 남으므로 표시할 종료가
+  없다. 폴더에서 호스트가 시작되면 누가 띄웠든 표시를 지운다. `--connection`은 호스트가 돌지 않는 동안 그것을
+  `stopped: { by, at }`로 알린다. 허브 자신의 멈춤(업데이트, 되돌리기, 제거)은 `CENTRALU_STOP_BY=hub`로 `serve --stop`을
+  돌리고 표시를 남기지 않는다.
+- **링크가 그쪽에 띄우는 호스트는 10분에 세 번까지이고**(`RESTARTS`), 그 뒤로는 얼마나 기다리든 사람의 Start 전에는 띄우지
+  않는다. 한도는 기억해 두며, 띄운 기록이 시간이 지나 빠진다고 다시 풀리지 않는다. 사람의 Start로 띄운 것도 세므로, 답하기 전에
+  멈추는 호스트를 Start가 끝없이 되풀이하지 않는다. 띄우기 자체가 실패한 것은 세지 않는다: 예전처럼 까닭과 함께 `not_running`이고
+  backoff대로 다시 한다. hello에 답하고 곧바로 다시 멈추는 호스트는 hello마다 backoff를 되돌려서 약 10초마다 끝없이 다시 띄워졌다.
+  이제 backoff와 한도는 호스트가 60초 버틴 뒤에만 처음부터 다시 센다(`STABLE_MS`).
+- **어느 쪽이든 행은 `stopped`이고** `error`가 어느 쪽인지 말한다. 사람의 Start(행의 버튼, `machines.reconnect`)나 오케스트레이터의
+  `reconnect_machine`(멈춘 기기에는 카드로 묻는다) 전에는 아무것도 띄우지 않는다. 연결 줄은 backoff대로 계속 읽으므로 사람이
+  그쪽에서 띄운 호스트에는 붙는다. 표시를 모르는 이전 Centralu는 `stopped`를 말하지 않고, 같은 한도 안에서 예전처럼 띄워진다.
 
 **링크를 여는 때**(#1134, 소유자 결정 2026-10-18; `MachineInfo.connect`, `linked_machines.connect` 열, v59). 기본값 `at_start`는
 예전부터 모든 기기가 하던 대로다: 허브가 시작할 때 연결하고 끊길 때마다 다시 시도해, 그 기기로 일하는 오케스트레이터가 보고와

@@ -48,6 +48,16 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
   )
 }
 
+/**
+ * The row's button that opens the link (`machines.reconnect`): Connect for a disconnected machine (#1134), Start where
+ * Centralu is stopped (#1143), which this computer then starts there, Reconnect otherwise
+ */
+export function connectAction(status: MachineInfo['status']): { label: string; title?: string } {
+  if (status === 'disconnected') return { label: 'Connect', title: 'Stays connected until you disconnect it' }
+  if (status === 'stopped') return { label: 'Start', title: 'Starts Centralu there, which this computer does not do by itself' }
+  return { label: 'Reconnect' }
+}
+
 function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
   const reconnect = useStore((s) => s.reconnectMachine)
   const disconnect = useStore((s) => s.disconnectMachine)
@@ -75,9 +85,9 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
               className="text-xs text-ink-faint hover:text-ink"
               onClick={() => void reconnect(m.id)}
               data-testid={`machine-reconnect-${m.id}`}
-              title={m.status === 'disconnected' ? 'Stays connected until you disconnect it' : undefined}
+              title={connectAction(m.status).title}
             >
-              {m.status === 'disconnected' ? 'Connect' : 'Reconnect'}
+              {connectAction(m.status).label}
             </button>
           )}
           {m.status !== 'disconnected' && !m.operation && (

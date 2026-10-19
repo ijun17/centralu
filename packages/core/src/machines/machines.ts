@@ -52,6 +52,7 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   starting: 'starting',
   updating: 'updating',
   disconnected: 'disconnected',
+  stopped: 'stopped',
 }
 
 export type MachineProblem = {
@@ -72,6 +73,8 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
   const e = m.error ?? ''
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
+  // Stopped there, by the person or after its hosts kept stopping (#1143): the host says which, and Start starts one
+  if (m.status === 'stopped') return { title: e || `Centralu is stopped on ${m.name}`, fix: 'Press Start to start it there' }
   if (m.status === 'not_running') {
     // This computer tried to start it and says why; an older hub only said it was not serving
     return {

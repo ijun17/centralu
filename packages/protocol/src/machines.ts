@@ -34,8 +34,12 @@ export type MachineId = z.infer<typeof MachineId>
  *                    connects when needed (`connect`) and nothing needs it now. Its sessions keep running
  *                    there; what they say arrives once the link is up again. An older window reads it as
  *                    unreachable
+ *   stopped          no host runs there and the hub starts none by itself (#1143): the person stopped it there
+ *                    (`centralu serve --stop`, or quitting Centralu there), or the hosts the hub started kept
+ *                    stopping soon after they started. `error` says which; the person's Start
+ *                    (`machines.reconnect`) starts one. An older window reads it as unreachable
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected'])
+export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected', 'stopped'])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({

@@ -152,7 +152,9 @@ export function crashRecorder(
  *   child service holds the children. A signal under it is a restart, and the next host takes the
  *   open app views over; a crash or a vanished parent hands nothing over (nothing is known to start
  *   a next host, and the state that threw is not one to carry forward);
- * - the keeper's `stop` on the child service, and `host.stop` (`centralu serve --stop`): a stop.
+ * - the keeper's `stop` on the child service, and `host.stop` (`centralu serve --stop`): a stop. The keeper's is the
+ *   person quitting Centralu here, said first through `quit` (#1143: a linked hub then starts no host here by itself).
+ *   `host.stop` is not: `serve --stop` remembers the person's stop itself, and a hub's update stops through it too.
  */
 export function wireEndings(o: {
   proc: ProcessLike
@@ -166,6 +168,8 @@ export function wireEndings(o: {
   watchParent: boolean
   log: (line: string) => void
   now?: () => number
+  /** The keeper stops this host for good: the person quit Centralu here (lifecycle/stopped-mark.ts `markQuit`) */
+  quit?: () => void
 }): { stopAsked: () => void; keeperStop: () => void } {
   const mode = signalMode(o.heldChildren)
   guardErrors(o.proc, { record: o.record, onCrash: () => o.leave(mode, false) })
@@ -193,6 +197,9 @@ export function wireEndings(o: {
   return {
     stopAsked: () => o.leave('stop', false),
     // No next host to hand the views to
-    keeperStop: () => o.leave('stop', false),
+    keeperStop: () => {
+      o.quit?.()
+      o.leave('stop', false)
+    },
   }
 }

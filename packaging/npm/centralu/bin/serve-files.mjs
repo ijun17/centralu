@@ -5,7 +5,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isAlive, replaceFile, sleepSync } from './serve-util.mjs'
 
@@ -24,6 +24,59 @@ export const SERVE_LOG_FILE = 'serve.log'
 
 /** The running launcher's pid and port, so `--stop` can find it. Removed when it exits */
 export const SERVE_PID_FILE = 'serve.pid'
+
+/** How many earlier starts' serve.log are kept, as serve.log.1 (the last) to serve.log.3 */
+export const SERVE_LOGS_KEPT = 3
+
+/**
+ * Makes room for a new start's serve.log (#1143): the earlier ones move down a place, and the oldest past
+ * `SERVE_LOGS_KEPT` goes. A hub that starts a host again after it stopped makes at most three starts in ten minutes,
+ * so the log of the start that failed first is still here when it stops trying. Never fatal
+ */
+export function rotateServeLog(log, kept = SERVE_LOGS_KEPT) {
+  for (let i = kept - 1; i >= 0; i--) {
+    try {
+      renameSync(i === 0 ? log : `${log}.${i}`, `${log}.${i + 1}`)
+    } catch {
+      // there was none
+    }
+  }
+}
+
+/**
+ * The person's stop, kept in the data folder (#1143): `centralu serve --stop` writes it (`by: 'stop'`), and so does a
+ * host that Centralu's own app stops for good when the person quits it there (`by: 'quit'`, the host's
+ * lifecycle/stopped-mark.ts, which names the same file). Every host that starts in the folder removes it.
+ * `--connection` reports it while no host runs, and a hub then starts none by itself. A hub's own stop (an update)
+ * leaves none: it says so with `CENTRALU_STOP_BY=hub`
+ */
+export const SERVE_STOPPED_FILE = 'stopped.json'
+
+/** Writes the mark; never fatal, a stop that could not note itself still stopped */
+export function markStopped(dataDir, by, now = Date.now()) {
+  try {
+    replaceFile(join(dataDir, SERVE_STOPPED_FILE), `${JSON.stringify({ v: 1, by, at: now })}\n`)
+  } catch {
+    // the folder is read-only or gone: nothing to remember it in
+  }
+}
+
+/** The mark as `{ by, at }`, or null when there is none. One that does not parse is still a stop, by `stop`, at no time */
+export function readStopped(dataDir) {
+  let text
+  try {
+    text = readFileSync(join(dataDir, SERVE_STOPPED_FILE), 'utf8')
+  } catch {
+    return null
+  }
+  let o = null
+  try {
+    o = JSON.parse(text)
+  } catch {
+    // half written, or written by hand
+  }
+  return { by: o?.by === 'quit' ? 'quit' : 'stop', at: typeof o?.at === 'number' && Number.isFinite(o.at) ? o.at : null }
+}
 
 /** The data folder: the host's own rule (`dataRoot()` in agent-host), CC_DATA_DIR or ~/.centralu */
 export function serveDataDir(env, home) {

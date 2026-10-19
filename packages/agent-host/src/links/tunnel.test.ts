@@ -654,6 +654,29 @@ describe('the remote command per shell (#82)', () => {
     expect(() => connectionCommand({ shell: 'wsl' })).toThrow(/Not a WSL distro name/)
   })
 
+  // #1143: the person's stop there, which keeps the hub from starting a host by itself; an older serve says nothing
+  it('reads the person’s stop from the line, as words it can be, and nothing from a line without it', () => {
+    const base = { v: 1, port: 17175, token: 't', protocolVersion: 1, hostRunning: false }
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: { by: 'quit', at: 5 } })).stopped).toEqual({ by: 'quit', at: 5 })
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: { by: '`rm -rf`', at: 'soon' } })).stopped).toEqual({ by: 'stop', at: null })
+    expect(parseConnectionLine(JSON.stringify(base))).not.toHaveProperty('stopped')
+    expect(parseConnectionLine(JSON.stringify({ ...base, stopped: true }))).not.toHaveProperty('stopped')
+  })
+
+  it('says it is the hub’s own stop to serve --stop in every shell, so serve leaves no mark of the person’s stop', () => {
+    const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
+    expect(stopCommand({ shell: 'posix' })).toMatch(/^sh -c 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=/)
+    expect(decode(stopCommand({ shell: 'powershell' }))).toContain("$env:CENTRALU_STOP_BY = 'hub'; $d = ")
+    const wsl = decode(stopCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }))
+    const script = Buffer.from(/echo ([A-Za-z0-9+/=]+) \| base64/.exec(wsl)![1]!, 'base64').toString('utf8')
+    expect(script).toContain('; CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=')
+    // Only the stop says it
+    for (const cmd of [connectionCommand, detachCommand, serveCommand]) {
+      expect(cmd({ shell: 'posix' })).not.toContain('CENTRALU_STOP_BY')
+      expect(decode(cmd({ shell: 'powershell' }))).not.toContain('CENTRALU_STOP_BY')
+    }
+  })
+
   it('reads the connection line past anything else the remote shell printed', () => {
     expect(parseConnectionLine('Welcome!\r\n{"v":1,"port":17175,"token":"t","version":"0.1.0","protocolVersion":1,"dataDir":"/d","hostRunning":true}\r\n')).toMatchObject({ port: 17175, token: 't' })
     expect(() => parseConnectionLine('{"v":2}')).toThrow(/connection format 2/)

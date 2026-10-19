@@ -79,6 +79,10 @@ export type LinkDeps = {
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
+  /** For tests: how long a host stays up before the backoff starts over (60 s when absent, #1143) */
+  stableMs?: number
+  /** For tests: at most `max` hosts the link starts by itself within `windowMs` (3 in 10 minutes when absent, #1143) */
+  restarts?: { max: number; windowMs: number }
   /**
    * Whether a session here waits on a session of the machine (#1134): a report owed of a child there, whose turn runs
    * or whose background work does (`SessionManager.linkedWorkOwed`). A machine that connects when needed stays up for

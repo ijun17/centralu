@@ -42,6 +42,7 @@ const MACHINE_STATUS: Record<string, string> = {
   not_running: 'unreachable (Centralu is not running there)',
   versions_differ: 'not connected (waiting for the person to align versions)',
   refused: 'not connected (it refused the link)',
+  stopped: 'not connected (Centralu is stopped there; reconnecting starts it, with a card)',
 }
 
 /** The OS and shell the hub reaches a machine with, in words: PowerShell is Windows, WSL a distro on Windows */
@@ -81,7 +82,8 @@ function targetError(target: string): string | null {
  * The orchestrator's commands for linked machines (#1219): add (probed first), install or update Centralu there,
  * remove, reconnect, when it connects, and whether it starts at boot. Each is the call the window's Machines screen
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
- * person's card, in every preset; reconnecting and the connect mode do not, as the row's buttons do not ask. Every
+ * person's card, in every preset; reconnecting and the connect mode do not, as the row's buttons do not ask, except
+ * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143). Every
  * refusal that can be known first (no such machine, a target that is no ssh target or does not answer, a build that
  * cannot install) comes before any card.
  */
@@ -102,8 +104,22 @@ export class MachineFlow {
       const m = this.named(ops, req.machine)
       if (typeof m === 'string') return { ok: false, error: m }
       switch (req.action) {
-        case 'reconnect':
+        case 'reconnect': {
+          /*
+           * Stopped there (#1143): by the person, or after the hosts this computer started kept stopping. Reconnecting
+           * starts one, which this computer otherwise does not do by itself, so it is the person's to allow
+           */
+          if (m.status === 'stopped') {
+            const refused = await this.ask(
+              sessionId,
+              `Start Centralu on ${m.name} (${m.sshTarget})? ${m.error ?? 'It is stopped there.'} It runs there in the background until it is stopped again.`,
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+            return done(`Starting Centralu on ${m.name}.`, ops.reconnect(m.id))
+          }
           return done(`Reconnecting ${m.name}.`, ops.reconnect(m.id))
+        }
         case 'connect':
           return done(
             req.connect === 'when_needed' ? `${m.name} now connects only when something needs it.` : `${m.name} now connects when Centralu starts.`,

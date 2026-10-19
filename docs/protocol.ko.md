@@ -422,7 +422,9 @@ type ProtocolError = {
   lastConnectedAt, localPort, sameLocalPort, hostStarted }`. `shell`은 `posix`, `powershell`, `wsl`.
   `status`는 `connecting`, `connected`, `unreachable`, `not_running`(Centralu는 답하지만 `centralu serve`가
   돌지 않고 허브가 띄우지도 못했다. `error`가 까닭), `starting`(허브가 띄우는 중. 추가만 했고, 이전 창은
-  `unreachable`로 읽는다), `versions_differ`, `refused`. `hostStarted`는 null, 또는 허브가 그 호스트를 띄웠을 때
+  `unreachable`로 읽는다), `versions_differ`, `refused`, `disconnected`, `stopped`(#1143: 그쪽에서 사람이 Centralu를
+  멈췄거나, 허브가 띄운 호스트가 거듭 멈췄다. `machines.reconnect` 전에는 허브가 띄우지 않는다. 추가만 했고, 이전 창은
+  `unreachable`로 읽는다). `hostStarted`는 null, 또는 허브가 그 호스트를 띄웠을 때
   `{ how, at, note }`: `detached`는 링크보다 오래 살고, `link_bound`는 그 기기가 WMI로 프로세스 만들기를 막아 링크의
   ssh 세션에서 돌며 링크와 함께 끝난다. 추가만. `versions`는 `{ hub, remote, older, compatible, sameChannel,
   accepted }`이고 양쪽은 각각 `{ version, protocolVersion, dev }`다. 두 쪽 버전이 다르면 맞추거나

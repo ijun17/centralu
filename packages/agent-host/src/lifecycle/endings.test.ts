@@ -153,6 +153,8 @@ describe('every ending, wired (HO15)', () => {
     const s = fakeStdin()
     const left: [LeaveMode, boolean][] = []
     const forced: string[] = []
+    /** How many leaves had begun when each quit was said */
+    const quits: number[] = []
     const signals = holdSignals(f.proc, () => {})
     const endings = wireEndings({
       proc: f.proc,
@@ -165,8 +167,9 @@ describe('every ending, wired (HO15)', () => {
       watchParent: watch,
       log: () => {},
       now: () => clock.t,
+      quit: () => void quits.push(left.length),
     })
-    return { f, s, left, forced, endings, clock }
+    return { f, s, left, forced, endings, clock, quits }
   }
 
   it('under the keeper\'s child service a signal is a restart: detach, and the next host takes the views', () => {
@@ -185,6 +188,16 @@ describe('every ending, wired (HO15)', () => {
     const w = wired(true)
     w.endings.keeperStop()
     expect(w.left).toEqual([['stop', false]])
+  })
+
+  // #1143: a linked hub starts no host in a folder whose person quit Centralu; a serve --stop marks itself, a signal is no quit
+  it("says the person quit before the keeper's stop begins, and only for that stop", () => {
+    const w = wired(true)
+    w.endings.stopAsked()
+    w.f.emitter.emit('SIGTERM', 'SIGTERM')
+    expect(w.quits).toEqual([])
+    w.endings.keeperStop()
+    expect(w.quits).toEqual([2])
   })
 
   it('a crash or a vanished parent hands nothing over', () => {

@@ -56,6 +56,10 @@ import {
   runWindow,
   serveFrom,
   processStartTime,
+  SERVE_STOPPED_FILE,
+  markStopped,
+  readStopped,
+  rotateServeLog,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -277,6 +281,35 @@ describe('replacing a file that a reader holds open (#1041)', () => {
     let sleeps = 0
     expect(readServeState(tempDir(), { sleep: () => sleeps++ })).toBeNull()
     expect(sleeps).toBe(0)
+  })
+})
+
+describe('the person’s stop and the earlier logs (#1143)', () => {
+  it('keeps the three earlier starts’ serve.log, so the first failure’s is still there after three more starts', () => {
+    const d = tempDir()
+    const log = join(d, 'serve.log')
+    for (const n of [1, 2, 3, 4]) {
+      writeFileSync(log, `start ${n}`)
+      rotateServeLog(log)
+    }
+    expect(existsSync(log)).toBe(false)
+    expect([1, 2, 3].map((k) => readFileSync(`${log}.${k}`, 'utf8'))).toEqual(['start 4', 'start 3', 'start 2'])
+    writeFileSync(log, 'start 5')
+    rotateServeLog(log)
+    expect(readFileSync(`${log}.3`, 'utf8')).toBe('start 3')
+    expect(existsSync(`${log}.4`)).toBe(false)
+  })
+
+  it('reads the mark it wrote, a mark that does not parse as a stop, and none as none', () => {
+    const d = tempDir()
+    expect(readStopped(d)).toBeNull()
+    markStopped(d, 'stop', 1234)
+    expect(readStopped(d)).toEqual({ by: 'stop', at: 1234 })
+    writeFileSync(join(d, SERVE_STOPPED_FILE), '{"v":1,"by":"quit","at":9}')
+    expect(readStopped(d)).toEqual({ by: 'quit', at: 9 })
+    writeFileSync(join(d, SERVE_STOPPED_FILE), 'half')
+    expect(readStopped(d)).toEqual({ by: 'stop', at: null })
+    expect(JSON.parse(connectionLine({ port: 1, token: 't', version: '1', protocolVersion: 1, dataDir: d, hostRunning: false, stopped: { by: 'quit', at: 9 } }))).toMatchObject({ stopped: { by: 'quit', at: 9 } })
   })
 })
 
@@ -1223,9 +1256,9 @@ describe('the install field and the managed launcher (remote-hub.md §10.1)', ()
 })
 
 /** `centralu serve <args>` to the end, its last stdout line parsed */
-async function cli(dataDir: string, args: string[]) {
+async function cli(dataDir: string, args: string[], extra: NodeJS.ProcessEnv = {}) {
   return await new Promise<{ code: number | null; line: Record<string, any>; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, 'serve', ...args], { cwd: ROOT, env: cliEnv(dataDir), stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [CLI, 'serve', ...args], { cwd: ROOT, env: { ...cliEnv(dataDir), ...extra }, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout!.on('data', (b) => (stdout += String(b)))
@@ -1291,6 +1324,37 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
       }
     },
     120_000 * SLOW,
+  )
+
+  /*
+   * #1143: the person's stop is remembered, so a linked hub does not start the host again by itself; the hub's own stop
+   * (an update) is not the person's, and the next host to start here, whoever starts it, takes the mark away
+   */
+  it(
+    'remembers the person’s --stop for --connection, not the hub’s, and the next start takes it away',
+    async () => {
+      const d = tempDir()
+      try {
+        ensureServeState(d)
+        const port = await freePort()
+        expect((await cli(d, ['--detach', '--port', String(port)])).line).toMatchObject({ hostRunning: true })
+        expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
+        expect(await connection(d)).not.toHaveProperty('stopped')
+        expect((await cli(d, ['--detach'])).line).toMatchObject({ hostRunning: true })
+        expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: true })
+        const line = await connection(d)
+        expect(line).toMatchObject({ hostRunning: false, stopped: { by: 'stop', at: expect.any(Number) } })
+        // Started again (here --detach, as a hub does at the person's Start): the host removes the mark
+        const again = await cli(d, ['--detach'])
+        expect(again.line).toMatchObject({ hostRunning: true })
+        expect(again.line).not.toHaveProperty('stopped')
+        expect(existsSync(join(d, SERVE_STOPPED_FILE))).toBe(false)
+        expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true })
+      } finally {
+        cleanup(d)
+      }
+    },
+    180_000 * SLOW,
   )
 
   // The process group is POSIX's. Windows has no group to kill at once; its counterpart is the first test above, where the

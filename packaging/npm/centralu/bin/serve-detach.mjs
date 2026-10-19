@@ -3,11 +3,11 @@
  * stopping it in order (docs/plans/remote-hub.md §10.4).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, renameSync, writeSync } from 'node:fs'
+import { existsSync, openSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -159,12 +159,8 @@ export async function runDetach({
   }
 
   const log = join(dataDir, SERVE_LOG_FILE)
-  // One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows
-  try {
-    renameSync(log, `${log}.1`)
-  } catch {
-    // there was none
-  }
+  // One start per log: the earlier ones are kept beside it (`rotateServeLog`), and its absence is how a start that never ran shows
+  rotateServeLog(log)
   // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
   const asked = serveFrom(env, from)
   const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
@@ -230,6 +226,10 @@ export async function runDetachedChild({ spec, ...opts }) {
  * socket, and waited for (`stopServedHost` in serve-handover.mjs, which the hand-over into the sign-in shares, #1224).
  *
  * stdout: one line, `{ v: 1, stop: { ok, wasRunning, how?, message? } }`.
+ *
+ * A stop that went through is remembered in the data folder (`markStopped`, #1143), so a linked hub does not start the
+ * host again by itself; the next host that starts here removes the mark. Not for a hub's own stop, which starts the
+ * host again itself (an update, a rollback): the hub runs it with `CENTRALU_STOP_BY=hub` (links/tunnel.ts `stopCommand`)
  */
 export async function runStop({
   env,
@@ -242,5 +242,7 @@ export async function runStop({
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
-  return answerLine(write, 'stop', await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill }))
+  const stopped = await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill })
+  if (stopped.ok && env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, 'stop')
+  return answerLine(write, 'stop', stopped)
 }

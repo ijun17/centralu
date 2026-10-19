@@ -478,7 +478,9 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   `wsl`. `status` is `connecting`, `connected`, `unreachable`, `not_running` (Centralu answers
   there, no `centralu serve` runs, and the hub could not start one: `error` says why), `starting`
   (the hub is starting one, [plans/remote-hub.md](plans/remote-hub.md) §10.9 decision 7; additive,
-  an older window reads it as `unreachable`), `versions_differ` or `refused`. `hostStarted` is
+  an older window reads it as `unreachable`), `versions_differ`, `refused`, `disconnected` or `stopped` (#1143:
+  Centralu was stopped there by the person, or the hosts the hub started kept stopping, and the hub starts none until
+  `machines.reconnect`; additive, an older window reads it as `unreachable`). `hostStarted` is
   null, or `{ how, at, note }` when the hub started that host: `detached` outlives the link,
   `link_bound` runs in the link's own ssh session because the machine blocks starting a process
   through WMI, and `note` says so. Additive. `elevated` (#702, additive) is what the machine's host said in its last
