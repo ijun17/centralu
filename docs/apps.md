@@ -47,6 +47,8 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view (§6.2) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |
 | `uses.agent`, `uses.apps`, `uses.host` | What the app **declares** it will ask Centralu for (§10) | Optional. A declaration, not a permission. Absent means nothing |
+| `uses.notices` | `true`: the app may post notices into a session that called it (§10, `notify`) | Optional. In `uses`, as above |
+| `uses.background` | What the app does in the background, in words the person reads (§4, "Busy") | Optional, 1 to 200 characters. Without it the app cannot keep itself running. In `uses`, so an imported app adding it is reviewed again (§12) and the trust card lists it |
 | `secrets` | Names of the secrets the app needs | Optional. Environment-variable names; `CENTRALU_*` and `CC_*` are reserved |
 | `view.origin` | `opaque` (default) or `app` (§6.4) | An unknown value is refused, not read as the default |
 | `view.span` | The span, in grid cells, the app **recommends** for its panel on the grid (§6.2): `{ "cols": 2, "rows": 1 }` | Optional, and only a default: the person's choice for the placement and their setting for the app come first. Each side 1 to 4; a whole number outside is clamped, anything else ignored — both with a warning, never an error, since an app without one simply stands at 1 × 1 |
@@ -199,12 +201,13 @@ either to act.
 
 | | Rule | Why |
 |---|---|---|
-| Start | Lazily, the first time something needs the app: a tool list, a call, a screen. Discovery and the app list start nothing | Performance budget: five installed apps and nothing happening means zero app processes |
+| Start | Lazily, the first time something needs the app: a tool list, a call, a screen. Discovery and the app list start nothing, except that a host starting resumes the apps that were busy (Busy, below) | Performance budget: five installed apps and nothing happening means zero app processes |
 | One at a time | Concurrent needs share one start (five concurrent calls, one process) | Two processes would hold one data folder |
 | Started means answering | Connected **and** `tools/list` answered. A server that stays up but fails every request is a failed start | Spike S-6: a broken server stayed alive, answered `-32603` to everything, and said nothing on stderr |
 | Protocol era | Probed once per app (`server/discover`, falling back to the 2025-11-25 `initialize`), then remembered | The SDK's own probe starts the process twice |
 | One instance | Per (project, app) | Worktrees share the root's app |
-| Idle | No open view and no call in progress for 5 minutes: stopped | A process nobody calls has no reason to run. An open view holds its app |
+| Idle | No open view, no call in progress and no busy hold for 5 minutes: stopped | A process nobody calls has no reason to run. An open view holds its app |
+| Busy | An app whose manifest declares `uses.background` may say it is busy with background work (`centralu.busy(reason)`, anywhere in the app, a timer included) and release it (`centralu.busy(false)`). While it holds, the idle rule leaves it running, as an open view does; on release the idle time starts. The hold belongs to the process that made it: a stop, a crash or a restart ends it, and a report from a process already replaced holds nothing. The app's sidebar row says "Running: <reason>" and has Stop, as do its row in Settings and its view; Stop closes the view if one is open and stops the process (`apps.restart`), and the next need starts it again, and it may hold again. A hold also outlives the host: the apps holding busy are kept in `app-busy.json` in the data folder, and a host that starts (a restart, or the new one in a swap) starts them again 3 s after its first scan, with no call; each record is spent then, so an app with no work left goes on the idle rule. Releasing the hold, the person's Stop and a crash remove the record; an app that is gone, may not run, or no longer declares `uses.background` is not started (#1236) | Work that runs on its own clock (a merge queue landing pull requests overnight) stopped with the process when nobody looked at the app. The person sees what keeps it running and can stop it, and an app holds only what its manifest declares |
 | Crash | Nothing restarts it by itself; the next need does, not earlier than 1 s, then 2 s after. The third consecutive failure stops the app (`failed`) with its reason, until Restart, `check`, a changed manifest, or its builder's turn ending with the folder changed (§8). An app that ran 60 s before dying starts the count again | Retrying forever hides a broken app |
 | Stop | stdin and fd 3 closed together; after 2 s the whole process tree is terminated (SIGTERM, then SIGKILL). The app's process group is signalled even after a clean exit. Windows has neither groups nor signals: the app is not started detached (that would give it no console, and every console program it starts a window of its own), and its tree is ended with `taskkill /T /F` (#14). Once the app has ended there, by itself or stopped, what it left running is found by parent links (Windows keeps an orphan's parent id; creation times rule out a reused number) and ended the same way: a Node app's plain children already die with it in libuv's job, but a Python app's children and `detached` ones do not | Spike S-5: closing stdin alone left Node and Python apps running. On Windows the first test run showed a `detached` helper outliving its app |
 | Host shutdown | Every app stopped with a 1 s grace, without waiting for SIGKILL | Tauri gives the host 3 s |
@@ -975,6 +978,27 @@ gate happens in one place, the broker desk (`desk.ts`).
   broker call must carry the run id of a call **that app is handling now, on that same pipe**. A call
   without a run id (an app waking up by itself, out of scope), with an invented id, with a finished
   run's id or another app's id is refused, and the refusal goes to the app's log and its runs.
+- **`busy { busy, reason? }`, the one request without a run id (#1236).** The app tells the host
+  about itself (busy with background work, or no longer), so it asks for nothing outside the app and
+  reaches only its own lifecycle (§4, "Busy"). Refused unless the manifest declares
+  `uses.background`; a refusal goes to the app's log. Not a run: it leaves no run record. The
+  template's `centralu.busy(reason)` sends only changes, in order, and resolves false (said once on
+  stderr) when Centralu did not take it.
+- **`notify { to, text }`, the other request without a run id (#1161 item 1).** A notice into a
+  session that called the app, posted later from a timer or a queue: "merged #77", "#78 needs
+  attention". With `uses.notices: true`, every call a session's chain started carries that session's
+  address in `_meta["centralu/notice"]` (`centralu.noticeAddress()` in a tool handler). The address is
+  the session id with a MAC over (app, session) under a key in the data folder (`app-notice.key`,
+  0600; `notices.ts`): the app can name only sessions that called it, never one it read from a list,
+  another app's address does not open for it, and it still opens after the host restarts. The session
+  receives it as a report arrives: recorded as the app's message, handed to the agent in the app-text
+  frame (`appMessageFrame` `notice`: every line quoted, "the person did not write or read it"), and
+  an idle or asleep session wakes. Refused, with a reason the app reads, when undeclared, for an
+  address it was not given, when empty or over 4000 characters, past 10 a minute, while the host
+  hands over or quits (the app tries again), and once the session is gone. Every notice is a run
+  record with no parent, its session and text in the arguments, delivered or refused, so the Runs
+  panel shows what the app told which session. `centralu.notify(address, text)` resolves true once
+  delivered.
 - **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
   default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
   undeclared is refused before anything runs. Declaring is not permission.
@@ -1065,7 +1089,7 @@ The schemas are in `packages/protocol/src/commands/methods/apps.ts` (the `apps.*
 | `apps.questions`, `apps.answerQuestion` | Capability questions waiting on a pinned view (chains a view started); answer one |
 | `apps.permissions`, `apps.forgetPermission` | The answers kept for one app; forget one |
 | `apps.usage` | One app's agent use over the last day and 30 days |
-| `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it); remove a user-folder app |
+| `apps.restart`, `apps.remove` | Clear a stopped app's failures and stop it (the next need starts it; a view's Stop for a busy app, §4); remove a user-folder app |
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop (§8) |
 | `apps.setSecret` | Set, replace or clear one declared secret (§2); the value is never returned |
 | `apps.setShared` | Share a project app with the person's other projects, or stop (§9.4) |
@@ -1234,8 +1258,9 @@ from there it is an ordinary import, turned off unless the person enables it.
   is checked against the app-server protocol and a fake adapter only). fd 3 on Windows (spike
   S-5, §10) passes the broker test suites in the Windows CI job with Node apps; a Python app, and
   any app in the packaged Windows app, have not been tried.
-- The broker answers only while the app handles a call: an app cannot ask by itself (a timer, a
-  watcher). The host data list has two names.
+- The broker answers only while the app handles a call, except `busy` and `notify`: an app cannot
+  run an agent, call an app or read host data by itself (a timer, a watcher). The host data list has
+  two names.
 - Attaching another project's app (§9.4) is a project session's: the orchestrator, a worktree
   manager and a coordinator cannot. Codex gets an attached app only from its next turn, so the
   person has to send another message for the model to use it.

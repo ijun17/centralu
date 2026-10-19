@@ -26,8 +26,9 @@ type AppInfo = {
   root?: boolean
   /** A linked machine's user-folder app (#82) */
   machine?: string
-  uses?: { agent?: boolean | string[]; apps?: string[]; host?: string[] }
+  uses?: { agent?: boolean | string[]; apps?: string[]; host?: string[]; background?: string }
   shared?: boolean
+  busy?: string
 }
 
 function app(appId: string, projectId: string | null, over: Partial<AppInfo> = {}): AppInfo {
@@ -393,6 +394,29 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(empty).toContainText('This app has no screen.')
     await expect(empty).toContainText('Only tools for agents.')
     expect(await opened(page)).toEqual([])
+  })
+
+  test('an app with no view kept running for background work says why on its row and in Settings, and is stopped from either (#1236)', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    const busyApp = () => app('queue', pid, { home: null, status: 'running', busy: 'merge queue, 2 items', uses: { background: 'drives the merge queue' } })
+    await setApps(page, [busyApp()])
+    const row = page.getByTestId(`app-row-${pid}/queue`)
+    await expect(row.getByTestId('app-row-hint')).toHaveText('Running: merge queue, 2 items')
+    // Stop is on the row itself, so an app with no view to open is stopped without one
+    await page.getByTestId(`app-stop-${pid}/queue`).click()
+    await expect.poll(() => restarts(page)).toEqual([{ appId: 'queue', projectId: pid }])
+    await expect(row.getByTestId('app-row-hint')).toHaveCount(0)
+    await expect(page.getByTestId(`app-stop-${pid}/queue`)).toHaveCount(0)
+    expect(await opened(page)).toEqual([])
+
+    // Running for its work again: Settings' app row says so, and stops it too
+    await setApps(page, [busyApp()])
+    await openAppsSettings(page)
+    const settingsRow = page.getByTestId(`external-app-${pid}/queue`)
+    await expect(settingsRow.getByTestId('external-app-busy')).toContainText('Running: merge queue, 2 items')
+    await settingsRow.getByTestId('external-app-stop').click()
+    await expect.poll(() => restarts(page)).toHaveLength(2)
+    await expect(settingsRow.getByTestId('external-app-busy')).toHaveCount(0)
   })
 
   test('an app from an untrusted project: the row shows a reason, opening it gives the reason and a trust button, and clicking it opens the view right there', async ({ page }) => {

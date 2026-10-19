@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
+import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
@@ -17,7 +18,7 @@ import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -921,7 +922,7 @@ function filesNamed(dir: string, name: string): string[] {
 }
 const queueFile = () => filesNamed(join(root, 'data'), 'merge-queue.json')[0]!
 const queueOnDisk = () => JSON.parse(readFileSync(queueFile(), 'utf8'))
-const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string }[]).filter((e) => e.notify)
+const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string; told?: boolean | 'failed' }[]).filter((e) => e.notify)
 
 /** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most `ms` (20 s). */
 async function until(ok: (q: any) => boolean, what: string, ms = 20_000) {
@@ -940,6 +941,103 @@ async function morePolls(n = 2) {
   const target = reads() + n
   await until(() => reads() >= target, `${n} more polls`)
 }
+
+describe('the merge queue keeps the board app running while it has work (#1236)', { timeout: 60_000 * SLOW }, () => {
+  it('is busy while an item waits or is in CI, or a batch has its end to do; not for an item needing attention, nor once all of it ended', () => {
+    const q = emptyQueue()
+    expect(queueBusy(q)).toBe(null)
+    q.items.push({ ...fresh(), state: 'waiting' }, { ...fresh({ pr: 78 }), state: 'ci' }, { ...fresh({ pr: 79 }), state: 'attention' })
+    expect(queueBusy(q)).toBe('merge queue, 2 items')
+    // Only one needing attention left: it waits on a session, and does not keep the app running
+    q.items[0].state = 'merged'
+    q.items[1].state = 'closed'
+    expect(queueBusy(q)).toBe(null)
+    q.batches.push({ id: 1, state: 'landing', members: [{ pr: 77 }] })
+    expect(queueBusy(q)).toBe('merge queue, a batch finishing')
+  })
+
+  it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
+    const r = runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
+    const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy
+    await call('merge_queue')
+    expect(busy()).toBeUndefined()
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    await until(() => busy() === 'merge queue, 1 item', 'the hold')
+    // CI finishes: it lands, and the queue has no work left
+    patchGh((s) => {
+      s.checks[SHA] = [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
+      s.runs[SHA] = [ghRun('success')]
+    })
+    await until((x) => stateOf(x) === 'merged' && busy() === undefined, 'the landing and the release')
+  })
+
+  it('lets the hold go when the only item left needs attention', async () => {
+    const cancelled = [ghCheck('verify', 'cancelled', 11), ghCheck('windows tests', 'success', 12)]
+    const r = runtime(ghState({ checks: { [SHA]: cancelled }, runs: { [SHA]: [ghRun('cancelled')] }, on: { 'rerun:900': { runs: { [SHA]: [ghRun('cancelled', 2)] } } } }))
+    const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => busy() === 'merge queue, 1 item', 'the hold')
+    await until((x) => stateOf(x) === 'attention' && busy() === undefined, 'attention and the release')
+  })
+})
+
+describe('the merge queue posts its news into the session that queued (#1161 item 1)', { timeout: 60_000 * SLOW }, () => {
+  /** The sessions told, as Centralu's session side receives them (a recording broker host) */
+  function telling(fail: (sessionId: string) => string | null = () => null) {
+    const told: { sessionId: string; text: string; appId: string }[] = []
+    rt!.attachBrokerHost(
+      fakeBrokerHost({
+        appNotice: async (sessionId, text, app) => {
+          const why = fail(sessionId)
+          if (why) throw new Error(why)
+          told.push({ sessionId, text, appId: app.appId })
+        },
+      }),
+    )
+    return told
+  }
+
+  it('a landing reaches the queuing session as a message, once, with no watch command; the answer says so', async () => {
+    runtime(ghState())
+    const told = telling()
+    const q = await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(q.data.told).toBe(true)
+    expect(q.text).toContain('the queue posts its news into it as a message')
+    // The watch command is still given, for a session that wants it
+    expect(q.data.watch).toContain('merge-queue.mjs')
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    await until(() => told.length > 0, 'the notice')
+    // Ticks go on (every 50 ms here) with nothing left to poll: a told message is not posted again
+    await new Promise((r) => setTimeout(r, 500))
+    expect(told).toEqual([{ sessionId: 's1', text: 'Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)".', appId: 'project-board' }])
+    expect(notices().map((e) => e.told)).toEqual([true])
+    // A reader of merge_queue never sees the address
+    expect(JSON.stringify((await call('merge_queue', { all: true })).data)).not.toContain('"to"')
+  })
+
+  it('needing attention reaches it too, once, with what to do', async () => {
+    const cancelled = [ghCheck('verify', 'cancelled', 11), ghCheck('windows tests', 'success', 12)]
+    runtime(ghState({ checks: { [SHA]: cancelled }, runs: { [SHA]: [ghRun('cancelled')] }, on: { 'rerun:900': { runs: { [SHA]: [ghRun('cancelled', 2)] } } } }))
+    const told = telling()
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention')
+    await until(() => told.length > 0, 'the notice')
+    await morePolls()
+    expect(told).toHaveLength(1)
+    expect(told[0]!.sessionId).toBe('s1')
+    expect(told[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. .* Or take it out with unqueue\.$/)
+  })
+
+  it('a session that is gone is given up on after a few tries, not tried forever; the event stays for a watch command', async () => {
+    runtime(ghState(), { PROJECT_BOARD_QUEUE_TELL_RETRY_MS: '1' })
+    const told = telling(() => 'that session is gone')
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    await until(() => notices()[0]?.told === 'failed', 'giving up')
+    expect(told).toEqual([])
+    expect(notices()).toHaveLength(1)
+  })
+})
 
 describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, () => {
   it('passes check, with queue_merge and unqueue as changes and merge_queue as a read', async () => {

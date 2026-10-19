@@ -480,6 +480,9 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
+  const stopApp = useStore((s) => s.stopApp)
+  // Kept running for background work (#1236): what for, and Stop, as on its sidebar row
+  const busy = app.info.status === 'running' ? (app.info.busy ?? null) : null
   const toggleSettings = useStore((s) => s.toggleSettings)
   const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
@@ -499,6 +502,19 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           {status.label}
         </span>
       </div>
+      {busy && (
+        <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted" data-testid="external-app-busy">
+          <span className="min-w-0 truncate">Running: {busy}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
+            onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine: app.info.machine ?? null })}
+            data-testid="external-app-stop"
+          >
+            Stop
+          </button>
+        </div>
+      )}
       {status.reason && (
         <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-body text-ink-muted" data-testid="external-app-reason">
           {status.reason}

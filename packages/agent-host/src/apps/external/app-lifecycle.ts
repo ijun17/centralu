@@ -24,6 +24,8 @@ export type LifecycleHost = {
   find(ref: AppRef): AppEntry | undefined
   holdKey(ref: AppRef): string
   label(ref: AppRef): string
+  /** An app took a busy hold (`reason`) or let it go (`null`) (#1236) — kept so a host that starts again resumes it */
+  busyRecorded(e: AppEntry, reason: string | null): void
 }
 
 /**
@@ -241,6 +243,9 @@ export class AppLifecycle {
     if (L.proc !== proc) return
     L.proc = null
     L.tools = null
+    // A crashed app is not started again by itself (A-3), a host start included
+    if (L.busy) this.host.busyRecorded(e, null)
+    L.busy = null
     this.clearIdle(e)
     // If it died after running well for a long time, this is not a consecutive failure — counted from zero
     if (Date.now() - proc.startedAt >= this.host.timing.stableMs) L.failures = 0
@@ -268,6 +273,8 @@ export class AppLifecycle {
     const proc = L.proc
     L.proc = null
     L.tools = null
+    // A busy hold belongs to the process it came from (#1236): it ends with it
+    L.busy = null
     // The abandoned start's process goes with it (#839): left to finish starting, it ran beside the next start's copy
     const spawning = L.spawning
     L.spawning = null
@@ -283,12 +290,48 @@ export class AppLifecycle {
   armIdle(e: AppEntry): void {
     this.clearIdle(e)
     const L = e.life
-    if (L.inflight > 0 || this.viewsOf(e) > 0 || !L.proc) return
+    if (L.inflight > 0 || this.viewsOf(e) > 0 || !L.proc || this.busyReason(e) !== null) return
     L.idle = setTimeout(() => {
       L.idle = null
-      if (L.inflight === 0 && this.viewsOf(e) === 0) void this.halt(e, `idle for ${this.host.timing.idleMs}ms`)
+      if (L.inflight === 0 && this.viewsOf(e) === 0 && this.busyReason(e) === null) void this.halt(e, `idle for ${this.host.timing.idleMs}ms`)
     }, this.host.timing.idleMs)
     L.idle.unref()
+  }
+
+  /**
+   * What the app is busy with now (#1236), or null: a hold the **current** process made, under a manifest that
+   * declares `uses.background`. Read by the idle rule, which leaves a busy app running as it does one with an open
+   * view, and by the list, which shows the reason on the app's row.
+   */
+  busyReason(e: AppEntry): string | null {
+    const L = e.life
+    const b = L.busy
+    if (!b || !e.manifest?.uses.background || !L.proc?.alive || b.pipeId !== L.pipeId) return null
+    return b.reason
+  }
+
+  /**
+   * The app on pipe `pipeId` says it is busy with background work (`reason`), or no longer (`null`) (#1236). Answers
+   * why it is refused, or null once taken: only an app whose manifest declares `uses.background` may hold, and a
+   * report from a process that is not this entry's newest (one stopping, or replaced) changes nothing. A hold made
+   * while its process is still starting counts once the start completes. Releasing arms the idle rule again, which
+   * stops the app after the idle time if nothing else holds it.
+   */
+  setBusy(e: AppEntry, pipeId: number, reason: string | null): string | null {
+    if (!e.manifest?.uses.background) {
+      return 'refused: this app does not declare "uses": { "background": "<what it does>" } in centralu.app.json, so it cannot keep running with nothing open'
+    }
+    const L = e.life
+    // A process older than the current one (stopping after a restart) holds nothing for the new one
+    if (pipeId < L.pipeId) return "refused: this process is no longer the app's current one"
+    const was = this.busyReason(e)
+    L.busy = reason === null ? null : { pipeId, reason }
+    this.host.busyRecorded(e, reason)
+    const now = this.busyReason(e)
+    if (now !== null) this.clearIdle(e)
+    else this.armIdle(e)
+    if (now !== was) this.host.appsChanged()
+    return null
   }
 
   private viewsOf(e: AppEntry): number {

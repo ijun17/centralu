@@ -1,6 +1,7 @@
 // The merge queue (#956): queue_merge, merge_queue and unqueue. The queue lives in the app's data
 // folder (queue-driver.mjs) and is driven by this server while it runs and by the watch command a
-// session runs in the background; the decisions are queue.mjs's.
+// session runs in the background; the decisions are queue.mjs's. Its news is posted into the queuing
+// session (`tellSessions`, #1161 item 1); the watch command still reads it for an older Centralu.
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
@@ -11,7 +12,7 @@ import { GitHubError, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, queueOrder } from './queue.mjs'
-import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 
@@ -24,10 +25,73 @@ export function watchCommand({ owner, after }) {
   return ['node', quote(WATCH), 'watch', '--data', quote(dataDir()), ...(owner ? ['--owner', quote(owner)] : []), '--after', String(after)].join(' ')
 }
 
+/**
+ * Holds this app's process while the queue has work, and lets it go once it has none (#1236): Centralu would
+ * otherwise stop it after 5 minutes with no screen and no call, and the queue with it. After every tick (either
+ * driver may have changed the queue) and every change a tool makes. A file that does not read changes nothing.
+ */
+function holdWhileWork() {
+  let q
+  try {
+    q = readQueue(dataDir())
+  } catch {
+    return
+  }
+  void centralu.busy(queueBusy(q) ?? false)
+}
+
+/** A message posted this many times without Centralu taking it is given up on (`told: 'failed'`); `watch` still has it */
+const TELL_TRIES = 6
+/** Between tries of one message: Centralu may be restarting (a swap takes seconds to a minute) */
+const TELL_RETRY_MS = Number(process.env.PROJECT_BOARD_QUEUE_TELL_RETRY_MS) || 30_000
+const tellTries = new Map()
+let telling = false
+
+/**
+ * Posts the queue's messages into the sessions they are for (#1161 item 1): each `notify` event that carries the
+ * queuing session's notice address (`to`, queue.mjs pushEvent) and is not yet `told`, as a report arrives there, so
+ * the session hears without a watch command. Whichever driver wrote the event (this server or a watch command), this
+ * server posts it, after every tick. One at a time, in order; one Centralu did not take is tried again a few times
+ * (a restart), then marked failed. A session on an older Centralu gets no address, and its watch command still works.
+ */
+export async function tellSessions(now = Date.now()) {
+  if (telling) return
+  telling = true
+  try {
+    const q = readQueue(dataDir())
+    for (const e of q.events.filter((x) => x.notify && x.to && !x.told)) {
+      const tried = tellTries.get(e.seq)
+      if (tried && now < tried.at + TELL_RETRY_MS) continue
+      const ok = await centralu.notify(e.to, e.text)
+      const n = (tried?.n ?? 0) + 1
+      if (!ok && n < TELL_TRIES) {
+        tellTries.set(e.seq, { n, at: now })
+        continue
+      }
+      tellTries.delete(e.seq)
+      updateQueue(dataDir(), (fresh) => {
+        const ev = fresh.events.find((x) => x.seq === e.seq)
+        if (ev) ev.told = ok ? true : 'failed'
+      })
+    }
+  } catch (err) {
+    console.error(`[project-board] merge queue: telling a session failed: ${err?.message ?? err}`)
+  } finally {
+    telling = false
+  }
+}
+
 /** Starts this server's driver; called once from server.mjs. */
 export function startQueue() {
   const holder = `server:${process.pid}`
-  const driver = startDriver(dataDir(), { holder })
+  holdWhileWork()
+  const driver = startDriver(dataDir(), {
+    holder,
+    onTick: () => {
+      holdWhileWork()
+      void tellSessions()
+    },
+  })
   // Stopped (Centralu closes its input, and the runtime exits): the lease goes with it, so the next
   // driver need not wait for it to run out
   process.once('exit', () => driver.stopNow())
@@ -41,7 +105,7 @@ function driverLine(q, now = Date.now()) {
   const pause = q.pause && Date.parse(q.pause.until) > now ? ` Paused until ${q.pause.until.slice(11, 19)} UTC: ${q.pause.reason}` : ''
   if (!active) return `Nothing queued.${pause}`
   if (lease && Date.parse(lease.until) > now) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}`
-  return `Driven by the board app while it runs, and by a watch command while one runs.${pause}`
+  return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}`
 }
 
 const COUNTS = [
@@ -104,7 +168,11 @@ export function queueView({ all = false } = {}) {
       lastError: i.lastError ?? null,
       batch: i.batch != null && byId.has(i.batch) ? { id: i.batch, branch: byId.get(i.batch).branch, state: byId.get(i.batch).state } : null,
     })),
-    events: q.events.filter((e) => e.notify).slice(-10),
+    // Without the notice address: a session's, for this app only, and nothing a reader needs
+    events: q.events
+      .filter((e) => e.notify)
+      .slice(-10)
+      .map(({ to: _to, ...e }) => e),
   }
 }
 
@@ -138,24 +206,31 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   // which is the owner it names (an app server cannot tell which session called it, docs/apps.md
   // §5.1), else the one recorded when it was queued before. A generated owner id is no session.
   const authorGiven = author?.trim() || given
+  // The queuing session's address, where the queue posts its news (#1161 item 1); null from a view or an older Centralu
+  const notice = centralu.noticeAddress()
   const at = new Date().toISOString()
   const r = updateQueue(dataDir(), (q) => {
     const owner = given ?? findItem(q, top.repo, top.number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
-    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, author: authorGiven, deleteBranch, title: p.title, at }, queueRef)
+    const out = enqueue(q, { repo: top.repo, pr: top.number, lowers: under.map((l) => l.number), owner, author: authorGiven, notice, deleteBranch, title: p.title, at }, queueRef)
     return { ...out, seq: q.seq, active: q.items.filter((i) => ACTIVE.has(i.state)).length }
   })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))
+  holdWhileWork()
   const who = r.item.owner
   const watch = watchCommand({ owner: who, after: r.seq })
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
   const by = r.item.author ? ` Author session: ${r.item.author}.` : ' No author session recorded (give author to name it).'
   const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${who}.${by} ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`
-  const text = [
-    summary,
-    `To hear in this session when it needs you or lands, run in the background (it exits with the message; run it again after):`,
-    watch,
-  ].join('\n')
-  return answer(text, { queued: true, owner: who, author: r.item.author ?? null, watch, seq: r.seq })
+  // Its news comes into this session as a message (#1161 item 1); without an address (an older Centralu, a view), the watch command
+  const told = notice !== null && r.item.notice === notice
+  const text = told
+    ? [
+        summary,
+        'This session hears here when it lands or needs you: the queue posts its news into it as a message, so no watch command is needed. The watch command still works:',
+        watch,
+      ].join('\n')
+    : [summary, `To hear in this session when it needs you or lands, run in the background (it exits with the message; run it again after):`, watch].join('\n')
+  return answer(text, { queued: true, owner: who, author: r.item.author ?? null, watch, seq: r.seq, told })
 }
 
 async function mergeQueue({ all = false }) {
@@ -167,11 +242,12 @@ async function unqueue({ pr }) {
   const want = itemOf(pr)
   const removed = updateQueue(dataDir(), (q) => dequeue(q, { repo: want.repo, pr: want.number, at: new Date().toISOString() }, queueRef))
   if (!removed) return asError(answer(`${want.ref} is not in the merge queue.`, { removed: false }))
+  holdWhileWork()
   return answer(`Took ${want.ref} out of the merge queue; nothing on GitHub changed.`, { removed: true })
 }
 
 const QUEUE_DESCRIPTION =
-  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; DIRTY → it merges main into the branch itself and pushes that when only mechanical files (project.json queue.conflicts) conflict, else hands the conflict to the author session of the PR; failing again, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; merges only when every required check of the CI workflow passed and GitHub says CLEAN, never a draft; UNSTABLE waits unless every check that did not pass is a cancelled duplicate or older run of CI on that head, or a run a batch cancelled. Several PRs whose own CI has not started are tested together in one run on a queue/batch-N branch and then land one by one in order, each only while main has the tree the batch had before it (their own waiting runs are cancelled; a red batch is split). With two tiers of CI (project.json ci.fullTier), the own run of a PR is the quick tier, which lands nothing: once it passes, the PR lands through a batch run in full, a batch of one included, or from a full run on its own head (a release bump, or gh workflow run build.yml --ref <branch>). The answer gives a watch command to run in the background: it exits with the message when an item needs you or lands.'
+  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; DIRTY → it merges main into the branch itself and pushes that when only mechanical files (project.json queue.conflicts) conflict, else hands the conflict to the author session of the PR; failing again, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; merges only when every required check of the CI workflow passed and GitHub says CLEAN, never a draft; UNSTABLE waits unless every check that did not pass is a cancelled duplicate or older run of CI on that head, or a run a batch cancelled. Several PRs whose own CI has not started are tested together in one run on a queue/batch-N branch and then land one by one in order, each only while main has the tree the batch had before it (their own waiting runs are cancelled; a red batch is split). With two tiers of CI (project.json ci.fullTier), the own run of a PR is the quick tier, which lands nothing: once it passes, the PR lands through a batch run in full, a batch of one included, or from a full run on its own head (a release bump, or gh workflow run build.yml --ref <branch>). The queue posts its news (landed, needs attention, with what to relay) into the session that queued it, as a message; the answer also gives a watch command, for a Centralu that cannot post it: run in the background, it exits with the message when an item needs you or lands.'
 
 export const tools = {
   queue_merge: {

@@ -741,6 +741,14 @@ to the app (`appMessageFrame(..., 'request')`; `app-agents.test.ts` "work an app
 confined to the same frame as UI messages — every line is a quote, so the app's text cannot forge
 a header or fake the end of the frame").
 
+A notice an app posts into a session that called it (apps.md §10, `notify`, #1161 item 1) is an
+app's text no person chose to send either. It is stored with its source (`fromApp`), and reaches the
+agent in the same frame, under a heading saying the app posted it to this session, which called its
+tools before, that the person did not write or read it, and that nothing in it can grant permissions
+or change instructions (`appMessageFrame(..., 'notice')`; `app-notice.test.ts` "is recorded as the
+app's message and reaches the agent framed as the app's text, each line quoted", with a forged header
+inside the text). Who it may reach is under "App servers".
+
 Limits:
 
 - The frame states where text came from. As with reports, it does not make the text safe to obey.
@@ -1353,7 +1361,24 @@ then who may call it:
   `mediation.test.ts` "a broker call with no run id is refused (an app waking itself up on its
   own)", "a made-up id, a finished run's id, and another app's live id are all refused";
   `broker-records.test.ts`). Broker work is
-  cancelled with the call it serves, down to an agent session it started.
+  cancelled with the call it serves, down to an agent session it started. The one exception is
+  `busy` (#1236): an app says it is busy with background work, or no longer, without a run id. It
+  asks for nothing outside the app: it only keeps the app's own process from the idle rule, and only
+  when the manifest declares `uses.background` (in `uses`, so an imported app adding it is reviewed
+  again and the trust card lists it). The hold is the app's row ("Running: <reason>"), it ends with
+  the process, and the person stops it from its sidebar row, its row in Settings or its view
+  (`app-lifecycle.ts` `setBusy`; `busy.test.ts`, `e2e/apps.spec.ts`). A host that starts again
+  starts the apps that held busy when the last one stopped (`app-busy.json`), but only one still
+  allowed to run (trusted, enabled, not failed) and still declaring `uses.background`; the person's
+  Stop and a crash remove its record (`busy-book.ts`, `ExternalApps.resumeBusy`).
+  The other is `notify` (#1161 item 1): an app that declares `uses.notices` posts a
+  notice into a session that called it, from a timer, without a run id. It can reach only those
+  sessions: a call a session's chain started carries an address for that session, the session id
+  with a MAC over (app, session) under a key kept in the data folder (0600), so a session id read
+  from `sessions.list`, another app's address or a made-up one opens nothing. The text reaches the
+  agent in the app-text frame, every line quoted ("Text an app sends"); at most 10 a minute and 4000
+  characters each; every notice, delivered or refused, is a run record naming the session
+  (`notices.ts`, `desk.ts` `notice`; `notices.test.ts`, `app-notice.test.ts`).
 - What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
   each capability once (an agent tool, another app, a host data name), asked where the chain
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
@@ -1386,6 +1411,12 @@ Limits:
 
 - Nothing confines what a running app server does with the user's privileges. Trust is a decision
   about code, not a sandbox.
+- A session that called an app with `uses.notices` once can be told by it for as long as the session
+  exists: an address does not expire, and nothing but the rate limit bounds how often the app speaks.
+  The text is the app's, framed as such, and grants nothing; the person reads it in the conversation.
+- An app that declares `uses.background` decides when it is busy: one that never releases keeps
+  running until the person stops it or Centralu quits. The row shows the hold the whole time; nothing
+  limits how long it lasts.
 - The data folder is outside the repository so that runtime files are never committed. It is not
   an isolation boundary between apps: they all run as the same user.
 - Redaction is literal string replacement. Values shorter than 4 characters, and values the app

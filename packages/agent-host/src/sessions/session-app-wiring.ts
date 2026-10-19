@@ -38,6 +38,8 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     sessionOf: (sessionId: string) => SessionInfo
     appHostData: AppSessions['appHostData']
     runAppAgent: AppSessions['runAppAgent']
+    /** An app's notice into a session that called it (#1161 item 1) — `SessionManager.appNotice` */
+    appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
     agentRunEnded: AppSessions['agentRunEnded']
     askCapability: HostCards['askCapability']
     migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']
@@ -70,6 +72,7 @@ export class SessionAppWiring {
       agentLabel: (tool) => this.host.adapters.get(tool)?.descriptor.label ?? tool,
       askCapability: (q, signal) => this.host.askCapability(q, signal),
       agentRunEnded: (run) => this.host.agentRunEnded(run),
+      appNotice: (sessionId, text, app) => this.host.appNotice(sessionId, text, app),
     }
   }
   useExternalApps(rt: ExternalApps, opts?: Omit<NonNullable<ConstructorParameters<typeof SessionAppsHub>[1]>, 'onDemand'>): void {

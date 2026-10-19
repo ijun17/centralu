@@ -139,7 +139,7 @@ export function readViewSpan(raw: unknown): { span?: GridSpan; warning?: string 
   return { span, warning: `view.span: each side is 1 to ${GRID_SPAN_MAX} cells — read as ${span.cols} × ${span.rows}` }
 }
 
-const USES_KEYS = ['agent', 'apps', 'host'] as const
+const USES_KEYS = ['agent', 'apps', 'host', 'background', 'notices'] as const
 const SERVER_KEYS = ['command', 'args'] as const
 
 const ManifestSchema = z.object({
@@ -192,6 +192,19 @@ const ManifestSchema = z.object({
           }),
         )
         .optional(),
+      /**
+       * The background work the app may keep its process running for (#1236), in words the person reads: with this
+       * declared, the app may say it is busy (`centralu.busy`), and the idle rule leaves it running meanwhile, as an
+       * open view does. In `uses`, so adding it is a change the person reviews again for an imported app (E-3) and the
+       * project's trust card lists (#1141). Without it, a busy report is refused.
+       */
+      background: z.string().trim().min(1).max(200).optional(),
+      /**
+       * May it post notices into a session that called it (#1161 item 1)? With this, each call a session's chain started
+       * carries an address for that session, and the app posts there later with no call in progress
+       * (`centralu.notify`), framed as the app's text. Only sessions that called it: the address is signed (`notices.ts`).
+       */
+      notices: z.boolean().optional(),
     })
     .default({}),
   /** Only the name is listed here. The value lives only on the user's machine (the runtime's secrets file) */

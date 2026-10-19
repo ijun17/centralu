@@ -227,14 +227,24 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **Where it lives**: `merge-queue.json` in the app's data folder, read and written whole and
   synchronously for each change, so it survives the server restarting. A file that does not read
   stops the driver, said once in the app's log, then tried again with a growing wait. Centralu stops an app with no
-  open screen and no call after 5 minutes (docs/apps.md §4), and an app cannot message a session on
-  its own (§13), so the queue has two drivers: this server while it runs, and the **watch command** a
-  session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
+  open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
+  `uses.background`, and this server holds busy exactly while the queue has an item waiting or in CI, or a batch
+  with its end to do (not one needing attention: it waits on a session, and one forgotten would keep the app polling
+  for good) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
+  items"), so the queue carries on overnight with nothing open (#1236). The queue has two drivers: this server, and
+  the **watch command** a session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
   every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,
   let go on exit).
 - **Telling the session**: every change worth a message is an event with a sequence number and the
   item's owner. Attention is one event per change (`noticeKey`: the reason, the head and the job), not
-  one per poll; a merge or a close is one too. `node .centralu/apps/project-board/bin/merge-queue.mjs
+  one per poll; a merge or a close is one too. The manifest declares `uses.notices`, so `queue_merge`
+  keeps the calling session's notice address on the item (`centralu.noticeAddress()`, docs/apps.md
+  §10), each message event carries it (`to`), and this server posts it into that session after every
+  tick (`tellSessions`, #1161 item 1): it arrives as a report does, with the relay text in an
+  attention message, and the event is marked `told` (or `failed` after 6 tries 30 s apart: the
+  session is gone, or the Centralu cannot post). `merge_queue` never shows the address. An item
+  queued from an older Centralu has no address, and the watch command still works for every item:
+  `node .centralu/apps/project-board/bin/merge-queue.mjs
   watch --data <folder> --owner <name> --after <seq>` (queue_merge answers it whole) drives the queue
   while it waits and exits with that owner's messages: 3 when one needs attention, 0 for a merge or
   when nothing is left, 6 at its deadline (`--minutes`, default 100), 2 for a wrong argument or an
@@ -243,7 +253,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **The screen** shows a "Merge queue" section above the board while it has items: needs attention
   (with why), CI, waiting, merged in the last day, each with Unqueue while active. Nothing tells a
   screen when the driver moves an item, so it reads `merge_queue` again every 15 s while one is active.
-- `PROJECT_BOARD_QUEUE_TICK_MS` and `PROJECT_BOARD_QUEUE_POLL_MS` shorten the waits only for tests.
+- `PROJECT_BOARD_QUEUE_TICK_MS`, `PROJECT_BOARD_QUEUE_POLL_MS` and `PROJECT_BOARD_QUEUE_TELL_RETRY_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
 

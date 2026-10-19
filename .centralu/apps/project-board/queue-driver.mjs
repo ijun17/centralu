@@ -2,9 +2,10 @@
 // process drive at a time, and one poll per tick. The decisions are queue.mjs's; this reads GitHub
 // for them and does what they say.
 //
-// Who drives: the board app's server while it runs (Centralu stops an app with no open screen and no
-// call for 5 minutes, docs/apps.md §4), and the watch command (bin/merge-queue.mjs) a session runs in
-// the background. Both take the same lease (`merge-queue.lease.json`), so one of them polls at a
+// Who drives: the board app's server while it runs, and the watch command (bin/merge-queue.mjs) a
+// session runs in the background. Centralu stops an app with no open screen and no call for 5 minutes
+// unless it says it is busy (docs/apps.md §4): the server holds busy while the queue has work
+// (`queueBusy`, #1236), so the queue carries on overnight with nothing open. Both take the same lease (`merge-queue.lease.json`), so one of them polls at a
 // time, and both read and write the same file, so the queue carries on in whichever is alive, and
 // after either restarts.
 //
@@ -61,7 +62,7 @@ import { mergeMain, statLine } from './queue-conflict.mjs'
 import { classifyRun } from './run-failure.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
-import { listSome, short, span } from './util.mjs'
+import { listSome, plural, short, span } from './util.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
 export const LEASE_FILE = 'merge-queue.lease.json'
@@ -126,6 +127,19 @@ export function updateQueue(dir, fn) {
   const out = fn(q)
   writeAtomic(join(dir, QUEUE_FILE), q)
   return out
+}
+
+/**
+ * What the server tells Centralu it is busy with (#1236), or null when the queue has no work of its own: an item
+ * waiting or in CI, or a batch with its end still to do. An item needing attention is not: it waits on a session, and
+ * one forgotten would keep the app running and polling for good. It is still polled while the app runs for any other
+ * reason (a view, a call, other work), and queued again it is work again. The row reads "Running: merge queue, 2 items".
+ */
+export const WORKING = new Set(['waiting', 'ci'])
+export function queueBusy(q) {
+  const active = q.items.filter((i) => WORKING.has(i.state)).length
+  if (active) return `merge queue, ${plural(active, 'item')}`
+  return activeBatch(q) ? 'merge queue, a batch finishing' : null
 }
 
 // --- The lease ---------------------------------------------------------------------------------------

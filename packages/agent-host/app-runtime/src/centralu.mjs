@@ -10,6 +10,9 @@
  *   centralu.agent(prompt, { schema, tool })       ask Centralu's agent (over fd 3)
  *   centralu.callApp(app, tool, args)              call another app's tool (over fd 3)
  *   centralu.host(name)                            read Centralu data declared in uses.host (over fd 3)
+ *   centralu.busy(reason) / centralu.busy(false)   keep running with nothing open while busy (uses.background)
+ *   centralu.noticeAddress()                       the calling session's address, for a notice later (uses.notices)
+ *   centralu.notify(address, text)                 post a notice into that session, from anywhere (over fd 3)
  *   centralu.readJson / writeJson                  state files in the app's data folder
  *   centralu.dataDir                               CENTRALU_APP_DATA (outside the app folder)
  */
@@ -88,6 +91,40 @@ async function askBroker(what, tool, args) {
   return result
 }
 
+/*
+ * The busy state as last asked, and the chain of reports to Centralu: each waits for the one before, so Centralu hears
+ * them in the order they were made, and the last word wins. A refusal is said once on stderr, and the same report is
+ * not sent again after it (an older Centralu refuses every one): only a change is.
+ */
+let busyWanted = null
+let busySent = null
+let busyRefused = undefined
+let busyChain = Promise.resolve(true)
+let busySaid = null
+
+function sendBusy() {
+  busyChain = busyChain.then(async () => {
+    const want = busyWanted
+    if (want === busySent) return true
+    if (want === busyRefused) return false
+    try {
+      const r = await callBroker('busy', want === null ? { busy: false } : { busy: true, reason: want }, undefined)
+      if (r?.isError) throw new Error(textOf(r))
+      busySent = want
+      busyRefused = undefined
+      busySaid = null
+      return true
+    } catch (e) {
+      const why = String(e?.message ?? e)
+      if (why !== busySaid) console.error(`[centralu] centralu.busy: Centralu did not take it: ${why}`)
+      busySaid = why
+      busyRefused = want
+      return false
+    }
+  })
+  return busyChain
+}
+
 export const centralu = {
   RUN_META,
   UI_MIME: RESOURCE_MIME_TYPE,
@@ -113,6 +150,7 @@ export const centralu = {
         runId: ctx?.mcpReq?._meta?.[RUN_META] ?? null,
         signal: ctx?.mcpReq?.signal,
         progressToken: ctx?.mcpReq?._meta?.progressToken,
+        notice: ctx?.mcpReq?._meta?.['centralu/notice'] ?? null,
         notify: ctx?.mcpReq?.notify,
       }
       return runs.run(store, async () => {
@@ -180,6 +218,48 @@ export const centralu = {
   async host(name) {
     const r = await askBroker(`centralu.host(${JSON.stringify(name)})`, 'host_data', { name })
     return r.structuredContent ?? JSON.parse(textOf(r))
+  },
+
+  /**
+   * Says this app is busy with background work (`reason`, what it is doing, shown on the app's row as "Running:
+   * <reason>"), or no longer (`false`), so Centralu keeps its process running meanwhile with no view open and no call:
+   * otherwise an app is stopped after 5 minutes of that. The manifest must declare it: "uses": { "background": "what
+   * the app does in the background" }. Callable anywhere, a timer included (unlike the helpers above); saying the
+   * same thing again sends nothing. Resolves true once Centralu took it, false when it did not (said on stderr once):
+   * no declaration, an older Centralu, or running outside Centralu. Hold it only while there is work: the person sees
+   * it and can stop the app, and a process that holds forever is what the idle rule exists to prevent.
+   */
+  busy(reason) {
+    const want = reason === false || reason === null || reason === undefined ? null : String(reason).trim().slice(0, 200) || 'background work'
+    busyWanted = want
+    return sendBusy()
+  },
+
+  /**
+   * The address of the session whose call this is, for a notice later (`centralu.notify`), or null: the call did not
+   * come from a session (a view, or no Centralu), or the manifest does not declare "uses": { "notices": true }. Only
+   * inside a tool handler; keep it with the work it belongs to. It names that session for this app only.
+   */
+  noticeAddress() {
+    return runs.getStore()?.notice ?? null
+  },
+
+  /**
+   * Posts `text` into the session `address` names (from `centralu.noticeAddress()`), as a report arrives there: the
+   * agent reads it as this app's text, and an idle session wakes. Callable anywhere, a timer included. Resolves true
+   * once delivered, false when Centralu did not take it, said on stderr: the session is gone, Centralu is restarting
+   * (post it again later), too many notices (10 a minute), no declaration, or an older Centralu. Up to 4000 characters.
+   */
+  async notify(address, text) {
+    if (typeof address !== 'string' || !address) return false
+    try {
+      const r = await callBroker('notify', { to: address, text: String(text) }, undefined)
+      if (r?.isError) throw new Error(textOf(r))
+      return true
+    } catch (e) {
+      console.error(`[centralu] centralu.notify: Centralu did not take it: ${e?.message ?? e}`)
+      return false
+    }
   },
 
   /** Reads `<data folder>/<file>` as JSON, or `fallback` if the file does not exist yet. */

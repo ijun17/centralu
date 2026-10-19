@@ -1490,6 +1490,18 @@ export class SessionManager {
     return this.deliver(sessionId, text, undefined, undefined, false, app, place)
   }
 
+  /**
+   * An app's notice into a session that called it (#1161 item 1, the broker's `notify`) — delivered as a report
+   * arrives: recorded as the app's message and handed to the agent framed as the app's text (`appMessageFrame`
+   * `notice`), waking the session if it is idle or asleep. Throws a reason the app reads when it cannot be delivered
+   * now: while this host hands over or quits (the app tries again; the next host takes it), or once the session is gone.
+   */
+  async appNotice(sessionId: string, text: string, app: AppMessageSource): Promise<void> {
+    if (this.handingOver || this.disposing) throw new Error('Centralu is restarting; post it again in a moment')
+    if (!this.meta.has(sessionId) || this.trash.trashing.has(sessionId)) throw new Error('that session is gone')
+    return this.deliver(sessionId, text, undefined, undefined, false, app, 'notice')
+  }
+
   /** `SessionEvents.deliver` (session-events.ts), kept on the manager for its callers */
   private deliver(...a: Parameters<SessionEvents['deliver']>): ReturnType<SessionEvents['deliver']> {
     return this.events.deliver(...a)
@@ -2384,6 +2396,7 @@ export class SessionManager {
       requireAppAccess: (...a) => self.apps.requireAppAccess(...a),
       respondApproval: (...a) => self.respondApproval(...a),
       runAppAgent: (...a) => self.runAppAgent(...a),
+      appNotice: (...a) => self.appNotice(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy

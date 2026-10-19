@@ -79,6 +79,22 @@ when an agent's call started it, on this app's screen when the screen did — an
 until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
 refusal comes back as that error: show it plainly instead of retrying.
 
+**Background work.** Centralu stops an app with no open screen and no call for 5 minutes. An app
+with work on its own clock (a timer that polls, a queue it drives) declares it in the manifest,
+`"uses": { "background": "what it does, in a few words" }`, and calls `centralu.busy('what it is
+doing now')` while there is work and `centralu.busy(false)` once there is none: anywhere, a timer
+included. Meanwhile it keeps running, and its row says "Running: <what it is doing now>"; the person
+can stop it. It resolves false (said on stderr) when Centralu did not take it. Hold it only while
+there is work.
+
+**Telling a session later.** To tell the session that asked for work when that work ends (a job
+finished, something needs it), declare `"uses": { "notices": true }`, keep
+`centralu.noticeAddress()` (inside the tool handler of that session's call) with the work, and when
+it is done call `await centralu.notify(address, 'what happened')`: anywhere, a timer included. The
+session receives it as your app's message. It resolves false (said on stderr) when Centralu did not
+take it: the session is gone, Centralu is restarting (try again later), or more than 10 a minute.
+The address is null when a view called, or the manifest does not declare it.
+
 ## Dragging an item out of the screen
 
 An item the person may want to hand to a session (a card, a row, a record) should be draggable and
