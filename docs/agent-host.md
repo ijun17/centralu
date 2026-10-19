@@ -313,7 +313,13 @@ For a machine's project the call runs through the links, not the manager's own s
 exclusions as here), the person's consent is asked for this call, the task goes as `host.send` (recorded
 there as sent by the asking session, named with this computer), and the turn is waited on through the
 machine's own events, which the hub relays qualified (`observeLinked`). The answer is the session's last
-words, read there. It runs on that machine with its own logins, folder and preset.
+words, read there whole (`host.lastAnswer`, #1186: its text up to 100,000 characters, its length and its first
+message's seq there), cut as an answer is cut here, the cut naming `read_session` on that session with that seq and
+an offset. The hub used to read it from `host.readSession`'s lines, which the machine cut at 2,000 characters of JSON,
+so a long answer came back as an older line or empty; an older machine is still read that way, its cut line read back
+as far as it goes. A read that failed is said (the turn ended, the answer could not be read, read it with
+`read_session` once the machine answers), here, in start_agent's answers for a child there and in a report's preview,
+where it used to come back as an empty answer. It runs on that machine with its own logins, folder and preset.
 
 | Choice | Reason |
 |---|---|

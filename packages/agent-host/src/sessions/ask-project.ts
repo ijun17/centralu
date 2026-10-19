@@ -23,6 +23,9 @@ import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
  */
 export const ASK_WAIT_MS = 240_000
 
+/** How much of a linked machine's last message is read for an answer (#700, #1038); `clipAnswer` then cuts it to the usual size */
+export const ANSWER_READ_MAX_CHARS = 100_000
+
 /** The longest answer handed back whole. Past it, the head and the tail are kept: a report puts its findings first and the paths last */
 export const ANSWER_MAX_CHARS = 6000
 const ANSWER_HEAD_CHARS = 4500

@@ -162,8 +162,13 @@ export type LinkedSessions = {
   readerFacts(sessionId: string): { app: boolean; trusted: boolean } | null
   /** A machine's session as the hub last knew it (the headers mirror): its name and its project's */
   describe(sessionId: string): { name: string; project: string } | null
-  /** The last thing a machine's session said, for a report; empty when it cannot be read */
-  lastWords(sessionId: string, maxChars: number): Promise<string>
+  /**
+   * The last thing a machine's session said (`host.lastAnswer` there, #1186): its head up to `maxChars` (an ellipsis
+   * past it), its length in all, and the seq its first message has there (`around` for read_session), or null when
+   * the machine does not say (an older one, read from its lines). A read that failed says why: it used to be an empty
+   * answer, which read as "it said nothing"
+   */
+  lastWords(sessionId: string, maxChars: number): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
   list(): Promise<OrchestratedSession[]>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */

@@ -329,7 +329,16 @@ export class LinkedReports {
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
     // Words of the turn go only through the gate (#1038 review); a report that the link or the machine went says no words
     if (!unreachable && this.gate(sessionId) !== 'deliver') return
-    const preview = unreachable ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '') : await reader.lastWords(sessionId, 600).catch(() => '')
-    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work)
+    /*
+     * A read that failed says so (#1186): an empty preview read as a turn that said nothing. A machine that could not
+     * be reached says that, or where its last words were
+     */
+    const words = unreachable ? null : await reader.lastWords(sessionId, 600).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const preview =
+      !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
+      : words.ok ? words.text
+      : `(its last response could not be read there: ${words.error})`
+    const seq = words?.ok && words.seq !== null ? words.seq : undefined
+    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work, seq)
   }
 }

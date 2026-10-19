@@ -28,6 +28,7 @@ import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
 import { orchestratorMemory } from './transcript-view.js'
+import { lastResponse, lastResponseSeq } from './turn-answer.js'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type {
@@ -139,6 +140,8 @@ export { PAUSED_REPORT_SETTLE_MS }
  * cannot ask for a whole store over the link
  */
 const HOST_READ_MAX_LINES = 200
+/** The longest last response a hub reads of this host in one call (`host.lastAnswer`, #1186) */
+const HOST_ANSWER_MAX_CHARS = 100_000
 const HOST_RECALL_MAX_HITS = 50
 
 /*
@@ -1025,9 +1028,21 @@ export class SessionManager {
     sessions(): Promise<OrchestratedSession[]>
     read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
+    lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
     const view = this.orchestratorToolsFor('', undefined, undefined, true)
     return {
+      /*
+       * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
+       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown
+       */
+      lastAnswer: async (sessionId, maxChars) => {
+        const m = this.meta.get(sessionId)
+        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        const rows = this.store.messages.loadMessages(sessionId, 200)
+        const text = lastResponse(rows)
+        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows) }
+      },
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
         const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)

@@ -1,5 +1,5 @@
 import type { Delegation } from './child-ownership.js'
-import { ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
@@ -10,8 +10,6 @@ import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
-/** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
-const ANSWER_READ_MAX_CHARS = 100_000
 
 /** A machine that cannot be asked, as the verb phrase after its name: its plain cause, or the words a model reads for any other */
 const awayPhrase = (why: string): string => (why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`)
@@ -517,14 +515,19 @@ export class AskProjectFlow {
       if (this.linkedAsks.get(ask.sessionId) === ask) this.linkedAsks.delete(ask.sessionId)
       if (!r.ok) return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.` }
       // Its last words, read there: the whole text, cut here as an answer is cut everywhere
-      const answer = await reader.lastWords(ask.sessionId, ANSWER_READ_MAX_CHARS).catch(() => '')
+      const words = await reader.lastWords(ask.sessionId, ANSWER_READ_MAX_CHARS).catch((e: Error) => ({ ok: false as const, error: e.message }))
+      // A read that failed is said, not handed back as an empty answer (#1186): the turn ended, and the task is done there
+      if (!words.ok) {
+        return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] ended its turn, but its answer could not be read there (${words.error}). Do not give the task again: read it with read_session(sessionId="${ask.sessionId}") once that machine answers.` }
+      }
+      const answer = words.text
       return {
         ok: true,
         state: 'done',
         project: ask.project,
         sessionId: ask.sessionId,
         sessionName: ask.sessionName,
-        answer: clipAnswer(answer, ask.sessionName),
+        answer: clipAnswer(answer, ask.sessionName, words.seq !== null ? { sessionId: ask.sessionId, seq: words.seq } : undefined),
         // Paths in the answer are that machine's: listed, not opened to the caller
         readable: [],
         outside: pathsIn(answer),

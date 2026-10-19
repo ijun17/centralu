@@ -143,8 +143,48 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     const reader = linkedSessions(() => [
       machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ role: 'assistant', text: answer }), JSON.stringify({ role: 'tool', tool: 'Bash', title: 'ls' })] } }),
     ])
-    expect(await reader.lastWords('m1.w1', 20)).toBe(`${answer.slice(0, 20)}…`)
-    expect(await reader.lastWords('m1.w1', 600)).toBe(answer)
+    expect(await reader.lastWords('m1.w1', 20)).toMatchObject({ ok: true, text: `${answer.slice(0, 20)}…` })
+    expect(await reader.lastWords('m1.w1', 600)).toMatchObject({ ok: true, text: answer })
+  })
+
+  /*
+   * #1186: the hub read a machine's last words from read_session's lines, which the machine cut at 2,000 characters of
+   * JSON, so a long answer did not parse and an older line, or nothing, came back as the answer; a failed read came
+   * back as an empty answer. A machine of this build answers host.lastAnswer with the whole text and where it starts.
+   */
+  it('reads the whole last answer from a machine that answers host.lastAnswer, with its seq there', async () => {
+    const answer = `${'x'.repeat(30_000)} the tail`
+    const asked: unknown[] = []
+    const m = machine({})
+    m.call = async (method, params) => {
+      asked.push({ method, params })
+      if (method === 'host.lastAnswer') return { text: answer.slice(0, (params as { maxChars: number }).maxChars), length: answer.length, seq: 41 }
+      throw new Error(`Unknown method: ${method}`)
+    }
+    const reader = linkedSessions(() => [m])
+    expect(await reader.lastWords('m1.w1', 100_000)).toEqual({ ok: true, text: answer, length: answer.length, seq: 41 })
+    expect(asked[0]).toEqual({ method: 'host.lastAnswer', params: { sessionId: 'w1', maxChars: 100_000 } })
+    expect(await reader.lastWords('m1.w1', 600)).toEqual({ ok: true, text: `${answer.slice(0, 600)}…`, length: answer.length, seq: 41 })
+  })
+
+  it('reads the head of a long answer an older machine cut, rather than an older line or nothing', async () => {
+    const long = JSON.stringify({ ts: '2026-10-18 10:00', role: 'assistant', text: `HEAD "quoted" \\ ${'y'.repeat(5000)}` })
+    // An older machine's cut: 2,000 characters of the line's JSON and an ellipsis, here inside an escape
+    const cut = `${long.slice(0, 2000)}…`
+    const older = machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ role: 'assistant', text: 'an older answer' }), cut] } })
+    const r = await linkedSessions(() => [older]).lastWords('m1.w1', 100_000)
+    expect(r).toMatchObject({ ok: true, seq: null })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text.startsWith('HEAD "quoted" \\ yyy')).toBe(true)
+    expect(r.text.endsWith('…')).toBe(true)
+    expect(r.text).not.toContain('an older answer')
+  })
+
+  it('says why a last answer could not be read, rather than answering empty', async () => {
+    const away = machine({}, { reachable: false })
+    expect(await linkedSessions(() => [away]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'Box is not reachable right now' })
+    const failing = machine({ 'host.lastAnswer': new Error('the link closed') })
+    expect(await linkedSessions(() => [failing]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'the link closed' })
   })
 
   it('quotes a conversation line that is not one line, and keeps one that is', async () => {
@@ -348,7 +388,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
         return { ok: true as const }
       },
       describe: () => (linked ? { name: 'Worker', project: 'api on Box' } : null),
-      lastWords: async () => 'all done',
+      lastWords: async () => ({ ok: true as const, text: 'all done', length: 0, seq: null }),
       machineLinked: (id: string) => linked && id === 'm1',
       backgroundTasks: (id: string) => (id === 'm1' ? listed() : Promise.resolve(null)),
     } as unknown as LinkedSessions
