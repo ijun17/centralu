@@ -20,6 +20,8 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
+import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
@@ -737,7 +739,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.prs[args[2]].state = 'CLOSED'
   save()
 } else if (args[0] === 'pr' && args[1] === 'list') {
-  out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
+  if (args.includes('--head')) out(Object.values(st.prs ?? {}).filter((p) => p.headRefName === args[args.indexOf('--head') + 1]))
+  else out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
 } else if (path === R + '/commits/main') {
   if (st.mainError) fail('Not Found (HTTP 404)')
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
@@ -757,6 +760,12 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const body = JSON.parse(stdin)
   if (st.dispatchError) fail(st.dispatchError)
   st.dispatched = [...(st.dispatched ?? []), { ref: body.ref, inputs: body.inputs ?? null }]
+  // A probe the test answers by its branch: a finished run on whatever commit the branch holds in GitHub's stand-in
+  const answer = (st.probeAnswers ?? {})[body.ref]
+  if (answer) {
+    const head = require('node:child_process').execFileSync('git', ['-C', st.origin, 'rev-parse', 'refs/heads/' + body.ref], { encoding: 'utf8' }).trim()
+    st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 7000 + st.dispatched.length, run_attempt: 1, head_sha: head, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: answer, created_at: '2099-01-01T00:00:00Z' }] }
+  }
   write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
@@ -2590,6 +2599,29 @@ const issues = (): { title: string; body: string }[] => gh().issues ?? []
 const mainRedNotices = () => notices().filter((e) => e.kind === 'main-red') as unknown as { kind: string; text: string; owner: string | null }[]
 
 describe('the main guard finds what broke main after it landed (#1259)', { timeout: 120_000 * SLOW }, () => {
+  it("reads every main run: the newest red over an older green, the newest green over an older red, and counts the unfinished", () => {
+    const r = (id: number, sha: string, status: string, conclusion: string | null) => ({ id, headSha: sha, status, conclusion })
+    expect(mainVerdict([r(4, 'd', 'in_progress', null), r(3, 'c', 'completed', 'failure'), r(2, 'b', 'completed', 'failure'), r(1, 'a', 'completed', 'success')])).toMatchObject({ green: 'a', red: { id: 3 }, unfinished: 1 })
+    expect(mainVerdict([r(3, 'c', 'completed', 'success'), r(2, 'b', 'completed', 'failure'), r(1, 'a', 'queued', null)])).toMatchObject({ green: 'c', red: null, unfinished: 1 })
+  })
+
+  it('suspects by paths only a commit wholly inside them, the only one touching them; and a suspect is blamed only between a green and a red probe', () => {
+    const c = (sha: string, files: string[]) => ({ sha, files })
+    const paths = { 'keeper e2e': ['apps/desktop/', 'pnpm-lock.yaml'] }
+    expect(attributeByPaths([c('a', ['docs/x.md']), c('b', ['apps/desktop/k.rs'])], ['keeper e2e (linux)'], paths)).toBe('b')
+    // It also changed something outside the paths, or another commit touches them too, or a failed job has none: no suspect
+    expect(attributeByPaths([c('a', ['docs/x.md']), c('b', ['apps/desktop/k.rs', 'packages/ui/a.ts'])], ['keeper e2e'], paths)).toBe(null)
+    expect(attributeByPaths([c('a', ['pnpm-lock.yaml']), c('b', ['apps/desktop/k.rs'])], ['keeper e2e'], paths)).toBe(null)
+    expect(attributeByPaths([c('a', ['docs/x.md']), c('b', ['apps/desktop/k.rs'])], ['keeper e2e', 'verify'], paths)).toBe(null)
+    const commits = ['a', 'b', 'c', 'd'].map((sha) => c(sha, []))
+    const confirm = { index: 2, how: 'by paths' }
+    expect(nextStep({ commits, good: -1, bad: 3, confirm })).toMatchObject({ index: 1 })
+    expect(nextStep({ commits, good: 1, bad: 3, confirm })).toMatchObject({ index: 2 })
+    expect(nextStep({ commits, good: 1, bad: 2, confirm })).toMatchObject({ culprit: commits[2], how: expect.stringContaining('confirmed') })
+    expect(nextStep({ commits, good: -1, bad: 1, confirm })).toEqual({ refuted: true })
+    expect(nextStep({ commits, good: 2, bad: 3, confirm })).toEqual({ refuted: true })
+  })
+
   it('reads nothing of main while the queue has landed nothing', async () => {
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     guardRuntime(repo, { branchRuns: { main: [mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] } })
@@ -2623,22 +2655,82 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     expect(gh().dispatched ?? []).toEqual([])
   })
 
-  it("attributes by the failed job's paths when exactly one commit touches them, with no run", async () => {
-    const repo = mainRepo([
+  /** A probe's branch, and a dispatch of it answered with a finished run on its commit */
+  const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+  const answers = (list: [string, string, number][]) =>
+    Object.fromEntries(list.map(([sha, conclusion, id]) => [`dispatch:${probe(sha)}`, { branchRuns: { [probe(sha)]: [probeRun(id, sha, conclusion)] } }]))
+  const keeperRepo = () =>
+    mainRepo([
       { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
       { subject: 'fix(desktop): change 82 (#82)', files: ['apps/desktop/src-tauri/src/keeper.rs'] },
       { subject: 'docs: change 83 (#83)', files: ['docs/a.md'] },
     ])
+
+  it("suspects the one commit touching the failed job's paths, and blames it only once the full tier passed before it and failed on it", async () => {
+    const repo = keeperRepo()
+    const [c1, c2] = repo.shas as [string, string, string]
     landed(repo.shas[2]!)
     guardRuntime(repo, {
       branchRuns: { main: [mainRun(990, repo.shas[2]!, 'failure'), mainRun(980, repo.green, 'success')] },
       jobs: { 990: [failedJob(31, 'keeper e2e (linux)')] },
+      on: answers([
+        [c1, 'success', 991],
+        [c2, 'failure', 992],
+      ]),
     })
     await call('merge_queue')
-    await until(() => !!guardOnDisk().hunt?.endedAt, 'the report')
-    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: repo.shas[1], how: expect.stringContaining('touches the paths of keeper e2e (linux)') })
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit', 60_000)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c2, how: expect.stringMatching(/touches the paths of keeper e2e \(linux\), confirmed: the full tier passed on the commit before it and failed on it/) })
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual([probe(c1), probe(c2)])
     expect(issues()[0]!.title).toBe('Main is red since #82 fix(desktop): change 82')
-    expect(gh().dispatched ?? []).toEqual([])
+  })
+
+  it('bisects when the suspect by paths is refuted: the commit before it failed too', async () => {
+    const repo = keeperRepo()
+    const [c1] = repo.shas as [string, string, string]
+    landed(repo.shas[2]!)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, repo.shas[2]!, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'keeper e2e (linux)')] },
+      on: answers([[c1, 'failure', 991]]),
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the culprit', 60_000)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c1, how: expect.stringContaining('bisected') })
+    expect(guardOnDisk().hunt.refuted).toContain('touches the paths of keeper e2e (linux)')
+    expect(issues()[0]!.title).toBe('Main is red since #81 feat(ui): change 81')
+  })
+
+  it("gives up on a bisect whose probe's run does not finish, and says so in the issue", async () => {
+    const repo = mainRepo(['81', '82', '83'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    landed(repo.shas[2]!)
+    guardRuntime(
+      repo,
+      { branchRuns: { main: [mainRun(990, repo.shas[2]!, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [failedJob(31, 'verify')] } },
+      { PROJECT_BOARD_QUEUE_PROBE_MS: '300' },
+    )
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'giving up', 60_000)
+    expect(guardOnDisk().hunt.culprit ?? null).toBe(null)
+    expect(issues()[0]!.body).toContain("(a bisect step) had not finished after")
+    // The first probe, the middle of three: the first commit
+    expect(writes().map(short2)).toContain(`delete ${probe(repo.shas[0]!)}`)
+  })
+
+  it("holds landing while more of main's full runs than allowed are unfinished, and lands once they finish", async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    landed(repo.shas[0]!)
+    const going = (id: number) => ({ ...mainRun(id, repo.shas[0]!, null), status: 'in_progress' })
+    guardRuntime(repo, { branchRuns: { main: [going(994), going(993), going(992), mainRun(980, repo.green, 'success')] } }, { PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS: '2', ...NO_TIERS })
+    await call('merge_queue')
+    await until(() => guardOnDisk().unfinished === 3, 'the count')
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const held = await call('merge_queue')
+    expect(held.text).toContain("Landing held: 3 of main's full runs unfinished (at most 2, #1259).")
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(writes().map(short2)).not.toContain('merge 77')
+    patchGh((s) => (s.branchRuns.main = [going(994), mainRun(993, repo.shas[0]!, 'success'), mainRun(992, repo.shas[0]!, 'success'), mainRun(980, repo.green, 'success')]))
+    await until((x) => stateOf(x) === 'merged', 'the landing')
   })
 
   it('bisects otherwise: the full tier on the middle commit, then on the next, and the culprit is the first that fails', async () => {
@@ -2730,7 +2822,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reported', 'the report')
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
-    expect(issues()[0]!.body).toContain('The queue could not revert it: its reverse does not apply to main')
+    expect(issues()[0]!.body).toMatch(/The queue could not revert it: the reverse of [0-9a-f]{7} does not apply to main at/)
     expect(issues()[0]!.body).toContain('Revert it by hand.')
   })
 })
@@ -2739,3 +2831,90 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
 function landedBump(commit: string, pr = 90) {
   seedQueue([{ repo: R, pr, lowers: [], owner: 'other', state: 'merged', commit, title: `change ${pr}`, updatedAt: new Date().toISOString(), reruns: {} }])
 }
+
+describe('the main guard with overlapping failures, and when it acts again (#1259 review)', { timeout: 180_000 * SLOW }, () => {
+  it('finds a second culprit that landed after the first, probing its commit without the first, and never blames a known one or a revert again', async () => {
+    const repo = mainRepo([
+      { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
+      { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] },
+    ])
+    const [a, c] = repo.shas as [string, string]
+    seedQueue([
+      { repo: R, pr: 81, lowers: [], owner: 'tester', state: 'merged', commit: a, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} },
+      { repo: R, pr: 82, lowers: [], owner: 'writer', state: 'merged', commit: c, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} },
+    ])
+    const going = { ...mainRun(992, c, null), status: 'in_progress' }
+    guardRuntime(repo, {
+      origin: repo.origin,
+      branchRuns: { main: [going, mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 991: [failedJob(31, 'verify')], 992: [failedJob(32, 'verify')] },
+      // #82 without #81 still fails: it is a culprit of its own
+      probeAnswers: { [`queue/bisect-${c.slice(0, 12)}`]: 'failure' },
+    })
+    await call('merge_queue')
+    // #81's run failed first: the only commit since the last green one, reverted in #600
+    await until(() => guardOnDisk().hunt?.culprit?.sha === a && guardOnDisk().hunt?.endedAt, 'the first culprit')
+    expect(guardOnDisk().known).toEqual([{ sha: a, subject: 'feat(ui): change 81 (#81)', pr: 600 }])
+    // #82's run fails while that is under way: not dropped, the next hunt, with #81 out of the candidates
+    patchGh((s) => (s.branchRuns.main = [mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
+    await until(() => guardOnDisk().hunt?.red === c && guardOnDisk().hunt?.endedAt, 'the second culprit', 60_000)
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c, how: expect.stringContaining('bisected') })
+    // Its commit was probed without #81: a commit on #82 with #81's change taken out
+    const probeBranch = `queue/bisect-${c.slice(0, 12)}`
+    const probed = g(repo.origin, 'rev-parse', probeBranch)
+    expect(g(repo.origin, 'rev-parse', `${probed}^`)).toBe(c)
+    expect(spawnSync('git', ['cat-file', '-e', `${probed}:packages/ui/src/a.ts`], { cwd: repo.origin, env: GIT_ENV }).status).not.toBe(0)
+    expect(g(repo.origin, 'show', `${probed}:packages/ui/src/b.ts`)).toBe('feat(ui): change 82 (#82)')
+    expect(writes().filter((w) => w[0] === 'pr-create').map((w) => w[2])).toEqual(['revert: feat(ui): change 81', 'revert: feat(ui): change 82'])
+    expect(issues().map((i) => i.title)).toEqual(['Main is red since #81 feat(ui): change 81', 'Main is red since #82 feat(ui): change 82'])
+
+    // #81's revert lands, and main is red on it (as #82 still is): nothing is left but known culprits and their reverts
+    g(repo.work, 'revert', '--no-edit', a)
+    g(repo.work, 'commit', '-q', '--amend', '-m', 'revert: feat(ui): change 81 (#600)')
+    const rv = g(repo.work, 'rev-parse', 'HEAD')
+    g(repo.work, 'push', '-q', 'origin', 'main')
+    patchGh((s) => (s.branchRuns.main = [mainRun(993, rv, 'failure'), mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
+    await until(() => guardOnDisk().hunt?.red === rv && guardOnDisk().hunt?.endedAt, 'the third red')
+    expect(guardOnDisk().hunt.outcome).toBe('explained')
+    await new Promise((r) => setTimeout(r, 500))
+    expect(issues()).toHaveLength(2)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(2)
+  })
+
+  it('acts again without a second revert or issue: a revert branch and pull request an earlier try made are used as they are', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const culprit = repo.shas[0]!
+    const branch = `revert/${culprit.slice(0, 12)}`
+    // An earlier try pushed the revert and opened #640, then stopped before the issue
+    g(repo.work, 'checkout', '-q', '-b', 'earlier', culprit)
+    g(repo.work, 'revert', '--no-edit', culprit)
+    const earlier = g(repo.work, 'rev-parse', 'HEAD')
+    g(repo.work, 'push', '-q', 'origin', `${earlier}:refs/heads/${branch}`)
+    landed(culprit)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, culprit, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      prs: { '77': ghPr(77), '640': ghPr(640, { headRefName: branch, headRefOid: earlier, title: 'revert: feat(ui): change 81' }) },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the act')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 640, branch })
+    expect(queueOnDisk().items.find((i: any) => i.pr === 640)).toMatchObject({ state: expect.any(String), front: expect.any(String) })
+    expect(g(repo.origin, 'rev-parse', branch)).toBe(earlier)
+  })
+
+  it('keeps known culprits and their reverts out of the candidates, and knows what a commit still carries', () => {
+    const c = (sha: string, subject: string) => ({ sha, subject, files: [] })
+    const listed = [c('a', 'feat: a (#81)'), c('b', 'feat: b (#82)'), c('r', 'revert: feat: a (#600)'), c('d', 'feat: d (#83)')]
+    const known = [{ sha: 'a', subject: 'feat: a (#81)', pr: 600 }]
+    const { all, commits } = sortCommits(listed, known)
+    expect(commits.map((x: { sha: string }) => x.sha)).toEqual(['b', 'd'])
+    // b landed after a and before its revert: it carries a; d is after the revert: it does not
+    expect(carried(all, known, 1)).toEqual(['a'])
+    expect(carried(all, known, 3)).toEqual([])
+    // Not reverted at all (a release bump, say): every later commit carries it
+    expect(carried(all, [{ sha: 'a', subject: '', pr: null }], 3)).toEqual(['a'])
+  })
+})
