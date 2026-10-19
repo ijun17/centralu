@@ -40,7 +40,10 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
  * badge's place inside a row that is itself a button (an app row), where the badge stands over it as a button of its
  * own beside the row's.
  */
-const BADGE = `${CHIP} max-w-24`
+// In the project name's own ink, text and border (owner, 2026-10-20): beside a project's changes badge, the faint chip read as one more
+// count. Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
+// of the generated CSS, not of the class attribute
+const BADGE = 'shrink-0 truncate rounded-md border border-ink px-1 text-2xs leading-body text-ink max-w-24'
 
 export function MachineBadge({
   machine,
@@ -60,7 +63,7 @@ export function MachineBadge({
   return (
     <button
       type="button"
-      className={`${BADGE} ${connected ? '' : 'border-dashed'} hover:text-ink ${className}`}
+      className={`${BADGE} ${connected ? '' : 'border-dashed'} ${className}`}
       style={style}
       title={info?.error ?? `${name} — ${info?.sshTarget ?? ''}`}
       data-testid={testId}

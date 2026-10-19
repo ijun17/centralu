@@ -5,6 +5,18 @@ import type {
   GitSource,
 } from '@cc/protocol'
 
+/**
+ * A command's last run as the screen holds it: the host's record (#60) and two facts only this window saw. Both are
+ * the screen's own: a reload reads the host's record again and they are gone, which leaves a run without its end
+ * time and a stop read as its exit code, never a wrong one.
+ */
+export type CommandRun = CommandRunInfo & {
+  /** When its exit arrived here, so the commands list can say how long ago it ended rather than when it began */
+  endedAt?: number
+  /** Stopped from Centralu (Stop in the commands list or on its terminal): its exit is a stop, not a failure */
+  stopped?: boolean
+}
+
 /** Projects: the list, git state, trust, saved commands and their runs. */
 export type ProjectsSlice = {
   projects: Record<string, ProjectInfo>
@@ -26,7 +38,7 @@ export type ProjectsSlice = {
    * strip must read too — the gap this piece exists to close is that leaving a dev server on and
    * moving away left no trace of it visible anywhere. Keyed projectId → command → last run.
    */
-  commandRuns: Record<string, Record<string, CommandRunInfo>>
+  commandRuns: Record<string, Record<string, CommandRun>>
   focusProject(id: string): void
   /**
    * Sets the project's worktree trunk (#76). It was chosen when making the worktree manager, which was folded into

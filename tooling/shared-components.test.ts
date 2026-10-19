@@ -40,7 +40,6 @@ const ALLOWED: Allowed[] = [
   { file: 'features/onboarding/Intro.tsx', look: 'button', count: 1, why: 'a tool card of the first run, large and two-lined' },
   { file: 'features/orchestrator/OrchestratorView.tsx', look: 'button', count: 3, why: 'two approve buttons brighter than primary on purpose (a proposal waits on the person), and the suggestion tiles' },
   { file: 'features/palette/SearchField.tsx', look: 'button', count: 1, why: 'the search box of the top bar, a button shaped as a field' },
-  { file: 'features/settings/Settings.tsx', look: 'button', count: 1, why: 'the orchestrator tool list: full-width option rows with a check mark' },
   { file: 'features/sidebar/GridButton.tsx', look: 'button', count: 1, why: 'a sidebar navigation tile (rounded-lg), lit while its screen is open' },
   { file: 'features/sidebar/OrchestratorButton.tsx', look: 'button', count: 1, why: 'a sidebar navigation tile (rounded-lg), lit while its screen is open' },
   { file: 'features/sidebar/Sidebar.tsx', look: 'button', count: 2, why: 'the sidebar search and add-project tiles (rounded-lg), the same family as the navigation tiles' },

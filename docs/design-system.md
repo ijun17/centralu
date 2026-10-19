@@ -157,6 +157,7 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | Icons | `icons.tsx` |
 | A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame); `xs` / `sm` / `md`; `busy` with `busyText` |
 | One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick) |
+| A setting that is on or off | `Switch` (a checkbox underneath, drawn as a track and knob); in Settings through `SettingToggle`, laid out with `SettingsLayout.tsx` (page, group card, row) |
 | A capsule | `Pill`: `size="bar"` (the top bar's 28px) or `"label"` (a waiting card's kind); edges `quiet`, `live`, `solid`, `dashed` |
 | A small uppercase label | `Badge` (`readout` among figures) |
 | A framed text field | `TextInput`, or `TextField` with its label, hint and problem |

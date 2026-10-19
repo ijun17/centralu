@@ -48,14 +48,17 @@ export function TrashRuns({
 }) {
   if (runs.length === 0) return null
   return (
-    <div className="mt-4" data-testid="trash-runs">
-      <p className="text-xs leading-body text-ink-faint">
-        App agent runs. A session an app started for its request is deleted once the run ends cleanly; what it did is
-        kept here for 30 days.
-      </p>
+    <div className="space-y-3" data-testid="trash-runs">
+      <div className="px-1">
+        <h3 className="text-xs font-medium text-ink-muted">App agent runs</h3>
+        <p className="mt-0.5 text-xs leading-body text-ink-faint">
+          A session an app started for its request is deleted once the run ends cleanly; what it did is kept here for 30
+          days.
+        </p>
+      </div>
       {groupRuns(runs).map((g) => (
-        <div key={g.key} className="mt-2" data-testid={`trash-runs-app-${g.key}`}>
-          <div className="flex items-baseline gap-2">
+        <div key={g.key} className="divide-y divide-line/70 rounded-lg border border-line bg-surface-raised" data-testid={`trash-runs-app-${g.key}`}>
+          <div className="flex items-baseline gap-2 px-4 py-2.5">
             <span className="min-w-0 truncate text-sm text-ink">{g.name}</span>
             <span className="min-w-0 shrink truncate text-2xs text-ink-muted">{g.projectName ?? 'Your apps'}</span>
             <span className="readout text-2xs text-ink-faint">
@@ -72,19 +75,21 @@ export function TrashRuns({
             </button>
           </div>
           {confirming === g.key && (
-            <InlineConfirm
-              text={`Delete all ${g.runs.length} kept ${g.runs.length === 1 ? 'run' : 'runs'} of ${g.name} for good? Their requests, answers and conversations leave this machine; the app's run log keeps only their status and time. This cannot be undone.`}
-              yesLabel="Delete for good"
-              tone="danger"
-              busy={busy}
-              onYes={() => void onPurge(g.runs, g.key).finally(() => onConfirming(null))}
-              onNo={() => onConfirming(null)}
-              testId="trash-confirm"
-            />
+            <div className="px-4 pb-3">
+              <InlineConfirm
+                text={`Delete all ${g.runs.length} kept ${g.runs.length === 1 ? 'run' : 'runs'} of ${g.name} for good? Their requests, answers and conversations leave this machine; the app's run log keeps only their status and time. This cannot be undone.`}
+                yesLabel="Delete for good"
+                tone="danger"
+                busy={busy}
+                onYes={() => void onPurge(g.runs, g.key).finally(() => onConfirming(null))}
+                onNo={() => onConfirming(null)}
+                testId="trash-confirm"
+              />
+            </div>
           )}
-          <ul className="mt-1 divide-y divide-line/60 rounded-md border border-line">
+          <ul className="divide-y divide-line/70">
             {g.runs.map((r) => (
-              <li key={r.runId} className="px-2.5 py-2" data-testid={`trash-run-${r.runId}`}>
+              <li key={r.runId} className="px-4 py-3" data-testid={`trash-run-${r.runId}`}>
                 <div className="flex items-baseline gap-2">
                   <span className="min-w-0 truncate text-sm text-ink">{r.sessionName}</span>
                   <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">{formatDay(r.startedAt)}</span>

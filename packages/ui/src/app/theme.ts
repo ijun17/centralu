@@ -81,9 +81,13 @@ function presetFor(base: ThemeBase): ThemePreset {
   return THEME_PRESETS.find((p) => p.base === base) ?? THEME_PRESETS[0]!
 }
 
-/** Which side shows: the mode, or the OS when the mode is System. */
-export function activeSide(mode: UiPreferences['themeMode'], systemDark: boolean): ThemeBase {
-  return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
+/**
+ * Which side shows. One theme is picked in Settings, and its side is the mode; the app does not follow the OS
+ * (owner, 2026-10-19: Dark is the default and nothing switches it behind the person's back). A stored `system`
+ * from an older build reads as Dark.
+ */
+export function activeSide(mode: UiPreferences['themeMode']): ThemeBase {
+  return mode === 'light' ? 'light' : 'dark'
 }
 
 /**
@@ -116,16 +120,21 @@ function isAccentValid(accent: string): boolean {
 /** Both sides resolved, plus the mode — what the cache keeps, so first paint can pick a side before the prefs arrive. */
 export type ThemeChoice = { mode: UiPreferences['themeMode']; dark: ResolvedTheme; light: ResolvedTheme }
 
+/**
+ * The stored `accent` is no longer followed (owner, 2026-10-20): Settings stopped offering it, and a value an older
+ * build saved would otherwise colour focus and selection with no switch left to take it back. A theme file can still
+ * set the same tokens itself.
+ */
 export function resolveChoice(prefs: UiPreferences, themeFiles: readonly ThemeFileEntry[]): ThemeChoice {
   return {
     mode: prefs.themeMode,
-    dark: resolveSide('dark', prefs.themeDark, themeFiles, prefs.accent),
-    light: resolveSide('light', prefs.themeLight, themeFiles, prefs.accent),
+    dark: resolveSide('dark', prefs.themeDark, themeFiles, null),
+    light: resolveSide('light', prefs.themeLight, themeFiles, null),
   }
 }
 
-export function pickTheme(choice: ThemeChoice, systemDark: boolean): ResolvedTheme {
-  return activeSide(choice.mode, systemDark) === 'dark' ? choice.dark : choice.light
+export function pickTheme(choice: ThemeChoice): ResolvedTheme {
+  return activeSide(choice.mode) === 'dark' ? choice.dark : choice.light
 }
 
 /** The names this module last wrote inline, so a switch removes exactly those and nothing else on `<html>`. */
@@ -153,11 +162,6 @@ export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.do
   window.dispatchEvent(new CustomEvent('cc-themechange'))
 }
 
-/** `matchMedia` for the OS's dark preference, or dark when there is none (a test page in node). */
-export function systemPrefersDark(): boolean {
-  return typeof matchMedia !== 'function' || matchMedia('(prefers-color-scheme: dark)').matches
-}
-
 const CACHE_KEY = 'cc-theme'
 
 export function cacheChoice(choice: ThemeChoice): void {
@@ -179,7 +183,7 @@ export function applyCachedTheme(): void {
     if (!raw) return
     const choice = JSON.parse(raw) as ThemeChoice
     if (!choice?.dark || !choice?.light) return
-    const theme = pickTheme(choice, systemPrefersDark())
+    const theme = pickTheme(choice)
     // The cache is the page's own writing, but it is re-checked like anything stored
     const tokens: Record<string, string> = {}
     const keyOf = new Map(THEME_TOKENS.map((token) => [token.cssVar, token.key]))
@@ -187,8 +191,8 @@ export function applyCachedTheme(): void {
       const key = keyOf.get(name)
       if (key && typeof value === 'string' && isValidTokenValue(key, value)) tokens[name] = value
     }
-    const accent = typeof theme.accent === 'string' && isAccentValid(theme.accent) ? theme.accent : null
-    applyTheme({ ...theme, tokens, accent })
+    // A cache an older build wrote may still carry an accent; it is not applied any more (`resolveChoice`)
+    applyTheme({ ...theme, tokens, accent: null })
   } catch {
     /* a broken cache is the same as none */
   }

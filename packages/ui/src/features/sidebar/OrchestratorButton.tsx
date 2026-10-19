@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useSelectedSessionId } from '../../store/selectors.js'
-import { INDENT, GUIDE, ROW_PAD } from './layout.js'
+import { INDENT, GUIDE } from './layout.js'
 import { approvalLine } from './rows/SessionRow.jsx'
 import { ToolMark } from './marks/ToolMark.jsx'
 import { RowMenu } from './menus/RowMenu.jsx'
@@ -133,6 +133,8 @@ function OrchestratorChildren({ orchestratorId }: { orchestratorId: string | nul
  * One child's row: opens it, drags onto the grid, and carries a ⋯ menu to stop or delete it (#994 review): the delete
  * dialog lived only in a project's list, so a child of the orchestrator could not be removed from the screen.
  */
+// No fold gutter on these rows (owner, 2026-10-20): an orchestrator's child folds nothing, so the chevron's empty
+// column only pushed its mark away from the guide line
 function OrchestratorChildRow({ s }: { s: SessionSummary }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)
@@ -158,7 +160,7 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
         data-testid={`orchestrator-child-row-${s.id}`}
         aria-current={focused ? 'page' : undefined}
         data-unread={(unread && !focused) || undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-8 text-left text-md transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2 pr-8 text-left text-md transition-colors ${
           focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >

@@ -3,7 +3,6 @@ import { DEFAULT_UI_PREFERENCES, TEXT_SIZES, parseUiPreferences } from '@cc/prot
 import type {
   AppQuestion,
   ToolStatus,
-  CommandRunInfo,
   ExternalAppInfo,
   GridPanel,
   GridSpan,
@@ -28,6 +27,8 @@ export {
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
 import { type AppState, type InlineView, type Notice, type PinnedView, type StoreSet } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
+import type { CommandRun } from './state/projects.js'
+export type { CommandRun } from './state/projects.js'
 export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
 export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
@@ -207,8 +208,6 @@ export const useStore = create<AppState>((rawSet, get) => {
     stopping: {},
     expandedDirs: {},
     showIgnored: true,
-    // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
-    foldComposer: true,
     focusedSessionId: null,
     focusedProjectId: null,
     newSessionFor: null,
@@ -256,7 +255,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     foldedProjects: [],
     projectPanels: {} as Record<string, ProjectArrangement>,
     appSpans: {} as Record<string, GridSpan>,
-    commandRuns: {} as Record<string, Record<string, CommandRunInfo>>,
+    commandRuns: {} as Record<string, Record<string, CommandRun>>,
     overlay: null,
     inboxOpen: false,
     toast: null,

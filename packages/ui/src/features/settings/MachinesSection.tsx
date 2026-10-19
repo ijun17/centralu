@@ -9,6 +9,8 @@ import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { GrantList } from './GrantList.jsx'
+import { Switch } from '../../components/Switch.jsx'
+import { More, SettingsCard, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
 /**
  * Settings → Machines (#82, docs/plans/remote-hub.md): the other computers this computer's host reaches.
@@ -24,14 +26,21 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
   const list = Object.values(machines)
   const [adding, setAdding] = useState(list.length === 0)
   return (
-    <section data-testid="settings-machines">
-      <p className="text-xs leading-body text-ink-faint">
-        Other computers whose sessions and projects show here, each under its own name in the sidebar. Each one runs
-        Centralu itself (<code className="font-mono">centralu serve</code>); this computer reaches it over your own ssh
-        and keys. Nothing is opened to the network.
-      </p>
+    <SettingsPage
+      testId="settings-machines"
+      title="Machines"
+      lead={
+        <>
+          Other computers reached over your own ssh and keys. Nothing is opened to the network.
+          <More>
+            Their sessions and projects show here, each under its own name in the sidebar. Each one runs Centralu itself
+            (<code className="font-mono">centralu serve</code>); this computer reaches it over your own ssh and keys.
+          </More>
+        </>
+      }
+    >
       {list.length > 0 && (
-        <ul className="mt-3 space-y-2" data-testid="machines-list">
+        <ul className="space-y-3" data-testid="machines-list">
           {list.map((m) => (
             <MachineRow key={m.id} m={m} onOpenCategory={onOpenCategory} />
           ))}
@@ -40,11 +49,11 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
       {adding ? (
         <AddMachineForm onDone={() => setAdding(false)} canCancel={list.length > 0} />
       ) : (
-        <Button variant="quiet" size="sm" className="mt-3" onClick={() => setAdding(true)} data-testid="machines-add-open">
+        <Button variant="quiet" size="sm" onClick={() => setAdding(true)} data-testid="machines-add-open">
           Add a machine
         </Button>
       )}
-    </section>
+    </SettingsPage>
   )
 }
 
@@ -64,111 +73,111 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
     .filter(Boolean)
     .join(' · ')
   return (
-    <li className="rounded-md border border-line px-2.5 py-2" data-testid={`machine-row-${m.id}`} data-status={m.status}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-sm text-ink">{m.name}</span>
-        <MachineStatusMark status={m.status} testId={`machine-row-status-${m.id}`} />
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          {m.status !== 'connected' && !m.operation && (
-            <button
-              type="button"
-              className="text-xs text-ink-faint hover:text-ink"
-              onClick={() => void reconnect(m.id)}
-              data-testid={`machine-reconnect-${m.id}`}
-              title={m.status === 'disconnected' ? 'Stays connected until you disconnect it' : undefined}
-            >
-              {m.status === 'disconnected' ? 'Connect' : 'Reconnect'}
-            </button>
-          )}
-          {m.status !== 'disconnected' && !m.operation && (
-            <button
-              type="button"
-              className="text-xs text-ink-faint hover:text-ink"
-              onClick={() => void disconnect(m.id)}
-              data-testid={`machine-disconnect-${m.id}`}
-              title="Its sessions keep running there"
-            >
-              Disconnect
-            </button>
-          )}
-          {confirming ? (
-            <InlineConfirm
-              inline
-              text="Remove?"
-              yesLabel="Remove"
-              noLabel="Keep"
-              busy={removing}
-              onYes={() => {
-                setRemoving(true)
-                void remove(m.id).catch((e: Error) => {
-                  setRemoving(false)
-                  setConfirming(false)
-                  setToast(`Could not remove ${m.name}: ${e.message}`)
-                })
-              }}
-              onNo={() => setConfirming(false)}
-              yesTestId={`machine-remove-yes-${m.id}`}
-            />
-          ) : (
-            <button
-              type="button"
-              className="text-xs text-ink-faint hover:text-ink"
-              onClick={() => setConfirming(true)}
-              data-testid={`machine-remove-${m.id}`}
-              title="Unlink it: its sessions and projects leave this computer's lists. Nothing on the machine changes."
-            >
-              Remove
-            </button>
-          )}
-        </span>
-      </div>
-      <p className="mt-0.5 truncate font-mono text-2xs text-ink-faint" title={where}>
-        {where}
-      </p>
-      {operation && (
-        <p className="mt-1 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
-          {operation}
+    <SettingsCard as="li" testId={`machine-row-${m.id}`} data-status={m.status}>
+      <div className="px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium text-ink">{m.name}</span>
+          <MachineStatusMark status={m.status} testId={`machine-row-status-${m.id}`} />
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {m.status !== 'connected' && !m.operation && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void reconnect(m.id)}
+                data-testid={`machine-reconnect-${m.id}`}
+                title={m.status === 'disconnected' ? 'Stays connected until you disconnect it' : undefined}
+              >
+                {m.status === 'disconnected' ? 'Connect' : 'Reconnect'}
+              </Button>
+            )}
+            {m.status !== 'disconnected' && !m.operation && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void disconnect(m.id)}
+                data-testid={`machine-disconnect-${m.id}`}
+                title="Its sessions keep running there"
+              >
+                Disconnect
+              </Button>
+            )}
+            {confirming ? (
+              <InlineConfirm
+                inline
+                text="Remove?"
+                yesLabel="Remove"
+                noLabel="Keep"
+                busy={removing}
+                onYes={() => {
+                  setRemoving(true)
+                  void remove(m.id).catch((e: Error) => {
+                    setRemoving(false)
+                    setConfirming(false)
+                    setToast(`Could not remove ${m.name}: ${e.message}`)
+                  })
+                }}
+                onNo={() => setConfirming(false)}
+                yesTestId={`machine-remove-yes-${m.id}`}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirming(true)}
+                data-testid={`machine-remove-${m.id}`}
+                title="Unlink it: its sessions and projects leave this computer's lists. Nothing on the machine changes."
+              >
+                Remove
+              </Button>
+            )}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate font-mono text-2xs text-ink-faint" title={where}>
+          {where}
         </p>
-      )}
-      {elevated && (
-        <div className="mt-1 text-xs leading-body" data-testid={`machine-elevated-${m.id}`}>
-          <p className="text-ink">{elevated.title}</p>
-          <p className="mt-0.5 text-ink-muted">{elevated.fix}</p>
-        </div>
-      )}
-      {logon && (
-        <div className="mt-1 text-xs leading-body" data-testid={`machine-logon-${m.id}`}>
-          <p className="text-ink">{logon.title}</p>
-          <p className="mt-0.5 text-ink-muted">{logon.fix}</p>
-        </div>
-      )}
+        {operation && (
+          <p className="mt-1.5 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
+            {operation}
+          </p>
+        )}
+        {elevated && (
+          <div className="mt-1.5 text-xs leading-body" data-testid={`machine-elevated-${m.id}`}>
+            <p className="text-ink">{elevated.title}</p>
+            <p className="mt-0.5 text-ink-muted">{elevated.fix}</p>
+          </div>
+        )}
+        {logon && (
+          <div className="mt-1.5 text-xs leading-body" data-testid={`machine-logon-${m.id}`}>
+            <p className="text-ink">{logon.title}</p>
+            <p className="mt-0.5 text-ink-muted">{logon.fix}</p>
+          </div>
+        )}
+        {started && (
+          <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
+            {started}
+          </p>
+        )}
+        {confirming && (
+          <p className="mt-1.5 text-xs leading-body text-ink-muted">
+            Its sessions and projects leave this computer&apos;s lists. Nothing on {m.name} changes, and linking it again brings
+            them back.
+          </p>
+        )}
+        {problem && m.status !== 'versions_differ' && (
+          <div className="mt-1.5 text-xs leading-body" data-testid={`machine-problem-${m.id}`}>
+            <p className="text-ink">{problem.title}</p>
+            {problem.fix && <p className="mt-0.5 text-ink-muted">{withCode(problem.fix)}</p>}
+          </div>
+        )}
+        <VersionPrompt m={m} onOpenCategory={onOpenCategory} />
+      </div>
       <InstalledRow m={m} />
       <ConnectWhenNeeded m={m} />
       <AutostartSwitch m={m} />
       <AsksSwitch m={m} />
-      {started && (
-        <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
-          {started}
-        </p>
-      )}
-      {confirming && (
-        <p className="mt-1 text-xs leading-body text-ink-muted">
-          Its sessions and projects leave this computer&apos;s lists. Nothing on {m.name} changes, and linking it again brings
-          them back.
-        </p>
-      )}
-      {problem && m.status !== 'versions_differ' && (
-        <div className="mt-1.5 text-xs leading-body" data-testid={`machine-problem-${m.id}`}>
-          <p className="text-ink">{problem.title}</p>
-          {problem.fix && <p className="mt-0.5 text-ink-muted">{withCode(problem.fix)}</p>}
-        </div>
-      )}
-      <VersionPrompt m={m} onOpenCategory={onOpenCategory} />
-    </li>
+    </SettingsCard>
   )
 }
-
-const linkButton = 'text-xs text-ink-faint hover:text-ink disabled:opacity-50'
 
 /**
  * A change that stops the host there (update, rollback), asked first with what it stops (plan §10.5): the remote's
@@ -211,7 +220,7 @@ function InstalledRow({ m }: { m: MachineInfo }) {
   if (notInstalled) {
     if (hubVersion?.dev) return null
     return (
-      <div className="mt-1.5">
+      <div className="px-4 py-3">
         <Button variant="secondary" size="sm" disabled={busy} onClick={() => void change(m.id, 'install')} data-testid={`machine-install-${m.id}`}>
           Install Centralu on {m.name}
         </Button>
@@ -221,17 +230,19 @@ function InstalledRow({ m }: { m: MachineInfo }) {
   if (!note) return null
   const previous = m.install?.previous
   return (
-    <div className="mt-1" data-testid={`machine-installed-${m.id}`}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-xs leading-body text-ink-muted">{note}</span>
-        {previous && (
-          <button type="button" className={linkButton} disabled={busy} onClick={() => setAsking('rollback')} data-testid={`machine-rollback-${m.id}`}>
-            Roll back to {previous.version}
-          </button>
-        )}
-        <button type="button" className={linkButton} disabled={busy} onClick={() => setAsking('uninstall')} data-testid={`machine-uninstall-${m.id}`}>
-          Uninstall
-        </button>
+    <div className="px-4 py-3" data-testid={`machine-installed-${m.id}`}>
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1 text-sm text-ink-muted">{note}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {previous && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking('rollback')} data-testid={`machine-rollback-${m.id}`}>
+              Roll back to {previous.version}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking('uninstall')} data-testid={`machine-uninstall-${m.id}`}>
+            Uninstall
+          </Button>
+        </span>
       </div>
       {asking === 'rollback' && (
         <StopConfirm
@@ -263,9 +274,9 @@ function InstalledRow({ m }: { m: MachineInfo }) {
             >
               Uninstall
             </button>
-            <button type="button" className={linkButton} onClick={() => setAsking(null)}>
+            <Button variant="ghost" size="sm" onClick={() => setAsking(null)}>
               Keep
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -284,11 +295,23 @@ function ConnectWhenNeeded({ m }: { m: MachineInfo }) {
   const [pending, setPending] = useState(false)
   const on = m.connect === 'when_needed'
   return (
-    <div className="mt-1.5">
-      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-ink-muted"
+    <SettingsRow
+      label={<label htmlFor={`machine-connect-${m.id}`}>Connect only when needed</label>}
+      hint={
+        on ? (
+          <span data-testid={`machine-connect-note-${m.id}`}>
+            Not connected when Centralu starts; it connects when something there is needed.
+            <More>
+              It connects when you open one of its projects or sessions, or an agent is started or sent work there, and
+              disconnects once nothing has needed it for 10 minutes and no session there is working. Its sessions keep
+              running there meanwhile.
+            </More>
+          </span>
+        ) : undefined
+      }
+      control={
+        <Switch
+          id={`machine-connect-${m.id}`}
           checked={on}
           disabled={pending || !!m.operation}
           onChange={(e) => {
@@ -297,16 +320,8 @@ function ConnectWhenNeeded({ m }: { m: MachineInfo }) {
           }}
           data-testid={`machine-connect-when-needed-${m.id}`}
         />
-        <span>Connect only when needed</span>
-      </label>
-      {on && (
-        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-connect-note-${m.id}`}>
-          Not connected when Centralu starts. It connects when you open one of its projects or sessions, or an agent is
-          started or sent work there, and disconnects once nothing has needed it for 10 minutes and no session there is
-          working. Its sessions keep running there meanwhile.
-        </p>
-      )}
-    </div>
+      }
+    />
   )
 }
 
@@ -321,11 +336,12 @@ function AutostartSwitch({ m }: { m: MachineInfo }) {
   const row = autostartRow(m)
   if (!row) return null
   return (
-    <div className="mt-1.5">
-      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-ink-muted"
+    <SettingsRow
+      label={<label htmlFor={`machine-autostart-input-${m.id}`}>{row.label}</label>}
+      hint={row.note ? <span data-testid={`machine-autostart-note-${m.id}`}>{withCode(row.note)}</span> : undefined}
+      control={
+        <Switch
+          id={`machine-autostart-input-${m.id}`}
           checked={row.on}
           disabled={pending || !!m.operation}
           onChange={(e) => {
@@ -335,14 +351,8 @@ function AutostartSwitch({ m }: { m: MachineInfo }) {
           }}
           data-testid={`machine-autostart-${m.id}`}
         />
-        <span>{row.label}</span>
-      </label>
-      {row.note && (
-        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-autostart-note-${m.id}`}>
-          {withCode(row.note)}
-        </p>
-      )}
-    </div>
+      }
+    />
   )
 }
 
@@ -366,18 +376,19 @@ function AsksSwitch({ m }: { m: MachineInfo }) {
     })
   }
   return (
-    <div className="mt-1.5">
-      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-ink-muted"
+    <SettingsRow
+      label={<label htmlFor={`machine-asks-input-${m.id}`}>{row.label}</label>}
+      hint={row.note ? <span data-testid={`machine-asks-note-${m.id}`}>{row.note}</span> : undefined}
+      control={
+        <Switch
+          id={`machine-asks-input-${m.id}`}
           checked={row.on}
           disabled={pending || confirming}
           onChange={(e) => (e.target.checked ? setConfirming(true) : turn(false))}
           data-testid={`machine-asks-${m.id}`}
         />
-        <span>{row.label}</span>
-      </label>
+      }
+    >
       {confirming && (
         <InlineConfirm
           text={row.confirm}
@@ -392,13 +403,8 @@ function AsksSwitch({ m }: { m: MachineInfo }) {
           textTestId={`machine-asks-text-${m.id}`}
         />
       )}
-      {row.note && (
-        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-asks-note-${m.id}`}>
-          {row.note}
-        </p>
-      )}
       {row.on && <AskPairs m={m} />}
-    </div>
+    </SettingsRow>
   )
 }
 
@@ -410,7 +416,7 @@ function AskPairs({ m }: { m: MachineInfo }) {
   const read = useLoad(async () => (await platform.machines.askConsents()).filter((c) => c.machineId === m.id), [platform, m.id], [version])
   const keyOf = (c: MachineAskConsent) => `${c.sessionId}>${c.projectId}`
   return (
-    <div className="ml-5 mt-1" data-testid={`machine-ask-pairs-${m.id}`}>
+    <SettingsCard className="mt-2.5 bg-surface-side/60" testId={`machine-ask-pairs-${m.id}`}>
       <GrantList
         load={read}
         keyOf={keyOf}
@@ -436,7 +442,7 @@ function AskPairs({ m }: { m: MachineInfo }) {
           row: (c) => `machine-ask-pair-${m.id}-${keyOf(c)}`,
         }}
       />
-    </div>
+    </SettingsCard>
   )
 }
 
@@ -456,7 +462,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
   const p = versionPrompt(m)
   if (!p) return null
   return (
-    <div className="mt-2 rounded-md border border-line bg-surface-raised px-2.5 py-2" data-testid={`machine-versions-${m.id}`}>
+    <div className="mt-2.5 rounded-md border border-line bg-surface-floor px-3 py-2.5" data-testid={`machine-versions-${m.id}`}>
       <p className="text-xs leading-body text-ink" data-testid={`machine-versions-text-${m.id}`}>
         {p.text}
       </p>
@@ -471,9 +477,9 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
           >
             {update?.newer && update.latest ? `Update this computer to ${update.latest}` : 'Check for an update'}
           </Button>
-          <button type="button" className="text-xs text-ink-faint hover:text-ink" onClick={() => onOpenCategory('updates')}>
+          <Button variant="ghost" size="sm" onClick={() => onOpenCategory('updates')}>
             Open Updates
-          </button>
+          </Button>
         </div>
       )}
       {p.updateHere && !confirming && (
@@ -513,9 +519,10 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
             >
               {p.remoteCommand}
             </code>
-            <button
-              type="button"
-              className="shrink-0 text-xs text-ink-faint hover:text-ink"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
               onClick={() =>
                 void navigator.clipboard?.writeText(p.remoteCommand!).then(
                   () => setCopied(true),
@@ -524,7 +531,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
               }
             >
               {copied ? 'Copied' : 'Copy'}
-            </button>
+            </Button>
           </div>
         </div>
       )}

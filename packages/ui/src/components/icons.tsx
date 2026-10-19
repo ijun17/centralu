@@ -68,6 +68,26 @@ export function StopIcon({ size = 10 }: { size?: number }) {
   )
 }
 
+/**
+ * A ring: how a run ended (the saved commands list). Solid once it ended well or was stopped, dashed when it failed:
+ * the background work list's grammar (a hollow ring once done, a dashed ring when it failed). Drawn, not a bordered
+ * span, so it reads as a mark and not as a capsule. The dash divides the circumference evenly, so no seam shows.
+ */
+export function RingIcon({ dashed = false, size = 8 }: { dashed?: boolean; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 8 8" fill="none" aria-hidden className="shrink-0">
+      <circle
+        cx="4"
+        cy="4"
+        r="3.5"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeDasharray={dashed ? '1.5 1.25' : undefined}
+      />
+    </svg>
+  )
+}
+
 /** Two cards, one behind the other — work going on behind the conversation (background tasks) */
 export function BackgroundIcon({ size = 14 }: { size?: number }) {
   return (
@@ -164,6 +184,35 @@ export function AppIcon({ size = 13 }: { size?: number }) {
       <rect x="1.8" y="2.3" width="12.4" height="11.4" rx="2" stroke="currentColor" strokeWidth="1.3" />
       <path d="M1.8 5.8h12.4" stroke="currentColor" strokeWidth="1.3" />
       <rect x="4.2" y="8" width="3.2" height="3.2" rx="0.6" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** A folder: an existing folder added as a project (the sidebar's Projects row) */
+export function FolderIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3.1l1.6 1.7h5.3c.7 0 1.2.5 1.2 1.2v6.6c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** A folder with a plus: a new, empty folder made as a project (the sidebar's Projects row) */
+export function FolderPlusIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3.1l1.6 1.7h5.3c.7 0 1.2.5 1.2 1.2v6.6c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4.2Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path d="M8 7.2v4M6 9.2h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   )
 }
@@ -416,6 +465,80 @@ export function ImportIcon({ size = 13 }: { size?: number }) {
         strokeWidth="1.5"
         strokeLinecap="round"
       />
+    </svg>
+  )
+}
+
+/*
+ * The categories of Settings, one mark each beside its name in the rail. Drawn on the same 16-unit grid and stroke as
+ * the sidebar's marks, so the rail reads as the same family.
+ */
+
+/** A bell — notifications */
+export function BellIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M4 11.2V7.4a4 4 0 0 1 8 0v3.8l1.1 1.3H2.9Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path d="M6.6 14h2.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** A screen on a stand — a machine */
+export function MonitorIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="1.8" y="2.5" width="12.4" height="8.5" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5.5 13.8h5M8 11v2.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** A circle half filled — appearance (light and dark) */
+export function ContrastIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 2.2a5.8 5.8 0 0 1 0 11.6Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** A shield — permissions */
+export function ShieldIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M8 1.8 13 3.7v3.9c0 3.1-2.1 5.4-5 6.6-2.9-1.2-5-3.5-5-6.6V3.7Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** A bin — the trash */
+export function TrashIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <path d="M2.5 4.2h11M6.3 4.2V2.6h3.4v1.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.8 4.2l.7 9.1c.1.6.5 1 1.1 1h4.8c.6 0 1-.4 1.1-1l.7-9.1" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** A keyboard — shortcuts */
+export function KeyboardIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="1.5" y="3.8" width="13" height="8.4" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M4.3 6.5h.01M6.8 6.5h.01M9.2 6.5h.01M11.7 6.5h.01M5.3 9.6h5.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   )
 }

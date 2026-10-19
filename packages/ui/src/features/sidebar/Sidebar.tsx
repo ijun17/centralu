@@ -3,7 +3,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { AppIcon, PlusIcon } from '../../components/icons.jsx'
+import { AppIcon, FolderIcon, FolderPlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
@@ -29,7 +29,7 @@ export function Sidebar() {
   const [addingOn, setAddingOn] = useState<string | null>(null)
   /** The Add project button's machine choice (#734), open once a machine is linked */
   const [choosing, setChoosing] = useState(false)
-  const addAnchor = useRef<HTMLButtonElement>(null)
+  const addAnchor = useRef<HTMLSpanElement>(null)
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
@@ -81,6 +81,47 @@ export function Sidebar() {
         The list keeps room for about two rows however short the window (#988 follow-up): in a 150px window the fixed
         top and bottom left it none, and a project's row could not be reached at all. The bottom area gives way first.
       */}
+      {/*
+        The three ways a project comes to be stand over the list as icons (owner, 2026-10-19), beside its name, instead
+        of a row of framed buttons under it: the list starts where its own controls are, and the bottom keeps only the
+        user-folder apps still listed. The row stands still; only the list under it scrolls. A wider gap above it sets it
+        off from the doors, and a divider under it, the same hairline as between projects, sets it over the list (owner,
+        2026-10-19).
+      */}
+      <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line/70 pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-faint">Projects</span>
+        <span ref={addAnchor} className="flex">
+          <IconButton
+            /*
+             * **There should be exactly one way to pick a folder in this app**: this button is the picker itself (the
+             * typed-path dialog is long gone). Once a machine is linked it first asks where (#734): this computer, the
+             * picker, or a linked machine, whose folder is typed (the picker cannot see that machine's disk).
+             */
+            label="Add a folder as a project"
+            onClick={() => {
+              if (machines.length > 0) setChoosing((v) => !v)
+              else void pickHere()
+            }}
+            disabled={adding}
+            testId="add-project"
+            align="right"
+          >
+            <FolderIcon size={14} />
+          </IconButton>
+        </span>
+        <IconButton
+          label="New folder as a project"
+          onClick={() => setCreating(true)}
+          testId="create-project"
+          align="right"
+        >
+          <FolderPlusIcon size={14} />
+        </IconButton>
+        {/* An app is made like a project (#1141): a new folder that joins this list as a project whose root is the app */}
+        <IconButton label="New app" onClick={() => setCreatingApp(true)} testId="create-app" align="right">
+          <AppIcon size={14} />
+        </IconButton>
+      </div>
       <div className="min-h-[4.5rem] flex-1 overflow-y-auto" data-testid="sidebar-projects">
         {/*
           Until the host's first lists arrive the list is not known to be empty (owner, 2026-10-18: "No projects yet"
@@ -92,8 +133,8 @@ export function Sidebar() {
           <p className="cc-fade px-4 py-6 text-sm leading-body text-ink-faint">
             No projects yet.
             <br />
-            Start with <span className="text-ink-muted">Add project</span>, <span className="text-ink-muted">New folder</span> or the
-            app button below.
+            Start with the buttons beside <span className="text-ink-muted">Projects</span> above: an existing folder, a new
+            folder, or a new app.
           </p>
         ) : (
           <div className="cc-fade">
@@ -110,79 +151,10 @@ export function Sidebar() {
         (none on this computer once its host has moved them into projects).
       */}
       <div
-        className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line/70"
+        className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line/70 empty:hidden"
         data-testid="sidebar-bottom"
       >
         <UserApps />
-        {/*
-          **Where the person presses and where the result appears must be the same place** (issue
-          #4). It used to live at the far right of the top bar — the person pressed one side of the
-          screen and had to go find the result in the sidebar on the other side. A new project is
-          appended to the **end** of the list, so the button lives at the end of the list too: the
-          result grows right below where it was pressed.
-
-          It is not lit up the way the orchestrator and the grid button are. Those two are doors
-          used constantly, while this is something done rarely, so it has to stay unobtrusive while
-          the list is being read.
-        */}
-        {/*
-          Two ways in, side by side (#515): an existing folder through the picker, or a new empty one made in
-          ~/Centralu (the dialog says where). The orchestrator's create_project makes the same folder behind a card.
-        */}
-        <div className="flex gap-1.5 px-2 py-2">
-          <button
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
-            /*
-             * **There should be exactly one way to pick a folder in this app.**
-             *
-             * This used to open a window where the person typed an absolute path by hand — a
-             * fallback left over from the web-development days that carried straight over into
-             * Tauri. The first-run screen was already using the native picker, so the same task had
-             * two ways to do it, and **the more frequently used one had the worse method** (open
-             * Finder, copy the path, come back and paste it). The dialog is gone entirely, and the
-             * button itself is now the picker.
-             */
-            /*
-             * Once a machine is linked, it first asks where (#734): this computer, the picker as before, or a linked
-             * machine, whose folder is typed (the picker cannot see that machine's disk). The machine headers that each
-             * had their own + are gone; with no machine linked there is nothing to choose and it is the picker at once.
-             */
-            ref={addAnchor}
-            onClick={() => {
-              if (machines.length > 0) setChoosing((v) => !v)
-              else void pickHere()
-            }}
-            disabled={adding}
-            data-testid="add-project"
-            aria-haspopup={machines.length > 0 ? 'menu' : undefined}
-            title="Add an existing folder as a project"
-          >
-            <PlusIcon size={13} />
-            <span className="truncate">Add project</span>
-          </button>
-          <button
-            className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
-            onClick={() => setCreating(true)}
-            data-testid="create-project"
-            title="Create a new, empty folder as a project, in the Centralu folder of your home unless you choose another"
-          >
-            New folder
-          </button>
-          {/*
-            An app is made like a project (#1141): a new folder, in ~/Centralu unless another is chosen, that joins this
-            list as a project whose root is the app. So its door stands with the other two ways a project comes to be,
-            where the result appears. An icon, so the row still fits the narrowest sidebar.
-          */}
-          <IconButton
-            label="New app, in a folder of its own"
-            onClick={() => setCreatingApp(true)}
-            testId="create-app"
-            className="shrink-0 self-stretch border border-line px-2 hover:border-line-strong"
-            align="right"
-          >
-            <AppIcon />
-          </IconButton>
-        </div>
       </div>
       {choosing && (
         <AddProjectMachines

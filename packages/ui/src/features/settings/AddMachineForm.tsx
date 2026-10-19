@@ -124,7 +124,7 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
 
   return (
     <form
-      className="mt-3 rounded-md border border-line px-2.5 py-2.5"
+      className="rounded-lg border border-line bg-surface-raised px-4 py-3.5"
       data-testid="machines-add-form"
       onSubmit={async (e) => {
         e.preventDefault()
@@ -153,7 +153,7 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
         if (!isPlainEscape(e.nativeEvent)) e.stopPropagation()
       }}
     >
-      <p className="text-sm text-ink">Add a machine</p>
+      <p className="text-sm font-medium text-ink">Add a machine</p>
       {hosts === undefined && (
         <p className="mt-2 text-xs text-ink-faint" data-testid="machines-add-hosts-reading">
           Reading your ssh config…

@@ -8,7 +8,7 @@ import { letterOf, navButtonOf, navKeyOf } from './keys.js'
 import { isForeground } from './foreground.js'
 import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
-import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } from './theme.js'
+import { applyTheme, cacheChoice, pickTheme, resolveChoice } from './theme.js'
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
@@ -97,37 +97,24 @@ export function App({
   const themeLight = useStore((s) => s.prefs.themeLight)
   const themeFiles = useStore((s) => s.themeFiles)
   const lastGoodThemes = useStore((s) => s.lastGoodThemes)
-  const accent = useStore((s) => s.prefs.accent)
   const connected = useStore((s) => s.connection === 'connected')
   const [prefsArrived, setPrefsArrived] = useState(false)
   if (connected && !prefsArrived) setPrefsArrived(true)
-  const [systemDark, setSystemDark] = useState(systemPrefersDark)
-  useEffect(() => {
-    if (typeof matchMedia !== 'function') return
-    const query = matchMedia('(prefers-color-scheme: dark)')
-    const follow = () => setSystemDark(query.matches)
-    query.addEventListener('change', follow)
-    return () => query.removeEventListener('change', follow)
-  }, [])
   useEffect(() => {
     if (!prefsArrived) return
     const choice = resolveChoice(
-      { ...useStore.getState().prefs, themeMode, themeDark, themeLight, accent },
+      { ...useStore.getState().prefs, themeMode, themeDark, themeLight },
       usableThemeFiles({ themeFiles, lastGoodThemes }),
     )
-    const theme = pickTheme(choice, systemDark)
+    const theme = pickTheme(choice)
     applyTheme(theme)
     cacheChoice(choice)
     /*
-     * The desktop window learns the side too: held to one appearance, it reports that appearance
-     * to the page's prefers-color-scheme, so System mode hands it back to the OS (null). Its
-     * background is the floor as it actually computed, for the strip the window paints itself.
+     * The desktop window learns the side too: held to the theme's appearance, whatever the OS is set to.
+     * Its background is the floor as it actually computed, for the strip the window paints itself.
      */
     void platform.system
-      .setWindowAppearance(
-        themeMode === 'system' ? null : theme.base,
-        getComputedStyle(document.body).backgroundColor,
-      )
+      .setWindowAppearance(theme.base, getComputedStyle(document.body).backgroundColor)
       .catch(() => {})
   }, [
     prefsArrived,
@@ -136,8 +123,6 @@ export function App({
     themeLight,
     themeFiles,
     lastGoodThemes,
-    accent,
-    systemDark,
     platform,
   ])
 
@@ -535,7 +520,7 @@ function TopBar() {
         waiting-for-input) — a more accurate signal was already there, and the chip was just
         riding along with it.
 
-        Where they went: named with their keys in Settings → Shortcuts, and runnable from
+        Where they went: named with their keys in the palette's Keyboard shortcuts, and runnable from
         the command palette (⌘K). Deleting the only visible mention was the failure to avoid,
         so the palette gained both entries in the same change.
       */}
