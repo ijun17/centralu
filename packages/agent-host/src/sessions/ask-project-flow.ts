@@ -104,9 +104,10 @@ export class AskProjectFlow {
 
   /**
    * What ask_project rests on in the caller, read before its card, again once the person answered it, and again before a
-   * queued ask goes in (`drainQueue`): a card or a queue can outlast any of it.
+   * queued ask goes in (`drainQueue`): a card or a queue can outlast any of it. `quiet`: an earlier read of this ask
+   * already logged the `auto` boundary it opens, so this one does not log it again.
    */
-  askGateError(callerId: string): string | null {
+  askGateError(callerId: string, quiet = false): string | null {
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) return 'This session belongs to no project, so it cannot ask another one'
     /*
@@ -120,7 +121,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
+    if (this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, quiet ? undefined : 'delegate from an untrusted project')) {
       return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
     }
     return null
@@ -314,6 +315,13 @@ export class AskProjectFlow {
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
       const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
+      /*
+       * Read again once the session is awake: waking or restarting it takes seconds, and the gates can close meanwhile.
+       * An untrusted project's `auto` boundary was logged by the read after the card, with no wait since; one that lost
+       * its trust during the wake is logged then
+       */
+      const logged = this.host.store.projects.listProjects().find((p) => p.id === callerProjectId)?.trusted !== true
+      const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
       if (midTurn) {
         const releaseHold = d.wait.holdInput()
         const release = () => { releaseHold(); this.host.applyDeferredRestart(delegatedId) }
@@ -321,9 +329,9 @@ export class AskProjectFlow {
         await this.host.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false, undefined, 'inline', (h, input) => {
           const fail = (e: Error) => { d.wait.fail(e); release() }
           void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
-        })
+        }, stillAllowed)
       } else {
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false)
+        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
       }
     } catch (e) {
       d.wait.fail(e as Error)

@@ -30,6 +30,16 @@ describe('the registry', () => {
   })
 })
 
+describe('an app waiting on review (M4 E-3, #1172)', () => {
+  it('reads as never enabled only for an import not enabled yet; changed after enabling, or held with no import mark, it needs review', () => {
+    const reason = 'This app changed what it runs or what it uses since you enabled it. Review it and enable it again'
+    expect(appStatus(info('a', { projectId: null, status: 'unconfirmed', imported: { source: '/s', at: 1, confirmedAt: null } }))).toMatchObject({ label: 'Not enabled', runnable: false })
+    expect(appStatus(info('a', { projectId: null, status: 'unconfirmed', imported: { source: '/s', at: 1, confirmedAt: 2 }, error: reason }))).toMatchObject({ label: 'Needs review', reason })
+    // Held because the record of imports was lost: enabled once, then changed. No mark is sent, so only the reason says it
+    expect(appStatus(info('a', { projectId: null, status: 'unconfirmed', error: reason }))).toMatchObject({ label: 'Needs review', reason, runnable: false })
+  })
+})
+
 describe('apps of a linked machine (#82, remote-hub.md §11)', () => {
   it('open like this computer’s: their status is read the same way, a project app’s and a user-folder app’s', () => {
     expect(appStatus(info('board', { projectId: 'm1.p1', machine: 'm1', status: 'running' }))).toMatchObject({ label: 'Running', runnable: true })

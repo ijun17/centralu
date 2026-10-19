@@ -31,6 +31,21 @@ export function wslInterop() {
   return existsSync('/proc/sys/fs/binfmt_misc/WSLInterop') || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop-late')
 }
 
+/**
+ * Which Windows logon this process runs in (#1224), from `whoami /groups` as the host reads its own (`logonFromGroups`
+ * in agent-host's os.ts): `interactive` (S-1-5-4), `network` (S-1-5-2), `batch`, `service`, or null when it cannot
+ * tell. By the SIDs, which read the same in every language
+ */
+export async function ownLogon(env, run = runCaptured) {
+  const r = await run(windowsTool('wmi', env, ['System32', 'whoami.exe']), ['/groups', '/fo', 'csv', '/nh'], env).catch(() => null)
+  const out = String(r?.stdout ?? '')
+  if (/"S-1-5-4"/.test(out)) return 'interactive'
+  if (/"S-1-5-2"/.test(out)) return 'network'
+  if (/"S-1-5-3"/.test(out)) return 'batch'
+  if (/"S-1-5-6"/.test(out)) return 'service'
+  return null
+}
+
 /** A WSL distro's name for `wsl.exe -d`, refused when it could be read as anything else */
 export function wslDistro(distro) {
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(distro ?? '')) throw new Error(`not a WSL distro name: ${distro}`)

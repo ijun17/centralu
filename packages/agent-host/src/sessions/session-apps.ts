@@ -142,15 +142,18 @@ export type OnDemandApps = {
 
 /**
  * Decision 4's scope, apart from the app's state: whether this session is ever given this app. The
- * orchestrator gets the user-folder apps and the root apps (#1141: a project that is an app takes the
- * user-folder app's place), a project's sessions that project's apps (its root app included), and a
- * building session its own app as well (see `refsFor`).
+ * orchestrator gets the user-folder apps, a project's sessions that project's apps (its root app included),
+ * and a building session its own app as well (see `refsFor`).
+ *
+ * Not the root apps for the orchestrator (#1205): each one was its own MCP server in every orchestrator
+ * request, so the list grew with every project the person trusted (#1141 had given them all). It finds and
+ * attaches the one it needs (`find_apps` / `attach_app`, sessions/app-access.ts), as a project's session does.
+ * The user-folder apps stay: an MCP server the person approved for the orchestrator is one (A-7), and it is
+ * promised from the start.
  */
-function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId' | 'root'>): boolean {
+function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
   return (
-    (session.kind === 'orchestrator'
-      ? app.projectId === null || app.root === true
-      : session.projectId !== null && app.projectId === session.projectId) ||
+    (session.kind === 'orchestrator' ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
     (session.builderOf?.appId === app.appId && session.builderOf.projectId === app.projectId)
   )
 }
@@ -350,8 +353,8 @@ export class SessionAppsHub {
   /**
    * The apps this session receives (decision 4).
    *
-   *   orchestrator                the user-folder apps and the root apps (#1141) — it belongs to no project, so it gets
-   *                               no project's inner apps
+   *   orchestrator                the user-folder apps — it belongs to no project, so it gets no project's inner apps,
+   *                               and it attaches a root app when it needs one (#1205, `givesApp`)
    *   a project's session         that project's apps — only if the project is trusted. A worktree session
    *                               carries the same project id, so it receives the root's apps too
    *                               (A-2: one instance per project)
@@ -463,7 +466,8 @@ export class SessionAppsHub {
    * (trust, then the app's own state), and then what the live agent has (`live.appAttachment`: a Codex
    * thread keeps the servers it started with). `session` is null for a session that gets no apps at
    * all (one stood up by an app, manager `appsFor`). With no live agent the session attaches what the
-   * rule gives it when it wakes, so the rule's answer stands.
+   * rule gives it when it wakes, so the rule's answer stands. A root app the orchestrator may attach and
+   * has not is reachable (#1205): its agent attaches it with `attach_app`, and the person has nothing to do.
    */
   reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
     const app = this.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
@@ -471,10 +475,16 @@ export class SessionAppsHub {
     // An app the session attached itself (#371 part A) counts like one the rule gives, under the name it was given
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
-    if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
+    // A root app the orchestrator has not attached (#1205): it attaches it itself, with nothing for the person to do
+    const selfServed = !!session && !own && session.kind === 'orchestrator' && app.root === true && !!this.opts.onDemand
+    // One it attached whose project has since lost trust: the person is told to trust the project, not that it is another's
+    const lostTrust = !!own && app.status === 'untrusted'
+    if (!session || (!givesApp(session, app) && !onDemand && !selfServed && !lostTrust)) return { reachable: false, reason: 'other-project' }
     // An untrusted project's apps attach nowhere, auto included (owner, #1141)
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
+    if (selfServed && !this.opts.onDemand!.allowed(session, app)) return { reachable: false, reason: 'other-project' }
+    if (selfServed) return { reachable: true }
     const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameRef(h.ref, ref))?.server ?? appMcpServerName(app.appId)) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }

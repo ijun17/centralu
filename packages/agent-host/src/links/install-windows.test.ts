@@ -270,7 +270,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(await uninstallRemote(c)).toEqual({ stopped: true })
       expect(seen).toEqual(['hold', 'stop', 'autostart', 'remove'])
       // The boot entry goes, through the Centralu it would start, after the host stopped and before its files go
-      expect(events()).toEqual(['stop 9.9.1', 'autostart off'])
+      expect(events()).toEqual(['stop 9.9.1', 'autostart remove'])
       expect(existsSync(data('autostart'))).toBe(false)
       expect(existsSync(remote())).toBe(false)
       expect(existsSync(data('serve.json'))).toBe(true)
