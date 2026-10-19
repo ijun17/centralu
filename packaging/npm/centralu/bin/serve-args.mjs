@@ -14,11 +14,12 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
   centralu serve --rotate-token   Replace the token (a running serve keeps the old one until restarted)
   centralu serve --from <hub>     With serve or --detach: the name of the computer whose link asks,
                                   said by a second Centralu on this data folder when it is refused
-  centralu serve --autostart on|off|status
+  centralu serve --autostart on|off|remove|status
                                   Start it when this machine starts (Linux: a systemd user unit;
-                                  Windows and WSL: a scheduled task at sign-in), stop doing that,
-                                  or say whether it does. Turning it on or off leaves a host that
-                                  runs now as it is
+                                  Windows and WSL: a scheduled task at sign-in), stop doing that
+                                  (Windows keeps the task, without its trigger, for --detach),
+                                  remove the entry altogether, or say whether it does. None of them
+                                  starts or stops a host that runs now
 
 The data folder is ~/.centralu (CC_DATA_DIR overrides it). The app on another computer reaches
 this host through an SSH local forward, and starts it with --detach when it is not running.
@@ -34,7 +35,7 @@ const MODE_FLAGS = { '--connection': 'connection', '--rotate-token': 'rotate', '
 const FLAG_OF = { ...Object.fromEntries(Object.entries(MODE_FLAGS).map(([f, m]) => [m, f])), autostart: '--autostart' }
 
 /** What `--autostart` takes */
-export const AUTOSTART_ACTIONS = ['on', 'off', 'status']
+export const AUTOSTART_ACTIONS = ['on', 'off', 'remove', 'status']
 
 /**
  * The argument a detached launcher is started with: what it needs from the `--detach` that started
@@ -69,7 +70,7 @@ export function parseServeArgs(argv) {
     const a = argv[i]
     if (a === '--autostart' || a.startsWith('--autostart=')) {
       const raw = a === '--autostart' ? argv[++i] : a.slice('--autostart='.length)
-      if (!AUTOSTART_ACTIONS.includes(raw)) return { error: `--autostart needs on, off or status (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
+      if (!AUTOSTART_ACTIONS.includes(raw)) return { error: `--autostart needs on, off, remove or status (got ${raw === undefined ? 'nothing' : JSON.stringify(raw)})` }
       if (mode !== 'serve' && mode !== 'autostart') return { error: `${FLAG_OF[mode]} and --autostart are separate commands; pass one` }
       mode = 'autostart'
       autostart = raw

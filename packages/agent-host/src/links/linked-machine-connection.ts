@@ -3,6 +3,7 @@ import { rpcError } from '../rpc-error.js'
 import {
   isInTurn,
   transition,
+  HostHandover,
   type HostLogon,
   type MachineConnect,
   type MachineInfo,
@@ -123,6 +124,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private elevated: boolean | null = null
   /** Which Windows logon the remote host said in its last hello it runs in (#1224); null: it did not say */
   private logon: HostLogon | null = null
+  /** A sign-in's serve waiting to take over from the remote host, as its hello or `host_handover` last said (#1224) */
+  private handover: HostHandover | null = null
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
   /**
@@ -209,6 +212,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       elevated: this.elevated,
       asks: { on: this.record.asks === true, note: this.record.asks === true ? this.asksNote : null },
       logon: this.logon,
+      handover: this.handover,
       connect: this.connectMode,
     }
   }
@@ -713,6 +717,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.deps.log?.(`[links] ${this.name}: its host runs in a network logon (started over ssh), so Git there cannot use a sign-in saved in Windows`)
     }
     this.logon = logon
+    this.handover = h.handover ?? null
     this.switched = null
     this.switchTried = false
     this.switchFailure = null
@@ -730,6 +735,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   private onEvent(raw: unknown): void {
     if (!isObj(raw)) return
+    // The machine's own hand-over into its sign-in (#1224): kept on its row, passed on to no one
+    if (raw.type === 'host_handover') {
+      const h = HostHandover.nullable().safeParse(raw.handover)
+      this.handover = h.success ? h.data : null
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      return
+    }
     const sid = typeof raw.sessionId === 'string' ? raw.sessionId : null
     if (sid !== null) {
       if (raw.type === 'session_created') {

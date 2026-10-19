@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -42,6 +42,7 @@ import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSettin
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
+import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
@@ -595,6 +596,13 @@ const router: Router = new Router({
     heldPids: held?.heldPids,
     machines: links,
     stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
+    // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
+    stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
+    // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
+    handover: (h) => {
+      handover = h
+      server.broadcast({ type: 'host_handover', handover: h })
+    },
     activity: () => activityCounts(activity()),
     updateApply,
     hubs,
@@ -610,6 +618,8 @@ const router: Router = new Router({
 let elevated: boolean | null = null
 // And on Windows which logon it runs in (#1224): one `whoami` answers both
 let logon: HostLogon | null = null
+/** What a serve in the person's Windows sign-in last said about taking over from this host (#1224, `host.handover`) */
+let handover: HostHandover | null = null
 const elevation = detectToken().then((t) => {
   elevated = t.elevated
   logon = t.logon
@@ -644,6 +654,7 @@ const server = new HostServer({
   elevated: () => elevated,
   // Which Windows logon it runs in, for a hub linked to it (#1224); asked with the elevation
   logon: () => logon,
+  handover: () => handover,
   // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
   drain: hostDrain,
 })

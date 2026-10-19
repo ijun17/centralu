@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { HostLogon } from './host-logon.js'
+import { HostHandover, HostLogon } from './host-logon.js'
 
 /**
  * Linked machines (remote mode as linked hosts, #82; docs/plans/remote-hub.md).
@@ -218,6 +218,12 @@ export const MachineInfo = z.object({
    * the host has not said (not connected yet, not Windows, or a build that predates it). Additive
    */
   logon: HostLogon.nullable().catch(null).default(null),
+  /**
+   * The machine's host said a `serve` in the person's Windows sign-in waits to take over from it, or gave up waiting
+   * (#1224, `HostHandover`, from its hello and its `host_handover` events). Null otherwise, and from a host that
+   * predates it. Additive
+   */
+  handover: HostHandover.nullable().catch(null).default(null),
   /** When the hub opens the link (`MachineConnect`, #1134). Additive: an older hub sends nothing, which is `at_start` */
   connect: MachineConnect.catch('at_start').default('at_start'),
 })

@@ -250,6 +250,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     machine: { id: 'ubuntu', name: 'Ubuntu server', sshTarget: 'ubuntu', status: 'unreachable', error: 'ssh could not reach ubuntu' },
   },
   { type: 'machine_resync', machineId: 'ubuntu' },
+  // A sign-in's serve waits to take over from this host, gave up, or nothing is pending (#1224)
+  { type: 'host_handover', handover: { state: 'waiting', since: 1791182683464 } },
+  { type: 'host_handover', handover: { state: 'gave_up', since: 1791182683464 } },
+  { type: 'host_handover', handover: null },
   { type: 'worktree_pr', sessionId: 's1', pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' } },
   // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden
   {

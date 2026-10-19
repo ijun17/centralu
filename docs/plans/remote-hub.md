@@ -425,9 +425,12 @@ gives an `AtLogOn` trigger; a task with no trigger reads as autostart off) and s
 nobody is signed in, and the host then says which logon it runs in (`hello_ok.logon`), which the machine's row turns
 into one sentence. `CENTRALU_SIGNIN_TASK=off` leaves the task out. **The hand-over**: when the person later signs in
 (the task's trigger, with autostart on) or a `--detach` starts the task while such a network-logon host still holds the
-folder, the task's `serve` waits until that host has nothing running a person would lose (its `host.activity`, all
-zero), stops it in order and starts its own. Waiting rather than asking: without a keeper on Windows a stop ends what
-runs, and an idle host loses nothing.
+folder, the task's `serve` waits until that host has nothing running a person would lose, stops it in order and starts
+its own. The check and the stop are one call the host decides in one step (`host.stop { ifIdle }`, which from its yes on
+refuses every new call), so a turn the hub starts cannot slip in between, as it could over two calls. It waits 30
+minutes at most, then gives up until the next sign-in or start, and the machine's row says it waits, then that it gave
+up (`host.handover`). Waiting rather than asking: without a keeper on Windows a stop ends what runs, and an idle host
+loses nothing.
 
 **Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.
@@ -718,7 +721,8 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
 - **The connection line says it** (`autostart: { on, how, linger }`) from a mark `--autostart` keeps in the data folder
   (`autostart.json`), so no link start asks systemd or Task Scheduler. `--autostart status` asks them and corrects the
   mark.
-- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart off`; it
+- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart remove`
+  (`off` of a serve from before it; since #1224 `off` keeps the Windows task without its trigger); it
   refuses to go on when the entry would not go. A version older than `--autostart` is passed by: it cannot have written
   one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
   leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).

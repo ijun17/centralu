@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { NormalizedEvent } from './events.js'
 import { ProtocolError } from './entities.js'
-import { HostLogon } from './host-logon.js'
+import { HostHandover, HostLogon } from './host-logon.js'
 
 /** Transport envelope (docs/protocol.md §1). One WS text frame equals one value of this type. */
 
@@ -61,6 +61,8 @@ export const HelloServer = z.object({
    * value this build does not know reads as absent. Additive
    */
   logon: HostLogon.optional().catch(undefined),
+  /** A sign-in's `serve` waiting to take over from this host, or one that gave up (#1224, `HostHandover`). Additive */
+  handover: HostHandover.optional().catch(undefined),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

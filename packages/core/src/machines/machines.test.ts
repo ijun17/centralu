@@ -23,6 +23,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   elevated: null,
   asks: null,
   logon: null,
+  handover: null,
   ...patch,
 })
 
@@ -275,6 +276,16 @@ describe('a machine whose host runs outside the Windows sign-in (#1224)', () => 
     expect(logonNote(machine({ logon: 'interactive' }))).toBeNull()
     expect(logonNote(machine({ logon: 'batch' }))).toBeNull()
     expect(logonNote(machine({ logon: null }))).toBeNull()
+  })
+
+  it('says it waits for the host’s work to end, or that it gave up, as the hand-over said (#1224)', () => {
+    expect(logonNote(machine({ name: 'Win', logon: 'network', handover: { state: 'waiting', since: 1 } }))?.fix).toBe(
+      'It moves into your sign-in on Win once its agents, terminals and commands there are idle. A repository with an SSH remote works either way.',
+    )
+    expect(logonNote(machine({ name: 'Win', logon: 'network', handover: { state: 'gave_up', since: 1 } }))?.fix).toBe(
+      'It could not move into your sign-in on Win: its agents, terminals or commands stayed busy for 30 minutes. It tries again at your next sign-in there. A repository with an SSH remote works either way.',
+    )
+    expect(logonNote(machine({ logon: 'interactive', handover: { state: 'gave_up', since: 1 } }))).toBeNull()
   })
 })
 

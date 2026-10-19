@@ -149,12 +149,16 @@ export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>
  * starts its host when someone is signed in (`centralu serve --detach`, through the sign-in task). An SSH remote needs
  * no saved sign-in. Null when the host did not say so.
  */
-export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'>): { title: string; fix: string } | null {
+export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'> & Partial<Pick<MachineInfo, 'handover'>>): { title: string; fix: string } | null {
   if (m.logon !== 'network') return null
-  return {
-    title: `Centralu runs on ${m.name} without your Windows sign-in, so Git there cannot use the credentials saved in Windows.`,
-    fix: `Sign in on ${m.name}: Centralu moves into your sign-in once its agents are idle. A repository with an SSH remote works either way.`,
+  const title = `Centralu runs on ${m.name} without your Windows sign-in, so Git there cannot use the credentials saved in Windows.`
+  const ssh = 'A repository with an SSH remote works either way.'
+  // The sign-in's serve waits for the host's work to end, for 30 minutes at most (#1224)
+  if (m.handover?.state === 'waiting') return { title, fix: `It moves into your sign-in on ${m.name} once its agents, terminals and commands there are idle. ${ssh}` }
+  if (m.handover?.state === 'gave_up') {
+    return { title, fix: `It could not move into your sign-in on ${m.name}: its agents, terminals or commands stayed busy for 30 minutes. It tries again at your next sign-in there. ${ssh}` }
   }
+  return { title, fix: `Sign in on ${m.name}: Centralu moves into your sign-in once its agents are idle. ${ssh}` }
 }
 
 /**

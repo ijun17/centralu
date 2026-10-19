@@ -56,6 +56,7 @@ async function remoteHost(
     without?: readonly string[]
     elevated?: () => boolean | null
     logon?: () => HostLogon | null
+    handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
     /** What happens on the host before it listens: no hub can see it yet */
     beforeListen?: (mgr: SessionManager) => Promise<void>
   } = {},
@@ -69,6 +70,7 @@ async function remoteHost(
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
+    ...(o.handover ? { handover: o.handover } : {}),
   })
   await o.beforeListen?.(mgr)
   const p = await server.listen()
@@ -463,6 +465,23 @@ describe('a hub linked to another host (#82)', () => {
     logon = null
     await u.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.links.list()[0]!.logon === null)
+  })
+
+  /** #1224's review: the sign-in's serve waits for the host's work to end, 30 minutes at most, and the row says which */
+  it('keeps the hand-over a machine’s host says, from its hello and its host_handover events, on the row only', async () => {
+    let handover: { state: 'waiting' | 'gave_up'; since: number } | null = { state: 'waiting', since: 7 }
+    const remote = await remoteHost(0, new Store(), { logon: () => 'network', handover: () => handover })
+    const hub = await hubHost(() => lineFor(remote.port, { install: undefined }))
+    const u = await ui(hub.port)
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.handover).toEqual({ state: 'waiting', since: 7 })
+    // It gave up while the link was up: the event says so, and the row follows
+    handover = { state: 'gave_up', since: 9 }
+    remote.server.broadcast({ type: 'host_handover', handover })
+    await eventually(() => hub.links.list()[0]!.handover?.state === 'gave_up')
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.handover?.state === 'gave_up'))
+    // Kept on the row; the window never gets the machine's own event
+    expect(u.events().some((e) => e.type === 'host_handover')).toBe(false)
   })
 
   it('tells a PowerShell machine’s person to type centralu.cmd and npm.cmd, never the bare names a default execution policy blocks (#688)', async () => {
