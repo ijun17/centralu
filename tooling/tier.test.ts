@@ -304,3 +304,90 @@ describe('pnpm tier on a git repository', () => {
     expect(() => tierOfChange({ root: repo, base: 'main', head: 'top', rulesRef: 'origin/main' })).toThrow('origin/main is not a commit here.')
   })
 })
+
+describe('pnpm tier reads a file\'s mode, not only its name (#1259 review)', () => {
+  const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', LC_ALL: 'C' }
+  let repo = ''
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd: repo, encoding: 'utf8', env: GIT_ENV }).trim()
+  const gitIn = (input: string, ...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: GIT_ENV, input }).trim()
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(join(repo, path)), { recursive: true })
+    writeFileSync(join(repo, path), text)
+  }
+  /** Puts `path` in the index with `mode` and a blob of `text` (a link's target), as git stores a link on any system */
+  const stage = (path: string, mode: string, text: string) => {
+    const sha = mode === '160000' ? 'c0ffee0000000000000000000000000000000000' : gitIn(text, 'hash-object', '-w', '--stdin')
+    git('update-index', '--add', '--cacheinfo', `${mode},${sha},${path}`)
+  }
+  const judge = () => tierOfChange({ root: repo, base: 'main', head: 'top' })
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cc-tier-modes-'))
+    git('init', '-q', '-b', 'main')
+    write(RULES_FILE, JSON.stringify({ tiers: ['auto', 'light', 'deep', 'person'], fallback: 'light', rules: [{ id: 'docs', tier: 'auto', paths: ['docs/**'], why: 'documents' }] }))
+    write('docs/a.md', 'a\n')
+    git('add', '-A')
+    git('commit', '-q', '-m', 'main')
+    git('checkout', '-q', '-b', 'top')
+  })
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('takes a plain document as auto, and the same name as a symbolic link as deep', () => {
+    write('docs/b.md', 'b\n')
+    git('add', '-A')
+    git('commit', '-q', '-m', 'a document')
+    expect(judge().tier).toBe('auto')
+    stage('docs/icon.svg', '120000', '../../../outside/secret.svg')
+    git('commit', '-q', '-m', 'a link')
+    const r = judge()
+    expect(r.tier).toBe('deep')
+    expect(r.because).toEqual([{ path: 'docs/icon.svg', tier: 'deep', rules: [], mode: 'a symbolic link' }])
+    expect(r.line).toBe('Tier: deep, from `docs/icon.svg` (a symbolic link); the other files: 1 auto.')
+    expect(r.text).toContain('a symbolic link, so deep whatever its name says')
+  })
+
+  it('takes a submodule as deep, also where git is told to ignore submodules', () => {
+    git('config', 'diff.ignoreSubmodules', 'all')
+    stage('docs/vendor', '160000', '')
+    git('commit', '-q', '-m', 'a submodule')
+    expect(judge().because).toEqual([{ path: 'docs/vendor', tier: 'deep', rules: [], mode: 'a submodule' }])
+  })
+
+  it('takes a file made executable, a new executable file, or one edited while executable, as at least light; the bit taken away is nothing', () => {
+    git('update-index', '--chmod=+x', 'docs/a.md')
+    stage('docs/run.txt', '100755', 'echo hi\n')
+    git('commit', '-q', '-m', 'executables')
+    const r = judge()
+    expect(r.tier).toBe('light')
+    expect(r.because.map((f: { path: string; mode?: string }) => [f.path, f.mode])).toEqual([
+      ['docs/a.md', 'an executable file'],
+      ['docs/run.txt', 'an executable file'],
+    ])
+    // Already executable on the base, and only its content edited: still something that runs. Staged through the index
+    // with its mode, not `git add`: where core.fileMode is true (Linux, macOS) `git add` takes the mode of the file on
+    // disk, 644 here, and would commit the bit taken away instead (which is rightly auto, below)
+    stage('docs/a.md', '100755', 'edited\n')
+    git('commit', '-q', '-m', 'edit an executable')
+    const edited = tierOfChange({ root: repo, base: 'top~1', head: 'top' })
+    expect(git('diff', '--raw', 'top~1', 'top')).toMatch(/^:100755 100755 [0-9a-f]+ [0-9a-f]+ M\tdocs\/a\.md$/)
+    expect(edited.because).toEqual([{ path: 'docs/a.md', tier: 'light', rules: [], mode: 'an executable file' }])
+    git('update-index', '--chmod=-x', 'docs/a.md')
+    git('rm', '-q', '--cached', 'docs/run.txt')
+    git('commit', '-q', '-m', 'not executable again')
+    expect(tierOfChange({ root: repo, base: 'top~1', head: 'top' }).tier).toBe('auto')
+  })
+
+  it('takes deleting a link as deep too, and judges a bare list of paths by name alone', () => {
+    git('checkout', '-q', 'main')
+    stage('docs/old-link', '120000', 'a.md')
+    git('commit', '-q', '-m', 'a link on main')
+    git('checkout', '-q', '-B', 'top', 'main')
+    git('rm', '-q', '--cached', 'docs/old-link')
+    git('commit', '-q', '-m', 'drop the link')
+    expect(judge().because[0]).toMatchObject({ path: 'docs/old-link', mode: 'a symbolic link' })
+    expect(classify(['docs/icon.svg'], parseRules(readFileSync(join(repo, RULES_FILE), 'utf8'))).tier).toBe('auto')
+  })
+})

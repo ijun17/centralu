@@ -14,6 +14,9 @@
 //   node scripts/tier.mjs [--base <ref>] [--head <ref>] [--json]      the commits from base to head
 //   node scripts/tier.mjs [--json] -- <path>...                        the paths given
 //
+// A file's mode counts too (git diff --raw): a symbolic link or a submodule is deep, and a file executable in the
+// new commit at least light, whatever its name says.
+//
 // --base defaults to origin/main, --head to HEAD; the change is what head adds over where it left
 // base. The rules are read from base, so a change cannot loosen the rules that judge it; a base
 // without them (before they existed) leaves the head's. pre-pr.mjs puts the tier in its answer, and the
@@ -130,26 +133,48 @@ export function subjectsOf(path) {
   return rs ? [`${rs[1]}/mod.rs`, `${rs[1]}.rs`] : []
 }
 
+/** git's file modes that say what a path is, beside a plain file (100644) */
+export const MODES = { link: '120000', submodule: '160000', executable: '100755' }
+
+/**
+ * What a change to a path's mode makes it, whatever its name: { tier, mode } or null. A symbolic link or a
+ * submodule (either side of the change) is deep: the name says nothing of what it points at, and a build reads
+ * the target (an asset that links outside the repository is bundled from there). A file executable in the new
+ * commit (new, the bit added, or edited while it has it) is at least light: something will run it.
+ */
+export function modeTier(entry) {
+  if (!entry) return null
+  const sides = [entry.oldMode, entry.newMode]
+  if (sides.includes(MODES.link)) return { tier: 'deep', mode: 'a symbolic link' }
+  if (sides.includes(MODES.submodule)) return { tier: 'deep', mode: 'a submodule' }
+  if (entry.newMode === MODES.executable) return { tier: 'light', mode: 'an executable file' }
+  return null
+}
+
 /**
  * One file's tier: { path, tier, rules }, and `tests` when it took the tier of the file it tests (a test
- * of a deep file guards that boundary, so weakening it is deep too).
+ * of a deep file guards that boundary, so weakening it is deep too), or `mode` when its mode put it higher
+ * (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
  */
-export function tierOfFile(path, rules) {
+export function tierOfFile(path, rules, entry = null) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
   let best = { path: p, ...ownTier(p, rules) }
   for (const s of subjectsOf(p)) {
     const t = ownTier(s, rules)
     if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }
   }
+  const m = modeTier(entry)
+  if (m && rank(m.tier) > rank(best.tier)) best = { path: p, tier: m.tier, rules: [], mode: m.mode }
   return best
 }
 
 /**
  * A change's tier: { tier, files, because, counts }. `because` is the files at that tier, the ones that
  * put it there; `counts` how many files fell in each tier. No files at all is auto: nothing to review.
+ * `modes`: each path's modes (`changedEntries`), when they are known.
  */
-export function classify(paths, rules) {
-  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules))
+export function classify(paths, rules, modes = new Map()) {
+  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null))
   const tier = files.map((f) => f.tier).reduce(higher, 'auto')
   const counts = Object.fromEntries(TIERS.map((t) => [t, files.filter((f) => f.tier === t).length]).filter(([, n]) => n))
   return { tier, files, because: files.filter((f) => f.tier === tier), counts }
@@ -157,6 +182,7 @@ export function classify(paths, rules) {
 
 /** Why a file has its tier, in a few words: its rules, or that none matched. */
 export function reasonOf(file, rules) {
+  if (file.mode) return file.mode
   if (!file.rules.length) return `no rule matches: ${rules.fallback}`
   return `${file.rules.join(', ')}${file.tests ? `, as the test of ${file.tests}` : ''}`
 }
@@ -188,7 +214,8 @@ export function report(result, rules) {
   lines.push(`${result.because.length} file(s) put it there:`)
   for (const f of result.because) {
     lines.push(`  ${f.path}${f.tests ? ` (a test of ${f.tests}, which takes its tier)` : ''}`)
-    if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
+    if (f.mode) lines.push(`      ${f.mode}, so ${f.tier} whatever its name says`)
+    else if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
     for (const id of f.rules) lines.push(`      ${id}: ${byId.get(id).why}`)
   }
   const others = Object.entries(result.counts).filter(([t]) => t !== result.tier)
@@ -233,10 +260,28 @@ export function rulesAt(root, ref, fallbackRef) {
   return null
 }
 
+/**
+ * What `head` changes over where it left `base`, with modes: { path, oldMode, newMode } per file (added,
+ * changed and deleted, renames as both names; 000000 is "not there"). From `git diff --raw -z`, whose
+ * records are ":<old mode> <new mode> <old sha> <new sha> <status>" and then the path, each ended by a NUL.
+ */
+export function changedEntries(root, base, head) {
+  const fork = git(root, ['merge-base', base, head]).trim()
+  // --ignore-submodules=none: a .gitmodules "ignore = all" or a diff.ignoreSubmodules setting must not hide a submodule
+  const parts = git(root, ['diff', '--raw', '--no-renames', '--no-abbrev', '--ignore-submodules=none', '-z', fork, head]).split('\0')
+  const out = []
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i].startsWith(':')) continue
+    const [oldMode, newMode] = parts[i].slice(1).split(' ')
+    out.push({ path: parts[i + 1], oldMode, newMode })
+    i += 1
+  }
+  return out
+}
+
 /** The files `head` changes over where it left `base`: added, changed and deleted, renames as both names. */
 export function changedFiles(root, base, head) {
-  const fork = git(root, ['merge-base', base, head]).trim()
-  return git(root, ['diff', '--name-only', '--no-renames', '-z', fork, head]).split('\0').filter(Boolean)
+  return changedEntries(root, base, head).map((e) => e.path)
 }
 
 /**
@@ -247,7 +292,12 @@ export function changedFiles(root, base, head) {
 export function tierOfChange({ root, base, head, rulesRef = base }) {
   const found = rulesAt(root, rulesRef, head)
   if (!found) return unjudged(`no ${RULES_FILE} at ${rulesRef} or ${head}`)
-  const result = classify(changedFiles(root, base, head), found.rules)
+  const entries = changedEntries(root, base, head)
+  const result = classify(
+    entries.map((e) => e.path),
+    found.rules,
+    new Map(entries.map((e) => [e.path, e])),
+  )
   return { ...result, rulesFrom: found.from, line: tierLine(result, found.rules), text: report(result, found.rules) }
 }
 

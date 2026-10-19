@@ -398,7 +398,7 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 Every change has a risk tier by the paths it touches (#1259): `pnpm tier [--base origin/main]`
 prints it and the files that put it there. The rules, one reason each, are in
 [`.centralu/tiers.json`](.centralu/tiers.json); a change takes the highest tier of its files, and
-a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). No rules, rules that cannot be
+a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). A symbolic link or a submodule is deep, and a file that is executable in the change at least light, whatever its name. No rules, rules that cannot be
 read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
