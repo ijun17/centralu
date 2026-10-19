@@ -111,7 +111,7 @@ export type BrokerAdmission = {
    * The app asks to hear of its project's sessions (`WATCH_TOOL`): one long-poll. Answers why it is refused, or the
    * answer (what changed after the cursor it presented). `signal` ends when the app cancels or its pipe closes.
    */
-  watch(args: { after?: string; waitMs?: number }, signal: AbortSignal): Promise<{ refused: string } | { answer: SessionsAnswer }>
+  watch(args: { after?: string; waitMs?: number }, signal: AbortSignal, progress: (message?: string) => void): Promise<{ refused: string } | { answer: SessionsAnswer }>
   /** Also records a request that was never admitted, in the run ledger (D-6) — a denial is a row too. This is where a person reads it, in the app's runs panel */
   refused(tool: BrokerToolName, args: Record<string, unknown>, why: string): void
 }
@@ -223,7 +223,26 @@ export function serveBroker(
           inputSchema: z.object({ after: z.string().max(100).optional(), waitMs: z.number().int().min(0).max(60_000).optional() }),
         },
         async (args, ctx) => {
-          const r = await admission.watch(args, ctx.mcpReq.signal)
+          /*
+           * Kept alive as the run tools are: the app gives up on a request after `IDLE_MS` of silence, and a poll may wait
+           * on the person's answer to the question (up to 5 minutes) as well as on a change (up to 25 s). Without the beat
+           * the app cancelled at 60 s, the question was withdrawn, and the loop asked it again, over and over
+           */
+          const token = ctx.mcpReq._meta?.progressToken
+          let beat = 0
+          const progress = (message?: string) => {
+            if (token === undefined || ctx.mcpReq.signal.aborted) return
+            beat += 1
+            void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, progress: beat, ...(message ? { message } : {}) } }).catch(() => {})
+          }
+          const timer = token === undefined ? null : setInterval(() => progress(), keepaliveMs)
+          timer?.unref()
+          let r: Awaited<ReturnType<BrokerAdmission['watch']>>
+          try {
+            r = await admission.watch(args, ctx.mcpReq.signal, progress)
+          } finally {
+            if (timer) clearInterval(timer)
+          }
           if ('refused' in r) {
             admission.note(`broker ${r.refused}`)
             return text(r.refused, true)

@@ -1047,7 +1047,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   not a run: a poll every twenty seconds would bury the Runs panel, so a refusal is a line in the app's log. It is asked
   about once, like every capability (§10 "Asked once"): no run started the poll, so the question stands on the app's
   pinned view, the answer is kept until the manifest's `uses` changes, and an update that adds `observe` asks again
-  (`desk.ts` `watch` → `permit`). The owner's "trust follows the project, no further cards" (#1173) is not built for any
+  (`desk.ts` `watch` → `permit`); the poll is kept alive with progress notifications while it waits, as the run requests are, so the question stands for its 5 minutes. The owner's "trust follows the project, no further cards" (#1173) is not built for any
   capability yet; when it is, this follows. The trust card also lists the declaration: "Sessions of its project: see their
   state … (not their conversations)". Refused for good once the person says no. `centralu.watchSessions({ after })`
   is one poll; `centralu.observeSessions(onChange)` is the loop (backoff, ends on a refusal that will not go away).

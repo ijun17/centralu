@@ -78,7 +78,7 @@ export class AppStartEnv {
             busy: (reason) => this.lifecycle.setBusy(e, pipeId, reason),
             // Under the manifest this process started with, as every request it makes (#1161 item 1)
             notify: (to, text) => this.desk.notice({ ref: e.ref, name: m.name, manifest: m }, to, text),
-            watch: (args, signal) => this.desk.watch({ ref: e.ref, name: m.name, manifest: m }, args, signal),
+            watch: (args, signal, progress) => this.desk.watch({ ref: e.ref, name: m.name, manifest: m }, args, signal, progress),
             refused: (tool, args, why) => this.desk.refused({ ref: e.ref, name: m.name, manifest: m }, tool, args, why),
           },
           /*

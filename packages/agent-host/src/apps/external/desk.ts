@@ -505,7 +505,7 @@ export class BrokerDesk {
    * update that adds `observe` asks the person again. No run started the poll, so the question stands on the app's pinned
    * view. Answers the refusal, or what changed. No run row: see `WATCH_TOOL`.
    */
-  async watch(app: DeskApp, args: { after?: string; waitMs?: number }, signal: AbortSignal): Promise<{ refused: string } | { answer: SessionsAnswer }> {
+  async watch(app: DeskApp, args: { after?: string; waitMs?: number }, signal: AbortSignal, progress: (message?: string) => void = () => {}): Promise<{ refused: string } | { answer: SessionsAnswer }> {
     const refuse = (why: string) => ({ refused: `watch_sessions refused: ${why}` })
     if (!(app.manifest.uses.sessions ?? []).includes('observe')) {
       return refuse('this app does not declare "uses": { "sessions": ["observe"] } in centralu.app.json')
@@ -526,7 +526,7 @@ export class BrokerDesk {
     const waitMs = Math.min(WATCH_WAIT_MAX_MS, Math.max(0, args.waitMs ?? WATCH_WAIT_DEFAULT_MS))
     this.watching.add(key)
     try {
-      const denied = await this.permit(WATCH_TOOL, app, { kind: 'sessions', name: 'observe' }, sessionCapabilityText('observe'), { parentRunId: '', signal, progress: () => {} })
+      const denied = await this.permit(WATCH_TOOL, app, { kind: 'sessions', name: 'observe' }, sessionCapabilityText('observe'), { parentRunId: '', signal, progress })
       if (denied) return { refused: firstText(denied.result) }
       return { answer: await host.watchSessions(projectId, args.after, waitMs, signal) }
     } catch (e) {

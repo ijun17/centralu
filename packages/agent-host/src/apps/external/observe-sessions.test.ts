@@ -7,7 +7,7 @@ import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { memoryCapabilityBook } from './capabilities.js'
-import type { ObservedSession, SessionsAnswer } from './broker.js'
+import { serveBroker, type ObservedSession, type SessionsAnswer } from './broker.js'
 import { BrokerDesk, WATCH_ANSWERS_PER_MINUTE, WATCH_WAIT_MAX_MS, type DeskApps } from './desk.js'
 import { parseManifest, type AppManifest } from './manifest.js'
 import { ExternalApps, resultText, type AppRef } from './runtime.js'
@@ -227,6 +227,52 @@ describe('an app that does not declare it, or cannot have it', () => {
     await start(r, 'ledger')
     await until(() => h.polls.length, (n) => n >= 2)
     expect(r.runs(ref('ledger'), 50).map((x) => x.tool)).toEqual(['ping'])
+  })
+})
+
+describe('a poll that waits longer than the app is willing to wait in silence', () => {
+  it('is kept alive by the host (the person may take minutes over the question), so it is answered and not cancelled and asked again', async () => {
+    plant('ledger')
+    const dir = join(projRoot, '.centralu', 'apps', 'ledger')
+    const data = join(root, 'ledger-data')
+    mkdirSync(data)
+    // The app gives up on a request after 0.4 s of silence here (CENTRALU_BROKER_IDLE_MS, as app-template.test.ts does)
+    const child = spawn('node', ['server.mjs'], {
+      cwd: dir,
+      stdio: ['pipe', 'pipe', 'pipe', 'overlapped'],
+      env: { PATH: process.env.PATH!, CENTRALU_BROKER_IDLE_MS: '400', CENTRALU_APP_DATA: data, CENTRALU_APP_ID: 'ledger' },
+    })
+    const fd3 = child.stdio[3] as Socket
+    const polls: number[] = []
+    const closeBroker = serveBroker(
+      fd3,
+      {
+        openRun: () => null,
+        note: () => {},
+        refused: () => {},
+        busy: () => null,
+        notify: async () => null,
+        // The host is waiting for the person's answer: 1.2 s, three times the app's patience
+        watch: async () => {
+          polls.push(Date.now())
+          await new Promise((r) => setTimeout(r, 1_200))
+          return { answer: { cursor: 'e.1', full: true, sessions: [row('a')], gone: [] } }
+        },
+      },
+      async () => ({ content: [{ type: 'text', text: 'unused' }] }),
+      { keepaliveMs: 100 },
+    )
+    try {
+      await until(() => JSON.parse(readFileSync(join(data, 'heard.json'), 'utf8')) as unknown[], (v) => v.length >= 1, 8_000 * SLOW)
+      // One poll was open the whole time: not cancelled at 0.4 s and asked again
+      expect(polls.length).toBeLessThanOrEqual(2)
+    } finally {
+      closeBroker()
+      fd3.destroy()
+      const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, 'exit')
+      child.kill('SIGKILL')
+      await exited
+    }
   })
 })
 
