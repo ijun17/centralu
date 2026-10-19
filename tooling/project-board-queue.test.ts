@@ -19,7 +19,9 @@ import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { batchCandidates, decideLanding, endBatch, formBatch, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
+import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -91,18 +93,69 @@ describe('what the merge queue decides for one poll', () => {
     expect(again.action).toBeUndefined()
   })
 
-  it('reruns failed jobs once per head; failing again needs attention, naming the job; a new head starts over', () => {
+  it('reruns failed jobs once per head only for an infrastructure failure; failing again needs attention, naming the job; a new head starts over', () => {
     const failing = checksOf([check('verify', 'success'), check('windows tests', 'failure', { jobId: '12' })])
-    const first = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], defaultBranch: 'main', now: NOW, ref })
+    const timedOut = (attempt = 1, id = 900) => ({ [id]: { real: false, cause: 'timeout', job: { name: 'windows tests', id: '12' }, attempt } })
+    const first = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], failures: timedOut(), defaultBranch: 'main', now: NOW, ref })
     expect(first).toMatchObject({ action: { type: 'rerun', failedOnly: true } })
+    expect(first.event).toContain('a job that hit its timeout')
     const after = fresh({ reruns: first.patch.reruns })
     // Still running its rerun
     expect(decideCi({ item: after, pr: openPr(), checks: failing, runs: [run(null, 2)], defaultBranch: 'main', now: NOW, ref })).toEqual({ state: 'ci' })
-    const twice = decideCi({ item: after, pr: openPr(), checks: failing, runs: [run('failure', 2)], defaultBranch: 'main', now: NOW, ref })
+    const twice = decideCi({ item: after, pr: openPr(), checks: failing, runs: [run('failure', 2)], failures: timedOut(2), defaultBranch: 'main', now: NOW, ref })
     expect(twice).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'windows tests', id: '12' } } })
     expect(twice.reason.text).toContain('"windows tests" (job 12) failed twice')
     // Pushed again: the reruns belong to the old head, so the new head gets its own
-    expect(decideCi({ item: after, pr: openPr({ headRefOid: SHA2 }), checks: failing, runs: [run('failure', 1, 901)], defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', runId: 901 } })
+    expect(decideCi({ item: after, pr: openPr({ headRefOid: SHA2 }), checks: failing, runs: [run('failure', 1, 901)], failures: timedOut(1, 901), defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', runId: 901 } })
+  })
+
+  // The owner, 2026-10-19: 19 reruns on the queue's first day, most of them a test failing the same way again
+  it('never reruns a test or build failure, also in a run CI cancelled because of it (fail fast): attention at once, naming the job', () => {
+    const real = { 900: { real: true, cause: 'test', step: 'pnpm test', job: { name: 'verify', id: '11' }, attempt: 1 } }
+    const failing = checksOf([check('verify', 'failure', { jobId: '11' }), check('windows tests', 'success')])
+    const d = decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure')], failures: real, defaultBranch: 'main', now: NOW, ref })
+    expect(d).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'verify', id: '11' } } })
+    expect(d.action).toBeUndefined()
+    expect(d.reason.text).toContain('"verify" (job 11) failed at c0ffee0 with a test or build failure (step "pnpm test")')
+    // Fail fast: verify failed, CI cancelled the rest, and the run's conclusion is cancelled
+    const failFast = checksOf([check('verify', 'failure', { jobId: '11' }), check('windows tests', 'cancelled')])
+    const ff = decideCi({ item: fresh(), pr: openPr(), checks: failFast, runs: [run('cancelled')], failures: real, defaultBranch: 'main', now: NOW, ref })
+    expect(ff).toMatchObject({ state: 'attention', reason: { kind: 'failed', job: { name: 'verify' } } })
+    expect(ff.reason.text).toContain('CI cancelled the rest of run 900 (fail fast)')
+    // Not read from its jobs for this attempt: the checks say a job failed, so no rerun either
+    expect(decideCi({ item: fresh(), pr: openPr(), checks: failFast, runs: [run('cancelled', 2)], failures: real, defaultBranch: 'main', now: NOW, ref })).toMatchObject({ state: 'attention', reason: { kind: 'failed' } })
+    // A run cancelled with no failed job is rerun, as before
+    const cancelled = checksOf([check('verify', 'cancelled'), check('windows tests', 'cancelled')])
+    expect(decideCi({ item: fresh(), pr: openPr(), checks: cancelled, runs: [run('cancelled')], defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', failedOnly: false } })
+  })
+
+  it("tells a real failure from an infrastructure one by the run's jobs, their steps and what GitHub wrote on them", () => {
+    const job = (name: string, conclusion: string | null, extra: Record<string, unknown> = {}) => ({ id: name.length, name, conclusion, steps: [], notes: [], ...extra })
+    const failedStep = { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }] }
+    const cancelledRun = { id: 1, attempt: 1, conclusion: 'cancelled' }
+    const failedRun = { id: 1, attempt: 1, conclusion: 'failure' }
+    // Fail fast: verify failed in a step, the rest cancelled → real, naming verify
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled'), job('verify', 'failure', failedStep), job('changes', 'success')])).toMatchObject({ real: true, cause: 'test', step: 'pnpm test', job: { name: 'verify' } })
+    // Cancelled with no failed job → infrastructure
+    expect(classifyRun(cancelledRun, [job('verify', 'cancelled'), job('e2e (webkit 1/5)', 'cancelled')])).toMatchObject({ real: false, cause: 'cancelled' })
+    // A job that hit its timeout: by its conclusion, or by GitHub's note on a cancelled or failed job
+    expect(classifyRun(failedRun, [job('e2e (webkit 2/5)', 'timed_out')])).toMatchObject({ real: false, cause: 'timeout' })
+    const timeoutNote = ['The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.']
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 2/5)', 'cancelled', { notes: timeoutNote })])).toMatchObject({ real: false, cause: 'timeout', job: { name: 'e2e (webkit 2/5)' } })
+    expect(classifyRun(failedRun, [job('e2e (webkit 2/5)', 'failure', { ...failedStep, notes: ["The action 'pnpm e2e' has timed out after 25 minutes."] })])).toMatchObject({ real: false, cause: 'timeout' })
+    // A test's own timeout is a test failure
+    expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
+    // A lost runner
+    const lost = ['The hosted runner: GitHub Actions 12 lost communication with the server. Anything in your workflow that terminates the runner process can cause this error.']
+    expect(classifyRun(failedRun, [job('windows tests', 'failure', { notes: lost })])).toMatchObject({ real: false, cause: 'runner' })
+    // On the known-flaky list (a pattern); a real failure beside an infrastructure one is real
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'failure', failedStep)], { flaky: ['e2e (webkit *)'] })).toMatchObject({ real: false, cause: 'flaky' })
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'failure', failedStep), job('verify', 'failure', failedStep)], { flaky: ['e2e (webkit *)'] })).toMatchObject({ real: true, job: { name: 'verify' } })
+    expect(classifyRun(failedRun, [job('e2e (webkit 3/5)', 'timed_out'), job('verify', 'failure', failedStep)])).toMatchObject({ real: true, job: { name: 'verify' } })
+    // Failed outside any step it reports, with nothing that names the runner: the session's to look at
+    expect(classifyRun(failedRun, [job('verify', 'failure')])).toMatchObject({ real: true, cause: 'no-step' })
+    expect(onFlakyList('e2e (webkit 3/5)', ['e2e (chromium *)', 'keeper e2e'])).toBe(false)
+    expect(onFlakyList('keeper e2e', ['keeper e2e'])).toBe(true)
   })
 
   it('lands a stack through its top: retargets it from a lower branch, refuses another base, and keeps the subject within 72', () => {
@@ -460,7 +513,9 @@ describe('what the merge queue decides with two tiers of CI', () => {
 
   it('reruns a quick run that failed, and waits while one still runs', () => {
     const failed = tiered([check(TIER, 'skipped'), check('verify', 'failure', { jobId: '5' }), check('windows tests', 'success')])
-    expect(ci({ checks: failed, runs: [run('failure')] })).toMatchObject({ state: 'ci', action: { type: 'rerun', failedOnly: true } })
+    expect(ci({ checks: failed, runs: [run('failure')], failures: { 900: { real: false, cause: 'runner', job: { name: 'verify', id: '5' }, attempt: 1 } } })).toMatchObject({ state: 'ci', action: { type: 'rerun', failedOnly: true } })
+    // A test that failed in it is not rerun
+    expect(ci({ checks: failed, runs: [run('failure')] })).toMatchObject({ state: 'attention', reason: { kind: 'failed' } })
     const going = tiered([check(TIER, 'skipped'), check('verify', 'success'), check('windows tests', null)])
     expect(ci({ checks: going, runs: [run(null)] })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
   })
@@ -475,6 +530,17 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(alone.reason.text).toContain('its batch of one ended without landing it: Batch queue/batch-4: required check "verify" failed twice.')
     // On a new head it is batched again
     expect(ci({ item: fresh({ alone: { head: SHA2, text: 'x' } }) })).toMatchObject({ state: 'ci', quick: true })
+  })
+
+  it('keeps a pull request that failed alone in a batch in attention, without rerunning its own run the batch cancelled', () => {
+    const reason = { kind: 'failed', text: '#77 failed alone in batch queue/batch-3: "verify" failed.', job: { name: 'verify', id: '61' } }
+    const cancelled = tiered([check(TIER, 'skipped'), check('verify', 'cancelled'), check('windows tests', 'cancelled')])
+    const d = ci({ item: fresh({ alone: { head: SHA, text: reason.text, reason } }), checks: cancelled, runs: [run('cancelled')] })
+    expect(d).toEqual({ state: 'attention', reason })
+    // The same reason on the same head: one message, not one per poll
+    expect(noticeKey(d.reason, SHA)).toBe('failed:' + SHA + ':61')
+    // A new head is tried afresh: its cancelled run is rerun, and it is batched again
+    expect(ci({ item: fresh({ alone: { head: SHA2, text: reason.text, reason } }), checks: cancelled, runs: [run('cancelled')] })).toMatchObject({ action: { type: 'rerun' } })
   })
 
   it('batches items whose quick tier passed, one at a time when one was sent back, and never one alone again on its head', () => {
@@ -495,6 +561,43 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(batchCandidates(q, { max: 6, tiers: true }).map((i: any) => i.pr)).toEqual([2])
     q.items[0].alone = { head: B, text: 'x' }
     expect(batchCandidates(q, { max: 6, tiers: true }).map((i: any) => i.pr)).toEqual([3])
+  })
+
+  // The owner, 2026-10-19: day one's batches averaged 1.25 pull requests, about 20 minutes each, one after another
+  it('batches every ready item, whether its own quick run passed, still runs, waits or has not reported, four at most, those fixed after a conflict first', () => {
+    const quick = (pr: number, head: string, extra: Record<string, unknown> = {}) =>
+      waitingItem(pr, head, 'completed', { ci: { head, verdict: 'quick', runs: [{ id: 900 + pr, status: 'completed' }] }, ...extra })
+    const D = 'd'.repeat(40)
+    const q = queueOf(
+      quick(1, A),
+      waitingItem(2, B, 'in_progress'), // its quick run is going
+      waitingItem(3, C), // its quick run waits for a runner
+      waitingItem(4, D, 'queued', { ci: { head: D, verdict: 'none', runs: [] } }), // no run reported yet
+      waitingItem(5, '5'.repeat(40), 'completed', { ci: { head: '5'.repeat(40), verdict: 'failing', runs: [{ id: 905, status: 'completed' }] } }), // its own CI failed
+      quick(6, '6'.repeat(40), { front: '2026-10-17T10:30:00Z' }), // fixed after a conflict
+      quick(7, '7'.repeat(40), { lowers: [70, 71] }), // a stack: one member
+    )
+    expect(batchCandidates(q, { max: 4, tiers: true }).map((i: any) => i.pr)).toEqual([6, 1, 2, 3])
+    expect(batchCandidates(q, { max: 10, tiers: true }).map((i: any) => i.pr)).toEqual([6, 1, 2, 3, 4, 7])
+    // Without tiers only those not started: their own run could land them
+    expect(batchCandidates(q, { max: 10 }).map((i: any) => i.pr)).toEqual([3])
+    // The project's batches take four
+    expect(PROJECT.queue.batch.max).toBe(4)
+  })
+
+  it('waits a moment for one queued just now to be read, so pull requests queued together share a batch', () => {
+    const now = Date.parse('2026-10-17T10:00:00Z')
+    const q = queueOf(waitingItem(1, A), { repo: R, pr: 2, lowers: [], state: 'waiting', head: null, queuedAt: '2026-10-17T09:59:40Z' })
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(true)
+    // Not for ever: queued over a minute ago and still not read (GitHub slow to say), the batch goes without it
+    expect(gathering(q, { repo: R, now: now + 61_000, size: 1, max: 4 })).toBe(false)
+    // Nor when the batch is full, or the other one is read already, needs attention or is in another repository
+    expect(gathering(q, { repo: R, now, size: 4, max: 4 })).toBe(false)
+    q.items[1].state = 'attention'
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(false)
+    q.items[1].state = 'ci'
+    q.items[1].repo = 'someone/else'
+    expect(gathering(q, { repo: R, now, size: 1, max: 4 })).toBe(false)
   })
 
   it('marks the one member of a batch of one that ended without landing it, with why, and no member of a larger batch', () => {
@@ -679,6 +782,18 @@ if (args[0] === 'pr' && args[1] === 'view') {
   fail(st.rerunError)
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path)) {
   write([path.endsWith('failed-jobs') ? 'rerun-failed' : 'rerun', path.split('/')[5]])
+} else if (path && /\/actions\/runs\/\d+\/jobs\?/.test(path)) {
+  // A run's jobs and steps: as the test gives them, else its checks, a failed one failing in a step (a real failure)
+  const id = Number(path.split('/')[5])
+  if ((st.jobs ?? {})[id]) out({ jobs: st.jobs[id] })
+  else {
+    const runs = Object.values(st.runs ?? {}).flat().filter((r) => r.id === id)
+    const run = runs.sort((a, b) => (b.run_attempt ?? 1) - (a.run_attempt ?? 1))[0]
+    const checks = run ? ((st.checks ?? {})[run.head_sha] ?? []).filter((c) => (c.check_suite ?? {}).id === run.check_suite_id) : []
+    out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }] : [] })) })
+  }
+} else if (path && /\/check-runs\/\d+\/annotations/.test(path)) {
+  out((st.annotations ?? {})[path.split('/')[4]] ?? [])
 } else if (path && /\/actions\/jobs\/\d+\/logs$/.test(path)) {
   out((st.logs ?? {})[path.split('/')[5]] ?? '')
 } else if (path && path.includes('/compare/')) {
@@ -941,16 +1056,18 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().map((w) => w[0])).toEqual(['rerun'])
     const n = notices()
     expect(n).toHaveLength(1)
-    expect(n[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. #77: CI run 900 was cancelled again after one rerun at c0ffee0\./)
+    expect(n[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. #77: CI run 900 was cancelled again after one rerun at c0ffee0 \(cancelled, with no failed job\)\./)
   })
 
-  it('reruns failed jobs once; failing again names the job and its first failure, once; a new head starts over and lands', async () => {
+  it('reruns the failed jobs of a job that hit its timeout once; a test failing after it names the job and its first failure, once; a new head starts over and lands', async () => {
     const failing = [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)]
     runtime(
       ghState({
         checks: { [SHA]: failing },
         runs: { [SHA]: [ghRun('failure')] },
-        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] } } },
+        annotations: { '12': [{ message: 'The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.' }] },
+        // Its rerun fails in a test, which is not rerun
+        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] }, annotations: { '12': [] } } },
       }),
     )
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -959,7 +1076,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await morePolls()
     expect(writes().map((w) => w[0])).toEqual(['rerun-failed'])
     expect(notices()).toHaveLength(1)
-    expect(notices()[0]!.text).toContain('required check "windows tests" (job 12) failed twice at c0ffee0')
+    expect(notices()[0]!.text).toContain('"windows tests" (job 12) failed at c0ffee0 with a test or build failure (step "pnpm test")')
     expect(notices()[0]!.text).toContain('First failure: FAIL unit packages/x.test.ts > adds numbers')
     // The session fixes it and pushes: the queue takes the new head and lands it
     patchGh((s) => {
@@ -969,6 +1086,44 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     })
     await until((x) => stateOf(x) === 'merged', 'the new head to land')
     expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA2]))
+  })
+
+  // The contract with CI: in a full run, a failed verify cancels the rest (fail fast), and the run's conclusion is cancelled
+  it.each([
+    ['failed', 'failure', 'success'],
+    ['cancelled by fail fast', 'cancelled', 'cancelled'],
+  ])('reruns nothing when verify fails in a test (run %s): attention at once, naming the job and its first failure', async (_what, conclusion, other) => {
+    runtime(
+      ghState({
+        checks: { [SHA]: [ghCheck('verify', 'failure', 12), ghCheck('windows tests', other, 13)] },
+        runs: { [SHA]: [ghRun(conclusion)] },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason).toMatchObject({ kind: 'failed', job: { name: 'verify', id: '12' } })
+    await morePolls()
+    expect(writes()).toEqual([])
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('"verify" (job 12) failed at c0ffee0 with a test or build failure (step "pnpm test")')
+    expect(notices()[0]!.text).toContain('First failure: FAIL unit packages/x.test.ts > adds numbers')
+    // Its jobs are read once for the run, not again every poll while it waits for the session
+    expect(ghCalls().filter((a) => a.some((x) => /\/actions\/runs\/900\/jobs/.test(x)))).toHaveLength(1)
+  })
+
+  it('reruns once a job whose runner was lost, and lands it when the rerun passes', async () => {
+    runtime(
+      ghState({
+        checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
+        runs: { [SHA]: [ghRun('failure')] },
+        jobs: { 900: [{ id: 11, name: 'verify', conclusion: 'success', steps: [] }, { id: 12, name: 'windows tests', conclusion: 'failure', steps: [{ name: 'pnpm test', conclusion: null }] }] },
+        annotations: { '12': [{ message: 'The hosted runner: GitHub Actions 12 lost communication with the server.' }] },
+        on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
   })
 
   it('tells the session once when a pull request goes DIRTY and the queue has no checkout to merge it in, and never merges it', async () => {
@@ -1068,6 +1223,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
       ghState({
         checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
         runs: { [SHA]: [ghRun('failure')] },
+        annotations: { '12': [{ message: 'The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 30 minutes.' }] },
         rerunError: 'Unable to retry this workflow run because it was created over a month ago (HTTP 403)',
       }),
     )
@@ -1386,7 +1542,110 @@ const untouched = (work: string) => ({
   refs: g(work, 'for-each-ref', 'refs/centralu-queue'),
 })
 
+/**
+ * #1221 on #1218 (2026-10-19): #77 stacked on #76; #76 lands as a squash, GitHub moves #77's base to main, and #77's
+ * branch still carries #76's original commits, which conflict with their squash and what main did since (five files).
+ * `ownConflict`: #77's own commit also changes a file main changed since, so even the rebase conflicts.
+ */
+function squashedStack({ ownConflict = false } = {}) {
+  const repo = conflictRepo({ 90: ['other.txt'] })
+  const { work } = repo
+  const files = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts']
+  const write = (f: string, text: string) => {
+    mkdirSync(join(work, f, '..'), { recursive: true })
+    writeFileSync(join(work, f), text)
+  }
+  g(work, 'checkout', '-q', 'main')
+  for (const f of files) write(f, 'base\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'the files')
+  const base = g(work, 'rev-parse', 'HEAD')
+  g(work, 'checkout', '-q', '-b', 'feat/b76', base)
+  for (const f of files) write(f, 'lower 76\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'change 76')
+  const lower = g(work, 'rev-parse', 'HEAD')
+  g(work, 'checkout', '-q', '-b', 'feat/b77', lower)
+  write('own-77.txt', '77\n')
+  if (ownConflict) write('src/a.ts', 'top 77\n')
+  g(work, 'add', 'own-77.txt', 'src/a.ts')
+  g(work, 'commit', '-q', '-m', 'change 77')
+  const top = g(work, 'rev-parse', 'HEAD')
+  // main: #76 as one squash commit, then main changes the same files again
+  g(work, 'checkout', '-q', 'main')
+  g(work, 'merge', '-q', '--squash', 'feat/b76')
+  g(work, 'commit', '-q', '-m', 'change 76 (#76)')
+  for (const f of files) write(f, 'main after 76\n')
+  g(work, 'add', ...files)
+  g(work, 'commit', '-q', '-m', 'main moves on')
+  const main = g(work, 'rev-parse', 'HEAD')
+  g(work, 'push', '-q', '-f', 'origin', 'main', 'feat/b76', 'feat/b77')
+  g(work, 'checkout', '-q', 'mine')
+  return { ...repo, main, heads: { 76: lower, 77: top } as Record<string, string>, files }
+}
+
+/** #76 queued and landed by the queue first (green on its head), so the queue knows the head it landed */
+async function landLower(repo: ConflictRepo) {
+  patchGh((s) => {
+    s.prs['76'] = ghPr(76, { headRefOid: repo.heads[76] })
+    s.checks[repo.heads[76]!] = green()
+    s.runs[repo.heads[76]!] = [ghRun('success', 1, repo.heads[76], { head_branch: 'feat/b76' })]
+  })
+  await call('queue_merge', { pr: 76, owner: 'tester' })
+  await until((x) => stateOf(x, 76) === 'merged', '#76 to land')
+}
+
 describe('the merge queue resolves a conflict with main itself, or hands it to the author session (#1182)', { timeout: 120_000 * SLOW }, () => {
+  it('rebases a pull request stacked on one it landed as a squash onto main without that one\'s commits, pushes it with a lease, and lands it once CI passed (#1221)', async () => {
+    const repo = squashedStack()
+    const before = untouched(repo.work)
+    conflictRuntime(repo, [77])
+    await landLower(repo)
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the rebase to be pushed')
+    const tip = tipOf(repo, 77)
+    // Its own commit only, on main: #76's original commit is gone, nothing merged, nothing conflicted
+    expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tip).split(' ').slice(1)).toEqual([repo.main])
+    expect(g(repo.origin, 'log', '-1', '--format=%s', tip)).toBe('change 77')
+    expect(g(repo.origin, 'show', `${tip}:own-77.txt`)).toBe('77')
+    expect(g(repo.origin, 'show', `${tip}:src/a.ts`)).toBe('main after 76')
+    expect(spawnSync('git', ['merge-base', '--is-ancestor', repo.heads[76]!, tip], { cwd: repo.origin, env: GIT_ENV }).status).toBe(1)
+    expect(untouched(repo.work)).toEqual(before)
+    expect(queueTmps()).toEqual([])
+    expect(conflictSteps().map((e) => [e.step, e.dropped ?? null, e.lease ?? null])).toEqual([
+      ['rebase', 76, null],
+      ['push', null, true],
+    ])
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+    // Nothing lands from the rebased head until CI has passed on it
+    expect(writes().filter((w) => w[0] === 'merge').map((w) => w[1])).toEqual(['76'])
+    patchGh((s) => {
+      Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[tip] = green('2026-10-17T09:00:00Z')
+      s.runs[tip] = [ghRun('success', 1, tip)]
+    })
+    await until((x) => stateOf(x) === 'merged', 'the rebased head to land')
+    expect(writes().find((w) => w[0] === 'merge' && w[1] === '77')![2]).toEqual(expect.arrayContaining(['--match-head-commit', tip]))
+    expect(conflictSteps().at(-1)).toMatchObject({ step: 'fixed', by: 'queue' })
+  })
+
+  it('hands it off when the rebase without the landed one\'s commits conflicts too, saying how to rebase, and pushes nothing (#1221)', async () => {
+    const repo = squashedStack({ ownConflict: true })
+    conflictRuntime(repo, [77])
+    await landLower(repo)
+    await call('queue_merge', { pr: 77, owner: 'tester', author: 'writer' })
+    const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+    expect(q.queue.find((i: any) => i.pr === 77).reason).toMatchObject({ kind: 'conflict', files: ['src/a.ts'], relay: { to: 'writer', branch: 'feat/b77' } })
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    const told = notices().filter((e) => e.kind === 'attention')
+    expect(told).toHaveLength(1)
+    expect(told[0]!.text).toContain(`#76 landed as a squash, and feat/b77 still carries its original commits; the queue rebased feat/b77 onto main without them (git rebase --onto main ${repo.heads[76]!.slice(0, 7)}), and that conflicts too.`)
+    expect((told[0] as any).relay.text).toBe(`Rebase feat/b77 onto main without #76's commits (git rebase --onto origin/main ${repo.heads[76]}), resolve the conflicts and push with --force-with-lease; conflicted files: src/a.ts.`)
+    expect(conflictSteps().map((e) => e.step)).toEqual(['rebase', 'handoff'])
+    expect(queueTmps()).toEqual([])
+  })
+
+
   it('regenerates a conflict only in mechanical files, pushes the merge, and lands its new head once CI passed on it, with no attention', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml', 'docs/generated/schema.md'] })
     const before = untouched(repo.work)
@@ -1656,7 +1915,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
   })
 
-  it('splits a red batch: two go back to their own CI, whose cancelled runs are rerun, and land from there', async () => {
+  it('splits a red batch at once, without rerunning a test failure: two go back to their own CI, whose cancelled runs are rerun, and land from there', async () => {
     const landsAlone = (pr: number, head: string, id: number, suite: number) => ({
       runs: { [head]: [ownRun(pr, head, id, suite, 'success', 2)] },
       checks: { [head]: ownChecks(suite, 'success') },
@@ -1668,7 +1927,6 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
         on: {
           ...base.on,
           'dispatch:queue/batch-1': { runs: { [BATCH_HEAD]: [batchRun('failure')] }, checks: { [BATCH_HEAD]: batchChecks('failure') } },
-          'rerun-failed:950': { runs: { [BATCH_HEAD]: [batchRun('failure', 2)] } },
           'rerun:901': landsAlone(77, A, 901, 5001),
           'rerun:902': landsAlone(78, B, 902, 5002),
         },
@@ -1678,13 +1936,14 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     await call('queue_merge', { pr: 78, owner: 'tester' })
     await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land on their own', BATCH_WAIT_MS)
     const order = writes().map(short2)
-    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902', 'rerun-failed 950'])
+    expect(order.slice(0, 6)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
+    expect(order).not.toContain('rerun-failed 950')
     expect(order).toContain('delete queue/batch-1')
     expect(order.filter((w) => w.startsWith('rerun ')).sort()).toEqual(['rerun 901', 'rerun 902'])
     // Never landed from the red batch: no batch status on either head
     expect(order.filter((w) => w.startsWith('status'))).toEqual([])
     expect(batchesOnDisk().map((b) => b.state)).toEqual(['failed'])
-    expect(batchEvents().some((t) => t.includes('failed twice') && t.includes('Split'))).toBe(true)
+    expect(batchEvents().some((t) => t.includes('"windows tests" (job 62) failed at batch-b') && t.includes('test or build failure') && t.includes('Split'))).toBe(true)
     // Not batched again on the same heads
     expect(batchesOnDisk()).toHaveLength(1)
   })
@@ -1870,13 +2129,90 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else.'])
   })
 
+  it('batches four ready pull requests in one run, its quick run still going or finished, cancels what still runs, and lands them in order', async () => {
+    const H = (n: number) => `${n}`.repeat(40).slice(0, 40)
+    const quickOf = (n: number, going: boolean) => [
+      suiteCheck('full tier', 'skipped', n * 10, 5000 + n),
+      suiteCheck('verify', 'success', n * 10 + 1, 5000 + n),
+      suiteCheck('windows tests', going ? null : 'success', n * 10 + 2, 5000 + n),
+    ]
+    const own = (n: number, going: boolean) => ownRun(n, H(n), 900 + n, 5000 + n, going ? null : 'success', 1)
+    const going = (n: number) => ({ ...own(n, true), status: 'in_progress' })
+    const prs = [77, 78, 79, 80, 81]
+    const full = (suite: number) => [suiteCheck('full tier', 'success', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
+    const batchRunOf = (k: number, head: string) => ghRun('success', 1, head, { id: 950 + k, head_branch: `queue/batch-${k}`, event: 'workflow_dispatch', check_suite_id: 6000 + k })
+    runtime(
+      ghState({
+        prs: Object.fromEntries(prs.map((n) => [String(n), ghPr(n, { headRefOid: H(n), mergeStateStatus: n === 78 ? 'UNSTABLE' : 'CLEAN' })])),
+        runs: Object.fromEntries(prs.map((n) => [H(n), [n === 78 ? going(n) : own(n, false)]])),
+        checks: Object.fromEntries(prs.map((n) => [H(n), quickOf(n, n === 78)])),
+        on: {
+          'cancel:978': { runs: { [H(78)]: [{ ...own(78, false), conclusion: 'cancelled' }] }, checks: { [H(78)]: quickOf(78, false).map((c) => (c.name === 'windows tests' ? { ...c, conclusion: 'cancelled' } : c)) } },
+          'dispatch:queue/batch-1': { runs: { [`batch-${H(80)}`]: [batchRunOf(1, `batch-${H(80)}`)] }, checks: { [`batch-${H(80)}`]: full(6001) } },
+        },
+      }),
+      { ...TIERS, PROJECT_BOARD_QUEUE_BATCH_MIN: '4' },
+    )
+    // Five queued in a row (a batch starts at four here, so none goes alone before the rest are queued)
+    for (const n of prs) await call('queue_merge', { pr: n, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to land', BATCH_WAIT_MS)
+    const order = writes().map(short2)
+    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${H(77)}`, `merge-into ${H(78)}`, `merge-into ${H(79)}`, `merge-into ${H(80)}`, 'dispatch queue/batch-1', 'cancel 978'])
+    // One run for the four; each lands as its own squash, in order; the fifth waits for the next batch
+    expect(order.filter((w) => w.startsWith('merge ')).map((w) => w.slice(6))).toEqual(['77', '78', '79', '80'])
+    expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([[[77, 78, 79, 80], 'done']])
+    expect(['waiting', 'ci']).toContain(queueOnDisk().items.find((i: any) => i.pr === 81).state)
+    expect(queueOnDisk().items.find((i: any) => i.pr === 81).batch).toBeUndefined()
+    expect(order.filter((w) => w.startsWith('rerun'))).toEqual([])
+  })
+
+  it('bisects a red batch: the half that passes lands, the pull request that fails alone gets attention at once, nothing rerun', async () => {
+    const H = (n: number) => `${n}`.repeat(40).slice(0, 40)
+    const quickOf = (n: number) => [suiteCheck('full tier', 'skipped', n * 10, 5000 + n), suiteCheck('verify', 'success', n * 10 + 1, 5000 + n), suiteCheck('windows tests', 'success', n * 10 + 2, 5000 + n)]
+    const runOf = (k: number, head: string, conclusion: string) => ghRun(conclusion, 1, head, { id: 950 + k, head_branch: `queue/batch-${k}`, event: 'workflow_dispatch', check_suite_id: 6000 + k })
+    // #78 breaks the full tier: the batch of both fails, and so does #78 alone (the merges answer `batch-<last head>`)
+    const ran = (k: number, last: number, ok: boolean) => ({
+      runs: { [`batch-${H(last)}`]: [runOf(k, `batch-${H(last)}`, ok ? 'success' : 'failure')] },
+      checks: { [`batch-${H(last)}`]: fullChecks(6000 + k, ok ? 'success' : 'failure') },
+    })
+    runtime(
+      ghState({
+        prs: { '77': ghPr(77, { headRefOid: H(77) }), '78': ghPr(78, { headRefOid: H(78) }) },
+        runs: { [H(77)]: [ownRun(77, H(77), 977, 5077, 'success')], [H(78)]: [ownRun(78, H(78), 978, 5078, 'success')] },
+        checks: { [H(77)]: quickOf(77), [H(78)]: quickOf(78) },
+        logs: { '60032': 'FAIL e2e window.spec.ts > opens the window\nError: expected 1 window, got 0' },
+        on: { 'dispatch:queue/batch-1': ran(1, 78, false), 'dispatch:queue/batch-2': ran(2, 77, true), 'dispatch:queue/batch-3': ran(3, 78, false) },
+      }),
+      { ...TIERS, PROJECT_BOARD_QUEUE_BATCH_MIN: '2' },
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', '#77 to land and #78 to need attention', BATCH_WAIT_MS)
+    expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([
+      [[77, 78], 'failed'],
+      [[77], 'done'],
+      [[78], 'failed'],
+    ])
+    const order = writes().map(short2)
+    expect(order.filter((w) => w.startsWith('merge ') || w.startsWith('rerun'))).toEqual(['merge 77'])
+    const told = notices().filter((e) => e.kind === 'attention')
+    expect(told).toHaveLength(1)
+    expect(told[0]!.text).toContain('#78 failed alone in batch queue/batch-3')
+    expect(told[0]!.text).toContain('"windows tests" (job 60032) failed at batch-7 with a test or build failure')
+    expect(told[0]!.text).toContain('First failure: FAIL e2e window.spec.ts > opens the window')
+    await morePolls(4)
+    // Not batched again on its head, and still one message
+    expect(batchesOnDisk()).toHaveLength(3)
+    expect(notices().filter((e) => e.kind === 'attention')).toHaveLength(1)
+  })
+
   it('lands nothing when the batch of one fails, and tells the session why', async () => {
     runtime(
       tieredState({
         on: {
           'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun('failure')] }, checks: { [ONE]: fullChecks(6000, 'failure') } },
-          'rerun-failed:950': { runs: { [ONE]: [oneRun('failure', 2)] } },
         },
+        logs: { '60002': 'FAIL e2e full.spec.ts > the full tier\nError: expected the window' },
       }),
       TIERS,
     )
@@ -1884,9 +2220,12 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
     await morePolls(4)
     const q = await call('merge_queue', { all: true })
-    expect(q.data.queue[0].reason.kind).toBe('full-tier')
-    expect(notices().at(-1)!.text).toContain('its batch of one ended without landing it: Batch queue/batch-1: required check "windows tests" (job 60002) failed twice')
-    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'rerun-failed 950', 'delete queue/batch-1'])
+    expect(q.data.queue[0].reason).toMatchObject({ kind: 'failed', job: { name: 'windows tests', id: '60002' } })
+    // Told once, at once, with the batch's failing job and its first failure line
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('#77 failed alone in batch queue/batch-1, a full run of it on main at main0: "windows tests" (job 60002) failed at batch-c with a test or build failure')
+    expect(notices()[0]!.text).toContain('First failure: FAIL e2e full.spec.ts > the full tier')
+    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', 'delete queue/batch-1'])
     // Not batched again on this head, batch after batch
     expect(batchesOnDisk()).toHaveLength(1)
   })

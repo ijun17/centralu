@@ -31,6 +31,8 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
+  runJobSteps,
+  checkRunNotes,
   sameRepo,
   setPrBase,
 } from './github.mjs'
@@ -56,6 +58,7 @@ import {
   resetFor,
 } from './queue.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
+import { classifyRun } from './run-failure.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { listSome, short, span } from './util.mjs'
@@ -199,8 +202,33 @@ export function latestRuns(runs, pr) {
   return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null, suite: r.check_suite_id ?? null, url: r.html_url ?? null, createdAt: r.created_at ?? null }))
 }
 
+const OK_RUN = new Set(['success', 'neutral', 'skipped'])
+
+/**
+ * Why each finished run of `runs` that did not pass failed (run-failure.mjs classifyRun), by run id:
+ * its jobs and their steps, and the notes GitHub wrote on each job that did not pass (a timeout, a
+ * lost runner). `known` holds what an earlier poll read, kept for a run until its attempt moves, so
+ * an item waiting in attention does not read the same jobs every poll. Only once every run finished:
+ * before that, nothing is rerun or decided.
+ */
+export async function runFailures(repo, runs, known = {}) {
+  const out = {}
+  if (!runs.length || runs.some((r) => r.status !== 'completed')) return out
+  for (const run of runs.filter((r) => !OK_RUN.has(r.conclusion))) {
+    const had = known?.[run.id]
+    if (had && (had.attempt ?? 1) === (run.attempt ?? 1)) {
+      out[run.id] = had
+      continue
+    }
+    const jobs = await runJobSteps(repo, run.id)
+    for (const j of jobs) j.notes = j.conclusion && !OK_RUN.has(j.conclusion) && j.id != null ? await checkRunNotes(repo, j.id) : []
+    out[run.id] = classifyRun(run, jobs, { flaky: QUEUE.flakyJobs })
+  }
+  return out
+}
+
 /** The first failing test line of a failed job, for the attention message; best effort. */
-async function failingLine(repo, job) {
+export async function failingLine(repo, job) {
   if (!job?.id) return ''
   try {
     const f = firstFailure(await readJobLog(repo, job.id))
@@ -339,7 +367,7 @@ const conflictEvent = (text, data) => ({ kind: 'conflict', text, data })
  * while it works, since regenerating can take minutes. Answers `{ decision, patch?, events }`, or
  * `{ yielded }` when another driver took the queue.
  */
-async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
+async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [] }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -349,8 +377,8 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
   // Handed off on this head already: the same reason, so no second message
   if (done?.outcome === 'handoff' && done.reason) return { decision: { state: 'attention', reason: done.reason }, events: [] }
   const since = item.conflict?.at ?? at
-  const hand = (why, files, steps = []) => {
-    const d = handoffReason({ item, pr, files, why, ref })
+  const hand = (why, files, steps = [], instruction = null) => {
+    const d = handoffReason({ item, pr, files, why, ref, instruction })
     const to = d.reason.relay.to
     return {
       decision: d,
@@ -374,7 +402,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
   keep.unref?.()
   let r
   try {
-    r = await mergeMain({ repo: item.repo, pr, defaultBranch, dir: QUEUE.conflicts.checkout, conflicts: QUEUE.conflicts, renew })
+    r = await mergeMain({ repo: item.repo, pr, defaultBranch, dir: QUEUE.conflicts.checkout, conflicts: QUEUE.conflicts, renew, landed })
   } finally {
     clearInterval(keep)
   }
@@ -388,6 +416,11 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
             `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}${st.modules === 'linked' ? " (node_modules linked from the queue's checkout, its lockfile being main's: no install)" : ''}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
             { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat, modules: st.modules },
           )
+        : st.step === 'rebase'
+          ? conflictEvent(
+              `${n}: ${pr.headRefName} still carried the original commits of #${st.dropped}, which the queue landed as a squash; rebased it onto ${defaultBranch} without them in ${span(st.ms)}${st.files.length ? `, which conflicts in ${listSome(st.files, 8)}` : ''}.`,
+              { step: 'rebase', ms: st.ms, files: st.files, dropped: st.dropped },
+            )
         : st.step === 'superseded'
           ? conflictEvent(`${n}: ${pr.headRefName} moved to ${short(st.tip)} while the queue merged ${defaultBranch} in (its author pushed first), so git refused the queue's ${short(st.sha)}; the queue takes the new head.`, {
               step: 'superseded',
@@ -395,12 +428,12 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
               sha: st.sha,
               tip: st.tip,
             })
-          : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue' }),
+          : conflictEvent(`${n}: pushed ${short(st.sha)} to ${pr.headRefName}${st.lease ? ' with a lease on the head it read (--force-with-lease)' : ''} in ${span(st.ms)}; CI runs on the new head before it lands.`, { step: 'push', ms: st.ms, sha: st.sha, by: 'queue', ...(st.lease ? { lease: true } : {}) }),
   )
   if (r.outcome === 'pushed') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'pushed', sha: r.sha, files: r.files } }, events: steps }
   // Quietly: the author's own push is the fix, or the next conflict, which the next poll reads
   if (r.outcome === 'superseded') return { decision: { state: 'waiting' }, patch: { conflict: { head, at: since, outcome: 'superseded', tip: r.tip, files: r.files } }, events: steps }
-  return hand(r.why, r.files, steps)
+  return hand(r.why, r.files, steps, r.instruction ?? null)
 }
 
 /**
@@ -408,7 +441,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch }) {
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew, save }) {
+async function pollItem(item, { now, ref, renew, save, landed = [] }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -421,7 +454,7 @@ async function pollItem(item, { now, ref, renew, save }) {
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }
-    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch })
+    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch, landed })
     if (c.yielded) return { yielded: true }
     d = c.decision
     Object.assign(base, c.patch ?? {})
@@ -448,6 +481,9 @@ async function pollItem(item, { now, ref, renew, save }) {
     const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
     runs = latestRuns(scoped.runs, pr)
+    // Why a finished run failed (its jobs and steps): only an infrastructure failure is rerun
+    const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, view.failures) : {}
+    base.failures = failures
     const canBatch = QUEUE.batch !== null && batchable(pr)
     // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
     base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
@@ -457,7 +493,7 @@ async function pollItem(item, { now, ref, renew, save }) {
     // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
     let supersededOnly = false
     if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
-    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
+    d = decideCi({ item: view, pr, checks, runs, failures, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
     // Its quick tier passed: what a batch takes (two tiers, queue.mjs)
     if (d.quick) base.ci.verdict = 'quick'
   }
@@ -550,9 +586,14 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
       if (it) Object.assign(it, p)
     })
+  // What this queue landed (#1221): a pull request stacked on one of them still carries its commits
+  const landed = q.items
+    .filter((i) => i.state === 'merged' && i.head && i.pr !== item.pr && String(i.repo).toLowerCase() === String(item.repo).toLowerCase())
+    .sort((a, b) => String(b.mergedAt ?? '').localeCompare(String(a.mergedAt ?? '')))
+    .map((i) => ({ pr: i.pr, head: i.head }))
   let r
   try {
-    r = await pollItem(item, { now, ref, renew, save })
+    r = await pollItem(item, { now, ref, renew, save, landed })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
