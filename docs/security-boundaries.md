@@ -360,6 +360,8 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `reconnect_machine` | yes | — | — | — | — |
 | `set_machine_connect` | yes | — | — | — | — |
 | `set_machine_autostart` | yes | — | — | — | — |
+| `get_preferences` | yes | — | — | — | — |
+| `set_preferences` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -522,6 +524,8 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and connect mode; the central orchestrator only |
 | `add_machine`, `install_machine` (install or update), `remove_machine`, `set_machine_autostart` (the orchestrator changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The central orchestrator only, as rare commands behind `centralu_run` |
 | `reconnect_machine`, `set_machine_connect` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setConnect`: what the Machines row's Reconnect and connect setting do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
+| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, idle sleep, update checking and moving idle sessions to a new agent CLI (the orchestrator changes a setting the window offers, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field; `sessionTools`, the agent ceiling, depth and models, trust, approval rules and app grants have none, and an unknown field is refused by name. The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
+| `set_preferences` `applyUpdatesWhenIdle: true`, when it is off (#1219) | asks (a card saying that a newer Centralu then installs by itself and the window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAutoApply`. Turning it off asks nothing. A denial leaves it off and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -623,6 +627,15 @@ first). The probe comes after Allow, and a target that does not answer is linked
 what it can tell without connecting: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read,
 a target, name or distro with a control or format character (a bidi override would make the card read otherwise than
 what runs), a name already linked, and an install this computer cannot make.
+
+**Settings from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
+window's Settings changes, through the window's own calls, so the same schemas and handlers decide. The reversible
+settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
+at once. What widens what agents may do or cost (`sessionTools`, the agent ceiling, depth and models), trust, approval
+rules and app grants have no field: an unknown field is refused by name. "Apply updates when idle" turned on is the one
+setting that asks: with it on, code arrives and the window relaunches without a later question, which is what
+`update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
+is read as allow, once).
 
 ### Turning things off
 

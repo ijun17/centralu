@@ -881,6 +881,10 @@ commands, so their 874 characters ride in none of its requests; one line of its 
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
 9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
 
+The preferences commands (#1219, `get_preferences` and `set_preferences`, rare) came with no more resident cost: the machine line,
+which named six commands, now names one and says "the other *_machine commands", and the same line names the two. Claude 9,443 → 9,411,
+Codex 9,495 → 9,463; the two definitions ride in none of the orchestrator's requests (`centralu_commands` lists them).
+
 An orchestrator that had root apps attached before this build reads one line before its first turn by it ("Project
 apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you
 need."), once, in the turn's input only: never stored or shown (`SessionAppWiring.rootAppsNotice`, marked

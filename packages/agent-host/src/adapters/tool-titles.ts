@@ -84,6 +84,8 @@ const CENTRALU_LABELS: Record<string, string> = {
   reconnect_machine: 'Reconnected a machine',
   set_machine_connect: 'Set when a machine connects',
   set_machine_autostart: 'Asked to change a machine starting at boot',
+  get_preferences: 'Read the preferences',
+  set_preferences: 'Changed preferences',
   propose_mcp_server: 'Proposed an MCP server',
   propose_skill: 'Proposed a skill',
   centralu_commands: 'Listed Centralu commands',

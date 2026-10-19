@@ -1348,6 +1348,29 @@ a target that is no ssh target or that `ssh -G` cannot read, a name already link
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 
+**Preferences** (#1219, with the trash). `get_preferences` and `set_preferences` are rare commands of the central orchestrator
+(`PreferencesFlow`, `sessions/preferences-flow.ts`). They make the window's own calls through the router
+(`SessionManager.useWindowRpc`, wired in main.ts to `router.handle`; `callWindow` in `sessions/window-rpc.ts` checks
+the params with the method's schema and reads the answer with its result schema, and only the methods named in
+`WINDOW_METHODS` are callable), so the host checks them as it checks the window.
+
+- `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: no network)
+  and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
+  It also lists what no command changes (send key, session tools, agent ceiling and depth) and says the notification
+  switches are not reachable yet (they live in the window's workspace snapshot, §1.4).
+- `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
+  `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
+  `moveIdleSessionsToNewAgentCli`. The arguments are strict: a field it does not have (`sessionTools`, `agentCeiling`,
+  `themeMode`) is refused by name. A theme names one preset (`THEME_PRESETS`, now in the protocol) or a theme file that
+  reads cleanly; it sets the side of the theme's base and the stored mode to that same base, so the mode stays `dark` or
+  `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
+  schema refusal comes before any write; a service the host lacks (no update service in a test) is reported next to the
+  changes that did happen.
+- Turning **on** "apply updates when idle" asks first, in every preset: with it on, a newer Centralu installs by itself
+  and the window relaunches into it when nothing is busy, so code arrives with no later question. The card is an `other`
+  card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`), allow or deny only. A denial leaves it off and the
+  call's other changes still happen. Turning it off, or on when it already is, asks nothing; neither does any other field.
+
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
 The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
@@ -1356,7 +1379,7 @@ This is the list that principle is applied to: every RPC method of `packages/pro
 window's channel), grouped, and for each group one of three states.
 
 - **Has it**: reachable by the orchestrator today, as a tool or a rare command behind `centralu_run`.
-- **Should**: the orchestrator should reach it. *Slice 2* is this pull request (preferences and the trash); *next* is a
+- **Should**: the orchestrator should reach it. *This change* is preferences and the trash; *next* is a
   later slice, with the card it needs.
 - **Person**: stays with the person, with the reason. A method here may still be *read* by the orchestrator when the
   group says so.
@@ -1370,14 +1393,14 @@ window's channel), grouped, and for each group one of three states.
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | **Slice 2** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools`, `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
-| Themes. `themes.list` | **Slice 2** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
-| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **Slice 2** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
-| Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **Slice 2** | |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools`, `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
+| Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
+| Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
+| Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
 | Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
 | Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312) |
-| The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **Slice 2** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
-| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **Slice 2**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`) |
+| The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
+| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`) |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
 | `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
@@ -1395,7 +1418,7 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
-Slice 1 was the linked machines (#1238). Slice 2 is the preferences above and the trash. *Next*, in the order the owner's
+The linked machines came first (#1238). This change is the preferences above and the trash. *Next*, in the order the owner's
 errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
 app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
 calls stay out of every slice unless the owner says otherwise.
@@ -2214,7 +2237,8 @@ methods as the window. In the commands tier it is discovered and run through `ce
 and `centralu_run`; an ordinary session gets a minimal definition, deferred behind Claude's tool search
 like `app_guide` because updates are rare (Codex is offered it without a deferral flag). Its first call raises a consent card:
 allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
-cannot change the person's automatic-apply preference. An install starts the normal host install; the window still
+cannot change the person's automatic-apply preference with it. (The orchestrator's `set_preferences` can turn it on, behind a
+card in every preset, §1.4.) An install starts the normal host install; the window still
 performs its own safe relaunch/switch step.
 
 **Applying for an agent (#665).** `update_centralu(action: "apply")` is the window's "Apply now" asked for by an agent.

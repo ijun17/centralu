@@ -3,6 +3,7 @@ import type {
   BackgroundTask,
   GitSource,
   Interruption,
+  LineHeight,
   MachineConnect,
   MachineInfo,
   RpcResult,
@@ -21,6 +22,24 @@ export type MachineRequest =
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
   | { action: 'connect'; machine: string; connect: MachineConnect }
   | { action: 'autostart'; machine: string; on: boolean }
+
+/** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
+export type PreferenceChanges = {
+  /** A theme by id or name; it sets the dark or the light side by the theme's base, and shows that side */
+  theme?: string
+  textSize?: number
+  bodyFont?: string
+  codeFont?: string
+  lineHeight?: LineHeight
+  /** Minutes of quiet before an idle session sleeps, or 'never' */
+  idleSleepMinutes?: number | 'never'
+  checkForUpdates?: boolean
+  applyUpdatesWhenIdle?: boolean
+  moveIdleSessionsToNewAgentCli?: boolean
+}
+
+/** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
+export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: PreferenceChanges }
 
 export type OrchestratedSession = {
   sessionId: string
@@ -579,6 +598,12 @@ export type OrchestratorTools = {
    * The answer is the text the model reads. Absent on seats that cannot.
    */
   machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * The preferences (#1219, preferences and the trash): read them all, and change the reversible ones the window offers (theme, text
+   * size, fonts, line height, idle sleep, the update switches) through the window's own calls. Turning on "apply updates
+   * when idle" waits for the person's card. Absent on seats that cannot.
+   */
+  preferences?(req: PreferencesRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.
