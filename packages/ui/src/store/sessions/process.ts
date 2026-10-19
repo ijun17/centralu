@@ -193,7 +193,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
 
   async switchTool(sessionId, tool) {
     const platform = get().platform
-    if (!platform) return
+    if (!platform) return false
     try {
       const info = await platform.agents.switchTool(sessionId, tool)
       set((s) => ({
@@ -218,8 +218,10 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
             }
           : s.sessions,
       }))
+      return true
     } catch (e) {
       set({ toast: `Could not switch the agent: ${(e as Error).message}` })
+      return false
     }
   },
 

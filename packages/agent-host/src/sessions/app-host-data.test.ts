@@ -72,6 +72,10 @@ describe('sessions.list for a project that is an app (#1141)', () => {
     const orchestrator = await w.mgr.orchestrator()
     const mine = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const elsewhere = (await w.rpc('agents.createSession', { projectId: otherId, cwd: other, tool: 'claude' })) as SessionInfo
+    // The orchestrator attaches a root app when it needs one (#1205): through its commands, as its agent does
+    const attached = await w.mgr.runOrchestratorTool(orchestrator.id, 'centralu_run', { command: 'attach_app', args: { app: 'board' } })
+    expect(attached.text).toContain('as the app-board server')
+    expect(attached.isError).toBeFalsy()
     const r = await read(orchestrator, 'app-board', 'sessions.list')
     expect(r.isError).toBe(false)
     const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()

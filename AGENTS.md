@@ -66,6 +66,10 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
 ## How work is done
 
 Before opening a PR, run `pnpm pre-pr`, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request) and write its [Situations checked](CONTRIBUTING.md#situations-checked).
+Before saying done, get the review your change's tier asks for (`pnpm tier`; light: a sub-agent of
+another model reads the diff against the self-check, deep: a separate review session with
+real-environment cases) and record in Verified who reviewed and what they found
+([how](CONTRIBUTING.md#review-before-you-say-done)).
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: tests that must fail without their fix,
 commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull request template

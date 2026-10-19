@@ -6,12 +6,13 @@ import { spawn } from 'node:child_process'
 import { existsSync, openSync, renameSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
-import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep, waitUntil } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, readServeState, ensureServeState, heldHere, lockHolderPid, readServePid } from './serve-files.mjs'
+import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
-import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
-import { protocolVersionOf, connectionLine, hostProvesOf, probeHost, askHostToStop } from './serve-host.mjs'
+import { startInSignIn } from './serve-autostart.mjs'
+import { stopServedHost } from './serve-handover.mjs'
+import { connectionLine, serveFrom } from './serve-host.mjs'
 import { describe, runServe, serveFolder } from './serve-run.mjs'
 
 /**
@@ -19,7 +20,7 @@ import { describe, runServe, serveFolder } from './serve-run.mjs'
  * does not inherit this environment: it gets the account's default one. Everything else it needs
  * (the token, the port) is in the data folder. Never a secret.
  */
-export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED']
+export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM']
 
 export function encodeChildSpec({ env, log }) {
   const carried = {}
@@ -111,11 +112,14 @@ export async function runDetach({
   version,
   cliPath,
   port = null,
+  from = null,
   platform = process.platform,
   execPath = process.execPath,
   cwd = process.cwd(),
   start = startDetached,
   how = detachHow(platform, env),
+  signIn = startInSignIn,
+  signInMs = 20_000,
   timeoutMs = 30_000,
   noStartMs = 10_000,
   write = (line) => process.stdout.write(line),
@@ -123,13 +127,36 @@ export async function runDetach({
   // Created here, so the token exists before the launcher reads it and `answered` reads it again
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
   const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
-  const answered = async (already) => {
+  const answered = async (already, as = how) => {
     const d = await describe({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
     if (!d?.hostRunning) return false
-    write(`${connectionLine({ ...d, detach: { ok: true, how, already } })}\n`)
+    write(`${connectionLine({ ...d, detach: { ok: true, how: as, already } })}\n`)
     return true
   }
   if (await answered(true)) return 0
+
+  /*
+   * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
+   * when nobody is. WMI's process keeps this ssh session's network logon, where Git cannot use the credentials saved in
+   * Windows. A task-started host that does not answer in time is left to the lock: the WMI start below then either
+   * holds the folder or is refused by it, never a second host on it.
+   */
+  if (how === 'wmi') {
+    const s = await signIn({ dataDir, env, home, platform })
+    if (s.started) {
+      say(`started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`)
+      const t0 = Date.now()
+      while (Date.now() - t0 < signInMs) {
+        if (await answered(false, 'task')) return 0
+        await sleep(250)
+      }
+      say(`the host the sign-in task started did not answer within ${Math.round(signInMs / 1000)} s; starting one through WMI instead`)
+    } else if (s.reason === 'nosession') {
+      say('nobody is signed in to Windows here: starting the host through WMI, outside any sign-in, where Git cannot use the credentials saved in Windows')
+    } else if (s.reason === 'error') {
+      say(`could not start the host in the Windows sign-in (${s.message}); starting it through WMI`)
+    }
+  }
 
   const log = join(dataDir, SERVE_LOG_FILE)
   // One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows
@@ -138,7 +165,10 @@ export async function runDetach({
   } catch {
     // there was none
   }
-  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env, log })}`]
+  // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
+  const asked = serveFrom(env, from)
+  const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
+  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log })}`]
   let started
   try {
     started = await start({ how, execPath, args, env, cwd })
@@ -196,18 +226,8 @@ export async function runDetachedChild({ spec, ...opts }) {
 }
 
 /**
- * `centralu serve --stop` (docs/plans/remote-hub.md §10.4, S10): asks the running host to stop over
- * its own socket and waits until it has, so its shutdown runs (its agents, terminals and app
- * processes stopped in order, the store closed). Measured on Windows: killing the WMI-started
- * launcher ended the host 143 ms later with no "shutting down" line, because the host sits in
- * libuv's kill-on-close job object; so on Windows killing is the last resort, not the way.
- *
- * Then, only for a host that did not go: posix SIGTERM to the launcher (which passes it to the host,
- * the same clean stop), and on Windows ending the host. A host from before `host.stop` gets that
- * too. The launcher ends with its host; one still there afterwards is ended.
- *
- * Only the processes serve.pid and host.lock name, and only while they agree with each other and
- * the host answered with this folder's token: a stale pid is never signalled.
+ * `centralu serve --stop` (docs/plans/remote-hub.md §10.4, S10): the running host stopped in order, over its own
+ * socket, and waited for (`stopServedHost` in serve-handover.mjs, which the hand-over into the sign-in shares, #1224).
  *
  * stdout: one line, `{ v: 1, stop: { ok, wasRunning, how?, message? } }`.
  */
@@ -222,56 +242,5 @@ export async function runStop({
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
-  const report = (stop) => answerLine(write, 'stop', stop)
-  const state = readServeState(dataDir)
-  if (!state) return report({ ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` })
-  const port = state.port ?? DEFAULT_SERVE_PORT
-  const installed = protocolVersionOf(entry) ?? 0
-  const prove = hostProvesOf(entry)
-  const probe = () => probeHost({ port, token: state.token, protocolVersion: installed, prove })
-  const first = await probe()
-  if (!heldHere(first, dataDir)) return report({ ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` })
-
-  const hostPid = lockHolderPid(dataDir)
-  const launcher = readServePid(dataDir)
-  // serve.pid is only believed when it names the host that holds the folder now
-  const launcherPid = launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
-  const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
-
-  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed, prove })
-  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion, prove })
-  let how = 'asked'
-  let stopped = asked.ok && (await waitUntil(down, timeoutMs))
-  let note = asked.ok ? null : `the host did not take the request to stop (${asked.message})`
-  if (!stopped) {
-    const target = platform !== 'win32' && launcherPid ? launcherPid : hostPid
-    if (target) {
-      how = platform === 'win32' ? 'ended' : 'signal'
-      try {
-        kill(target, 'SIGTERM')
-      } catch {
-        // gone in the meantime
-      }
-      stopped = await waitUntil(down, platform === 'win32' ? 5_000 : graceMs)
-      if (!stopped && hostPid && isAlive(hostPid)) {
-        how = 'ended'
-        try {
-          kill(hostPid, 'SIGKILL')
-        } catch {
-          // gone in the meantime
-        }
-        stopped = await waitUntil(down, 5_000)
-      }
-    }
-    if (how === 'ended') note = `${note ? `${note}; ` : ''}ended the host without its shutdown`
-  }
-  if (launcherPid && launcherPid !== process.pid && !(await waitUntil(() => !isAlive(launcherPid), 5_000))) {
-    try {
-      kill(launcherPid, 'SIGKILL')
-    } catch {
-      // gone in the meantime
-    }
-  }
-  if (!stopped) return report({ ok: false, wasRunning: true, how, message: `the host on 127.0.0.1:${port} is still running${note ? ` (${note})` : ''}` })
-  return report({ ok: true, wasRunning: true, how, ...(note ? { message: note } : {}) })
+  return answerLine(write, 'stop', await stopServedHost({ dataDir, entry, platform, timeoutMs, graceMs, kill }))
 }

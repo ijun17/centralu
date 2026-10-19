@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, machinesInUse, operationNote, updateStops, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, machinesInUse, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -22,6 +22,8 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   autostart: null,
   elevated: null,
   asks: null,
+  logon: null,
+  handover: null,
   ...patch,
 })
 
@@ -262,6 +264,28 @@ describe('the switch for a machine’s sessions to ask this computer’s project
     expect(off.confirm).toContain('a card asks you on this computer')
     expect(off.confirm).toContain('until you withdraw it')
     expect(asksRow(machine({ asks: { on: true, note: 'Box runs a Centralu from before this' } }))).toMatchObject({ on: true, note: 'Box runs a Centralu from before this' })
+  })
+})
+
+describe('a machine whose host runs outside the Windows sign-in (#1224)', () => {
+  it('says that Git there cannot use the credentials saved in Windows, with the way out, and nothing otherwise', () => {
+    expect(logonNote(machine({ name: 'Win', shell: 'powershell', logon: 'network' }))).toEqual({
+      title: 'Centralu runs on Win without your Windows sign-in, so Git there cannot use the credentials saved in Windows.',
+      fix: 'Sign in on Win: Centralu moves into your sign-in once its agents are idle. A repository with an SSH remote works either way.',
+    })
+    expect(logonNote(machine({ logon: 'interactive' }))).toBeNull()
+    expect(logonNote(machine({ logon: 'batch' }))).toBeNull()
+    expect(logonNote(machine({ logon: null }))).toBeNull()
+  })
+
+  it('says it waits for the host’s work to end, or that it gave up, as the hand-over said (#1224)', () => {
+    expect(logonNote(machine({ name: 'Win', logon: 'network', handover: { state: 'waiting', since: 1 } }))?.fix).toBe(
+      'It moves into your sign-in on Win once its agents, terminals and commands there are idle. A repository with an SSH remote works either way.',
+    )
+    expect(logonNote(machine({ name: 'Win', logon: 'network', handover: { state: 'gave_up', since: 1 } }))?.fix).toBe(
+      'It could not move into your sign-in on Win: its agents, terminals or commands stayed busy for 30 minutes. It tries again at your next sign-in there. A repository with an SSH remote works either way.',
+    )
+    expect(logonNote(machine({ logon: 'interactive', handover: { state: 'gave_up', since: 1 } }))).toBeNull()
   })
 })
 

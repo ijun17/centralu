@@ -50,8 +50,18 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
   return (
     <div className="mx-auto w-full max-w-xl overflow-y-auto px-6 py-6" data-testid="pinned-review">
       <p className="text-md text-ink" data-testid="pinned-review-title">
-        {app.info.imported?.confirmedAt ? 'This app changed. Review it before it runs again.' : 'This app was imported. Review it before it runs.'}
+        {app.info.imported?.confirmedAt
+          ? 'This app changed. Review it before it runs again.'
+          : app.info.imported
+            ? 'This app was imported. Review it before it runs.'
+            : 'Review this app before it runs.'}
       </p>
+      {/* No import mark to show (#1172): the record of imports could not be read, and the host's reason says where it went */}
+      {!app.info.imported && app.info.error && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-body text-ink" data-testid="pinned-review-reason">
+          {app.info.error}
+        </p>
+      )}
       <p className="mt-1 text-xs leading-body text-ink-faint">
         Nothing from it runs until you enable it: no process, no tools for agents, no screen.
       </p>

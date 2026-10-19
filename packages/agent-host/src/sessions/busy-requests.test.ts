@@ -44,6 +44,31 @@ describe('requests to a busy session (#677)', () => {
     await w.mgr.send(a, "the person's own work")
     return { a, b }
   }
+  /**
+   * The person's turn in `target` ends while a setting changed during it restarts the process (#656), whose start is
+   * held until `release()`: the request queued behind the turn is being delivered meanwhile, waiting on the restart,
+   * so taking away what it rests on now leaves it to the read at delivery
+   */
+  const restartHeldAtTurnEnd = async (target: string) => {
+    // A conversation the restart resumes
+    handleOf(target).externalId = `ext-${target}`
+    expect(await w.mgr.updateSettings(target, { effort: 'high' })).toMatchObject({ applied: 'after_turn' })
+    const create = claude().createSession.bind(claude())
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    let restarting = false
+    // Only this session's start: another session the test changes meanwhile restarts as usual
+    vi.spyOn(claude(), 'createSession').mockImplementation(async (opts, emit) => {
+      if (opts.sessionId === target) {
+        restarting = true
+        await held
+      }
+      return create(opts, emit)
+    })
+    handleOf(target).answer("the person's answer")
+    await w.until(() => restarting && w.store.children.listQueuedRequests().length === 1)
+    return release
+  }
   const reportsTo = (b: string, a: string) =>
     w.store.messages.loadMessages(b, 50).filter((m) => m.role === 'user' && JSON.stringify(m.payload).includes('The assigned work finished') && (m.payload as { from?: { sessionId: string } }).from?.sessionId === a)
 
@@ -229,6 +254,17 @@ describe('requests to a busy session (#677)', () => {
       expect(handleOf(target).sent[1]).toContain('export it')
     })
 
+    it("is not delivered when the caller's project loses trust while the asked session restarts for it", async () => {
+      const { target, asker } = await queuedAsk()
+      const release = await restartHeldAtTurnEnd(target)
+      void w.mgr.setProjectTrusted(w.caller.id, false)
+      release()
+      await w.until(() => w.store.children.listQueuedRequests().length === 0)
+      // The process the restart brought up was given nothing
+      expect(handleOf(target).sent).toEqual([])
+      await w.until(() => toldNotDelivered(asker))
+    })
+
     it('is not delivered when the trust is gone by the time the turn ends', async () => {
       const { target, asker } = await queuedAsk()
       // Taken away at the store (as another host would), so only the read at delivery can see it
@@ -339,6 +375,17 @@ describe('requests to a busy session (#677)', () => {
       const { other, sender } = await autoSend()
       lowerQuietly(sender)
       await endsWithNothingDelivered(other)
+      await w.until(() => told(sender))
+    })
+
+    it('a send to a session it did not start is not delivered when the caller leaves auto while that session restarts for it', async () => {
+      const { other, sender } = await autoSend()
+      const release = await restartHeldAtTurnEnd(other)
+      await lower(sender)
+      release()
+      await w.until(() => w.store.children.listQueuedRequests().length === 0)
+      // The process the restart brought up was given nothing
+      expect(handleOf(other).sent).toEqual([])
       await w.until(() => told(sender))
     })
   })

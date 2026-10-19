@@ -317,6 +317,7 @@ type AppActions = Pick<
   | 'sendViewMessage'
   | 'openApp'
   | 'takeBuilderPaneFor'
+  | 'takeRunsPanelFor'
   | 'ensurePinnedView'
   | 'ensureGridAppView'
   | 'dismissPinnedView'
@@ -479,6 +480,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       view: 'app',
       focusedApp: machine ? { projectId, appId, machine } : { projectId, appId },
       ...(opts?.builder ? { builderPaneFor: key } : {}),
+      ...(opts?.runs ? { runsPanelFor: key } : {}),
       // What is picked must be shown (the same rule as `focusSession`) — any covering wide surface is dismissed
       overlay: null,
       // Picking a screen = having passed the intro (the same reason as `setView`, #63)
@@ -496,6 +498,10 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
 
   takeBuilderPaneFor(key) {
     if (get().builderPaneFor === key) set({ builderPaneFor: null })
+  },
+
+  takeRunsPanelFor(key) {
+    if (get().runsPanelFor === key) set({ runsPanelFor: null })
   },
 
   ensurePinnedView(projectId, appId) {

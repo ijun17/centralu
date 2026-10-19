@@ -185,8 +185,9 @@ export type SessionsSlice = {
   /**
    * Switches a session's agent (claude ↔ codex).
    * **The conversation does not carry over** — the caller must tell the person that beforehand.
+   * A refusal is toasted here; `false` says it happened, so a caller does not show the switch as done.
    */
-  switchTool(sessionId: string, tool: ToolName): Promise<void>
+  switchTool(sessionId: string, tool: ToolName): Promise<boolean>
   /** Wakes a session the instant it is picked (so we do not wait for the first response) */
   wake(sessionId: string): Promise<void>
   /**
