@@ -1717,17 +1717,21 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
 
   // #1161 item 2: the machine's own instructions (its paths, its shell), not the hub's copy of the project's
   it("carries the instructions of the machine's copy of the project after the task, not the hub's", async () => {
-    const { remote, hub, answer, start } = await rig()
+    const { remote, hub, card, answer, start } = await rig()
     hub.mgr.setAgentInstructions('p-hub', 'Work in /Users/me/wt.')
-    remote.mgr.setAgentInstructions('p-app', 'Work in C:\\wt. The shell is PowerShell.')
+    remote.mgr.setAgentInstructions('p-app', 'An older text.')
     const sent = vi.spyOn(remote.mgr, 'sendFromHub')
     const call = start()
+    await eventually(() => !!card())
+    // Changed there while the card stands (#1161 review): the child reads them as they are when it is made
+    remote.mgr.setAgentInstructions('p-app', 'Work in C:\\wt. The shell is PowerShell.')
     await answer('allow')
     expect(await call).toMatchObject({ ok: true })
     const task = sent.mock.calls[0]![1]
     expect(task).toContain("from the project's settings on this computer:]\n\nWork in C:\\wt. The shell is PowerShell.")
     expect(task.indexOf('say hello')).toBeLessThan(task.indexOf('Work in C:\\wt.'))
     expect(task).not.toContain('/Users/me/wt')
+    expect(task).not.toContain('An older text.')
   })
 
   // #1038 review: a turn that ended inside the send was reported, and the call then waited out its bound as "working"

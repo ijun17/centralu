@@ -325,6 +325,17 @@ export function linkedSessions(
       })
     },
 
+    async agentInstructions(project) {
+      const m = owner(project.id)
+      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
+      return attempt(m, async () => {
+        const list = await m.call('projects.list', {})
+        const now = (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).find((p) => p?.id === project.id)
+        if (!now) throw new Error(`${project.name} is no longer a project there`)
+        return { text: now.agentInstructions ?? '' }
+      })
+    },
+
     async deleteAgentChild(sessionId, branch) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }

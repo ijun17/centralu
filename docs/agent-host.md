@@ -493,7 +493,8 @@ below retained for `safe` and `normal`:
    `git stash`), written once in the dialog of the project's menu, "Instructions for agents…", and said in the frame
    to be the person's, from the project's settings on that computer. They are read when the task is delivered, so a
    card that stood a while or a start queued for memory carries what is set then; the orchestrator's children (no
-   project) get none, and nothing else (`agent_session send`, ask_project) carries them. They are kept as an app
+   project) get none, and nothing else (`agent_session send`, ask_project, a fork, which carries the conversation)
+   carries them. They are kept as an app
    setting of the project (`agent_instructions:<projectId>`, at most 8,000 characters, gone with the project), not a
    column, so no store step: an older build serving the same store during a swap ignores the key, and its children
    start without them.
@@ -589,8 +590,9 @@ task's turn is sent with that depth too); a machine whose build would drop it is
 Only network remotes match (`gitRemoteKey`), and a refusal names repositories, never the addresses as written. Its
 task goes in `remoteAgentFrame`, sent as from the caller ("… on <hub>"), with **the machine's** instructions for agents
 started in its copy of the project after it (#1161 item 2), not the hub's: each machine keeps its own, so a Windows
-machine's say its paths and its shell. The hub reads them from the project as the machine lists it (a machine whose
-build predates them lists none, and its child starts without them); the person edits them in that project's menu on
+machine's say its paths and its shell. The hub reads them from the machine once the child is made there, after the
+card (a machine whose build predates them lists none, and its child starts without them; one that cannot be asked then
+gives what it listed before the card); the person edits them in that project's menu on
 the hub, which routes the save to the machine (`projects.setAgentInstructions`, by project). A call that waits opens its wait before the
 send, so a turn that ends at once is its answer, not a report. The hub records it (`remote_agents`, an app setting) and arms a linked report for the
 caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a

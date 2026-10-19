@@ -393,8 +393,12 @@ export class RemoteAgents {
     })
     if (!made.ok) return { ok: false, error: `Could not start ${tool} on ${machine.name}: ${bare(made.error)}. ${ASK_THE_PERSON}` }
     const label = labelOf(this.host.store.messages, caller)
-    // The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell
-    const task = remoteAgentFrame(label, opts.task, target.agentInstructions)
+    /*
+     * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
+     * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
+     */
+    const now = await reader.agentInstructions(target)
+    const task = remoteAgentFrame(label, opts.task, now.ok ? now.text : target.agentInstructions)
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),

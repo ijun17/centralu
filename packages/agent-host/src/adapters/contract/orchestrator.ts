@@ -126,6 +126,11 @@ export type LinkedSessions = {
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
   /**
+   * The project's instructions for started agents as the machine has them now (#1161 item 2), '' for none; an error
+   * when it cannot be asked, so the caller keeps what it listed before
+   */
+  agentInstructions(project: LinkedProject): Promise<Outcome<{ text: string }>>
+  /**
    * A start_agent child deleted there with the worktree made for it on `branch`, when nothing would be lost
    * (`agents.deleteAgentChild` there, #1161 item 3). `olderBuild`: the machine predates it, and nothing was deleted
    */
