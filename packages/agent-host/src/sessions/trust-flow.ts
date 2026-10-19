@@ -39,6 +39,11 @@ function appLines(a: ExternalAppInfo): string[] {
   return out
 }
 
+/** What a remembered consent of one project reaching another allows, in words */
+function consentWords(kind: 'delegate' | 'apps' | 'agents'): string {
+  return kind === 'delegate' ? 'start sessions in' : kind === 'apps' ? 'attach the apps of' : 'start agents in'
+}
+
 /** What a trust card covered of a project's apps: each one's id, whether it is the root, and what it may ask for */
 const appsKey = (apps: readonly ExternalAppInfo[]): string =>
   JSON.stringify(apps.map((a) => [a.appId, !!a.root, a.uses ?? null]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))))
@@ -76,6 +81,14 @@ export class TrustFlow {
           return await this.listRules(rpc, req.project)
         case 'remove_rule':
           return await this.removeRule(rpc, req.id)
+        case 'list_app_grants':
+          return await this.listAppGrants(rpc, req.app, req.project)
+        case 'forget_app_answer':
+          return await this.forgetAnswer(rpc, req.app, req.project, req.capability)
+        case 'revoke_consent':
+          return await this.revokeConsent(rpc, req.from, req.to, req.kind)
+        case 'share_app':
+          return await this.shareApp(rpc, sessionId, req.app, req.project, req.shared, signal)
       }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -211,6 +224,138 @@ export class TrustFlow {
     if (!rule) return { ok: false, error: `No approval rule has the id ${id}; list_approval_rules shows them.` }
     await callWindow(rpc, 'approvals.deleteRule', { id })
     return { ok: true, text: `Removed the approval rule ${this.ruleLine(rule, o).slice(2)}. That action asks again from now on (a running session takes it at its next start).` }
+  }
+
+  // ── App trust and grants ──
+  //
+  // An app's own trust follows its project's (#1141: a root app and its inner apps run when the project is trusted, and an
+  // imported app is enabled by trusting its project), so trusting is `set_project_trust`. What is left: the answers the
+  // person gave to an app's capability questions (forgetting one only makes it ask again), the remembered consents of one
+  // project reaching another (revoking one makes the next reach ask again), and sharing a project app with the person's
+  // other projects, which widens who can attach it and so asks.
+
+  /** The app an argument names: its id or name, in the named project when one is given; refused when several match */
+  private findApp(apps: readonly ExternalAppInfo[], all: Projects, named: string, project?: string): { app: ExternalAppInfo } | { error: string } {
+    const want = named.trim().toLowerCase()
+    if (!want) return { error: 'Give app: its id or name, from list_app_grants.' }
+    let pool = apps
+    if (project?.trim()) {
+      const found = this.find(all, project)
+      if ('error' in found) return { error: found.error }
+      pool = apps.filter((a) => a.projectId === found.project.id && (a.machine ?? null) === (found.project.machine ?? null))
+    }
+    const byId = pool.filter((a) => a.appId.toLowerCase() === want)
+    const matches = byId.length ? byId : pool.filter((a) => (a.name ?? '').trim().toLowerCase() === want)
+    if (matches.length === 1) return { app: matches[0]! }
+    if (!matches.length) return { error: `No app is called ${shown(named.trim())}${project ? ` in ${shown(project.trim())}` : ''}; list_app_grants names them.` }
+    return { error: `${matches.length} apps are called ${shown(named.trim())}: ${matches.map((a) => this.appLabel(a, all)).join(', ')}. Give project too.` }
+  }
+
+  /** An app as one name: its title and id, and the project or user folder it is in */
+  private appLabel(a: ExternalAppInfo, all: Projects): string {
+    const title = a.name?.trim() ? a.name : a.appId
+    const project = a.projectId ? all.projects.find((p) => p.id === a.projectId) : undefined
+    const home = a.projectId ? (project ? `of the project ${shown(project.name)}` : `of the project [${a.projectId}]`) : 'in the user folder'
+    return `${shown(title)} [${a.appId}] ${home}${this.where(a, all.machines)}`
+  }
+
+  /** The window's call for one app's remembered answers, routed to its machine as the window routes it */
+  private on(a: ExternalAppInfo): { machine?: string } {
+    return a.machine ? { machine: a.machine } : {}
+  }
+
+  private async listAppGrants(rpc: WindowRpc, named?: string, project?: string): Promise<TrustAnswer> {
+    const [apps, all, consents] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc), callWindow(rpc, 'projectConsents.list', {}).catch(() => [])])
+    let pool = apps
+    if (named?.trim()) {
+      const found = this.findApp(apps, all, named, project)
+      if ('error' in found) return { ok: false, error: found.error }
+      pool = [found.app]
+    } else if (project?.trim()) {
+      const found = this.find(all, project)
+      if ('error' in found) return { ok: false, error: found.error }
+      pool = apps.filter((a) => a.projectId === found.project.id && (a.machine ?? null) === (found.project.machine ?? null))
+    }
+    const out: string[] = []
+    for (const a of pool.slice(0, ROWS)) {
+      const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...this.on(a) }).catch(() => null)
+      const sharing = a.root ? 'reached through its project\'s trust' : a.projectId ? (a.shared ? 'shared with your other projects' : 'not shared') : 'a user-folder app, available everywhere'
+      out.push(`- ${this.appLabel(a, all)}: ${a.trusted ? 'trusted' : 'untrusted'}; ${sharing}`)
+      if (answers === null) out.push('  Its remembered answers could not be read just now.')
+      for (const p of answers ?? []) {
+        out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${shown(p.text)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; no longer applies, its uses changed'}`)
+      }
+    }
+    if (pool.length > ROWS) out.push(`- and ${pool.length - ROWS} more apps`)
+    const lines = [
+      pool.length ? `${pool.length} ${pool.length === 1 ? 'app' : 'apps'}, with the answers the person gave to what each asked for (forget_app_answer forgets one, so it asks again; share_app shares a project app):` : 'No app.',
+      ...out,
+    ]
+    if (!named?.trim() && !project?.trim()) {
+      lines.push(
+        consents.length ? `${consents.length} remembered ${consents.length === 1 ? 'consent' : 'consents'} of one project reaching another (revoke_project_consent revokes one, so the next reach asks again):` : 'No remembered consent of one project reaching another.',
+        ...rows(consents, (c) => `- ${shown(c.fromName)} [${c.fromProjectId}] may ${consentWords(c.kind)} ${shown(c.toName)} [${c.toProjectId}]${this.where(c, all.machines)}, since ${new Date(c.decidedAt).toISOString().slice(0, 10)}`),
+      )
+    }
+    return { ok: true, text: lines.join('\n') }
+  }
+
+  private async forgetAnswer(rpc: WindowRpc, named: string, project: string | undefined, capability: string): Promise<TrustAnswer> {
+    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc)])
+    const found = this.findApp(apps, all, named, project)
+    if ('error' in found) return { ok: false, error: found.error }
+    const a = found.app
+    const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...this.on(a) })
+    const answer = answers.find((p) => p.capability === capability.trim())
+    if (!answer) return { ok: false, error: `${this.appLabel(a, all)} has no remembered answer for ${shown(capability.trim())}; list_app_grants names them.` }
+    await callWindow(rpc, 'apps.forgetPermission', { appId: a.appId, projectId: a.projectId, capability: answer.capability, ...this.on(a) })
+    return { ok: true, text: `Forgot the answer ${answer.decision === 'allow' ? 'allowing' : 'denying'} ${shown(answer.capability)} for ${this.appLabel(a, all)}: the next time it asks for that, the person is asked again.` }
+  }
+
+  private async revokeConsent(rpc: WindowRpc, from: string, to: string, kind: 'delegate' | 'apps' | 'agents'): Promise<TrustAnswer> {
+    const [consents, all] = await Promise.all([callWindow(rpc, 'projectConsents.list', {}), this.projects(rpc)])
+    const idOf = (named: string) => {
+      const found = this.find(all, named)
+      return 'error' in found ? null : found.project.id
+    }
+    const match = (named: string, id: string, name: string) => named.trim() === id || idOf(named) === id || name.trim().toLowerCase() === named.trim().toLowerCase()
+    const hits = consents.filter((c) => c.kind === kind && match(from, c.fromProjectId, c.fromName) && match(to, c.toProjectId, c.toName))
+    if (!hits.length) return { ok: false, error: `No remembered consent lets ${shown(from.trim())} ${consentWords(kind)} ${shown(to.trim())}; list_app_grants lists them.` }
+    if (hits.length > 1) return { ok: false, error: `${hits.length} remembered consents match; give the project ids list_app_grants shows.` }
+    const c = hits[0]!
+    await callWindow(rpc, 'projectConsents.revoke', { fromProjectId: c.fromProjectId, toProjectId: c.toProjectId, kind: c.kind })
+    return { ok: true, text: `Revoked: ${shown(c.fromName)} may no longer ${consentWords(c.kind)} ${shown(c.toName)} unasked; the next time it does, the person is asked again.` }
+  }
+
+  private async shareApp(rpc: WindowRpc, caller: string, named: string, project: string | undefined, shared: boolean, signal?: AbortSignal): Promise<TrustAnswer> {
+    const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), this.projects(rpc)])
+    const found = this.findApp(apps, all, named, project)
+    if ('error' in found) return { ok: false, error: found.error }
+    const a = found.app
+    const label = this.appLabel(a, all)
+    if (!a.projectId) return { ok: false, error: `${label} is a user-folder app, available to every project already; it has no share switch.` }
+    if (a.root) return { ok: false, error: `${label} is its project's root app: it is reached through its project's trust (set_project_trust) and has no share switch.` }
+    if (!!a.shared === shared) return { ok: true, text: `${label} is already ${shared ? 'shared' : 'not shared'}; nothing changed.` }
+    const ref = { appId: a.appId, projectId: a.projectId }
+    if (!shared) {
+      await callWindow(rpc, 'apps.setShared', { ...ref, shared: false })
+      return { ok: true, text: `${label} is not shared any more: it is detached from every session of another project that attached it.` }
+    }
+    const asks = a.uses ? usesLines(a.uses) : []
+    const question = [
+      `Share the app ${label} with your other projects?`,
+      'A session in another project can then find it and attach it (find_apps, attach_app), after you allow that pair of projects once.',
+      ...(asks.length ? asks.map((l) => `It may ask to: ${l.charAt(0).toLowerCase()}${l.slice(1)}`) : ['It asks for nothing beyond its own tools.']),
+    ].join('\n')
+    const refused = await this.ask(caller, question, signal, 'shared')
+    if (refused) return { ok: false, error: refused }
+    // Still what the card named: the same app in the same project, not shared yet, asking for the same things
+    const now = (await callWindow(rpc, 'apps.list', {})).find((x) => x.appId === a.appId && x.projectId === a.projectId && (x.machine ?? null) === (a.machine ?? null))
+    if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was shared.` }
+    if (now.shared) return { ok: true, text: `${label} was shared while the card stood; nothing more changed.` }
+    if (appsKey([now]) !== appsKey([a])) return { ok: false, error: `What ${label} may ask for changed while the card stood, so it is not what the card named and nothing was shared. Ask again to show the person what it asks for now.` }
+    await callWindow(rpc, 'apps.setShared', { ...ref, shared: true })
+    return { ok: true, text: `${label} is shared now: a session in another project can attach it once the person allows that pair of projects.` }
   }
 
   // ── The card ──

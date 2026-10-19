@@ -38,6 +38,11 @@ export const WINDOW_METHODS = [
   'approvals.rules',
   'approvals.deleteRule',
   'sessions.list',
+  'apps.permissions',
+  'apps.forgetPermission',
+  'projectConsents.list',
+  'projectConsents.revoke',
+  'apps.setShared',
 ] as const satisfies readonly RpcMethodName[]
 
 export type WindowMethod = (typeof WINDOW_METHODS)[number]

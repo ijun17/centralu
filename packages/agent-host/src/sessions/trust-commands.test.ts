@@ -6,8 +6,10 @@ import { ORCHESTRATOR_CHANGE, type ProjectInfo, type ToolName } from '@cc/protoc
 import type { AgentAdapter } from '../adapters/contract.js'
 import { MANIFEST_VERSION } from '../apps/external/manifest.js'
 import { ExternalApps, MANIFEST_FILE } from '../apps/external/runtime.js'
+import { storePermissionBook } from '../app-permission-book.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
+import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
@@ -18,7 +20,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * on a real store, so the host checks it as it checks the window. Widening trust waits for the person's card, which
  * names exactly what changes and is checked again after Allow; narrowing acts at once.
  */
-const COMMANDS = ['list_projects', 'set_project_trust', 'list_approval_rules', 'remove_approval_rule'] as const
+const COMMANDS = ['list_projects', 'set_project_trust', 'list_approval_rules', 'remove_approval_rule', 'list_app_grants', 'forget_app_answer', 'revoke_project_consent', 'share_app'] as const
 type Command = (typeof COMMANDS)[number]
 
 let root: string
@@ -31,7 +33,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-trust-')))
   mkdirSync(join(root, 'data'))
   store = new Store()
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: ['control'] })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: ['control'], permissions: storePermissionBook(store), shared: (ref) => readShared(store.settings, ref) })
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, () => {})
   mgr.useExternalApps(rt)
@@ -281,12 +283,134 @@ describe('approval rules', () => {
   })
 })
 
+describe('app grants', () => {
+  const answer = (decision: 'allow' | 'deny', capability = 'agent:claude') => ({ capability, text: `may ${capability}`, decision, stamp: 's', decidedAt: Date.UTC(2026, 9, 1) })
+  type App = { appId: string; projectId: string | null; shared?: boolean }
+  const app = async (appId: string) => ((await rpc('apps.list', {})) as App[]).find((a) => a.appId === appId)!
+  /** A trusted project with an inner app (`.centralu/apps/<id>`), which is what can be shared */
+  async function inner(projectName: string, appId: string, over: Record<string, unknown> = {}): Promise<ProjectInfo> {
+    const p = await project(projectName)
+    manifest(join(p.path, '.centralu', 'apps', appId), appId, over)
+    await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    rt.refresh()
+    return p
+  }
+
+  it('lists each app with its trust, sharing and the remembered answers, and the consents between projects', async () => {
+    const a = await inner('Alpha', 'helper')
+    const b = await project('Beta', { app: {} })
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('deny', 'app:other'))
+    store.permissions.setProjectConsent(b.id, a.id, 'apps')
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'list_app_grants')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain(`- "App helper" [helper] of the project "Alpha": trusted; not shared`)
+    expect(r.text).toContain('  Allowed: "agent:claude" ("may agent:claude"), since 2026-10-01')
+    expect(r.text).toContain('  Denied: "app:other" ("may app:other"), since 2026-10-01')
+    expect(r.text).toContain(`- "App beta" [beta] of the project "Beta": untrusted; reached through its project's trust`)
+    expect(r.text).toContain('1 remembered consent of one project reaching another')
+    expect(r.text).toContain(`- "Beta" [${b.id}] may attach the apps of "Alpha" [${a.id}], since `)
+    const one = await run(orc.id, 'list_app_grants', { app: 'helper' })
+    expect(one.text).toContain('1 app,')
+    expect(one.text).not.toContain('Beta')
+  })
+
+  it('forgets one remembered answer at once, with no card, so it asks again', async () => {
+    const a = await inner('Alpha', 'helper')
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow', 'app:other'))
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'forget_app_answer', { app: 'App helper', capability: 'agent:claude' })
+    expect(card(orc.id)).toBeUndefined()
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Forgot the answer allowing "agent:claude" for "App helper" [helper] of the project "Alpha"')
+    expect(store.permissions.listAppPermissions(`${a.id}/helper`).map((x) => x.capability)).toEqual(['app:other'])
+    const none = await run(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' })
+    expect(none.isError).toBe(true)
+    expect(none.text).toContain('has no remembered answer for "agent:claude"')
+  })
+
+  it('revokes a remembered consent at once, with no card', async () => {
+    const a = await project('Alpha')
+    const b = await project('Beta')
+    store.permissions.setProjectConsent(b.id, a.id, 'delegate')
+    store.permissions.setProjectConsent(b.id, a.id, 'apps')
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'revoke_project_consent', { from: 'Beta', to: a.id, kind: 'delegate' })
+    expect(card(orc.id)).toBeUndefined()
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toBe('Revoked: "Beta" may no longer start sessions in "Alpha" unasked; the next time it does, the person is asked again.')
+    expect(store.permissions.listProjectConsents().map((c) => c.kind)).toEqual(['apps'])
+    const none = await run(orc.id, 'revoke_project_consent', { from: 'Beta', to: 'Alpha', kind: 'agents' })
+    expect(none.isError).toBe(true)
+  })
+
+  it('asks before sharing a project app, naming what it may ask for, and shares it once allowed; stops sharing at once', async () => {
+    await inner('Alpha', 'helper', { uses: { agent: true } })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow')
+    expect(question).toContain('Share the app "App helper" [helper] of the project "Alpha" with your other projects?')
+    expect(question).toContain('after you allow that pair of projects once')
+    expect(question).toContain('It may ask to: run your default agent in a new session')
+    expect(r.isError).toBeFalsy()
+    expect((await app('helper')).shared).toBe(true)
+    const off = await run(orc.id, 'share_app', { app: 'helper', shared: false })
+    expect(card(orc.id)).toBeUndefined()
+    expect(off.text).toContain('is not shared any more')
+    expect((await app('helper')).shared).toBeFalsy()
+  })
+
+  it('shares nothing when the person denies it', async () => {
+    await inner('Alpha', 'helper')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'deny')
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('nothing was shared')
+    expect((await app('helper')).shared).toBeFalsy()
+  })
+
+  it('refuses a root app, which follows its project\'s trust, before any card', async () => {
+    await project('Rooted', { app: {} })
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'share_app', { app: 'rooted', shared: true })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain("is its project's root app: it is reached through its project's trust")
+    expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('shares nothing when what the app may ask for changed while the card stood', async () => {
+    const p = await inner('Alpha', 'helper')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow', async () => {
+      manifest(join(p.path, '.centralu', 'apps', 'helper'), 'helper', { uses: { agent: true } })
+      rt.refresh()
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('changed while the card stood, so it is not what the card named and nothing was shared.')
+    expect((await app('helper')).shared).toBeFalsy()
+  })
+
+  it('shares nothing when the app was removed while the card stood', async () => {
+    const p = await inner('Alpha', 'helper')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow', async () => {
+      rmSync(join(p.path, '.centralu', 'apps', 'helper'), { recursive: true, force: true })
+      rt.refresh()
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('was removed while the card stood, so nothing was shared.')
+  })
+})
+
 describe('who may run them', () => {
   it('are found through centralu_commands', async () => {
     const orc = await mgr.orchestrator()
     const found = [
       (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trust' })).text,
       (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'rule' })).text,
+      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'app' })).text,
+      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'consent' })).text,
     ].join('\n')
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
   })
@@ -310,7 +434,15 @@ describe('who may run them', () => {
     store.permissions.addApprovalRule({ scope: 'project', projectId: target.id, matcher: 'Bash:npm test', decision: 'allow' })
     const ruleId = ((await rpc('approvals.rules', {})) as { id: number }[])[0]!.id
     for (const name of COMMANDS) {
-      const args = name.includes('rule') ? { id: ruleId } : { project: target.id, trusted: true }
+      const args = name.includes('rule')
+        ? { id: ruleId }
+        : name === 'share_app'
+          ? { app: 'x', shared: true }
+          : name === 'forget_app_answer'
+            ? { app: 'x', capability: 'agent:claude' }
+            : name === 'revoke_project_consent'
+              ? { from: target.id, to: p.id, kind: 'apps' }
+              : { project: target.id, trusted: true }
       await expect(mgr.runOrchestratorTool(caller.id, name, args), name).rejects.toThrow(`Not a tool of this session: ${name}`)
       await expect(mgr.runOrchestratorTool(caller.id, 'centralu_run', { command: name, args }), name).rejects.toThrow(/Not a tool of this session/)
     }

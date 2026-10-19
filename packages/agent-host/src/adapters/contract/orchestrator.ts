@@ -63,6 +63,10 @@ export type TrustRequest =
   | { action: 'project_trust'; project: string; trusted: boolean }
   | { action: 'list_rules'; project?: string }
   | { action: 'remove_rule'; id: number }
+  | { action: 'list_app_grants'; app?: string; project?: string }
+  | { action: 'forget_app_answer'; app: string; project?: string; capability: string }
+  | { action: 'revoke_consent'; from: string; to: string; kind: 'delegate' | 'apps' | 'agents' }
+  | { action: 'share_app'; app: string; project?: string; shared: boolean }
 
 export type OrchestratedSession = {
   sessionId: string

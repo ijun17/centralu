@@ -286,6 +286,26 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ id: z.number().int().describe('The id list_approval_rules gives.') }).strict(),
   },
   {
+    name: 'list_app_grants',
+    description: "Lists apps with their trust, sharing and the person's remembered answers to what each asked for, and the consents of one project reaching another.",
+    schema: z.object({ app: z.string().optional().describe('Only this app: its id or name.'), project: z.string().optional().describe('Only this project\'s apps, or where app is.') }).strict(),
+  },
+  {
+    name: 'forget_app_answer',
+    description: "Forgets the person's remembered answer to one thing an app asked for, so it asks again. Acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), capability: z.string().describe('As list_app_grants names it.') }).strict(),
+  },
+  {
+    name: 'revoke_project_consent',
+    description: 'Revokes a remembered consent of one project reaching another, so the next reach asks again. Acts at once.',
+    schema: z.object({ from: z.string().describe('Project name or id.'), to: z.string().describe('Project name or id.'), kind: z.enum(['delegate', 'apps', 'agents']) }).strict(),
+  },
+  {
+    name: 'share_app',
+    description: "Shares a project's inner app with the other projects, or stops. Sharing waits for the person's card; stopping acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
+  },
+  {
     name: 'create_session',
     description:
       'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it is the person\'s job.',

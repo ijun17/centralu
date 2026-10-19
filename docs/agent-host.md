@@ -1477,6 +1477,17 @@ ids).
   `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only
   narrows, and that action asks again. An id no rule has is refused. **No command adds or widens a rule**: the window has
   no such call either, and a rule comes only from the person answering a card "always" (`ApprovalRules.rememberAlways`).
+- App trust follows the project's since #1141 (a root app and its inner apps run when the project is trusted, and an
+  imported app is enabled by trusting its project), so trusting an app is `set_project_trust`. `list_app_grants { app?,
+  project? }` lists the apps (`apps.list`) with their trust and sharing and the person's remembered answers to what each
+  asked for (`apps.permissions`, routed to a linked machine as the window routes it), and the remembered consents of one
+  project reaching another (`projectConsents.list`). `forget_app_answer { app, project?, capability }` and
+  `revoke_project_consent { from, to, kind }` act at once (`apps.forgetPermission`, `projectConsents.revoke`): each only
+  makes the next attempt ask the person again. `share_app { app, project?, shared }` is the inner app's share switch
+  (`apps.setShared`): off acts at once; on asks first, every preset, with a card naming the app, its project and what it
+  may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
+  stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
+  person's answer to an app's own capability question is not given from here: the app asks the person.
 
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
@@ -1517,7 +1528,8 @@ window's channel), grouped, and for each group one of three states.
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
-| App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
+| App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer`, `revoke_project_consent` (they only make the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it may ask for, checked again after Allow; off acts at once) |
+| App trust and imports. `apps.reach`, `apps.enable`, `apps.review`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | **Person** | Enabling an app is trusting its project since #1141 (`set_project_trust`); importing one brings code in; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
 | Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |

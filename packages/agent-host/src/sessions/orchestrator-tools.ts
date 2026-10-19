@@ -327,6 +327,10 @@ const HANDLERS: ToolHandlers = {
   set_project_trust: ({ project, trusted }, call) => trustCommand({ action: 'project_trust', project, trusted }, call),
   list_approval_rules: ({ project }, call) => trustCommand({ action: 'list_rules', ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
   remove_approval_rule: ({ id }, call) => trustCommand({ action: 'remove_rule', id }, call),
+  list_app_grants: ({ app, project }, call) => trustCommand({ action: 'list_app_grants', ...(trimmed(app) ? { app: trimmed(app) } : {}), ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  forget_app_answer: ({ app, project, capability }, call) => trustCommand({ action: 'forget_app_answer', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), capability }, call),
+  revoke_project_consent: ({ from, to, kind }, call) => trustCommand({ action: 'revoke_consent', from, to, kind }, call),
+  share_app: ({ app, project, shared }, call) => trustCommand({ action: 'share_app', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), shared }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
   get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
