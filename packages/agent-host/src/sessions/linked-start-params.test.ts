@@ -68,3 +68,69 @@ describe('a session another machine starts, at the depth it gives (#1038)', () =
     expect(agentDepthRefusal(host, own.id, 'start agents')).toBeNull()
   })
 })
+
+/**
+ * The preset a session another machine's start_agent starts here runs under (#1273): an `auto` caller's child runs
+ * `auto` here only while this machine's "Allow auto from a linked computer" switch is on, and anything else keeps the
+ * preset the hub gave, `normal` at most. The window's own start is not touched.
+ */
+describe('a session a linked computer starts, under the preset it carries (#1273)', () => {
+  const create = async (more: Record<string, unknown>) => {
+    const project = (await rpc('projects.add', { path: repo(`app-${Math.random().toString(36).slice(2)}`, null) })) as { id: string; path: string }
+    return (await rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', agentDepth: 1, ...more })) as { id: string; permissionPreset: string; startedFromHub?: boolean }
+  }
+
+  it("runs an auto caller's child under auto while the switch is on, says so to the hub, and marks it as started from there", async () => {
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: true })
+    const child = await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })
+    expect(child).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
+    expect(store.settings.appSetting(`started_from_hub:${child.id}`)).toBe('true')
+  })
+
+  it('runs it under normal once the person turns the switch off, and says so to the hub', async () => {
+    await rpc('prefs.set', { patch: { hubAuto: false } })
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
+    expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'normal', startedFromHub: true })
+  })
+
+  // #1273 review (owner decision): the switch only restricts, so a damaged record reads as off, never as on
+  it('reads a damaged record as off, and an absent switch as on', async () => {
+    store.settings.setAppSetting('ui_preferences', 'not a json object')
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
+    expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'normal' })
+    store.settings.setAppSetting('ui_preferences', JSON.stringify({ hubAuto: 'yes' }))
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
+    store.settings.setAppSetting('ui_preferences', JSON.stringify({ sessionTools: true }))
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: true })
+  })
+
+  // #1273 review: a machine with no window of its own is set from the hub's Settings → Machines
+  it('takes the switch from the hub, and answers it as it now reads', async () => {
+    expect(await rpc('host.setHubAuto', { allowed: false })).toEqual({ allowed: false })
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
+    expect(mgr.uiPreferences().hubAuto).toBe(false)
+    expect(await rpc('host.setHubAuto', { allowed: true })).toEqual({ allowed: true })
+    expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'auto' })
+  })
+
+  // #1273 review: the mark lives beside the row, and a session read back from the store lost it
+  it('keeps the mark through a host restart and through the trash and back', async () => {
+    const child = await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })
+    await rpc('agents.deleteSession', { sessionId: child.id })
+    const back = (await rpc('trash.restore', { sessionId: child.id })) as { session: { startedFromHub?: boolean } }
+    expect(back.session.startedFromHub).toBe(true)
+    expect(mgr.listSessions().find((s) => s.id === child.id)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
+    await mgr.disposeAll()
+    mgr = new SessionManager(store, scriptedAdapters(), () => {})
+    expect(mgr.listSessions().find((s) => s.id === child.id)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
+  })
+
+  it("keeps a normal or safe caller's preset, never above normal, and leaves the window's own start alone", async () => {
+    expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'normal' } })).toMatchObject({ permissionPreset: 'normal' })
+    expect(await create({ permissionPreset: 'safe', fromHub: { callerPreset: 'safe' } })).toMatchObject({ permissionPreset: 'safe' })
+    expect(await create({ permissionPreset: 'auto', fromHub: { callerPreset: 'normal' } })).toMatchObject({ permissionPreset: 'normal' })
+    const own = await create({ permissionPreset: 'auto' })
+    expect(own.permissionPreset).toBe('auto')
+    expect(own.startedFromHub).toBeUndefined()
+  })
+})

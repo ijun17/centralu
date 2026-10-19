@@ -6,6 +6,7 @@ import { type SessionRecords } from './sessions.js'
 import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 import { SESSION_SETTING_OF } from './settings.js'
+import { agentInstructionsKey } from './projects.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -242,6 +243,34 @@ export class TrashRecords {
   }
 
   /**
+   * Whether the trash holds a session of this project (its record names it): restoring one registers the project again
+   * under the same id and at the same path (`SessionTrash.restoreSession`), so its folder has to stay while this is
+   * true (#1204)
+   */
+  holdsProject(projectId: string): boolean {
+    return !!this.db
+      .prepare(
+        `SELECT 1 FROM sessions
+          WHERE deleted_at IS NOT NULL AND json_valid(trash) AND json_extract(trash, '$.projectId') = ? LIMIT 1`,
+      )
+      .get(projectId)
+  }
+
+  /** The project folders the trash's sessions name, in their kept spelling: a restore registers or joins a project there (#1204) */
+  trashedProjectPaths(): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT json_extract(trash, '$.projectPath') AS path FROM sessions
+            WHERE deleted_at IS NOT NULL AND json_valid(trash) AND json_extract(trash, '$.projectPath') IS NOT NULL`,
+        )
+        .all() as { path: unknown }[]
+    )
+      .map((r) => r.path)
+      .filter((p): p is string => typeof p === 'string')
+  }
+
+  /**
    * What is in the trash, most recently deleted first, with how much of the store each one holds: the bytes of its
    * messages (the index is already gone). Settings shows the total, because nothing empties the trash on its own.
    * Measured on a copy of the real store (135,828 messages): summing every session's messages takes about 40ms.
@@ -338,6 +367,8 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ? AND run_id NOT IN (SELECT id FROM app_runs)`).run(projectId)
       // Answers given to that project's apps' capabilities too (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
       this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
+      // Its instructions for started agents (#1161 item 2) are a setting of the project, as its commands are a column
+      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(agentInstructionsKey(projectId))
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
     tx()

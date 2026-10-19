@@ -146,6 +146,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       <ConnectWhenNeeded m={m} />
       <AutostartSwitch m={m} />
       <AsksSwitch m={m} />
+      <HubAutoSwitch m={m} />
       {started && (
         <p className="mt-1 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
           {started}
@@ -398,6 +399,60 @@ function AsksSwitch({ m }: { m: MachineInfo }) {
         </p>
       )}
       {row.on && <AskPairs m={m} />}
+    </div>
+  )
+}
+
+/**
+ * The machine's own "Allow auto from a linked computer" (#1273 review, owner decision 2026-10-19), read and set over the
+ * link, so a machine with no window of its own (`centralu serve`) can be set from here. The machine reads it at each
+ * start: off, a child this computer's `auto` session starts there runs under normal, and this computer asks first. The
+ * switch shows what the machine answered; while the link is down, or on a machine from before it, it says so instead.
+ */
+function HubAutoSwitch({ m }: { m: MachineInfo }) {
+  const platform = usePlatform()
+  // The machine's answer to the last change, kept only while the link is as it was then (#1273 review): a link that
+  // goes or comes back reads the machine again, and that read is what shows
+  const [set, setSet] = useState<{ state: 'on' | 'off' | 'older' | 'unreachable'; status: MachineInfo['status'] } | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  // Read again when the link comes and goes
+  const read = useLoad(() => platform.machines.hubAuto(m.id), [platform, m.id], [m.status])
+  const state = (set && set.status === m.status ? set.state : undefined) ?? read.data ?? (read.error ? 'unreachable' : undefined)
+  if (state === undefined) return null
+  const turn = (allowed: boolean) => {
+    setPending(true)
+    setFailed(null)
+    void platform.machines
+      .hubAuto(m.id, allowed)
+      .then(
+        (next) => setSet({ state: next, status: m.status }),
+        (err: unknown) => setFailed(err instanceof Error ? err.message : String(err)),
+      )
+      .finally(() => setPending(false))
+  }
+  return (
+    <div className="mt-1.5">
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          className="accent-ink-muted"
+          checked={state === 'on'}
+          disabled={pending || state === 'older' || state === 'unreachable'}
+          onChange={(e) => turn(e.target.checked)}
+          data-testid={`machine-hub-auto-${m.id}`}
+        />
+        <span>Let auto sessions here start agents under auto on {m.name}</span>
+      </label>
+      <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-hub-auto-note-${m.id}`}>
+        {failed
+          ? `Not changed: ${failed}`
+          : state === 'older'
+          ? `${m.name} runs a Centralu from before this setting: an agent started there always runs under normal, and this computer asks first.`
+          : state === 'unreachable'
+            ? `${m.name} is not connected, so its setting cannot be read or changed now.`
+            : `${m.name}'s own "Allow auto from a linked computer", set from here. On, an agent that a session under auto here starts there runs under auto too, without asking; off, it runs under normal and you are asked each time.`}
+      </p>
     </div>
   )
 }

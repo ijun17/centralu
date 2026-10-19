@@ -495,7 +495,9 @@ export class AgentStartFlow {
     release()
     progress.d = d
     try {
-      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
+      // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
+      const instructions = project.id === ORCHESTRATOR_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
+      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
     } catch (e) {
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)

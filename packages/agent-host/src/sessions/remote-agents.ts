@@ -16,6 +16,7 @@ import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound } from './with-timeout.js'
+import { raceTimeout } from '../timing.js'
 
 /**
  * A child start_agent started on a linked machine (#1038), as the hub keeps it: the machine's session (its qualified
@@ -33,6 +34,11 @@ export type RemoteAgent = {
   project: string
   /** The branch of the worktree it was started in there, if one */
   worktree?: string
+  /**
+   * The preset the machine started it under (#1273 review): a send is refused once the caller has less, as a local
+   * child's is (`agent-session-actions.ts`). Absent from a record made before #1273, when it was `normal` at most
+   */
+  preset?: PermissionPreset
   startedAt: number
   /** The turn its caller last gave it (a start, a send at rest): its cards' handles name it, as a delegated turn's do (#676) */
   turn?: string
@@ -76,16 +82,58 @@ const withoutOwed = (r: RemoteAgent): RemoteAgent => {
 const bare = (error: string): string => error.trim().replace(/\.+$/, '')
 
 /**
+ * How long a start waits for the machine to say its instructions for agents now (#1161 review), once the child is made
+ * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
+ */
+export const INSTRUCTIONS_WAIT_MS = 5_000
+
+/**
+ * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
+ * trash": removed, left and why, or left because the machine's build predates the cleanup. Nothing for a child started
+ * without a worktree.
+ */
+function remoteWorktreeLine(
+  rec: RemoteAgent,
+  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | 'older' | undefined,
+): string {
+  if (!rec.worktree) return ''
+  if (done === 'older' || !done) {
+    return `; its worktree there, on ${rec.worktree}, stays${done === 'older' ? `: ${rec.machine} runs a Centralu from before #1161, which does not remove it` : ''}. The person deletes it on that machine`
+  }
+  const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
+  // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
+  if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
+  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed`
+  if (done.worktree === 'none') return `; it had no worktree of its own there any more`
+  return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
+}
+
+/**
  * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
  * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
  */
 const shownRemote = (url: string | null): string => (url === null ? 'no origin' : (gitRemoteKey(url) ?? 'a local path'))
 
 /**
- * The most a child on another machine runs under (#1038 review, as create_session over a link, #838): `normal`. `auto`
- * there is the person's to give on that machine, never a caller's to carry across.
+ * The most a child on another machine runs under when its caller's `auto` is not carried (#1038 review, as
+ * create_session over a link, #838): `normal`. An `auto` caller's is carried only to a machine that takes it (#1273,
+ * `AutoThere`), as that machine's own switch says.
  */
 const remotePreset = (caller: PermissionPreset): PermissionPreset => (presetWithin(caller, 'normal') ? caller : 'normal')
+
+/**
+ * What a machine says of an `auto` caller's child (#1273, `LinkedSessions.hubAuto`): `auto`, it runs under `auto` there
+ * too and no card is raised; otherwise why it runs under `normal` (its switch is off, or its Centralu predates it)
+ */
+type AutoThere = { auto: true } | { auto: false; withheld: 'machine_off' | 'older' }
+
+/** What the start tells an `auto` caller of its child's preset (#1273), for its notice */
+const autoNotice = (machine: string, there: AutoThere): string =>
+  there.auto
+    ? `it runs under auto on ${machine}, as this session does`
+    : there.withheld === 'machine_off'
+      ? `it runs under normal on ${machine}: that computer does not take auto from another computer (its "Allow auto from a linked computer" setting is off)`
+      : `it runs under normal on ${machine}: that computer runs a Centralu from before #1273, which does not take auto from another computer`
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
@@ -296,6 +344,9 @@ export class RemoteAgents {
     const found = await this.checkoutOn(machine, project, reader)
     if ('error' in found) return { ok: false, error: found.error }
     const target = found.project
+    // An auto caller's child runs auto there too where that machine takes it (#1273), and then no card is raised
+    const asked = this.callerPreset(callerId) === 'auto' ? await this.autoThere(machine, reader) : null
+    if (asked && 'error' in asked) return { ok: false, error: asked.error }
     const tool = opts.tool ?? target.defaultTool ?? caller.tool
     // The person's model for a difficulty is read here, as for a local child; the machine is not asked for its list
     const { model, effort, difficulty } = agentChoice(opts, undefined, this.host.uiPreferences().agentModels?.[tool])
@@ -309,44 +360,63 @@ export class RemoteAgents {
       branch = asked || agentBranch(basis, randomUUID())
     }
     const name = given ?? (branch ? undefined : agentName(basis))
+    /*
+     * Decided from the caller as it is now, after every wait above (#1273 review): a caller that left `auto` while the
+     * machine was asked gets its own preset's card and child, never the `auto` it no longer has
+     */
+    const callerNow = this.callerPreset(callerId)
+    const there = callerNow === 'auto' ? asked : null
+    const preset: PermissionPreset = there?.auto ? 'auto' : remotePreset(callerNow)
     const detail: Extract<ApprovalDetail, { kind: 'agent_start' }> = {
       kind: 'agent_start',
       project: { id: target.id, name: target.name },
       tool,
       ...(model ? { model } : {}),
       ...(difficulty ? { difficulty } : {}),
-      preset: remotePreset(caller.permissionPreset),
+      preset,
       ...(branch ? { worktree: { branch } } : {}),
       text: taskLine(opts.task),
       ...(given ? { name: given } : {}),
       machine: machine.name,
+      ...(there && !there.auto ? { autoWithheld: there.withheld } : {}),
     }
+    /*
+     * Asked each time (#1038 review), with no "always": nothing is remembered for another machine. Except for an `auto`
+     * caller whose child runs `auto` there too (owner decision 2026-10-19, #1273): the person let this session act
+     * without asking, and that machine's own switch lets a linked computer's `auto` reach it. A `normal` or `safe`
+     * caller, or a machine whose switch is off or that cannot take `auto`, is asked
+     */
+    const unasked = there?.auto === true && this.host.autoBoundaryOpen(callerId, `start an agent on ${machine.name} under auto`)
     // The card is bounded as a local start's setup is (#660): past it the card goes and nothing is made
     const ctl = new AbortController()
-    const onAbort = () => ctl.abort()
-    signal?.addEventListener('abort', onAbort, { once: true })
-    if (signal?.aborted) ctl.abort()
-    const timer = setTimeout(() => ctl.abort(), START_AGENT_SETUP_MS)
-    let decision: Awaited<ReturnType<RemoteAgentsHost['askHost']>>
-    try {
-      // Asked each time, `auto` included (#1038 review): the card says so, and nothing opens another computer unasked
-      decision = await this.host.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
-    } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onAbort)
+    let decision: Awaited<ReturnType<RemoteAgentsHost['askHost']>> = 'allow'
+    if (!unasked) {
+      const onAbort = () => ctl.abort()
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) ctl.abort()
+      const timer = setTimeout(() => ctl.abort(), START_AGENT_SETUP_MS)
+      try {
+        decision = await this.host.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
+      } finally {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+      }
     }
     // The card may have stood a while: what the start rests on in the caller is read again, and its reason comes first
     const after = this.gateError(callerId)
     if (after) return { ok: false, error: after }
     if (decision === 'deny') return { ok: false, error: `The person did not allow this session to start an agent on ${machine.name}. Do not start one again unless they tell you to. ${ASK_THE_PERSON}` }
-    if (decision === null || ctl.signal.aborted) {
+    if (decision === null || ctl.signal.aborted || signal?.aborted) {
       return { ok: false, error: signal?.aborted ? 'The call was withdrawn before the session was created, so none was.' : `No session was created: the question to the person was withdrawn or not answered in time. ${ASK_THE_PERSON}` }
     }
+    // The caller's preset may have changed while the card stood: never a child above it (#1273 review)
+    const lowered = this.loweredError(callerId, preset, `so nothing was started on ${machine.name}`)
+    if (lowered) return { ok: false, error: lowered }
     // A place is held from here until the child counts (its wait or report armed), so starts at once cannot pass the ceiling together
     const place = this.places.reservePlace(callerId, project.id)
     if ('error' in place) return { ok: false, error: place.error }
     try {
-      return await this.makeChild(callerId, caller, opts, { machine, target, tool, name, model, effort, branch, startedAt }, reader, place.release, signal)
+      return await this.makeChild(callerId, caller, opts, { machine, target, tool, name, model, effort, branch, startedAt, preset, there, unasked }, reader, place.release, signal)
     } finally {
       place.release()
     }
@@ -357,27 +427,55 @@ export class RemoteAgents {
     callerId: string,
     caller: SessionInfo,
     opts: StartAgentOpts & { machine: string },
-    c: { machine: { id: string; name: string }; target: LinkedProject; tool: string; name?: string; model?: string; effort?: string; branch?: string; startedAt: number },
+    c: {
+      machine: { id: string; name: string }; target: LinkedProject; tool: string; name?: string; model?: string; effort?: string; branch?: string; startedAt: number
+      /** The preset it is to run under there, what the machine said of an `auto` caller's, and whether no card was asked (#1273) */
+      preset: PermissionPreset; there: AutoThere | null; unasked: boolean
+    },
     reader: LinkedSessions,
     counted: () => void,
     signal?: AbortSignal,
   ): Promise<ChildRunResult> {
-    const { machine, target, tool, name, model, effort, branch, startedAt } = c
+    const { machine, target, tool, name, model, effort, branch, startedAt, there, unasked } = c
     const made = await reader.createSession(target, {
       tool: tool as never,
       ...(name ? { name } : {}),
-      preset: remotePreset(caller.permissionPreset),
+      // `normal` at most, which a machine from before #1273 keeps; the preset carried says `auto` only where it is taken
+      preset: remotePreset(c.preset),
+      callerPreset: c.preset,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(branch ? { worktreeBranch: branch } : {}),
       agentDepth: depthOf(this.host, callerId) + 1,
     })
     if (!made.ok) return { ok: false, error: `Could not start ${tool} on ${machine.name}: ${bare(made.error)}. ${ASK_THE_PERSON}` }
+    /*
+     * Started without a card on the machine's word that it takes `auto` (#1273), and it did not: its switch went off
+     * since. A `normal` child there is what the card is for, so the one made is deleted unstarted (no task was sent)
+     */
+    const childPreset: PermissionPreset = made.preset ?? remotePreset(c.preset)
+    // Read again now: the caller's preset may have dropped while the machine made it (#1273 review)
+    const above = !presetWithin(childPreset, this.callerPreset(callerId))
+    if (above || (unasked && childPreset !== 'auto')) {
+      const why = above
+        ? `this session now runs under ${this.callerPreset(callerId)}, below the ${childPreset} the session made there runs under`
+        : `${machine.name} no longer takes auto from this computer (its "Allow auto from a linked computer" setting was turned off)`
+      const gone = await reader.deleteSession(made.sessionId)
+      return {
+        ok: false,
+        error: `${why}, so the session made there was given no task and went to ${machine.name}'s trash${gone.ok ? '' : `, or would have: it could not be deleted (${bare(gone.error)}), so "${made.name}" stays there with no task`}. Start it again to ask the person. ${ASK_THE_PERSON}`,
+      }
+    }
     const label = labelOf(this.host.store.messages, caller)
-    const task = remoteAgentFrame(label, opts.task)
+    /*
+     * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
+     * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
+     */
+    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target))
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),
+      preset: childPreset,
     }
     this.save([...this.records(), rec])
     // Its row came to the windows before the hub knew whose it is: now it hangs under the caller (#1038)
@@ -409,12 +507,26 @@ export class RemoteAgents {
       model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : '',
       // Not passed across (#1038 review): said, rather than dropped without a word
       opts.lsp ? `lsp is not passed to another machine: it starts as ${machine.name} starts a session` : '',
-      caller.permissionPreset === 'auto' ? `it runs under normal on ${machine.name}: auto is not carried to another computer` : '',
+      // As the machine started it: a switch turned off after its answer leaves a carded start under normal (#1273 review)
+      there ? autoNotice(machine.name, there.auto && childPreset !== 'auto' ? { auto: false, withheld: 'machine_off' } : there) : '',
     ].filter(Boolean).join('; ') || undefined
     const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
     // The wait opened before the send: a turn that ended inside the send has settled it already
     const result = waiting ? await this.awaitTurn(rec, signal, Math.min(ASK_WAIT_MS, left), waiting) : this.working(rec, true)
     return result.ok && unchecked ? { ...result, notice: [result.notice, unchecked].filter(Boolean).join('; ') } : result
+  }
+
+  /**
+   * The instructions of the machine's copy of the project as it has them now (#1161 item 2), or as it listed them
+   * before the card when it cannot say (#1161 review): a reader without the read, one that fails or throws, one that
+   * does not answer within `INSTRUCTIONS_WAIT_MS`. Never a reason the start stops; a machine that predates them listed
+   * none, so its child starts without them, as it did before.
+   */
+  private async instructionsOn(reader: LinkedSessions, target: LinkedProject): Promise<string> {
+    const listed = target.agentInstructions ?? ''
+    if (typeof reader.agentInstructions !== 'function') return listed
+    const now = await raceTimeout(reader.agentInstructions(target).catch(() => null), INSTRUCTIONS_WAIT_MS, null)
+    return now?.ok ? now.text : listed
   }
 
   /** agent_session on a child of a linked machine (#1038): status, wait, send, stop, delete, through the link */
@@ -459,6 +571,12 @@ export class RemoteAgents {
       case 'send': {
         const text = opts.text?.trim()
         if (!text) return { ok: false, error: 'Give the text to send.' }
+        // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)
+        const childPreset = rec.preset ?? 'normal'
+        const own = this.callerPreset(callerId)
+        if (!presetWithin(childPreset, own)) {
+          return { ok: false, error: `"${rec.name}" now has more permissions (${childPreset}) than this session (${own}), so this session cannot give it work. Tell the person.` }
+        }
         const now = await stateOf()
         if (!now.ok) return now
         if (now.running) {
@@ -535,12 +653,26 @@ export class RemoteAgents {
             return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
           }
         }
-        const r = await reader.deleteSession(rec.sessionId)
-        if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        /*
+         * The worktree made for it there goes with it when nothing would be lost (#1161 item 3): the machine decides, as
+         * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
+         * branch this hub asked for, and a child started without a worktree is deleted as before
+         */
+        // A reader without the call (one from before #1161) deletes as before, as a machine that predates it does
+        const canClean = typeof reader.deleteAgentChild === 'function'
+        const withWorktree = rec.worktree && canClean
+          ? await reader.deleteAgentChild!(rec.sessionId, rec.worktree).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+          : undefined
+        const older = !!rec.worktree && (!canClean || (!!withWorktree && !withWorktree.ok && 'olderBuild' in withWorktree))
+        if (withWorktree && !withWorktree.ok && !older) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(withWorktree.error)}.` }
+        if (!withWorktree?.ok) {
+          const r = await reader.deleteSession(rec.sessionId)
+          if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        }
         this.forget(rec.sessionId)
         return {
           ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
-          notice: `It went to ${rec.machine}'s trash${rec.worktree ? `; its worktree there, on ${rec.worktree}, stays until the person deletes it on that machine` : ''}.`,
+          notice: `It went to ${rec.machine}'s trash${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
         }
       }
     }
@@ -871,9 +1003,9 @@ export class RemoteAgents {
   /**
    * agent_session answer on a child of a linked machine (#1038), as on a local child's delegated turn (#676): the gate
    * must find the caller's turn running there, and the card must still stand as it read it. A question takes its answer,
-   * through the machine as its window would answer it. An approval stays the person's: the child runs under at most
-   * `normal` there, and a caller's `auto` (which alone lets a caller answer a local child's approval) is never carried
-   * to another computer, so what that computer runs is allowed there, by the person
+   * through the machine as its window would answer it. An approval stays the person's on that computer, whatever the
+   * child runs under there: a caller's `auto` (which alone lets a caller answer a local child's approval) may give the
+   * child `auto` there (#1273), but never answers that computer's cards, so what runs there is allowed there, by the person
    */
   private async answer(rec: RemoteAgent, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
     if (!(await this.gate(rec, reader)).live) return { ok: false, error: `"${rec.name}" on ${rec.machine} is not running a turn you gave it, so none of its cards are yours to answer.` }
@@ -889,7 +1021,7 @@ export class RemoteAgents {
       }
     }
     if (chosen.kind === 'approval') {
-      return { ok: false, error: `Only the person can answer this approval in "${rec.name}": it runs on ${rec.machine}, and your preset is not carried to another computer, so what runs there is allowed there. Tell them if it matters.` }
+      return { ok: false, error: `Only the person can answer this approval in "${rec.name}": it runs on ${rec.machine}, and only that computer decides what runs there, whatever preset the session runs under. Tell them if it matters.` }
     }
     const answers = answersFrom(chosen.questions, text)
     if ('error' in answers) return { ok: false, error: answers.error }
@@ -1057,6 +1189,25 @@ export class RemoteAgents {
       return `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}`
     }
     return agentDepthRefusal(this.host, callerId, 'start agents')
+  }
+
+  /** The caller's preset as it is now; `safe` for one gone, so nothing is decided on a preset no one has */
+  private callerPreset(callerId: string): PermissionPreset {
+    return this.host.meta.get(callerId)?.permissionPreset ?? 'safe'
+  }
+
+  /** Why a start stops when the caller's preset fell below the child's while it went on (#1273 review), or null */
+  private loweredError(callerId: string, preset: PermissionPreset, what: string): string | null {
+    const now = this.callerPreset(callerId)
+    return presetWithin(preset, now) ? null : `This session now runs under ${now}, below the ${preset} the child would have run under, ${what}. Start it again if it is still wanted. ${ASK_THE_PERSON}`
+  }
+
+  /** What the machine says of an `auto` caller's child (#1273): whether it takes `auto` from this computer, or why not */
+  private async autoThere(machine: { id: string; name: string }, reader: LinkedSessions): Promise<AutoThere | { error: string }> {
+    const r = await reader.hubAuto(machine.id)
+    if (r.ok) return r.allowed ? { auto: true } : { auto: false, withheld: 'machine_off' }
+    if ('olderBuild' in r) return { auto: false, withheld: 'older' }
+    return { error: `Could not ask ${machine.name} whether it takes auto from this computer: ${bare(r.error)}. Nothing was started there.` }
   }
 
   /** The machine's project that is a checkout of this project's repository: the same `origin`, read on both sides */

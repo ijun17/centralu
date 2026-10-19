@@ -110,6 +110,22 @@ export const sessionMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * agent_session delete of a child a hub's session started here with a worktree (#1161 item 3): the session goes to the
+   * trash, and the worktree Centralu made for it on `worktreeBranch` goes too when nothing would be lost (nothing
+   * uncommitted, every commit of its own on a remote or the trunk). `kept` says why it stayed; `none`, the session had
+   * no worktree. A build from before it answers "Unknown method", and the hub deletes the session as `agents.deleteSession`.
+   */
+  'agents.deleteAgentChild': {
+    params: z.object({ sessionId: SessionId, worktreeBranch: z.string().min(1) }),
+    result: z.object({
+      worktree: z.enum(['removed', 'kept', 'none']),
+      path: z.string().optional(),
+      branch: z.string().optional(),
+      why: z.string().optional(),
+      note: z.string().optional(),
+    }),
+  },
+  /**
    * The material needed to judge whether a worktree can be deleted. The UI asks this right
    * before deleting. `null` means this is not a worktree session — there is nothing to ask.
    */
@@ -441,8 +457,9 @@ export const sessionMethods = {
     result: z.object({ loggedIn: z.boolean().nullable(), fingerprint: z.string().nullable() }),
   },
   /**
-   * The trash (#204). Only the person reaches these: the RPC is the UI's channel, and neither the agents' tools nor
-   * the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
+   * The trash (#204). The person reaches these: the RPC is the UI's channel, and the central orchestrator's trash
+   * commands make the same calls (#1219), its deletes for good only after the person's card. No other agent tool and
+   * not the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
    *
    * `bytes` is the total of every session's `bytes` — shown because nothing empties the trash on its own. `runs` are
    * the records of deleted app-agent sessions (#378), which `bytes` counts too, each on the machine its app ran on

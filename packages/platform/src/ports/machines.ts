@@ -59,6 +59,11 @@ export interface MachinesPort {
   /** What would stop there if its host stopped now; null when the machine cannot say */
   activity(machineId: string): Promise<HostActivity | null>
   /**
+   * The machine's own "Allow auto from a linked computer" (#1273): read, or set when `allowed` is given, over the link.
+   * `older`: its Centralu predates it; `unreachable`: the link is not up
+   */
+  hubAuto(machineId: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'>
+  /**
    * Lets the machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7): off by
    * default; each pair (a session there, a project here) asks on this computer's card once. Off forgets the pairs
    */

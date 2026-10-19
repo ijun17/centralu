@@ -52,11 +52,28 @@ describe('screen preferences across builds', () => {
   it('a broken row reads as the defaults, says so once with the row name, and the next change replaces it', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { mgr, row } = setup('{"textSize": 1.1, ')
-    expect(mgr.uiPreferences()).toEqual(DEFAULT_UI_PREFERENCES)
+    // "Allow auto from a linked computer" alone reads as off from a damaged record (#1273 review), and is written so
+    expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, hubAuto: false })
     mgr.uiPreferences()
     expect(said.mock.calls.filter(([line]) => String(line).includes(`app_settings.${KEY}`))).toHaveLength(1)
     mgr.setUiPreferences({ sessionTools: false })
-    expect(row()).toEqual({ sessionTools: false })
+    expect(row()).toEqual({ sessionTools: false, hubAuto: false })
+  })
+
+  // #1273 review: an unrelated change over a damaged record dropped the switch, and absent reads as on
+  it('keeps a damaged "Allow auto from a linked computer" off when another setting is saved over it', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const broken = setup('{"hubAuto": false, "textSize": 1.1, ')
+    expect(broken.mgr.setUiPreferences({ textSize: 1 }).hubAuto).toBe(false)
+    expect(broken.row()).toMatchObject({ hubAuto: false })
+    expect(broken.mgr.uiPreferences().hubAuto).toBe(false)
+    const odd = setup(JSON.stringify({ hubAuto: 'no' }))
+    odd.mgr.setUiPreferences({ textSize: 1 })
+    expect(odd.row()).toMatchObject({ hubAuto: false })
+    // The person's own choice over a damaged record is what is written
+    const chosen = setup('{"textSize": 1.1, ')
+    chosen.mgr.setUiPreferences({ hubAuto: true })
+    expect(chosen.mgr.uiPreferences().hubAuto).toBe(true)
   })
 
   /*
@@ -70,7 +87,7 @@ describe('screen preferences across builds', () => {
     store.settings.saveWorkspace({ textScale: 3 })
     store.settings.setAppSetting(KEY, '{"textSize": 1.1, ')
     const mgr = new SessionManager(store, new Map(), () => {})
-    expect(mgr.uiPreferences()).toEqual(DEFAULT_UI_PREFERENCES)
+    expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, hubAuto: false })
     expect(store.settings.appSetting(KEY)).toBe('{"textSize": 1.1, ')
   })
 })
