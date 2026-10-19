@@ -51,6 +51,13 @@ export function turnAnswerSeq(messages: readonly StoredMessage[], opts: { afterS
   return first
 }
 
+/** Where `lastResponse` starts (#1186): the seq of its first message, or null when the session has said nothing */
+export function lastResponseSeq(messages: readonly StoredMessage[]): number | null {
+  let end = messages.length
+  while (end > 0 && !(messages[end - 1]!.role === 'assistant' && messages[end - 1]!.kind === 'text')) end--
+  return turnAnswerSeq(messages.slice(0, end))
+}
+
 /**
  * The session's last response, as a preview reads it: `turnAnswer` at the last text the agent wrote, past whatever came
  * after it (a tool call still running, the person's next message). Not an answer to hand a caller: it can be a plan.

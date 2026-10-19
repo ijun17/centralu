@@ -15,6 +15,7 @@ import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-ho
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { FakeAdapter, managerWorld, projectDirs } from './manager.test-helpers.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -120,6 +121,52 @@ describe("the orchestrator's tools see only this app's sessions", () => {
 
     const read = await tools.readSession(a.id)
     expect(read.lines?.join('\n')).toContain('HOSTILE_REPORT_SENTINEL')
+  })
+
+  /*
+   * #1186: the model read only "intersession message available" for every report, so a failed run, a usage limit and
+   * the way to continue reached the store and the screen and never it. It reads what Centralu wrote now, and the read
+   * that shows the last response, which stays out (#120).
+   */
+  it("a failed run's report reaches the model with how it ended, its tool's error and the read that shows its last response", async () => {
+    const { a, orc, tools } = await setup()
+    await rpc('sessions.rename', { sessionId: a.id, name: 'WORKER_NAME_SENTINEL' })
+    await tools.sendToSession(a.id, 'let me know when it is done', true)
+    adapter.handleOf(a.id)!.emitDelta('HOSTILE_REPORT_SENTINEL')
+    adapter.handleOf(a.id)!.emitError('API overloaded, retry later')
+    await new Promise((r) => setTimeout(r, 0))
+
+    const report = adapter.handleOf(orc.id)!.sent.find((t) => t.includes(a.id)) ?? ''
+    expect(report).toContain('[Centralu] The assigned work failed.')
+    expect(report).toContain(`id: ${a.id}`)
+    expect(report).toContain('"API overloaded, retry later"')
+    const seq = store.messages.loadMessages(a.id, 20).find((m) => m.role === 'assistant' && m.kind === 'text')!.seq
+    expect(report).toContain(`read_session(sessionId="${a.id}", around=${seq}) reads it`)
+    expect(report).not.toContain('HOSTILE_REPORT_SENTINEL')
+    expect(report).not.toContain('WORKER_NAME_SENTINEL')
+  })
+
+  it('a report a session cannot be woken for is kept, and goes in once it takes a message again (#1186)', async () => {
+    const { a, orc, tools } = await setup()
+    // Its own conversation, so waking the orchestrator does not find the worker holding the same one
+    adapter.handleOf(a.id)!.externalId = 'ext-worker'
+    // A tool that reports its background work can be put to sleep
+    Object.assign(adapter.capabilities, { backgroundTasks: true })
+    expect(await mgr.sleepSession(orc.id)).toBe(true)
+    await tools.sendToSession(a.id, 'let me know when it is done', true)
+    // Its tool cannot start now: the report cannot wake it
+    adapter.failCreate = 'Could not start the tool'
+    adapter.handleOf(a.id)!.emitDelta('the work is done')
+    adapter.handleOf(a.id)!.finishTurn()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(mgr.isLive(orc.id)).toBe(false)
+
+    adapter.failCreate = null
+    await rpc('agents.send', { sessionId: orc.id, text: 'anything new?' })
+    await eventually(() => (adapter.handleOf(orc.id)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${a.id}`)))
+    const sent = adapter.handleOf(orc.id)!.sent
+    expect(sent.filter((t) => t.includes('[Centralu] The assigned work finished.'))).toHaveLength(1)
+    expect(sent.indexOf('anything new?')).toBeLessThan(sent.findIndex((t) => t.includes(`sourceSessionId: ${a.id}`)))
   })
 
   it('an unknown session returns a reason — it is not swallowed silently', async () => {

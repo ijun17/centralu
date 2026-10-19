@@ -58,7 +58,7 @@ export type SessionTrashHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>
-  quitNotices: { sessionId: string; requester: string; }[]
+  quitNotices: { sessionId: string; requester: string; swapped?: true }[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
   readonly recoveryRepair: Promise<void>

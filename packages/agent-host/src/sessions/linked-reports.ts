@@ -11,6 +11,8 @@ export type ReportWork =
   | { linkLost: string; paused: readonly BackgroundTask[] }
   /** The machine was removed from Centralu: `paused`, the work its turn ended with; absent, a turn still running */
   | { machineRemoved: string; paused?: readonly BackgroundTask[] }
+  /** Its turn ended while the host was handed over (#1186): whether that turn was the work given is not known */
+  | { swapped: true }
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so
@@ -31,6 +33,7 @@ export type LinkedReportsHost = {
     preview: string,
     ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
     work?: ReportWork,
+    answerSeq?: number,
   ): Promise<void>
   /**
    * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine

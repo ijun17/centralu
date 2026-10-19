@@ -495,14 +495,22 @@ below retained for `safe` and `normal`:
    and that the final message is the answer) recorded as sent by the caller (`from`).
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
-   (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with
-   `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
+   (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
+   ended (finished, failed, paused on its own background work, a usage limit, cut short), the session's id, its
+   tool's error as JSON, how to go on, and `read_session(sessionId, around=<its last response's seq>)`; the last
+   response itself, the session's and project's names and its tasks' descriptions stay in the stored report and the
+   screen (#120: nothing the reported session or a name could write goes into the receiver's input). The model used
+   to read "intersession message available" and an id alone, for every such notice. A report or notice that cannot
+   be delivered (the receiver cannot be woken: its tool fails to start) is logged and kept in memory, and goes in
+   once that session takes a message again (`deliverHeld`); it used to be dropped without a word. A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
    is written to `report_marks` (store v49, #646) as well as kept in memory, so a host swap (#280) does not lose
    it: the leaving host's `detachAll` fails its waits without reporting (`handingOver`), the next host restores
    the marks of the sessions the keeper kept that are still in their turn, which ends under it. It drops a
    mark whose session has no process any more (that turn died with the old host) and one whose kept session
    already finished its turn during the swap, so a later turn the person starts there is never reported as the
-   assigned work (#166); that answer stays readable through `agent_session`. Paths the
+   assigned work (#166); that answer stays readable through `agent_session`, and the caller is told once that a turn
+   ended during the swap, with the read that shows it, not that the work finished (`tellTurnEndedInSwap`, #1186: it
+   used to hear nothing). Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
    Each answer that promises the notice (`working` with the report armed, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that

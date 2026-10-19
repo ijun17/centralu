@@ -469,6 +469,8 @@ export class SessionEvents {
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, adapterText)
     else h.send(adapterText)
+    // It takes messages again: what could not be told it before goes in now (#1186)
+    this.host.reports.deliverHeld(sessionId)
   }
 
   /**

@@ -263,6 +263,13 @@ describe("auto observes another caller's delegation without consuming it", () =>
     const notice = w.store.messages.loadMessages(observer, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('was not delivered'))
     expect(notice).toHaveLength(1)
     expect(notice[0]).toContain('the note was refused')
+    // The model reads Centralu's words too (#1186): that and why it was not delivered, and how to send it again; it
+    // used to read "intersession message available" alone. The session's name is not Centralu's words, and stays out
+    const told = reports(observer, child)[0]!
+    expect(told).toContain('[Centralu] Your note to another session was not delivered.')
+    expect(told).toContain('Reason: the note was refused')
+    expect(told).toContain(`agent_session(sessionId="${child}", action="send"`)
+    expect(told).not.toContain('Session: ')
     expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('not delivered') })
     expect(reports(observer, child)).toHaveLength(1)
   })

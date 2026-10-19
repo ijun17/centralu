@@ -632,12 +632,15 @@ export class RemoteAgents {
     if (!this.reportArmed(rec)) return
     this.host.children.dropLinkedReport(rec.sessionId)
     if (wait || this.pending.has(rec.sessionId)) return
+    const what = `${why ?? 'took a turn there that you did not give it (the person on that machine, most likely)'}. ` +
+      'What you gave it is not followed from here, and nothing of that turn is yours to read: agent_session status gives only its state.'
     void this.host.tellSession(
       rec.callerId,
-      `[Centralu] "${rec.name}" [${rec.sessionId}] on ${rec.machine} ${why ?? 'took a turn there that you did not give it (the person on that machine, most likely)'}. ` +
-        'What you gave it is not followed from here, and nothing of that turn is yours to read: agent_session status gives only its state.',
+      `[Centralu] "${rec.name}" [${rec.sessionId}] on ${rec.machine} ${what}`,
       { sessionId: rec.sessionId, name: rec.name },
       true,
+      // What the model reads (#1186): all of it but the names, which are not Centralu's words (#120)
+      `[Centralu] The session [${rec.sessionId}] on its machine ${what}`,
     )
   }
 
@@ -934,12 +937,15 @@ export class RemoteAgents {
       const report = this.host.children.linkedReports.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || this.toldDown.has(rec.sessionId)) continue
       this.toldDown.add(rec.sessionId)
+      const rest = 'It cannot be followed until the link is back: ' +
+        'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.'
       void this.host.tellSession(
         rec.callerId,
-        `[Centralu] The link to ${name} dropped while "${rec.name}" [${rec.sessionId}] was working there. It cannot be followed until the link is back: ` +
-          'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.',
+        `[Centralu] The link to ${name} dropped while "${rec.name}" [${rec.sessionId}] was working there. ${rest}`,
         { sessionId: rec.sessionId, name: rec.name },
         true,
+        // What the model reads (#1186): all of it but the names, which are not Centralu's words (#120)
+        `[Centralu] The link to its machine dropped while the session [${rec.sessionId}] was working there. ${rest}`,
       )
     }
   }

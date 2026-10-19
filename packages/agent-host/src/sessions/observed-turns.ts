@@ -94,15 +94,17 @@ export class ObservedTurns {
   /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
   async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
     const name = this.host.nameOf(sessionId)
+    const rest =
+      `id: ${sessionId}\n\n` +
+      `Reason: ${why.slice(0, 600)}\n\n` +
+      `Send it again with ${namedCall(this.host.toolProfileOf(observerId), 'agent_session', { sessionId, action: 'send', text: FILL })}, or read that session's recent conversation with read_session.`
     await this.host.tellSession(
       observerId,
-      `[Centralu] Your note to another session was not delivered.\n` +
-        `Session: ${frameField(name)}\n` +
-        `id: ${sessionId}\n\n` +
-        `Reason: ${why.slice(0, 600)}\n\n` +
-        `Send it again with ${namedCall(this.host.toolProfileOf(observerId), 'agent_session', { sessionId, action: 'send', text: FILL })}, or read that session's recent conversation with read_session.`,
+      `[Centralu] Your note to another session was not delivered.\nSession: ${frameField(name)}\n${rest}`,
       { sessionId, name },
       true,
+      // What the model reads (#1186): all of it but the session's name, which is not Centralu's words (#120)
+      `[Centralu] Your note to another session was not delivered.\n${rest}`,
     )
   }
 }

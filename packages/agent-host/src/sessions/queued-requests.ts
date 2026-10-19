@@ -292,11 +292,14 @@ export class QueuedRequests {
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
   async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
     const name = this.host.nameOf(sessionId)
+    const rest = `id: ${sessionId}\n\nReason: ${why.slice(0, 600)}`
     await this.host.tellSession(
       callerId,
-      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
+      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\n${rest}`,
       { sessionId, name },
       true,
+      // What the model reads (#1186): all of it but the session's name, which is not Centralu's words (#120)
+      `[Centralu] Your queued request to another session was not delivered.\n${rest}`,
     )
   }
 
