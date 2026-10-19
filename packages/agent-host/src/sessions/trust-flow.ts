@@ -65,7 +65,7 @@ function appLines(a: ExternalAppInfo): string[] {
 
 /** One of the limits on agents (`UiPreferences`): how it reads, as the card and the answer name it */
 type Limit = {
-  key: 'sessionTools' | 'agentCeiling' | 'agentDepth'
+  key: 'agentCeiling' | 'agentDepth'
   name: string
   /** The value as compared: an absent ceiling and a null one are the same (the preset's own); an absent depth is the default */
   value: (p: Partial<UiPreferences>) => string
@@ -74,13 +74,6 @@ type Limit = {
 }
 
 const LIMITS: Limit[] = [
-  {
-    key: 'sessionTools',
-    name: "Centralu's read-only tools in ordinary sessions",
-    value: (p) => (p.sessionTools === undefined ? '' : p.sessionTools ? 'on' : 'off'),
-    words: (v) => v,
-    means: "With them on, a session can read its own project's other sessions and search their past conversations.",
-  },
   {
     key: 'agentCeiling',
     name: 'Running agents per project',
@@ -448,17 +441,16 @@ export class TrustFlow {
 
   // ── The limits on agents ──
   //
-  // Whether ordinary sessions get Centralu's read-only tools, how many agents may run per project, and how many levels of
-  // sessions may start agents. They bound what agents do and cost, the orchestrator's own children included, so every
+  // How many agents may run per project, and how many levels of sessions may start agents. ("Let sessions look at other
+  // sessions" is not a setting any more, owner decision 2026-10-20: always on, so this has no field for it.) They bound what agents do and cost, the orchestrator's own children included, so every
   // change asks, either way: the card names each limit with what it is and what it becomes, and after Allow the host
   // reads them again and changes nothing when one moved while the card stood.
 
   private async setLimits(rpc: WindowRpc, caller: string, changes: AgentLimitChanges, signal?: AbortSignal): Promise<TrustAnswer> {
     const patch: Record<string, unknown> = {}
-    if (changes.sessionTools !== undefined) patch.sessionTools = changes.sessionTools
     if (changes.agentCeiling !== undefined) patch.agentCeiling = changes.agentCeiling === 'preset' ? null : changes.agentCeiling
     if (changes.agentDepth !== undefined) patch.agentDepth = changes.agentDepth
-    if (!Object.keys(patch).length) return { ok: false, error: 'Give at least one of sessionTools, agentCeiling, agentDepth.' }
+    if (!Object.keys(patch).length) return { ok: false, error: 'Give at least one of agentCeiling, agentDepth.' }
     // The window's own check of the values, before any card
     const checked = UiPreferencesPatch.safeParse(patch)
     if (!checked.success) return { ok: false, error: issuesOf(checked.error) }

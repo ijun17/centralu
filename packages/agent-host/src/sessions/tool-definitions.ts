@@ -307,10 +307,9 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'set_agent_limits',
-    description: "Changes the limits on agents: read-only tools in ordinary sessions, running agents per project, levels that may start agents. Waits for the person's card.",
+    description: "Changes the limits on agents: running agents per project, levels of sessions that may start agents. Waits for the person's card.",
     schema: z
       .object({
-        sessionTools: z.boolean().optional(),
         agentCeiling: z.union([z.number().int().min(0), z.literal('preset')]).optional().describe('0 is unlimited; "preset" uses the preset\'s own.'),
         agentDepth: z.number().int().optional().describe('1 to 3.'),
       })

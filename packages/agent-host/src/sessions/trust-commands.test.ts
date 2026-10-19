@@ -532,7 +532,7 @@ describe('app grants', () => {
 })
 
 describe('set_agent_limits', () => {
-  type Prefs = { sessionTools: boolean; agentCeiling?: number | null; agentDepth?: number }
+  type Prefs = { agentCeiling?: number | null; agentDepth?: number }
   const prefs = async () => (await rpc('prefs.get', {})) as Prefs
 
   it('asks before any change, naming each limit as it is and as it becomes, and changes them once allowed', async () => {
@@ -541,6 +541,7 @@ describe('set_agent_limits', () => {
     expect(question).toContain('Change the limits on what agents may do?')
     expect(question).toContain('- Running agents per project: by preset (auto unlimited, otherwise 4) → 8.')
     expect(question).toContain('- Levels of sessions that may start agents: 1 → 2.')
+    expect(question).not.toContain('look at other sessions')
     expect(question).not.toContain('read-only tools')
     expect(r.isError).toBeFalsy()
     expect(r.text).toBe('Changed: Running agents per project 8; Levels of sessions that may start agents 2. A session reads them when it starts or calls a tool.')
@@ -548,12 +549,22 @@ describe('set_agent_limits', () => {
   })
 
   it('asks for a change that narrows too, and changes nothing when the person denies it', async () => {
+    await rpc('prefs.set', { patch: { agentDepth: 2 } })
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'set_agent_limits', { sessionTools: false }, 'deny')
-    expect(question).toContain("- Centralu's read-only tools in ordinary sessions: on → off.")
+    const { question, r } = await answered(orc.id, 'set_agent_limits', { agentDepth: 1 }, 'deny')
+    expect(question).toContain('- Levels of sessions that may start agents: 2 → 1.')
     expect(r.isError).toBe(true)
     expect(r.text).toContain('The person did not approve it, so nothing was changed.')
-    expect((await prefs()).sessionTools).toBe(true)
+    expect((await prefs()).agentDepth).toBe(2)
+  })
+
+  it('has no field for "let sessions look at other sessions", which is not a setting any more (2026-10-20): refused by name', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_agent_limits', { sessionTools: false })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('sessionTools')
+    expect(card(orc.id)).toBeUndefined()
+    expect(((await rpc('prefs.get', {})) as { sessionTools: boolean }).sessionTools).toBe(true)
   })
 
   it('puts the ceiling back to the preset\'s own with "preset"', async () => {
@@ -567,7 +578,7 @@ describe('set_agent_limits', () => {
 
   it('asks nothing when the limits already are as asked', async () => {
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'set_agent_limits', { sessionTools: true, agentDepth: 1 })
+    const r = await run(orc.id, 'set_agent_limits', { agentCeiling: 'preset', agentDepth: 1 })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('The limits already are as asked')
@@ -595,9 +606,9 @@ describe('set_agent_limits', () => {
 
   it('is the one way: set_preferences still has no field for them, and get_preferences names this command', async () => {
     const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { sessionTools: false } })
+    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { agentDepth: 3 } })
     expect(r.isError).toBe(true)
-    expect((await prefs()).sessionTools).toBe(true)
+    expect((await prefs()).agentDepth ?? 1).toBe(1)
     expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'get_preferences', args: {} })).text).toContain('set_agent_limits changes them')
   })
 })

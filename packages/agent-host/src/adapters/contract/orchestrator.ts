@@ -71,8 +71,6 @@ export type TrustRequest =
 
 /** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
 export type AgentLimitChanges = {
-  /** Centralu's read-only tools in ordinary sessions */
-  sessionTools?: boolean
   /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
   agentCeiling?: number | 'preset'
   /** How many levels of sessions may start agents, 1 to 3 */

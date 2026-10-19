@@ -1495,9 +1495,10 @@ ids). The orchestrator's instructions point to these and the machine commands in
   may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
   stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
   person's answer to an app's own capability question is not given from here: the app asks the person.
-- `set_agent_limits { sessionTools?, agentCeiling?, agentDepth? }` changes the person's limits on agents: Centralu's
-  read-only tools in ordinary sessions, the running agents per project (a number, 0 unlimited, or `"preset"` for the
-  preset's own) and the levels of sessions that may start agents (1 to 3). They bound what agents do and cost, the
+- `set_agent_limits { agentCeiling?, agentDepth? }` changes the person's limits on agents: the running agents per project
+  (a number, 0 unlimited, or `"preset"` for the preset's own) and the levels of sessions that may start agents (1 to 3).
+  "Let sessions look at other sessions" (`sessionTools`) is not one of them: it is not a setting any more (owner decision
+  2026-10-20, #1321), so the command has no field for it and refuses one by name. They bound what agents do and cost, the
   orchestrator's own children included, so **every change asks**, narrowing too, in every preset: the card names each
   limit as it is and as it becomes (`→`). Values are checked with `prefs.set`'s own schema before the card; nothing to
   change asks nothing. After Allow the limits are read again, and when the person changed one in Settings while the card
