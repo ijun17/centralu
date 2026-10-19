@@ -366,8 +366,8 @@ describe('a deleted project gives its folder back', () => {
     const pid = project()!.id
     await door('projects.delete', { projectId: pid })
     await settling
-    // The person adds the folder again: a new project, at the same path
-    store.projects.addProject({ id: 'again', path: appDir(), name: 'notes' })
+    // The person adds the folder again, spelled another way (Windows and macOS fold case): a new project there
+    store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
     await door('trash.empty', {})
     await settling
     expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)

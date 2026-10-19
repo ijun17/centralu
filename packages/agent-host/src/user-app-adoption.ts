@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
+import { canonicalPath } from './dev-services/path-guard.js'
 import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
 
 /**
@@ -93,6 +94,28 @@ export function adoptedProjectOf(store: Pick<Store, 'adoption'>, appId: string):
 /** A path spelled as a registered project's is: resolved, with a capital drive letter (`ProjectCreation.addProject`) */
 const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
 
+/**
+ * Whether a kept path (a project's, a trashed session's) could name this folder (#1204). It errs toward yes: a folder
+ * wrongly kept is only kept, while one wrongly moved is a live project's. So ASCII case is folded on every system (a
+ * case-sensitive disk may keep one folder too many), the folder's real spelling counts as well as its own, and a kept
+ * path with a Windows short name is resolved. Nothing on a share is resolved: it may not answer
+ */
+function folderMatcher(dir: string): (kept: string) => boolean {
+  const ascii = (p: string) => p.replace(/[A-Z]/g, (c) => c.toLowerCase())
+  const real = canonicalPath(dir)
+  const near = new Set([ascii(resolve(dir)), ascii(real)])
+  return (kept) => {
+    const k = resolve(kept)
+    if (near.has(ascii(k))) return true
+    if (!k.includes('~') || k.startsWith('\\\\')) return false
+    try {
+      return realpathSync.native(k) === real
+    } catch {
+      return false
+    }
+  }
+}
+
 export class UserAppAdoption {
   private running: Promise<number> | null = null
   private again = false
@@ -131,7 +154,9 @@ export class UserAppAdoption {
    */
   settle(): Promise<void> {
     if (!this.ready) return Promise.resolve()
-    return this.run().then(
+    // A run under way may have read the trash before this change: a run of its own after it
+    const prior = this.running
+    return (prior ? prior.catch(() => 0).then(() => this.run()) : this.run()).then(
       () => undefined,
       (e: Error) => console.error(`[apps] giving back the folders of deleted projects failed: ${e.message}`),
     )
@@ -188,9 +213,10 @@ export class UserAppAdoption {
    * the folder (the person may have added it again), and nothing in the trash would register one there
    */
   private released(record: AdoptedRecord, dir: string): boolean {
-    const path = spelled(dir)
-    if (this.deps.store.projects.listProjects().some((p) => p.id === record.projectId || p.path === path)) return false
-    return !this.deps.store.trash.holdsProject(record.projectId, path)
+    const projects = this.deps.store.projects.listProjects()
+    if (projects.some((p) => p.id === record.projectId) || this.deps.store.trash.holdsProject(record.projectId)) return false
+    const here = folderMatcher(dir)
+    return !projects.some((p) => here(p.path)) && !this.deps.store.trash.trashedProjectPaths().some(here)
   }
 
   /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */
@@ -241,6 +267,7 @@ export class UserAppAdoption {
     const mark = randomUUID()
     mkdirSync(join(app.dir, ADOPTION_MARK[0]), { recursive: true })
     writeFileSync(join(app.dir, ...ADOPTION_MARK), `${mark}\n`)
+    this.retries.delete(app.appId)
     const moved = this.deps.store.adoption.carry(app.appId, { path, name: basename(path), trusted: !held, newId: projectId }, mark)
     this.deps.sessionsMoved(moved.sessions, moved.projectId)
     console.error(`[apps] user-folder app ${app.appId} is now the app of project ${moved.projectId} (${path})${held ? ', untrusted until enabled' : ''}`)

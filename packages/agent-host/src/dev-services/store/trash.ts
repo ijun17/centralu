@@ -242,18 +242,31 @@ export class TrashRecords {
   }
 
   /**
-   * Whether the trash holds a session of this project, or of any project at this folder (its record names either):
-   * restoring one registers its project again at that path, or joins the project found there
-   * (`SessionTrash.restoreSession`), so the folder has to stay while this is true (#1204)
+   * Whether the trash holds a session of this project (its record names it): restoring one registers the project again
+   * under the same id and at the same path (`SessionTrash.restoreSession`), so its folder has to stay while this is
+   * true (#1204)
    */
-  holdsProject(projectId: string, path: string): boolean {
+  holdsProject(projectId: string): boolean {
     return !!this.db
       .prepare(
         `SELECT 1 FROM sessions
-          WHERE deleted_at IS NOT NULL AND json_valid(trash)
-            AND (json_extract(trash, '$.projectId') = ? OR json_extract(trash, '$.projectPath') = ?) LIMIT 1`,
+          WHERE deleted_at IS NOT NULL AND json_valid(trash) AND json_extract(trash, '$.projectId') = ? LIMIT 1`,
       )
-      .get(projectId, path)
+      .get(projectId)
+  }
+
+  /** The project folders the trash's sessions name, in their kept spelling: a restore registers or joins a project there (#1204) */
+  trashedProjectPaths(): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT json_extract(trash, '$.projectPath') AS path FROM sessions
+            WHERE deleted_at IS NOT NULL AND json_valid(trash) AND json_extract(trash, '$.projectPath') IS NOT NULL`,
+        )
+        .all() as { path: unknown }[]
+    )
+      .map((r) => r.path)
+      .filter((p): p is string => typeof p === 'string')
   }
 
   /**

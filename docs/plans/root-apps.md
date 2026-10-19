@@ -40,7 +40,8 @@ nothing inherited.
   too (§5). Data, logs and kept versions stay on disk, as they do for an inner app today.
   A project that was a user-folder app gives its folder back once nothing in the trash can restore the
   project (#1204): the folder to `<data>/app-trash/`, its data, logs and kept versions back to `_user/<id>`,
-  in place of the old key's copy (§4), which is that app's `_user` copy gone before the later release's step.
+  in place of the old key's copy. That app's `_user` copies (§4) are replaced then; the others still wait for a later
+  release.
 
 ## 3. Creating and importing
 
