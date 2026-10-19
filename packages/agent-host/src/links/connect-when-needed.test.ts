@@ -293,7 +293,7 @@ describe('a machine that connects when needed (#1134)', () => {
      * scripted agent), and a turn ends in `waiting_input`, not `idle`. A loaded runner then read the history after the
      * reconnect before the reply was in it (a full-tier failure of #1238)
      */
-    await eventually(async () => (await remote.mgr.loadMessages(there)).some((m: any) => m.payload?.text === 'echo: while you were away'))
+    await eventually(async () => (await remote.mgr.loadMessages(there, 200)).some((m: any) => m.payload?.text === 'echo: while you were away'))
     await eventually(() => remote.mgr.listSessions().find((x) => x.id === there)?.state === 'waiting_input')
     await expect(hub.call('messages.load', { sessionId: s.id })).rejects.toMatchObject({ data: { reason: 'unreachable' } })
 
