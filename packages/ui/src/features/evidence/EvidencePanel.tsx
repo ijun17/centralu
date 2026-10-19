@@ -164,7 +164,8 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
           </button>
         </Tooltip>
       )}
-      <span className="ml-auto shrink-0">
+      {/* A flex box, not an inline span: a line box would sit the button 2px above the header's middle, where the rail's expand button is */}
+      <span className="ml-auto flex shrink-0">
         <IconButton
           label={`Collapse panel (${sc('mod', 'B')})`}
           onClick={() => togglePanel(false)}
