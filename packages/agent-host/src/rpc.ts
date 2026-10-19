@@ -118,6 +118,8 @@ export type MachinesPort = {
   probe(sshTarget: string): Promise<MachineProbe>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
+  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
+  hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'>
   /** The reverse direction's switch for one machine (#550) */
   setAsks(id: string, on: boolean): Promise<MachineInfo>
 }
@@ -874,6 +876,10 @@ export function createRpcHandler(
       return requireMachines().autostart(machineId, on)
     },
     'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
+    'machines.hubAuto': async (p) => {
+      const { machineId, allowed } = RpcMethods['machines.hubAuto'].params.parse(p)
+      return { state: await requireMachines().hubAuto(machineId, allowed) }
+    },
     // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
     'machines.setAsks': async (p) => {
       const { machineId, on } = RpcMethods['machines.setAsks'].params.parse(p)

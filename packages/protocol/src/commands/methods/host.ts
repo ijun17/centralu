@@ -190,6 +190,17 @@ export const hostMethods = {
    */
   'machines.activity': { params: z.object({ machineId: MachineId }), result: z.object({ activity: HostActivity.nullable() }) },
   /**
+   * A linked machine's own "Allow auto from a linked computer" switch (#1273 review, owner decision 2026-10-19), read,
+   * or set when `allowed` is given (`host.hubAuto` / `host.setHubAuto` there), for the hub's Settings → Machines: a
+   * machine with no window of its own (`centralu serve`) is set here. The machine reads it at each start; this is the
+   * person's say, no boundary against the hub. `older`: that machine's Centralu predates it; `unreachable`: the link is
+   * not up. Additive
+   */
+  'machines.hubAuto': {
+    params: z.object({ machineId: MachineId, allowed: z.boolean().optional() }),
+    result: z.object({ state: z.enum(['on', 'off', 'older', 'unreachable']) }),
+  },
+  /**
    * Lets a linked machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7,
    * owner decision 2026-10-18): the per-machine switch, off by default, stored with the machine. Each pair (a session
    * there, a project here) is asked on this computer's card once; off forgets every pair approved for it. Additive

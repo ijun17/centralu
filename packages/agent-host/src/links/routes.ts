@@ -314,6 +314,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.uninstall': HUB,
   'machines.autostart': HUB,
   'machines.activity': HUB,
+  'machines.hubAuto': HUB,
   // The reverse direction's switch and pairs are this computer's own (#550)
   'machines.setAsks': HUB,
   'machines.askConsents': HUB,

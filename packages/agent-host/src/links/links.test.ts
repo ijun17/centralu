@@ -1822,6 +1822,42 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
       expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
     })
 
+    // #1273 review (owner decision): a machine with no window of its own is set from the hub's Settings → Machines
+    it("reads and sets the machine's own switch from the hub, which the machine then keeps to", async () => {
+      const { remote, hub, answer, start } = await rig()
+      const u = await ui(hub.port)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'on' })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).toEqual({ state: 'off' })
+      expect(remote.mgr.uiPreferences().hubAuto).toBe(false)
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const call = start()
+      expect((await answer('allow')).detail).toMatchObject({ preset: 'normal', autoWithheld: 'machine_off' })
+      expect(await call).toMatchObject({ ok: true })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: true })).toEqual({ state: 'on' })
+      expect(remote.mgr.uiPreferences().hubAuto).toBe(true)
+    })
+
+    // #1273 review: any failure there read as the link being down
+    it('says a failure there in its own words, not as the link being down', async () => {
+      const { hub } = await rig({
+        remote: {
+          onCall: (method) => {
+            if (method === 'host.setHubAuto') throw new Error('the store is read-only')
+          },
+        },
+      })
+      const u = await ui(hub.port)
+      await expect(u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).rejects.toThrow(/did not answer for its "Allow auto from a linked computer": .*the store is read-only/)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'on' })
+    })
+
+    it('says a machine from before the switch has none to set', async () => {
+      const { hub } = await rig({ remote: { without: ['host.hubAuto', 'host.setHubAuto'] } })
+      const u = await ui(hub.port)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'older' })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).toEqual({ state: 'older' })
+    })
+
     // #1273 review (RVIA 1): a caller that left auto kept giving its auto child work there
     it('gives no work to a child that runs above its caller, once the caller has less', async () => {
       const { hub, card, agent } = await rig()
