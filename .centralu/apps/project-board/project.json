@@ -17,7 +17,8 @@
     "fullTier": "full tier"
   },
   "queue": {
-    "batch": { "min": 1, "max": 6 },
+    "batch": { "min": 1, "max": 4 },
+    "flakyJobs": [],
     "conflicts": {
       "mechanical": [
         { "files": ["pnpm-lock.yaml"], "run": [["pnpm", "install", "--lockfile-only", "--ignore-scripts"]] },
