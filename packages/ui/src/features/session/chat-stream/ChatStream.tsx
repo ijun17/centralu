@@ -404,7 +404,7 @@ function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: nu
         {children}
       </div>
       {/* When the answer was said, under its last bubble only (`answerEnds`), as a chat app writes it */}
-      {ends && at !== undefined && <SaidAt at={at} className="pl-2 pt-1" />}
+      {ends && at !== undefined && <SaidAt at={at} className="pl-2" />}
     </>
   )
 }

@@ -57,7 +57,7 @@ export const ChatRow = memo(function ChatRow({
 }) {
   if (item.kind === 'user') {
     return (
-      <div className="flex flex-col items-end gap-0.5" data-testid="msg-user">
+      <div className="flex flex-col items-end" data-testid="msg-user">
         {/*
           A message that came in through delegation (FR-11). Placed in the same spot (right) as
           the person's own messages — to the session it is equally "a directive received" —
@@ -65,7 +65,7 @@ export const ChatRow = memo(function ChatRow({
           (the palette rule): the distinction is made by shape, not brightness.
         */}
         {item.from && (
-          <div className="text-xs text-ink-muted" data-testid="msg-user-from">
+          <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from">
             {item.from.name} ⤷
           </div>
         )}
@@ -75,7 +75,7 @@ export const ChatRow = memo(function ChatRow({
           one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
-          <div className="text-xs text-ink-muted" data-testid="msg-user-from-app">
+          <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-app">
             {item.fromApp.name} app ⤷
           </div>
         )}
@@ -100,7 +100,7 @@ export const ChatRow = memo(function ChatRow({
           sent text differing from the rendered text.
         */}
         {item.attachments && item.attachments.length > 0 && (
-          <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
+          <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5 pb-0.5">
             {item.attachments.map((a, i) => (
               <UserAttachment key={`${a.path}-${i}`} att={a} />
             ))}
@@ -116,7 +116,7 @@ export const ChatRow = memo(function ChatRow({
             {item.text}
           </div>
         )}
-        {item.at !== undefined && <SaidAt at={item.at} className="pr-2 pt-0.5" />}
+        {item.at !== undefined && <SaidAt at={item.at} className="pr-2" />}
       </div>
     )
   }
@@ -601,10 +601,14 @@ export function trashedLine(trashed: number, more: boolean): string {
   return `${what} moved to the trash. Settings → Trash restores ${one ? 'it' : 'them'}.`
 }
 
-/** When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink */
+/**
+ * When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink. The 4px between the
+ * bubble and the time (owner, 2026-10-19) is its own, so the person's row and the answer's share one value; a caller
+ * gives only the side padding that lines the time up with the bubble's corner.
+ */
 export function SaidAt({ at, className = '' }: { at: number; className?: string }) {
   return (
-    <div className={`text-2xs text-ink-faint ${className}`} data-testid="said-at">
+    <div className={`pt-1 text-2xs text-ink-faint ${className}`} data-testid="said-at">
       {formatSaidAt(at)}
     </div>
   )
