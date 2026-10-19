@@ -12,6 +12,19 @@ export function trustedJsonText(value: string): string {
 }
 
 /**
+ * A name as one quoted line for a card the person reads before deleting or a line the model reads (#1219): JSON-quoted,
+ * and every control and format character (bidi overrides, zero-width ones, C1 controls) written as an escape, so the
+ * line reads as what it holds. Cut to `max` characters. `trustedJsonText` leaves the format characters alone.
+ */
+export function plainQuoted(value: string, max = 60): string {
+  const cut = value.length > max ? `${value.slice(0, max)}…` : value
+  return JSON.stringify(cut).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, (c) => {
+    const code = c.codePointAt(0)!
+    return code > 0xffff ? `\\u{${code.toString(16)}}` : `\\u${code.toString(16).padStart(4, '0')}`
+  })
+}
+
+/**
  * How many rows a reader's list shows (#984): its view spans every project and linked machine, and the list rides in
  * its context. The rest are counted, with the way to narrow.
  */

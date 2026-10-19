@@ -130,6 +130,11 @@ export type SessionSummary = {
    */
   plan: { text: string; status: 'pending' | 'inProgress' | 'completed' }[] | null
   /**
+   * A session on a linked computer started this one (#1273, `SessionInfo.startedFromHub`): its row and header show its
+   * preset. Absent from a host that predates it.
+   */
+  startedFromHub?: boolean
+  /**
    * The app that created this session (#81). Null means it has no owner — then the sidebar takes it.
    * All the core knows is a single id; only the app knows what it means.
    */

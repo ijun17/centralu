@@ -120,7 +120,14 @@ export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_sta
   const model = d.model ? ` (${d.model}${d.difficulty ? `, your choice for ${d.difficulty} work` : ''})` : ''
   // The name the caller gave it (#861) is what the sidebar will show, so the person reads it here first
   const named = d.name ? ` as ${quoted(d.name)}` : ''
-  return `Start ${d.tool}${model}${named} in ${where} with ${d.preset} permissions, to ${d.text}?`
+  // An auto caller's child that will not run auto there says why (#1273): the person reads it before allowing
+  const withheld =
+    d.autoWithheld === 'machine_off'
+      ? ` (not auto: ${quoted(d.machine ?? '')} does not allow auto from a linked computer)`
+      : d.autoWithheld === 'older'
+        ? ` (not auto: ${quoted(d.machine ?? '')} runs an older Centralu that cannot take it)`
+        : ''
+  return `Start ${d.tool}${model}${named} in ${where} with ${d.preset} permissions${withheld}, to ${d.text}?`
 }
 
 /** The question an update card asks (#581) */

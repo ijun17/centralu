@@ -567,8 +567,9 @@ with no way back.
   one click could cause. Nobody is asked about their tool files or worktrees then, so those stay even
   when the trash is emptied. The project's own rows (project-scope rules, usage totals, answers given
   to its apps) go with the project as before.
-- **Nobody but the person deletes for good.** The trash is reached only through the UI's RPC; the
-  agents' tools and the apps' broker have no verb for it. An agent can put a session in the trash (a session's
+- **Nobody but the person decides to delete for good.** The trash is reached through the UI's RPC, and by the
+  central orchestrator's `delete_trashed` and `empty_trash` (#1219), which make the same calls only after a card the person
+  answers, naming what goes. The agents' other tools and the apps' broker have no verb for it. An agent can put a session in the trash (a session's
   deletion of an agent it started, `agent_session` `delete`, does; a child without a worktree is stopped first), never take one out of it.
 - **The one deletion the host makes itself: a finished app-agent session** ([#378](https://github.com/ijun17/centralu/issues/378)).
   A session an app stood up with `run_agent` is deleted for good once its run ends cleanly, because what

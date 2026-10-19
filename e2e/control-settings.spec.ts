@@ -93,6 +93,23 @@ test("Settings: the sessions' read-only tools start on, and turning them off is 
   await expect(page.getByTestId('settings-session-tools')).not.toBeChecked()
 })
 
+// #1273: a linked computer's auto session starts agents here under auto unless the person turns it off
+test('Settings: auto from a linked computer starts on, and turning it off is remembered', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  await open()
+  await expect(page.getByTestId('settings-hub-auto')).toBeChecked()
+  await page.getByTestId('settings-hub-auto').uncheck()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.hubAuto)).toBe(false)
+
+  await page.reload()
+  await open()
+  await expect(page.getByTestId('settings-hub-auto')).not.toBeChecked()
+})
+
 test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
