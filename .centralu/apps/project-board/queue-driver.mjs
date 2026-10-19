@@ -22,6 +22,8 @@ import {
   deleteBranch,
   FATAL,
   GitHubError,
+  markDraft,
+  markReady,
   mergePr,
   openPrsOnBase,
   QUEUE_PR_FIELDS,
@@ -336,6 +338,32 @@ export async function land(item, pr, ref, renew, defaultBranch, { provedAt = nul
   }
   if (!renew()) return { yielded: true }
   const msg = squashMessage({ number: pr.number, title: pr.title, description: pr.body })
+  // An integrated record is a draft until this moment (#1259 step 3): readied and squashed in one step by the lease
+  // holder, and a draft again when the squash does not happen, so no other path lands it unjudged
+  const record = item.auto && pr.isDraft
+  const redraft = () => (record ? markDraft(repo, pr.number).catch((e) => console.error(`[project-board] merge queue: ${n} could not be turned back into a draft: ${e?.message ?? e}`)) : null)
+  if (!record) return squash(item, pr, n, msg, defaultBranch)
+  // Whatever happens between readying and the squash (GitHub refusing it, a rate limit, no network), it is a draft again
+  let out
+  try {
+    await markReady(repo, pr.number)
+    out = await squash(item, pr, n, msg, defaultBranch)
+  } catch (e) {
+    await redraft()
+    throw e
+  }
+  if (out.state !== 'merged') {
+    await redraft()
+    // Turned back into a draft, a squash GitHub held (its own merge queue, auto-merge) is not coming
+    if (out.reason?.kind === 'not-merged')
+      out.reason = { kind: 'not-merged', text: `gh pr merge answered for ${n} at ${short(pr.headRefOid)}, but GitHub does not show it merged (a merge queue or auto-merge on GitHub may hold it). Handed over with integrate, it was turned back into a draft, which also stops what GitHub held: integrate it again once that is sorted out.` }
+  }
+  return out
+}
+
+/** The squash itself, on the head that was read, and GitHub's word that it merged. */
+async function squash(item, pr, n, msg, defaultBranch) {
+  const repo = item.repo
   const why = await mergePr(repo, pr.number, pr.headRefOid, msg.subject, msg.body)
   if (why) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
   // gh can exit 0 without a merge (GitHub's own merge queue, auto-merge): only GitHub's word counts
@@ -496,6 +524,14 @@ async function pollItem(item, { now, ref, renew, save, landed = [] }) {
   const events = []
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
 
+  // A record handed over with integrate stays a draft until it lands (#1259 step 3): one found ready for review (a
+  // person, mark_ready, a driver stopped between readying and squashing) is turned back, before anything reads it
+  if (item.auto && pr.state === 'OPEN' && !pr.isDraft) {
+    if (!renew()) return { yielded: true }
+    await markDraft(repo, item.pr)
+    Object.assign(pr, { isDraft: true, mergeStateStatus: 'DRAFT' })
+    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was ready for review; turned back into a draft: a record handed over with integrate stays one until the queue squashes it, so nothing else (merge_when_green, an older board, a merge by hand) can land it unjudged.` })
+  }
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }

@@ -231,7 +231,8 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   if (pr.state === 'MERGED') return mainTree === step.tree ? { do: 'landed' } : { do: 'stop', text: `${n} was merged outside the batch` }
   if (pr.state !== 'OPEN') return { do: 'stop', text: `${n} was closed` }
   if (pr.headRefOid !== step.head) return { do: 'stop', text: `${n}'s head moved from ${short(step.head)} to ${short(pr.headRefOid)}` }
-  if (pr.isDraft) return { do: 'stop', text: `${n} became a draft` }
+  // An integrated record is a draft until land() readies and squashes it (#1259 step 3)
+  if (pr.isDraft && !item.auto) return { do: 'stop', text: `${n} became a draft` }
   if (mainTree !== prevTree) return { do: 'stop', text: `${defaultBranch} is not the tree the batch had before ${n} (something else landed)` }
   if (pr.baseRefName !== defaultBranch) {
     if (lowerBranches.includes(pr.baseRefName)) return { do: 'retarget', base: defaultBranch }
@@ -242,7 +243,7 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
     return { do: 'stop', text: `GitHub says ${pr.mergeStateStatus === 'BLOCKED' ? 'BLOCKED (a rule asks for something the batch does not give)' : pr.mergeStateStatus} for ${n}` }
   const clean =
     pr.mergeable === 'MERGEABLE' &&
-    (pr.mergeStateStatus === 'CLEAN' || (pr.mergeStateStatus === 'UNSTABLE' && checks && onlyCancelledByBatch(checks, b.cancelled.map((c) => c.suite), superseded)))
+    (pr.mergeStateStatus === 'CLEAN' || (item.auto && pr.isDraft && pr.mergeStateStatus === 'DRAFT') || (pr.mergeStateStatus === 'UNSTABLE' && checks && onlyCancelledByBatch(checks, b.cancelled.map((c) => c.suite), superseded)))
   if (clean) return { do: 'merge' }
   const since = b.uncleanSince?.pr === step.pr ? b.uncleanSince.at : new Date(now).toISOString()
   if (now - Date.parse(since) > LANDING_WAIT_MS) return { do: 'stop', text: `GitHub has said ${pr.mergeStateStatus ?? 'nothing'} for ${n} for ${Math.round(LANDING_WAIT_MS / 60_000)} minutes` }

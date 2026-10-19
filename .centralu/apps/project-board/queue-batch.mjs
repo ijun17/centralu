@@ -161,7 +161,7 @@ async function build(b, ctx) {
       continue
     }
     const pr = await readPr(repo, m.pr, QUEUE_PR_FIELDS)
-    if (pr.state === 'OPEN' && !pr.isDraft && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
+    if (pr.state === 'OPEN' && (!pr.isDraft || it.auto) && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
     else gone.push(m.pr)
   }
   if (kept.length < KEEP_MIN) {
@@ -289,7 +289,7 @@ async function runCi(b, ctx) {
       continue
     }
     const pr = await readPr(repo, s.pr, QUEUE_PR_FIELDS)
-    if (pr.state !== 'OPEN' || pr.isDraft || pr.headRefOid !== s.head) left.push(s.pr)
+    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) left.push(s.pr)
   }
   if (left.length) {
     await cancelBatchRuns(b, renew)
