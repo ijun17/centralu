@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,6 +54,7 @@ import {
   moveIntoSignIn,
   nothingRunning,
   runServe,
+  runWindow,
   serveFrom,
   processStartTime,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -983,6 +985,119 @@ process.stdin.once('data', () => {
       await h.server.close()
     }
   }, 60_000 * SLOW)
+})
+
+/*
+ * #1223: the desktop window on Windows found the folder held by the host a hub's link started there, and its own host
+ * was refused by the lock: "Could not start the agent host". With serve installed in the folder, the window runs
+ * `serve --window` instead, which hands it the folder's serve host (started in this sign-in when none runs)
+ */
+describe('centralu serve --window: the desktop window uses the folder’s serve host', () => {
+  async function folder() {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    return { d, state: readServeState(d)! }
+  }
+  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive') => {
+    const server = new HostServer({ port: state.port!, token: state.token, logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+    await server.listen()
+    return server
+  }
+  const window = (d: string, o: Record<string, unknown> = {}) => {
+    const lines: string[] = []
+    const stdin = new PassThrough()
+    const calls = { detach: 0, signIn: 0 }
+    const done = runWindow({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'win32',
+      write: (l: string) => void lines.push(l),
+      stdin,
+      detach: async () => {
+        calls.detach++
+        throw new Error('not asked')
+      },
+      signIn: async () => {
+        calls.signIn++
+        return { started: true, name: 'Centralu host' }
+      },
+      pollMs: 50,
+      misses: 3,
+      ...o,
+    }) as Promise<number>
+    return { lines, stdin, calls, done }
+  }
+
+  it('hands the window the running host’s port and token as a ready line, and leaves the host running when the window goes', async () => {
+    const { d, state } = await folder()
+    const server = await hostOn(state)
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(JSON.parse(w.lines[0]!)).toEqual({ ready: true, port: state.port, token: state.token, db: join(d, 'store.db') })
+      expect(w.calls).toEqual({ detach: 0, signIn: 0 })
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+      expect((await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })).running).toBe(true)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('starts the host the way --detach does when none runs, then ends when that host stops answering, so the window starts it again', async () => {
+    const { d, state } = await folder()
+    let server: HostServer | null = null
+    try {
+      const w = window(d, {
+        detach: async (o: { write: (l: string) => void }) => {
+          server = await hostOn(state)
+          o.write(`${JSON.stringify({ v: 1, port: state.port, token: state.token, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
+          return 0
+        },
+      })
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: state.token })
+      await server!.close()
+      expect(await w.done).toBe(1)
+    } finally {
+      await (server as HostServer | null)?.close()
+    }
+  })
+
+  it('says why and prints no ready line when the host cannot be started', async () => {
+    const { d } = await folder()
+    const w = window(d, {
+      detach: async (o: { write: (l: string) => void }) => {
+        o.write(`${JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'blocked' } })}\n`)
+        return 1
+      },
+    })
+    expect(await w.done).toBe(1)
+    expect(w.lines).toEqual([])
+  })
+
+  it('uses a host in a network logon now, and starts the sign-in task that moves it into this sign-in once idle (#1224)', async () => {
+    const { d, state } = await folder()
+    const server = await hostOn(state, 'network')
+    try {
+      const w = window(d)
+      await vi.waitFor(() => expect(w.lines).toHaveLength(1))
+      expect(w.calls).toEqual({ detach: 0, signIn: 1 })
+      w.stdin.end()
+      expect(await w.done).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('takes no port: the one serve recorded is the window’s', () => {
+    expect(parseServeArgs(['--window'])).toEqual({ mode: 'window', port: null })
+    expect(parseServeArgs(['--window', '--port', '9000']).error).toMatch(/--window .* takes no --port/)
+  })
 })
 
 describe('the install field and the managed launcher (remote-hub.md §10.1)', () => {

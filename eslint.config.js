@@ -37,6 +37,7 @@ export const PLATFORM_MODULES = [
   'packaging/npm/centralu/bin/serve-host.mjs',
   'packaging/npm/centralu/bin/serve-install.mjs',
   'packaging/npm/centralu/bin/serve-run.mjs',
+  'packaging/npm/centralu/bin/serve-window.mjs',
   'packaging/npm/centralu/bin/serve-windows.mjs',
   // TODO: remote phase 3 is changing the hub's links; revisit what platform checks they need then.
   'packages/agent-host/src/links/**',

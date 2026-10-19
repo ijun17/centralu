@@ -1665,6 +1665,7 @@ by hand) used to run the keeper in the window's executable; it now fails to star
 | Linux debug | none | `Direct` | the source host through tsx | as above |
 | Linux release | `CC_USE_KEEPER=1` | `Keeper` | the window copies the keeper beside it (`usr/bin/` in the AppImage) and its bundled host into `<data>/content/<version>/` (`keeper/carried.rs`: hashed, renamed into place, read-only; not signed) and starts the keeper from the copy, which runs the host from it; a copy that fails falls back to the keeper beside the window | nothing long-lived may run from the AppImage's mount, which goes when its window quits (runtime-lessons FI4); no shell off macOS |
 | Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
+| Windows release, `centralu serve` installed in the data folder (`<data>/remote/bin/centralu.cmd` or `<data>/bin/centralu.cmd`) | none | `Direct` (`Host::Serve`) | that launcher as `centralu serve --window`: it starts the folder's serve host in this sign-in when none runs (the sign-in task, as `--detach` does), prints that host's port and token as the ready line, and ends when the window closes its stdin, leaving the host running. A host in a network logon is used as it is, and the sign-in task moves it into this sign-in once idle | one host per data folder: a linked hub's serve holds this folder, or will, and the window's own host was refused by the lock ("Could not start the agent host", #1223). The window and the hub's link are two clients of one host |
 
 Not decided by the window, each in its own place:
 
@@ -1673,7 +1674,7 @@ Not decided by the window, each in its own place:
 | What the shell does once opened: install or keep, pinned or not, verify, copy, and the reasons it refuses | `shell::prepare`, `shell::install::plan`, `shell::start::start` in the window; the shell crate ([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
 | A keeper started directly handing itself over (§4.4): to the `centralu-keeper` the window names (since #444). An executable of any other name (a window from before #440 names its own) is refused and the keeper stays on its build (#461) | `server::switch`, `server::upgrade`, `handoff::give` |
 | A keeper from verified content handing itself over: verifies and copies the new content, then hands over to `<data>/content/<new>/centralu-keeper` | `server::content_route` (§4.4) |
-| `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper | `packaging/npm/centralu/bin/serve.mjs` and the `serve-*.mjs` modules beside it, one concern each (§4.7) |
+| `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper. On Windows a window in the same data folder attaches to it (`serve --window`, §4.0) | `packaging/npm/centralu/bin/serve.mjs` and the `serve-*.mjs` modules beside it, one concern each (§4.7) |
 | `pnpm dev` and e2e: `pnpm host` runs the source host; no window, no keeper | `CONTRIBUTING.md` |
 
 ### 4.1 Who holds the host: the keeper (#280, option C step 1)

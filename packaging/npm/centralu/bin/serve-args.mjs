@@ -7,6 +7,9 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
   centralu serve --port <n>       ... on that port (kept for the next start; default ${DEFAULT_SERVE_PORT})
   centralu serve --detach         Start it in the background, outside this session; return once it answers
   centralu serve --stop           Ask the running host to stop, and wait until it has
+  centralu serve --window         What the Centralu window on Windows runs here: start the host if
+                                  none runs, print its port and token as a ready line, stay until
+                                  stdin ends, and leave the host running
   centralu serve --connection     Print how to reach it as one JSON line, then exit
   centralu serve --rotate-token   Replace the token (a running serve keeps the old one until restarted)
   centralu serve --from <hub>     With serve or --detach: the name of the computer whose link asks,
@@ -27,7 +30,7 @@ paths, for SSH sessions whose PATH has neither npm's global folder nor node. Not
 from an install the app made over SSH, which has a launcher of its own.`
 
 /** The flags that each make serve a different command */
-const MODE_FLAGS = { '--connection': 'connection', '--rotate-token': 'rotate', '--detach': 'detach', '--stop': 'stop' }
+const MODE_FLAGS = { '--connection': 'connection', '--rotate-token': 'rotate', '--detach': 'detach', '--stop': 'stop', '--window': 'window' }
 const FLAG_OF = { ...Object.fromEntries(Object.entries(MODE_FLAGS).map(([f, m]) => [m, f])), autostart: '--autostart' }
 
 /** What `--autostart` takes */
@@ -97,6 +100,7 @@ export function parseServeArgs(argv) {
     return { error: '--port goes with `centralu serve`; `--connection` reports the port serve listens on' }
   }
   if (mode === 'stop' && port !== null) return { error: '--stop stops the serve that is running, on the port it recorded; it takes no --port' }
+  if (mode === 'window' && port !== null) return { error: '--window uses the serve that runs, or starts one on the port it recorded; it takes no --port' }
   if (mode === 'autostart') {
     if (port !== null) return { error: '--autostart takes no --port: the entry it writes starts serve on the port serve recorded' }
     return { mode, port, autostart }

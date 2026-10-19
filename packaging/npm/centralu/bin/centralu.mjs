@@ -53,6 +53,7 @@ import {
   runDetachedChild,
   runServe,
   runStop,
+  runWindow,
   SERVE_HELP,
 } from './serve.mjs'
 import { swapInto } from './swap.mjs'
@@ -632,7 +633,7 @@ switch (cmd) {
        * off|status` and `--rotate-token` start no host and keep working, so the hub can still ask this
        * machine what Node it has.
        */
-      const startsHost = args.mode === 'serve' || args.mode === 'detach' || (args.mode === 'autostart' && args.autostart === 'on')
+      const startsHost = args.mode === 'serve' || args.mode === 'detach' || args.mode === 'window' || (args.mode === 'autostart' && args.autostart === 'on')
       if (startsHost && belowFloor(process.versions.node, NODE_FLOOR)) {
         const message = oldNodeSentence(process.versions.node, NODE_FLOOR)
         console.error(`centralu serve: ${message}`)
@@ -657,6 +658,7 @@ switch (cmd) {
       if (args.mode === 'connection') process.exitCode = await printConnection(opts)
       else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port, from: args.from })
       else if (args.mode === 'stop') process.exitCode = await runStop(opts)
+      else if (args.mode === 'window') process.exitCode = await runWindow(opts)
       else if (args.mode === 'autostart') process.exitCode = await runAutostart({ ...opts, action: args.autostart })
       else if (spec) process.exitCode = await runDetachedChild({ ...opts, spec, port: args.port })
       else process.exitCode = await runServe({ ...opts, port: args.port, from: args.from })

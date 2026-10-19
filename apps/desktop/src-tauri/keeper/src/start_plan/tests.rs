@@ -15,6 +15,7 @@ fn window(os: Os, build: Build) -> Facts {
         bundled_host: false,
         keeper_answering: false,
         shell: Shell::Untried,
+        serve_launcher: false,
     }
 }
 
@@ -163,6 +164,30 @@ fn every_row_of_the_start_table() {
             false,
             Reason::NoKeeperHere,
         ),
+        (
+            "Windows release, centralu serve installed in the data folder: the serve host, through its launcher (#1223)",
+            Facts { serve_launcher: true, ..packaged(WIN) },
+            Direct,
+            Some(Serve),
+            false,
+            Reason::ServeInstalled,
+        ),
+        (
+            "Windows debug with serve installed: the source host, in the dev data folder",
+            Facts { serve_launcher: true, ..window(WIN, DEBUG) },
+            Direct,
+            Some(Source),
+            true,
+            Reason::NoKeeperHere,
+        ),
+        (
+            "Windows release, CC_HOST_CMD with serve installed: that command",
+            env(Facts { serve_launcher: true, ..packaged(WIN) }, Env { host_cmd: Var::Set, ..Env::default() }),
+            Direct,
+            Some(Command),
+            false,
+            Reason::HostCommand,
+        ),
     ];
     for (name, facts, mode, host, dev, reason) in rows {
         let p = plan(&facts);
@@ -175,6 +200,10 @@ fn every_row_of_the_start_table() {
 /// #461 made it refuse unless a debug window asked (`keeper::exe::run_from_window`).
 fn legacy(f: &Facts) -> (StartMode, Option<Host>, bool) {
     let release = f.build == Build::Release;
+    // Added on purpose by #1223: a Windows release whose data folder has serve's launcher uses that host
+    if f.os == Os::Windows && f.serve_launcher && release && f.bundled_host && f.env.host_cmd == Var::Unset {
+        return (StartMode::Direct, Some(Host::Serve), false);
+    }
     let unix = f.os != Os::Windows;
     let macos = f.os == Os::MacOs;
     // sidecar::use_keeper
@@ -244,8 +273,8 @@ fn the_plan_is_the_code_it_replaced() {
         for build in [DEBUG, RELEASE] {
             for host_cmd in vars {
                 for keeper_host_source in vars {
-                    // The five yes-or-no facts, one bit each
-                    for bits in 0u32..(1 << 5) {
+                    // The six yes-or-no facts, one bit each
+                    for bits in 0u32..(1 << 6) {
                         let bit = |i: u32| bits & (1 << i) != 0;
                         let f = Facts {
                             os,
@@ -254,6 +283,7 @@ fn the_plan_is_the_code_it_replaced() {
                             bundled_host: bit(2),
                             keeper_answering: bit(3),
                             shell: if bit(4) { Shell::FellBack } else { Shell::Untried },
+                            serve_launcher: bit(5),
                         };
                         let p = plan(&f);
                         assert_eq!((p.mode, p.host, p.dev), legacy(&f), "{f:?}");
@@ -263,7 +293,7 @@ fn the_plan_is_the_code_it_replaced() {
             }
         }
     }
-    assert_eq!(n, 3 * 2 * 3 * 3 * 32);
+    assert_eq!(n, 3 * 2 * 3 * 3 * 64);
 }
 
 /// Only macOS's release signs content (`scripts/release-npm.mts`). A Linux keeper from a copy its

@@ -146,6 +146,8 @@ struct Start {
     /// may be there: `tauri dev`'s resource folder is target/debug/, where a release build leaves a
     /// bundled host behind (`Plan::dev`).
     bundled: Option<PathBuf>,
+    /// The data folder's `centralu` launcher, when the plan runs the serve host through it (#1223, `Host::Serve`).
+    serve: Option<PathBuf>,
     #[cfg_attr(not(unix), allow(dead_code))]
     resources: Option<PathBuf>,
 }
@@ -153,9 +155,10 @@ struct Start {
 fn start_plan(app: &AppHandle) -> Start {
     let resources = app.path().resource_dir().ok();
     let found = resources.as_ref().map(|d| d.join("resources/host")).filter(|p| p.join("main.mjs").exists());
-    let facts = Facts::window(Env::current(), found.is_some());
+    let serve = centralu_keeper_core::os::serve_launcher();
+    let facts = Facts::window(Env::current(), found.is_some(), serve.is_some());
     let plan = start_plan::plan(&facts);
-    Start { bundled: found.filter(|_| !plan.dev), plan, facts, resources }
+    Start { bundled: found.filter(|_| !plan.dev), serve: serve.filter(|_| plan.host == Some(Host::Serve)), plan, facts, resources }
 }
 
 impl Supervisor {
@@ -341,7 +344,7 @@ mod tests {
     fn the_direct_path_stays_the_default_for_debug_builds() {
         // `pnpm app:dev` must keep running the host as the app's own child, unchanged.
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
-            assert!(!start_plan::plan(&Facts::window(Env::current(), true)).mode.keeper());
+            assert!(!start_plan::plan(&Facts::window(Env::current(), true, false)).mode.keeper());
         }
     }
 
