@@ -23,8 +23,6 @@ export type ToolProfileFacts = {
    * the bridge asks about.
    */
   builder: boolean
-  /** Settings' "Let sessions look at other sessions" (#320): the reader set is on unless the person turned it off */
-  sessionTools: boolean
 }
 
 /**
@@ -38,17 +36,13 @@ export function isAppAgent(f: Pick<ToolProfileFacts, 'kind' | 'appId' | 'builder
 }
 
 /**
- * Does this ordinary session get the light, read-only set (#320)? On unless the person turned it off
- * in Settings, and never for an agent session an app stood up (M4 D-1): that agent hands its answer
- * back to the app, so reading the project's conversations would carry them out to an app that was
- * never given them (the same reason it gets no apps, `appsFor`).
- *
- * The schemas are attached when the session starts, like every other bundle; turning the setting off
- * stops the calls at once (`readerToolsFor` and the bridge both ask again) and takes the schemas away
- * the next time the session starts.
+ * Does this ordinary session get the light, read-only set (#320)? Always, in a project (owner decision 2026-10-20: the
+ * Settings switch "Let sessions look at other sessions" is gone, and a stored "off" is not read), and never for an agent
+ * session an app stood up (M4 D-1): that agent hands its answer back to the app, so reading the project's conversations
+ * would carry them out to an app that was never given them (the same reason it gets no apps, `appsFor`).
  */
 export function readsOwnProject(f: ToolProfileFacts): boolean {
-  return f.kind === 'worker' && !!f.projectId && !isAppAgent(f) && f.sessionTools
+  return f.kind === 'worker' && !!f.projectId && !isAppAgent(f)
 }
 
 /**

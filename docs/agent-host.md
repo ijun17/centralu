@@ -98,8 +98,9 @@ the reason (the protocol keeps it for an older window), and the slot's column st
 The reader's read tools stay inside its project, and its tools object refuses changing
 settings outright, not only by name. Its agent tools follow §1.2.1, including auto's ownership opening. Its update tool requires consent outside auto (§4.5). It is never given to an agent
 session an app stood up (M4 D-1), whose answer goes
-back to the app. Settings → Orchestrator turns it off (`sessionTools`, on by default): a new session
-then gets no bundle, and a live one's calls are refused at once. For provenance (#90) a reader is
+back to the app. It cannot be turned off (owner decision 2026-10-20): `sessionTools` stays in the preferences record
+for older builds, but the host reads it as on whatever is stored and does not store an "off" an older window sends.
+For provenance (#90) a reader is
 still an ordinary worker — `directs()` counts every profile but `reader`.
 
 **Its size is the design constraint**, because it rides in every session on every turn. Measured
@@ -379,7 +380,7 @@ and siblings) whose work is over: not a turn cut short (`interruption`), failed 
 its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
 (`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being trashed is
 gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
-worktree manager's, which store step v48 copied into `askedBy`. With the session tools turned off it says so.
+worktree manager's, which store step v48 copied into `askedBy`.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
 is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
 stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.
@@ -1398,7 +1399,7 @@ the params with the method's schema and reads the answer with its result schema,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `error`, `done`, `allDone`,
   `whenFocused`, `sound`; merged one by one into the host's record, §1.4; no card, except to turn `approval` or `error` off, or `sound` while either would still notify, the ones that
-  tell the person a card waits, which ask in every preset and keep them on when denied). The arguments are strict: a field it does not have (`sessionTools`, `agentCeiling`,
+  tell the person a card waits, which ask in every preset and keep them on when denied). The arguments are strict: a field it does not have (`sessionTools`, always on and named by neither command, `agentCeiling`,
   `themeMode`) is refused by name. A theme names one preset (`THEME_PRESETS`, now in the protocol) or a theme file that
   reads cleanly; it sets the side of the theme's base and the stored mode to that same base, so the mode stays `dark` or
   `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
@@ -1464,7 +1465,7 @@ window's channel), grouped, and for each group one of three states.
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools`, `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter`, `accent` and `foldedGroups` are harmless and not asked for yet: *next* |
 | Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |

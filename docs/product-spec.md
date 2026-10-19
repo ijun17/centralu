@@ -324,7 +324,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   #564 (2026-10-12) one short instruction does, the rule of §1.2 worded as which tool answers which need. It
   rides in every session on every turn, so it was measured and cut: the four candidates in the orchestrator's
   words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
-  §1.1). Settings → Orchestrator → "Let sessions look at other sessions" turns it off.
+  §1.1). It is always on (owner decision 2026-10-20): the Settings switch "Let sessions look at other sessions" is gone.
 - **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
   `ask_project({ project, session?, task })` gives the task to an **existing ordinary session** in that project (the
   one named, or the project's only one) and never creates one there (#614, owner decision 2026-10-13); creating a

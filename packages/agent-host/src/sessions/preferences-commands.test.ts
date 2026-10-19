@@ -151,7 +151,9 @@ describe('get_preferences', () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('Kept by the person (no command changes these)')
-    expect(r.text).toContain("Centralu's read-only tools in ordinary sessions: on")
+    // Always on (2026-10-20): not a setting, so the inventory does not list it
+    expect(r.text).not.toContain('read-only tools')
+    expect(r.text).not.toMatch(/sessionTools/)
     expect(r.text).toContain('levels that may start agents 1')
     expect(r.text).not.toContain('the window keeps these switches')
   })

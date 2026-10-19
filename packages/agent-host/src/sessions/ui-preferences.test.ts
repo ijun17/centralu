@@ -13,9 +13,10 @@ const KEY = 'ui_preferences'
 function setup(stored?: string) {
   const store = new Store()
   if (stored !== undefined) store.settings.setAppSetting(KEY, stored)
-  const mgr = new SessionManager(store, new Map(), () => {})
+  const events: string[] = []
+  const mgr = new SessionManager(store, new Map(), (e) => events.push(e.type))
   const row = () => JSON.parse(store.settings.appSetting(KEY) ?? 'null') as Record<string, unknown>
-  return { mgr, row }
+  return { mgr, row, events }
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -57,8 +58,27 @@ describe('screen preferences across builds', () => {
     expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, hubAuto: false })
     mgr.uiPreferences()
     expect(said.mock.calls.filter(([line]) => String(line).includes(`app_settings.${KEY}`))).toHaveLength(1)
-    mgr.setUiPreferences({ sessionTools: false })
-    expect(row()).toEqual({ sessionTools: false, hubAuto: false })
+    mgr.setUiPreferences({ textSize: 1 })
+    expect(row()).toEqual({ textSize: 1, hubAuto: false })
+  })
+
+  /*
+   * Owner decision 2026-10-20: "Let sessions look at other sessions" is always on. The field stays in the record for
+   * older builds; a false one stored before is not read, and one an older window sends is not stored
+   */
+  it('reads the session tools as on whatever the record holds, and does not store an "off" an older window sends', () => {
+    const { mgr, row } = setup(JSON.stringify({ sessionTools: false, textSize: 1.1 }))
+    expect(mgr.uiPreferences().sessionTools).toBe(true)
+    expect(mgr.setUiPreferences({ sessionTools: false, sendWithModifierEnter: true }).sessionTools).toBe(true)
+    expect(row()).toMatchObject({ sessionTools: false, sendWithModifierEnter: true })
+    expect(mgr.uiPreferences().sessionTools).toBe(true)
+    const fresh = setup(JSON.stringify({}))
+    fresh.events.length = 0
+    fresh.mgr.setUiPreferences({ sessionTools: false })
+    // Nothing changed, so no window is told to read again
+    expect(fresh.events).not.toContain('prefs_changed')
+    expect(fresh.row()).not.toHaveProperty('sessionTools')
+    expect(fresh.mgr.uiPreferences().sessionTools).toBe(true)
   })
 
   // #1273 review: an unrelated change over a damaged record dropped the switch, and absent reads as on

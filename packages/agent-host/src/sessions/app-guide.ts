@@ -123,7 +123,7 @@ Every session has a permission preset: Safe (ask for everything), Normal (ask wh
 Changing a live session's settings restarts the conversation in place — the change applies from
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
-and approved skills, and whether every session can look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
+and approved skills; every session can always look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
 Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
