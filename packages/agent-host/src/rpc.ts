@@ -688,6 +688,11 @@ export function createRpcHandler(
       await mgr.setWorktreeTrunk(projectId, baseBranch)
       return { ok: true as const }
     },
+    'projects.setAgentInstructions': async (p) => {
+      const { projectId, text } = RpcMethods['projects.setAgentInstructions'].params.parse(p)
+      mgr.setAgentInstructions(projectId, text)
+      return { ok: true as const }
+    },
     'projects.setWorktreeSetup': async (p) => {
       const { projectId, setup } = RpcMethods['projects.setWorktreeSetup'].params.parse(p)
       mgr.setWorktreeSetup(projectId, setup)

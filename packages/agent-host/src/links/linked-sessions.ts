@@ -1,4 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostReadSessionResult, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -134,6 +134,8 @@ export function linkedSessions(
       machine: m.name,
       machineId: m.id,
       ...(typeof p.trusted === 'boolean' ? { trusted: p.trusted } : {}),
+      // Bounded here too: the machine's answer is its own, and the text goes into a task given there
+      ...(typeof p.agentInstructions === 'string' && p.agentInstructions.trim() ? { agentInstructions: p.agentInstructions.slice(0, AGENT_INSTRUCTIONS_MAX) } : {}),
     }
   }
 

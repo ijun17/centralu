@@ -730,6 +730,8 @@ export class SessionManager {
       // Worktree provisioning (#69) rides along too — a new session window prefills it without a separate
       // fetch
       worktreeSetup: this.store.projects.worktreeSetup(id),
+      // Instructions for the agents started here (#1161 item 2): the project's settings show them
+      agentInstructions: this.store.projects.agentInstructions(id),
       // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
       // is archived — so the screen never navigates to a ghost slot, this side (which knows about
       // sessions) does the check
@@ -783,6 +785,19 @@ export class SessionManager {
     const was = JSON.stringify(this.store.projects.worktreeSetup(projectId))
     this.store.projects.setWorktreeSetup(projectId, saved)
     if (was !== JSON.stringify(this.store.projects.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
+  }
+
+  /**
+   * The instructions for agents started in this project (#1161 item 2): appended to every start_agent task given here
+   * (`agentFrame`, and by a hub to a child it starts in this machine's copy, `remoteAgentFrame`). Trimmed whole; blank
+   * clears them. Every window's project settings read them, so a change is told to all.
+   */
+  setAgentInstructions(projectId: string, text: string): void {
+    this.requireProject(projectId)
+    const clean = text.trim()
+    if (this.store.projects.agentInstructions(projectId) === clean) return
+    this.store.projects.setAgentInstructions(projectId, clean)
+    this.emit({ type: 'projects_changed' })
   }
 
   /**

@@ -3,6 +3,12 @@ import { ToolName } from '../entities.js'
 import { machineField } from './machine-fields.js'
 
 /**
+ * The most a project's instructions for started agents may hold (#1161 item 2), in characters: they go into every task
+ * start_agent gives there, so a pasted log cannot ride along in each one. The briefs they replace ran to about 3,000.
+ */
+export const AGENT_INSTRUCTIONS_MAX = 8_000
+
+/**
  * A single saved shell command (#44, the alias was requested by the person on 2026-09-06).
  * `command` is the identity — the run ledger (commandRuns), the host's PTY registry and the log
  * buffer all key off this string. `label` is display-only, and wherever it is shown, the command
@@ -76,6 +82,13 @@ export const ProjectInfo = z.object({
    * This lives in our own database, not the repo (#50: nothing is ever written into the repo).
    */
   worktreeSetup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable().default(null),
+  /**
+   * The person's standing instructions for the agents start_agent starts in this project (#1161 item 2), appended to
+   * every such task: the rules a parent otherwise repeats in each brief (make your own worktree, stack the pull
+   * requests, never use git stash). Kept by each machine for its own copy of the project, so a linked Windows machine
+   * holds its own paths and shell. Empty when none are set; an older host answers without it.
+   */
+  agentInstructions: z.string().default(''),
   /**
    * This project's worktree manager slot and trunk (#76). Null means there is not one yet — the
    * screen then offers "start manager." baseBranch is both where a worktree branches off from

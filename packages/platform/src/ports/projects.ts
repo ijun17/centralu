@@ -39,6 +39,8 @@ export interface ProjectPort {
    * differ from what was sent.
    */
   setCommands(projectId: string, commands: SavedCommand[]): Promise<SavedCommand[]>
+  /** Saves the instructions for agents started in this project (#1161 item 2); an empty text clears them */
+  setAgentInstructions(projectId: string, text: string): Promise<void>
   /** Saves the worktree provisioning setup (#69). Null clears it */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
   /**

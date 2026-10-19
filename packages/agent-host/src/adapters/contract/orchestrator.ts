@@ -76,6 +76,8 @@ export type LinkedProject = {
   trusted?: boolean
   /** Set when the machine cannot be asked just now: why. The project is then what the headers mirror last held */
   away?: string
+  /** The person's instructions there for agents started in it (#1161 item 2); absent when none, or from a machine that predates them */
+  agentInstructions?: string
 }
 
 /** Failed with a sentence the model reads, or done */

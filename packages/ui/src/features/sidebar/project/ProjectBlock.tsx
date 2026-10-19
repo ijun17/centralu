@@ -5,6 +5,7 @@ import { useStore } from '../../../store/store.js'
 import { NewSessionDialog } from '../../project/NewSessionDialog.jsx'
 import { NewAppDialog } from '../../project/NewAppDialog.jsx'
 import { DeleteProjectDialog } from '../../project/DeleteProjectDialog.jsx'
+import { AgentInstructionsDialog } from '../../project/AgentInstructionsDialog.jsx'
 import { useIsProjectOpen, useSidebarSessionsOf } from '../../../store/selectors.js'
 import { useProjectApps } from '../../../store/app-catalog.js'
 import { PROJECT_MIME, moveTo } from '../reorder.js'
@@ -47,6 +48,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   const projectApps = useMemo(() => apps.filter((a) => a.info.root !== true), [apps])
   const groupedSessions = useMemo(() => groupProjectAppSessions(sessions, projectApps.map((app) => app.appId)), [sessions, projectApps])
   const [deleting, setDeleting] = useState(false)
+  // The instructions for agents started here (#1161 item 2), opened from the project's menu
+  const [instructing, setInstructing] = useState(false)
   // Fold state (#205) — held by the store: remembered per project and persists across restarts
   const folded = useStore((s) => s.foldedProjects.includes(projectId))
   /*
@@ -101,6 +104,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         appCount={apps.length}
         setNewAppOpen={setNewAppOpen}
         setDeleting={setDeleting}
+        setInstructing={setInstructing}
       />
 
       {askingTrust && <TrustAsk project={project} />}
@@ -142,6 +146,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
       {deleting && <DeleteProjectDialog project={project} onClose={() => setDeleting(false)} />}
+      {instructing && <AgentInstructionsDialog project={project} onClose={() => setInstructing(false)} />}
 
       <ProjectSessionDialogs
         defaultTool={project.defaultTool ?? ''}

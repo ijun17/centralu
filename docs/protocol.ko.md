@@ -153,7 +153,7 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
   프레임을 해석하지 못해 통째로 버린다). 오케스트레이터의 호출은 연결된 기계에도 RPC에 `by: 'orchestrator'`를 실어 보내고, 변경은
   오케스트레이터의 것으로 방송되므로 토스트가 남는다.
 - RPC로 저장한 프로젝트별 설정은 `projects_changed`로 알린다(#719): `projects.setTrusted`, `projects.setCommands`,
-  `projects.setWorktreeSetup`, `worktrees.setTrunk`, 그리고 세션이 기록하는 기본 도구와 도구별 모델·노력. 모든 창이 프로젝트 목록을
+  `projects.setWorktreeSetup`, `projects.setAgentInstructions`(#1161), `worktrees.setTrunk`, 그리고 세션이 기록하는 기본 도구와 도구별 모델·노력. 모든 창이 프로젝트 목록을
   다시 읽어 이 필드들은 호스트의 값을 받으므로(목록의 행은 자리와 `git`을 그대로 둔다) ⋯ 메뉴, 신뢰 표시, 프로젝트의 앱이 호스트와
   일치한다. 허브는 연결된 머신의 이 이벤트를 전달한다. 저장된 값이 바뀐 경우에만 보내며, 창은 자기 쓰기가 진행 중인 프로젝트는 건드리지 않고 끝난 뒤 다시 읽고, 목록은 한 번에 하나씩 읽는다.
 

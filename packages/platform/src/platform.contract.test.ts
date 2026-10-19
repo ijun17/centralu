@@ -646,7 +646,7 @@ describe.each([
       expect(await rules()).toEqual([['npm test', 'allow']])
     })
 
-    it("a change to a project's trust, commands, worktree setup or trunk tells every window; the same value does not", async () => {
+    it("a change to a project's trust, commands, worktree setup, agent instructions or trunk tells every window; the same value does not", async () => {
       const p = await h.platform.projects.add(repo)
       const told = async (change: () => Promise<unknown>) => {
         events.length = 0
@@ -660,6 +660,12 @@ describe.each([
       expect(await told(() => h.platform.projects.setWorktreeSetup(p.id, { command: 'pnpm i', copyFiles: [] }))).toBe(1)
       expect(await told(() => h.platform.projects.setWorktreeSetup(p.id, { command: 'pnpm i', copyFiles: [''] }))).toBe(0)
       expect(await told(() => h.platform.projects.setWorktreeTrunk(p.id, 'main'))).toBe(1)
+      // #1161 item 2: kept trimmed, and read back with the project
+      expect(await told(() => h.platform.projects.setAgentInstructions(p.id, 'Never use git stash.\n'))).toBe(1)
+      expect(await told(() => h.platform.projects.setAgentInstructions(p.id, ' Never use git stash. '))).toBe(0)
+      expect((await h.platform.projects.list()).find((x) => x.id === p.id)!.agentInstructions).toBe('Never use git stash.')
+      expect(await told(() => h.platform.projects.setAgentInstructions(p.id, ''))).toBe(1)
+      expect((await h.platform.projects.list()).find((x) => x.id === p.id)!.agentInstructions).toBe('')
     })
 
     it("a model chosen for a session becomes the project's default for that tool, and windows hear of it", async () => {
