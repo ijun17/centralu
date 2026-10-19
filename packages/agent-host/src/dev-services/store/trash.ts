@@ -6,6 +6,7 @@ import { type SessionRecords } from './sessions.js'
 import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 import { SESSION_SETTING_OF } from './settings.js'
+import { agentInstructionsKey } from './projects.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -366,6 +367,8 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ? AND run_id NOT IN (SELECT id FROM app_runs)`).run(projectId)
       // Answers given to that project's apps' capabilities too (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
       this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
+      // Its instructions for started agents (#1161 item 2) are a setting of the project, as its commands are a column
+      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(agentInstructionsKey(projectId))
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
     })
     tx()

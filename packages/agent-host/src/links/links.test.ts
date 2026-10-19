@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fakeExe } from '../fake-exe.test-helpers.js'
@@ -19,7 +19,7 @@ import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Two real hosts in one process (#82): each with its own store, session manager, RPC handler and
@@ -1768,6 +1768,25 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await third).toMatchObject({ ok: false, error: expect.stringContaining('did not allow this session to start an agent on Remote box') })
   })
 
+  // #1161 item 2: the machine's own instructions (its paths, its shell), not the hub's copy of the project's
+  it("carries the instructions of the machine's copy of the project after the task, not the hub's", async () => {
+    const { remote, hub, card, answer, start } = await rig()
+    hub.mgr.setAgentInstructions('p-hub', 'Work in /Users/me/wt.')
+    remote.mgr.setAgentInstructions('p-app', 'An older text.')
+    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
+    const call = start()
+    await eventually(() => !!card())
+    // Changed there while the card stands (#1161 review): the child reads them as they are when it is made
+    remote.mgr.setAgentInstructions('p-app', 'Work in C:\\wt. The shell is PowerShell.')
+    await answer('allow')
+    expect(await call).toMatchObject({ ok: true })
+    const task = sent.mock.calls[0]![1]
+    expect(task).toContain("from the project's settings on this computer:]\n\nWork in C:\\wt. The shell is PowerShell.")
+    expect(task.indexOf('say hello')).toBeLessThan(task.indexOf('Work in C:\\wt.'))
+    expect(task).not.toContain('/Users/me/wt')
+    expect(task).not.toContain('An older text.')
+  })
+
   // #1038 review: a turn that ended inside the send was reported, and the call then waited out its bound as "working"
   it('reads the answer of a turn that ends before the send returns, and owes no report of it', async () => {
     const { answer, start, agent, list, reports } = await rig({ remote: { immediate: true } })
@@ -2052,6 +2071,59 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const r = await call
     if (!r.ok) throw new Error(r.error)
     expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)?.worktree).toMatchObject({ branch: 'feat-remote' })
+  })
+
+  // #1161 item 3: the orchestrator removed these over SSH by hand
+  it('delete removes the worktree made for it there when nothing would be lost, and otherwise leaves it and says why', async () => {
+    const { remote, remoteStore, answer, start, agent } = await rig()
+    await remote.mgr.setProjectTrusted('p-app', true)
+    const git = (dir: string, ...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { encoding: 'utf8' })
+    const child = async (branch: string) => {
+      const call = start({ branch, task: `work on ${branch}` })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      const there = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!
+      return { id: r.sessionId, path: there.worktree!.path }
+    }
+    const branches = () => git(remoteStore.projects.listProjects().find((p) => p.id === 'p-app')!.path, 'branch', '--format=%(refname:short)')
+    const gone = (id: string) => !remote.mgr.listSessions().some((s) => `m1.${s.id}` === id)
+
+    const clean = await child('feat-clean')
+    expect(await agent(clean.id, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('on feat-clean, was removed with its branch') })
+    expect([existsSync(clean.path), gone(clean.id), branches()]).toEqual([false, true, expect.not.stringContaining('feat-clean')])
+
+    const dirty = await child('feat-dirty')
+    writeFileSync(join(dirty.path, 'notes.txt'), 'not committed')
+    expect(await agent(dirty.id, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('on feat-dirty, was left: it holds 1 uncommitted file') })
+    expect([existsSync(join(dirty.path, 'notes.txt')), gone(dirty.id)]).toEqual([true, true])
+
+    const unpushed = await child('feat-unpushed')
+    git(unpushed.path, 'commit', '-q', '--allow-empty', '-m', 'only here')
+    expect(await agent(unpushed.id, 'delete')).toMatchObject({ notice: expect.stringContaining('was left: it has 1 commit that no remote and not the trunk has: push feat-unpushed') })
+    expect([existsSync(unpushed.path), gone(unpushed.id)]).toEqual([true, true])
+
+    // Pushed: its commit is on a remote-tracking ref, as a push leaves it
+    const pushed = await child('feat-pushed')
+    git(pushed.path, 'commit', '-q', '--allow-empty', '-m', 'pushed')
+    git(pushed.path, 'update-ref', 'refs/remotes/origin/feat-pushed', 'HEAD')
+    expect(await agent(pushed.id, 'delete')).toMatchObject({ notice: expect.stringContaining('on feat-pushed, was removed with its branch') })
+    expect(existsSync(pushed.path)).toBe(false)
+  }, 60_000 * SLOW)
+
+  it('delete on a machine whose build predates the worktree cleanup trashes the child there and says its worktree stays', async () => {
+    const { remote, answer, start, agent } = await rig({ remote: { without: ['agents.deleteAgentChild'] } })
+    await remote.mgr.setProjectTrusted('p-app', true)
+    const call = start({ branch: 'feat-old' })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const path = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!.worktree!.path
+    expect(await agent(r.sessionId, 'delete')).toMatchObject({
+      ok: true, state: 'deleted', notice: expect.stringContaining('on feat-old, stays: Remote box runs a Centralu from before #1161, which does not remove it'),
+    })
+    expect(remote.mgr.listSessions().some((s) => `m1.${s.id}` === r.sessionId)).toBe(false)
+    expect(existsSync(path)).toBe(true)
   })
 
   it('tells the parent when the link drops, and reports the turn that ended meanwhile once the link is back', async () => {

@@ -16,6 +16,7 @@ import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound } from './with-timeout.js'
+import { raceTimeout } from '../timing.js'
 
 /**
  * A child start_agent started on a linked machine (#1038), as the hub keeps it: the machine's session (its qualified
@@ -79,6 +80,33 @@ const withoutOwed = (r: RemoteAgent): RemoteAgent => {
 
 /** A machine's sentence to go inside another, without its own full stop */
 const bare = (error: string): string => error.trim().replace(/\.+$/, '')
+
+/**
+ * How long a start waits for the machine to say its instructions for agents now (#1161 review), once the child is made
+ * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
+ */
+export const INSTRUCTIONS_WAIT_MS = 5_000
+
+/**
+ * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
+ * trash": removed, left and why, or left because the machine's build predates the cleanup. Nothing for a child started
+ * without a worktree.
+ */
+function remoteWorktreeLine(
+  rec: RemoteAgent,
+  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | 'older' | undefined,
+): string {
+  if (!rec.worktree) return ''
+  if (done === 'older' || !done) {
+    return `; its worktree there, on ${rec.worktree}, stays${done === 'older' ? `: ${rec.machine} runs a Centralu from before #1161, which does not remove it` : ''}. The person deletes it on that machine`
+  }
+  const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
+  // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
+  if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
+  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed`
+  if (done.worktree === 'none') return `; it had no worktree of its own there any more`
+  return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
+}
 
 /**
  * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
@@ -439,7 +467,11 @@ export class RemoteAgents {
       }
     }
     const label = labelOf(this.host.store.messages, caller)
-    const task = remoteAgentFrame(label, opts.task)
+    /*
+     * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
+     * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
+     */
+    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target))
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),
@@ -482,6 +514,19 @@ export class RemoteAgents {
     // The wait opened before the send: a turn that ended inside the send has settled it already
     const result = waiting ? await this.awaitTurn(rec, signal, Math.min(ASK_WAIT_MS, left), waiting) : this.working(rec, true)
     return result.ok && unchecked ? { ...result, notice: [result.notice, unchecked].filter(Boolean).join('; ') } : result
+  }
+
+  /**
+   * The instructions of the machine's copy of the project as it has them now (#1161 item 2), or as it listed them
+   * before the card when it cannot say (#1161 review): a reader without the read, one that fails or throws, one that
+   * does not answer within `INSTRUCTIONS_WAIT_MS`. Never a reason the start stops; a machine that predates them listed
+   * none, so its child starts without them, as it did before.
+   */
+  private async instructionsOn(reader: LinkedSessions, target: LinkedProject): Promise<string> {
+    const listed = target.agentInstructions ?? ''
+    if (typeof reader.agentInstructions !== 'function') return listed
+    const now = await raceTimeout(reader.agentInstructions(target).catch(() => null), INSTRUCTIONS_WAIT_MS, null)
+    return now?.ok ? now.text : listed
   }
 
   /** agent_session on a child of a linked machine (#1038): status, wait, send, stop, delete, through the link */
@@ -608,12 +653,26 @@ export class RemoteAgents {
             return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
           }
         }
-        const r = await reader.deleteSession(rec.sessionId)
-        if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        /*
+         * The worktree made for it there goes with it when nothing would be lost (#1161 item 3): the machine decides, as
+         * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
+         * branch this hub asked for, and a child started without a worktree is deleted as before
+         */
+        // A reader without the call (one from before #1161) deletes as before, as a machine that predates it does
+        const canClean = typeof reader.deleteAgentChild === 'function'
+        const withWorktree = rec.worktree && canClean
+          ? await reader.deleteAgentChild!(rec.sessionId, rec.worktree).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+          : undefined
+        const older = !!rec.worktree && (!canClean || (!!withWorktree && !withWorktree.ok && 'olderBuild' in withWorktree))
+        if (withWorktree && !withWorktree.ok && !older) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(withWorktree.error)}.` }
+        if (!withWorktree?.ok) {
+          const r = await reader.deleteSession(rec.sessionId)
+          if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
+        }
         this.forget(rec.sessionId)
         return {
           ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
-          notice: `It went to ${rec.machine}'s trash${rec.worktree ? `; its worktree there, on ${rec.worktree}, stays until the person deletes it on that machine` : ''}.`,
+          notice: `It went to ${rec.machine}'s trash${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
         }
       }
     }

@@ -664,6 +664,11 @@ export class SessionManager {
     return this.projectRegistry.setWorktreeSetup(...a)
   }
 
+  /** `ProjectRegistry.setAgentInstructions` (project-registry.ts), kept on the manager for its callers */
+  setAgentInstructions(...a: Parameters<ProjectRegistry['setAgentInstructions']>): ReturnType<ProjectRegistry['setAgentInstructions']> {
+    return this.projectRegistry.setAgentInstructions(...a)
+  }
+
   /** `ProjectRegistry.reorderProjects` (project-registry.ts), kept on the manager for its callers */
   reorderProjects(...a: Parameters<ProjectRegistry['reorderProjects']>): ReturnType<ProjectRegistry['reorderProjects']> {
     return this.projectRegistry.reorderProjects(...a)
@@ -1620,6 +1625,11 @@ export class SessionManager {
   /** `ProjectRegistry.folderRoots` (project-registry.ts), kept on the manager for its callers */
   folderRoots(...a: Parameters<ProjectRegistry['folderRoots']>): ReturnType<ProjectRegistry['folderRoots']> {
     return this.projectRegistry.folderRoots(...a)
+  }
+
+  /** `WorktreeSessions.deleteHubChild` (worktree-sessions.ts, #1161 item 3): `agents.deleteAgentChild` */
+  deleteHubChild(...a: Parameters<WorktreeSessions['deleteHubChild']>): ReturnType<WorktreeSessions['deleteHubChild']> {
+    return this.worktrees.deleteHubChild(...a)
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session

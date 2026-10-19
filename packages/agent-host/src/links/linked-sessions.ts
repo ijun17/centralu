@@ -1,4 +1,4 @@
-import { BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -172,6 +172,8 @@ export function linkedSessions(
       machine: m.name,
       machineId: m.id,
       ...(typeof p.trusted === 'boolean' ? { trusted: p.trusted } : {}),
+      // Bounded here too: the machine's answer is its own, and the text goes into a task given there
+      ...(typeof p.agentInstructions === 'string' && p.agentInstructions.trim() ? { agentInstructions: p.agentInstructions.slice(0, AGENT_INSTRUCTIONS_MAX) } : {}),
     }
   }
 
@@ -379,6 +381,43 @@ export function linkedSessions(
         await route('agents.deleteSession', { sessionId })
         return {}
       })
+    },
+
+    async agentInstructions(project) {
+      const m = owner(project.id)
+      if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
+      return attempt(m, async () => {
+        const list = await m.call('projects.list', {})
+        const now = (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).find((p) => p?.id === project.id)
+        if (!now) throw new Error(`${project.name} is no longer a project there`)
+        return { text: now.agentInstructions ?? '' }
+      })
+    },
+
+    async deleteAgentChild(sessionId, branch) {
+      const m = owner(sessionId)
+      if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      let older = false
+      const r = await attempt(m, async () => {
+        try {
+          const answer = RpcMethods['agents.deleteAgentChild'].result.safeParse(await route('agents.deleteAgentChild', { sessionId, worktreeBranch: branch }))
+          if (!answer.success) throw new Error('its answer to agents.deleteAgentChild did not parse')
+          const { worktree, path, branch: on, why, note } = answer.data
+          // The machine's words, each on one line, as every text from it the hub puts in an answer
+          return {
+            worktree,
+            ...(path ? { path: onePath(path) } : {}),
+            ...(on ? { branch: oneLine(on) } : {}),
+            // A sentence, not a label: longer, and still one line
+            ...(why ? { why: oneLine(why, 1_000) } : {}),
+            ...(note ? { note: oneLine(note, 1_000) } : {}),
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Unknown method: agents.deleteAgentChild')) older = true
+          throw err
+        }
+      })
+      return older ? { ok: false, error: `${m.name} runs a Centralu from before #1161`, olderBuild: true } : r
     },
 
     async lastUserMessage(sessionId) {

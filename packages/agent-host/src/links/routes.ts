@@ -102,6 +102,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.stopBackgroundTask': session(),
   'agents.clearBackgroundTasks': session(),
   'agents.deleteSession': session(),
+  'agents.deleteAgentChild': session(),
   'agents.exportHandoffRecord': session(),
   'agents.exportHandoffNote': session(),
   'agents.worktreeStatus': session(),
@@ -140,6 +141,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.setTrusted': project(),
   'projects.setCommands': project(),
   'projects.setWorktreeSetup': project(),
+  'projects.setAgentInstructions': project(),
   'projects.gitStatus': project(projectInfo),
   // A remote address, nothing of this machine's ids in it
   'projects.origin': project(),

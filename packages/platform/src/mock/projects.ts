@@ -111,6 +111,7 @@ export class ProjectsMock {
         defaultModels: {},
         commands: [],
         worktreeSetup: null,
+        agentInstructions: '',
         worktreeManager: null,
         // A newly registered project starts untrusted — the same as the real thing (M4, decision 3)
         trusted: false,
@@ -199,6 +200,15 @@ export class ProjectsMock {
       const was = JSON.stringify(p.worktreeSetup)
       p.worktreeSetup = clean && (clean.command || clean.copyFiles.length) ? clean : null
       if (was !== JSON.stringify(p.worktreeSetup)) this.emit({ type: 'projects_changed' })
+    },
+    // As the host keeps them (manager.setAgentInstructions, #1161 item 2): trimmed, told to every window when changed
+    setAgentInstructions: async (projectId: string, text: string) => {
+      const p = this.projectStore.list.find((x) => x.id === projectId)
+      if (!p) throw projectNotFound(projectId)
+      const clean = text.trim()
+      if (p.agentInstructions === clean) return
+      p.agentInstructions = clean
+      this.emit({ type: 'projects_changed' })
     },
     /** The project's worktree trunk (#76), as the real host's `worktrees.setTrunk` sets it */
     setWorktreeTrunk: async (projectId: string, baseBranch: string) => {

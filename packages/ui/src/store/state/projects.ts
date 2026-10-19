@@ -120,6 +120,8 @@ export type ProjectsSlice = {
    * Adding one and deleting one both arrive here as "the list is this now".
    */
   setProjectCommands(projectId: string, commands: SavedCommand[]): Promise<void>
+  /** Saves the instructions for agents started in the project (#1161 item 2), from the project menu's dialog */
+  saveAgentInstructions(projectId: string, text: string): Promise<void>
   /** Saves the worktree provisioning setup (#69) — called from the new-session window's worktree section */
   saveWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
   /** Reads the host's run ledger — when the evidence panel views a project, so a running command stays visible even after just reloading the UI */

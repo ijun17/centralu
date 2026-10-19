@@ -506,7 +506,17 @@ below retained for `safe` and `normal`:
    marked `askedBy` the caller (drawn indented under it in the sidebar, owner decision 2026-10-12; its header links
    back: "Started by …"), under **the caller's permission preset**:
    never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
-   and that the final message is the answer) recorded as sent by the caller (`from`).
+   and that the final message is the answer) recorded as sent by the caller (`from`). After the task come the
+   project's **instructions for agents started here** (#1161 item 2, `ProjectInfo.agentInstructions`), when the
+   person set any: the rules a parent otherwise repeats in every brief (its own worktree, stacked pull requests, never
+   `git stash`), written once in the dialog of the project's menu, "Instructions for agents…", and said in the frame
+   to be the person's, from the project's settings on that computer. They are read when the task is delivered, so a
+   card that stood a while or a start queued for memory carries what is set then; the orchestrator's children (no
+   project) get none, and nothing else (`agent_session send`, ask_project, a fork, which carries the conversation)
+   carries them. They are kept as an app
+   setting of the project (`agent_instructions:<projectId>`, at most 8,000 characters, gone with the project), not a
+   column, so no store step: an older build serving the same store during a swap ignores the key, and its children
+   start without them.
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
@@ -615,14 +625,35 @@ branch asked for (the machine's own rules apply: a worktree needs a project trus
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
 Only network remotes match (`gitRemoteKey`), and a refusal names repositories, never the addresses as written. Its
-task goes in `remoteAgentFrame`, sent as from the caller ("… on <hub>"); a call that waits opens its wait before the
+task goes in `remoteAgentFrame`, sent as from the caller ("… on <hub>"), with **the machine's** instructions for agents
+started in its copy of the project after it (#1161 item 2), not the hub's: each machine keeps its own, so a Windows
+machine's say its paths and its shell. The hub reads them from the machine once the child is made there, after the
+card (a machine whose build predates them lists none, and its child starts without them; one that cannot be asked then
+gives what it listed before the card); the person edits them in that project's menu on
+the hub, which routes the save to the machine (`projects.setAgentInstructions`, by project). A call that waits opens its wait before the
 send, so a turn that ends at once is its answer, not a report. The hub records it (`remote_agents`, an app setting) and arms a linked report for the
 caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
 works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
-(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash, its worktree left there), `answer`,
-and `list` names its machine. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
+(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash), `answer`,
+and `list` names its machine. **`delete` takes the worktree made for it there too** (#1161 item 3,
+`agents.deleteAgentChild` on that machine, `WorktreeSessions.deleteHubChild`), when nothing would be lost by it. Only
+that one: a worktree Centralu made (`worktree.base`) on the branch the hub's record names, for a session another
+session started (its recorded agent depth), so never the project's own folder, a worktree session of the person's, or
+one a child started without a worktree.
+Only when nothing is lost: nothing uncommitted in it, and every commit of its own (its checkout's `HEAD` and the branch
+made for it, which the agent may have left) on a remote-tracking ref or the trunk (`gitUnpublishedCommits`); a branch
+pushed from there passes, a commit only there does not. Then it goes as a local child's does (`cleanUpWorktreeChild`:
+its recovery snapshot in the trash, the worktree and the branch removed). Otherwise the session still goes to the trash,
+the worktree stays, and the answer says what was left and why ("it holds 2 uncommitted files", "it has 1 commit that no
+remote and not the trunk has: push …", work still running there, another session in its folder). A folder already gone
+is said in the cleanup's own words (#715: its branch kept when it holds commits the trunk lacks), never as "nothing was
+unpushed"; a delete asked again finds the session gone and says so. A turn the hub just
+stopped is waited out for up to 10 s first (`STOPPING_WAIT_MS`), as the cleanup refuses a session still in its turn. A
+machine whose build predates it answers "Unknown method": the hub deletes the session there as before and says the
+worktree stays because of that build. A local child's worktree was already removed by `delete` (#608); that is
+unchanged. The cards of the turn its caller gave it come to the caller as a local child's (#676): a
 wait returns them (`asking`), `status` reads them from the machine (`LinkedSessions.cards`), and a card raised while
 no call waits is told once (`cardNotice`); each card's handle names that turn (`RemoteAgent.turn`, new with each start
 or send at rest). `answer` takes a question card's answer to the machine (`agents.answerQuestion` there). An approval

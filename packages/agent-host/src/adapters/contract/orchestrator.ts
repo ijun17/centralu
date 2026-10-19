@@ -103,6 +103,8 @@ export type LinkedProject = {
   trusted?: boolean
   /** Set when the machine cannot be asked just now: why. The project is then what the headers mirror last held */
   away?: string
+  /** The person's instructions there for agents started in it (#1161 item 2); absent when none, or from a machine that predates them */
+  agentInstructions?: string
 }
 
 /** Failed with a sentence the model reads, or done */
@@ -157,6 +159,20 @@ export type LinkedSessions = {
   interrupt(sessionId: string): Promise<Outcome>
   /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
+  /**
+   * The project's instructions for started agents as the machine has them now (#1161 item 2), '' for none; an error
+   * when it cannot be asked, so the caller keeps what it listed before. Optional, as is `deleteAgentChild`: a reader
+   * from before them (a stand-in, a build that predates #1161) has neither, and its caller does as it did then
+   */
+  agentInstructions?(project: LinkedProject): Promise<Outcome<{ text: string }>>
+  /**
+   * A start_agent child deleted there with the worktree made for it on `branch`, when nothing would be lost
+   * (`agents.deleteAgentChild` there, #1161 item 3). `olderBuild`: the machine predates it, and nothing was deleted
+   */
+  deleteAgentChild?(
+    sessionId: string,
+    branch: string,
+  ): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> | { ok: false; error: string; olderBuild: true }>
   /**
    * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
    * last thousand messages: whose turn it is running (#1038 review)
