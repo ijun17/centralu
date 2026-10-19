@@ -30,6 +30,8 @@ import { useGitRefreshKey } from './GitChanges.jsx'
 export function CommitHistory({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const openCommit = useStore((s) => s.openCommit)
+  // The commit the wide view shows is the selected row: the same pair as a changed file and a file tree row
+  const openSha = useStore((s) => (s.overlay?.kind === 'git' && s.overlay.sub === 'history' ? (s.overlay.sha ?? null) : null))
   const touched = useGitRefreshKey(projectId)
   // A response arriving late while switching projects must not draw another project's history (`useLoad`)
   const log = useLoad(() => platform.git.log(projectId, COMMIT_LIMIT), [platform, projectId], [touched])
@@ -80,7 +82,9 @@ export function CommitHistory({ projectId }: { projectId: string }) {
           <li key={c.sha}>
             <button
               /* Fixed height — if rows had different heights, the lines would misalign at row boundaries and look broken */
-              className="flex w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-surface-hover/25"
+              className={`flex w-full items-center gap-1.5 pr-3 text-left transition-colors ${
+                openSha === c.sha ? 'bg-surface-selected' : 'hover:bg-surface-hover/20'
+              }`}
               style={{ height: ROW_H }}
               onClick={() => openCommit(c.sha)}
               data-testid={`history-commit-${c.shortSha}`}
@@ -89,7 +93,9 @@ export function CommitHistory({ projectId }: { projectId: string }) {
               {/* The left padding is the graph's own job (PAD_L) — stacking px-3 on top would push the dot twice as far from the wall */}
               <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-ink-muted">{c.subject}</span>
+                <span className={`block truncate text-sm ${openSha === c.sha ? 'text-ink' : 'text-ink-muted'}`}>
+                  {c.subject}
+                </span>
                 <span className="readout block truncate text-2xs text-ink-faint">
                   {c.shortSha} · <RelativeAge when={c.when} />
                   {[

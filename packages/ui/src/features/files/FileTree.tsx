@@ -439,7 +439,7 @@ function DirRow({
     <li data-testid={`file-drop-${entry.path}`} {...drop.handlers}>
       <button
         className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-sm transition-colors hover:text-ink ${
-          drop.over ? 'bg-surface-hover/40 text-ink' : 'text-ink-muted'
+          drop.over ? 'bg-surface-hover/40 text-ink' : 'text-ink-muted hover:bg-surface-hover/20'
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => toggleDir(projectId, entry.path)}
@@ -473,7 +473,10 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
     <li>
       <button
         className={`flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-sm transition-colors ${
-          current === entry.path ? 'bg-surface-hover/40 text-ink' : entry.ignored ? 'text-ink-faint' : 'text-ink-muted hover:text-ink'
+          // The same hover and selected pair as a changed file and a commit row
+          current === entry.path
+            ? 'bg-surface-selected text-ink'
+            : `hover:bg-surface-hover/20 hover:text-ink ${entry.ignored ? 'text-ink-faint' : 'text-ink-muted'}`
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => openFile(entry.path)}
@@ -490,11 +493,14 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
       >
         <FileKind name={entry.name} />
         <span className="truncate">{entry.name}</span>
-        {/* A file the agent just touched (FR-5) — a symbol, not a color */}
+        {/* A file the agent just touched (FR-5): a dot, not a colour */}
         {touched.has(entry.path) && (
-          <span className="ml-auto shrink-0 text-2xs text-ink-faint" title="Edited by agent">
-            ◆
-          </span>
+          <span
+            className="ml-auto mr-1 size-1.5 shrink-0 rounded-full bg-ink-muted"
+            title="Edited by agent"
+            role="img"
+            aria-label="Edited by agent"
+          />
         )}
       </button>
     </li>
@@ -538,7 +544,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
     role: 'menu',
     'data-testid': 'file-menu',
     className:
-      'fixed z-40 w-56 overflow-y-auto rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)',
+      'fixed z-40 w-56 overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)',
     style: {
       left: place?.left ?? 0,
       top: place?.top ?? 0,
@@ -560,7 +566,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
           role="menuitem"
           data-testid="file-menu-vscode"
           title={remoteIde.title}
-          className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+          className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
           onClick={() => {
             close()
             void remoteIde.open(target.path, target.isDir ? undefined : {})
@@ -578,7 +584,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         role="menuitem"
         data-testid="file-menu-reveal"
         title={`Show ${target.name} in ${fileManager}`}
-        className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+        className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
         onClick={() => {
           close()
           void ops.reveal(target)
@@ -591,12 +597,13 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         confuse the top one for the bottom one — pressing the top one by mistake just opens a
         window, while pressing the bottom one makes the file disappear.
       */}
+      <div className="my-1 border-t border-line" />
       <button
         type="button"
         role="menuitem"
         data-testid="file-menu-trash"
         title="Moves it to the Trash — you can put it back from there"
-        className="block w-full truncate border-t border-line px-2.5 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/25 hover:text-ink"
+        className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-ink-muted transition-colors hover:bg-surface-hover/60 hover:text-ink"
         onClick={() => {
           close()
           void ops.trash(target)
