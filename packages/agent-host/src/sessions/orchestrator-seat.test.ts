@@ -190,6 +190,16 @@ describe('the scope of a seat', () => {
     expect(host.handoff).toHaveBeenCalledWith('orch', meta.get('a'), { mode: 'agent', instructions: 'go on' }, undefined)
   })
 
+  it('only the central orchestrator reaches the trust commands (#1219): a lead, a reader view and a hub view never do', async () => {
+    host.trustRequest = vi.fn(async () => ({ ok: true as const, text: 'reached the flow' }))
+    for (const seat of [orchestratorToolsFor(host, 'orch', ['a']), orchestratorToolsFor(host, 'b', undefined, true), orchestratorToolsFor(host, 'orch', undefined, false, true)]) {
+      expect(await seat.trust!({ action: 'project_trust', project: 'p', trusted: true })).toEqual({ ok: false, error: 'Only the orchestrator changes trust' })
+    }
+    expect(host.trustRequest).not.toHaveBeenCalled()
+    expect(await orchestratorToolsFor(host, 'orch').trust!({ action: 'list_projects' })).toEqual({ ok: true, text: 'reached the flow' })
+    expect(host.trustRequest).toHaveBeenCalledWith('orch', { action: 'list_projects' }, undefined)
+  })
+
   it('never reads or sends to itself', async () => {
     const tools = orchestratorToolsFor(host, 'orch')
     expect(await tools.readSession('orch')).toEqual({

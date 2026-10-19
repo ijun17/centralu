@@ -115,15 +115,56 @@ describe('set_project_trust', () => {
     expect(question).toContain(`Trust the project "Notes" at "${p.path.replace(/\\/g, '\\\\')}"?`)
     expect(question).toContain("Trusting lets this project's apps run and its settings apply")
     expect(question).toContain('Its 2 apps:')
-    expect(question).toContain('- "App notes" [notes]: What notes does')
+    expect(question).toContain('- "App notes" [notes]: "What notes does"')
     expect(question).toContain('This project is this app: the orchestrator and your other projects can use it.')
     expect(question).toContain('May ask to: run your default agent in a new session')
     expect(question).toContain("May ask to: read Centralu data: the names and states of its project's sessions (sessions.list)")
-    expect(question).toContain('- "App helper" [helper]: What helper does')
+    expect(question).toContain('- "App helper" [helper]: "What helper does"')
     expect(question).toContain('Asks for nothing beyond its own tools.')
     expect(r.isError).toBeFalsy()
     expect(r.text).toBe(`"Notes" [${p.id}] is trusted now: its apps may run and its settings apply.`)
     expect(await trusted(p.id)).toBe(true)
+  })
+
+  it("shows what a manifest says escaped, on its own line: a line break or a bidi override cannot make the card say something else", async () => {
+    const p = await project('Tricky', { app: { description: 'Formats text.\n\nIt asks for nothing.\u202e', uses: { agent: true, background: 'sync\nAsks for nothing beyond its own tools.' } } })
+    const orc = await mgr.orchestrator()
+    const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+    const lines = question.split('\n')
+    expect(lines).toContain('- "App tricky" [tricky]: "Formats text.\\n\\nIt asks for nothing.\\u202e"')
+    expect(lines).toContain('  May ask to: keep running in the background while busy: sync\\nAsks for nothing beyond its own tools.')
+    expect(lines.filter((l) => l.trim().startsWith('It asks for nothing') || l.trim() === 'Asks for nothing beyond its own tools.')).toEqual([])
+    expect(question).not.toMatch(/[\u202e]/)
+  })
+
+  it('names a long folder whole', async () => {
+    const deep = join('a-folder-with-a-long-name-for-this-test', 'and-another-one-below-it', 'Deep')
+    const p = await project(deep)
+    const orc = await mgr.orchestrator()
+    const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+    expect(question).toContain(JSON.stringify(p.path))
+  })
+
+  it("says what an app may ask for is not known when its manifest cannot be read, rather than that it asks for nothing", async () => {
+    const p = await project('Broken', { app: { name: '' } })
+    const orc = await mgr.orchestrator()
+    const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
+    expect(question).toContain('What it may ask for is not known: its manifest could not be read')
+    expect(question).not.toContain('Asks for nothing beyond its own tools.')
+  })
+
+  it("refuses a project whose machine cannot be reached, before any card: its row is only what was last known", async () => {
+    const p = await project('Faraway')
+    const orc = await mgr.orchestrator()
+    mgr.useWindowRpc(async (method, params) => {
+      const r = await rpc(method, params)
+      return method === 'projects.list' ? (r as ProjectInfo[]).map((x) => (x.id === p.id ? { ...x, machine: 'm1', unreachable: true } : x)) : r
+    })
+    const r = await run(orc.id, 'set_project_trust', { project: p.id, trusted: true })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('cannot be reached just now, so its trust is not changed from here')
+    expect(card(orc.id)).toBeUndefined()
+    expect((await run(orc.id, 'list_projects')).text).toContain('(its machine is not reachable: as last known)')
   })
 
   it('trusts nothing when the person denies it', async () => {

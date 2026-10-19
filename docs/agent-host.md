@@ -1471,7 +1471,14 @@ ids). The orchestrator's instructions point to these and the machine commands in
   project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
   in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
   project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
-  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is.
+  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is. What a
+  manifest supplies (name, description, the declared background work) is quoted with control and format characters
+  escaped, the folder is named whole, and an app whose manifest could not be read, or that a linked machine listed without
+  `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
+  reachable (its row is the hub's last copy) is refused before the card; a linked machine's project's card says its apps are
+  as that machine listed them just now, and after Allow its folder and machine are checked too.
+- The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, so a
+  list without them does not read as complete.
 - `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
   folded): each rule's id, what it allows, the project or session it belongs to, and since when.
   `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only

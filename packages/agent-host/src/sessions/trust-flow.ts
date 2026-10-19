@@ -14,6 +14,16 @@ export type TrustFlowHost = Pick<HostCards, 'askHost'>
 /** A name as one quoted line the person or the model reads (`plainQuoted`) */
 const shown = (name: string): string => plainQuoted(name)
 
+/** A folder, quoted and escaped but not cut: the end of a path is what tells two projects apart */
+const shownPath = (path: string): string => plainQuoted(path, 4096)
+
+/**
+ * Text an app's manifest supplies (its description, the background work it declares), on one line with every control
+ * and format character escaped: a manifest is text in someone's repository, and a line break or a bidi override in it
+ * must not make a card read as something it does not say. Cut long enough that nothing an app declares is lost.
+ */
+const manifestText = (text: string, max = 2000): string => plainQuoted(text, max).slice(1, -1)
+
 /** How many rows of a list name their items; the rest are counted */
 const ROWS = 50
 
@@ -26,16 +36,30 @@ function rows<T>(items: readonly T[], line: (t: T) => string): string[] {
 type ApprovalRuleRow = RpcResult<'approvals.rules'>[number]
 
 /** The projects and machines as the window reads them, for naming and finding a project */
-type Projects = { projects: ProjectInfo[]; machines: Map<string, string> }
+type Projects = { projects: ProjectInfo[]; machines: Map<string, string>; away: string[] }
+
+/**
+ * What an app may ask for, as card lines (`usesLines`, the window's words). Said only when the host said it: an app whose
+ * manifest could not be read, or one a linked machine listed without `uses` (an older Centralu there), is not
+ * "asking for nothing", and the card says it is not known.
+ */
+function asksLines(a: ExternalAppInfo, indent: string, lead: string): string[] {
+  if (!a.uses) {
+    if (a.error || a.status === 'invalid') return [`${indent}What it may ask for is not known: its manifest could not be read (${manifestText(a.error ?? 'invalid', 300)}).`]
+    if (a.machine) return [`${indent}What it may ask for is not known: its machine did not say (it may run an older Centralu).`]
+  }
+  const asks = a.uses ? usesLines(a.uses) : []
+  if (!asks.length) return [`${indent}Asks for nothing beyond its own tools.`]
+  return asks.map((l) => `${indent}${lead}${manifestText(l.charAt(0).toLowerCase() + l.slice(1))}`)
+}
 
 /** One app of a project as the trust card names it: what it is, whether it is the project, what it may ask for */
 function appLines(a: ExternalAppInfo): string[] {
   const title = a.name?.trim() ? a.name : a.appId
-  const description = a.description?.trim() ? `: ${a.description.trim()}` : ''
+  const description = a.description?.trim() ? `: ${plainQuoted(a.description.trim(), 2000)}` : ''
   const out = [`- ${shown(title)} [${a.appId}]${description}`]
   if (a.root) out.push('  This project is this app: the orchestrator and your other projects can use it.')
-  const asks = a.uses ? usesLines(a.uses) : []
-  out.push(...(asks.length ? asks.map((l) => `  May ask to: ${l.charAt(0).toLowerCase()}${l.slice(1)}`) : ['  Asks for nothing beyond its own tools.']))
+  out.push(...asksLines(a, '  ', 'May ask to: '))
   return out
 }
 
@@ -135,7 +159,12 @@ export class TrustFlow {
 
   private async projects(rpc: WindowRpc): Promise<Projects> {
     const [projects, machines] = await Promise.all([callWindow(rpc, 'projects.list', {}), callWindow(rpc, 'machines.list', {}).catch(() => [] as MachineInfo[])])
-    return { projects, machines: new Map(machines.map((m) => [m.id, m.name])) }
+    return { projects, machines: new Map(machines.map((m) => [m.id, m.name])), away: machines.filter((m) => m.status !== 'connected').map((m) => m.name) }
+  }
+
+  /** A list's closing line when a linked machine is not connected: what it keeps is not in the list, and the list must not read as complete */
+  private awayLine(all: Projects, what: string): string[] {
+    return all.away.length ? [`Not listed: ${what} on ${all.away.map(shown).join(', ')}, which ${all.away.length === 1 ? 'is' : 'are'} not connected just now.`] : []
   }
 
   /** Where a project is, when it is not on this computer */
@@ -160,7 +189,8 @@ export class TrustFlow {
   private async listProjects(rpc: WindowRpc): Promise<TrustAnswer> {
     const all = await this.projects(rpc)
     if (!all.projects.length) return { ok: true, text: 'No project is registered. add_project and create_project make one.' }
-    const line = (p: ProjectInfo) => `- ${shown(p.name)} [${p.id}]${this.where(p, all.machines)}: ${shown(p.path)}; ${p.trusted ? 'trusted' : 'untrusted'}`
+    const line = (p: ProjectInfo) =>
+      `- ${shown(p.name)} [${p.id}]${this.where(p, all.machines)}: ${shownPath(p.path)}; ${p.trusted ? 'trusted' : 'untrusted'}${p.unreachable ? ' (its machine is not reachable: as last known)' : ''}`
     return { ok: true, text: [`${all.projects.length} ${all.projects.length === 1 ? 'project' : 'projects'} (set_project_trust changes trust):`, ...rows(all.projects, line)].join('\n') }
   }
 
@@ -176,6 +206,8 @@ export class TrustFlow {
     if ('error' in found) return { ok: false, error: found.error }
     const p = found.project
     const label = `${shown(p.name)} [${p.id}]${this.where(p, all.machines)}`
+    // A machine not reachable: its row is what the hub last knew, and nothing there can be changed or listed now
+    if (p.unreachable) return { ok: false, error: `The machine of ${label} cannot be reached just now, so its trust is not changed from here; list_projects shows it as last known.` }
     if (p.trusted === trusted) return { ok: true, text: `${label} is already ${trusted ? 'trusted' : 'untrusted'}; nothing changed.` }
     if (!trusted) {
       // Narrowing acts at once, as the window's switch does
@@ -186,16 +218,24 @@ export class TrustFlow {
       }
     }
     const apps = await this.appsOf(rpc, p)
+    // A linked machine's apps are what it listed just now: one it could not list is not shown, and the card says so
+    const listed = p.machine ? ', as its machine listed them just now' : ''
     const question = [
-      `Trust the project ${shown(p.name)}${this.where(p, all.machines)} at ${shown(p.path)}?`,
+      `Trust the project ${shown(p.name)}${this.where(p, all.machines)} at ${shownPath(p.path)}?`,
       "Trusting lets this project's apps run and its settings apply: its agents read the folder's own setting files. Trust it only if you trust the code in this folder.",
-      ...(apps.length ? [apps.length === 1 ? 'Its app:' : `Its ${apps.length} apps:`, ...apps.flatMap(appLines)] : ['It has no app.']),
+      ...(apps.length
+        ? [`${apps.length === 1 ? 'Its app' : `Its ${apps.length} apps`}${listed}:`, ...apps.flatMap(appLines)]
+        : [p.machine ? 'Its machine listed no app for it just now (an app it could not list would not be shown).' : 'It has no app.']),
     ].join('\n')
     const refused = await this.ask(caller, question, signal, 'trusted')
     if (refused) return { ok: false, error: refused }
     // What the card named, still? The project may have gone, been trusted, or gained or changed an app while it stood
     const now = (await this.projects(rpc)).projects.find((x) => x.id === p.id)
     if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was trusted.` }
+    if (now.path !== p.path || (now.machine ?? null) !== (p.machine ?? null)) {
+      return { ok: false, error: `${label} is not in the folder the card named any more, so nothing was trusted. Ask again to show the person where it is now.` }
+    }
+    if (now.unreachable) return { ok: false, error: `The machine of ${label} could not be reached after the card was answered, so nothing was trusted.` }
     if (now.trusted) return { ok: true, text: `${label} was trusted while the card stood; nothing more changed.` }
     if (appsKey(await this.appsOf(rpc, now)) !== appsKey(apps)) {
       return { ok: false, error: `The apps of ${label} changed while the card stood, so it is not what the card named and nothing was trusted. Ask again to show the person its apps as they are now.` }
@@ -231,7 +271,8 @@ export class TrustFlow {
           ? `a project no longer registered [${r.projectId}]`
           : 'nothing (it applies to no session)'
     const machine = r.machine ? ` on the linked machine ${shown(o.all.machines.get(r.machine) ?? r.machine)}` : ''
-    return `- [${r.id}] ${r.decision} ${shown(r.matcher)} for ${owner}${machine}, since ${new Date(r.createdAt).toISOString().slice(0, 10)}`
+    const decision = r.decision === 'allow' || r.decision === 'deny' ? r.decision : shown(r.decision)
+    return `- [${r.id}] ${decision} ${shown(r.matcher)} for ${owner}${machine}, since ${new Date(r.createdAt).toISOString().slice(0, 10)}`
   }
 
   private async listRules(rpc: WindowRpc, named?: string): Promise<TrustAnswer> {
@@ -244,12 +285,14 @@ export class TrustFlow {
       shownRules = rules.filter((r) => r.projectId === found.project.id)
       of = ` of ${shown(found.project.name)}`
     }
-    if (!shownRules.length) return { ok: true, text: `No approval rule${of}: every action that asks, asks.` }
+    const away = this.awayLine(o.all, 'the rules kept')
+    if (!shownRules.length) return { ok: true, text: [`No approval rule${of}${away.length ? ' was listed' : ': every action that asks, asks'}.`, ...away].join('\n') }
     return {
       ok: true,
       text: [
         `${shownRules.length} approval ${shownRules.length === 1 ? 'rule' : 'rules'}${of}, each a standing answer the person gave on a card (remove_approval_rule removes one; adding one is the person's own "always" on a card):`,
         ...rows(shownRules, (r) => this.ruleLine(r, o)),
+        ...away,
       ].join('\n'),
     }
   }
@@ -319,7 +362,7 @@ export class TrustFlow {
       out.push(`- ${this.appLabel(a, all)}: ${a.trusted ? 'trusted' : 'untrusted'}; ${sharing}`)
       if (answers === null) out.push('  Its remembered answers could not be read just now.')
       for (const p of answers ?? []) {
-        out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${shown(p.text)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; no longer applies, its uses changed'}`)
+        out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${plainQuoted(p.text, 300)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; no longer applies, its uses changed'}`)
       }
     }
     if (pool.length > ROWS) out.push(`- and ${pool.length - ROWS} more apps`)
@@ -333,6 +376,7 @@ export class TrustFlow {
         ...rows(consents, (c) => `- ${shown(c.fromName)} [${c.fromProjectId}] may ${consentWords(c.kind)} ${shown(c.toName)} [${c.toProjectId}]${this.where(c, all.machines)}, since ${new Date(c.decidedAt).toISOString().slice(0, 10)}`),
       )
     }
+    lines.push(...this.awayLine(all, 'the apps and answers kept'))
     return { ok: true, text: lines.join('\n') }
   }
 
@@ -377,11 +421,12 @@ export class TrustFlow {
       await callWindow(rpc, 'apps.setShared', { ...ref, shared: false })
       return { ok: true, text: `${label} is not shared any more: it is detached from every session of another project that attached it.` }
     }
-    const asks = a.uses ? usesLines(a.uses) : []
+    const home = all.projects.find((x) => x.id === a.projectId)
     const question = [
       `Share the app ${label} with your other projects?`,
       'A session in another project can then find it and attach it (find_apps, attach_app), after you allow that pair of projects once.',
-      ...(asks.length ? asks.map((l) => `It may ask to: ${l.charAt(0).toLowerCase()}${l.slice(1)}`) : ['It asks for nothing beyond its own tools.']),
+      ...(home && !home.trusted ? [`Its project is untrusted, so it attaches nowhere until you trust ${shown(home.name)}.`] : []),
+      ...asksLines(a, '', 'It may ask to: '),
     ].join('\n')
     const refused = await this.ask(caller, question, signal, 'shared')
     if (refused) return { ok: false, error: refused }

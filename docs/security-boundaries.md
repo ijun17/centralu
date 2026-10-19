@@ -708,8 +708,13 @@ raises a card that names the project, its folder and machine, and each app the t
 project whose apps changed while the card stood is not trusted on an answer about other apps. Approval rules only
 narrow from the orchestrator: it may list and remove them, and no command adds one, so a standing "allow" still comes
 only from the person's own "always" on a card. An app's remembered answers and the consents between projects can only
-be forgotten or revoked from the orchestrator, which makes the next attempt ask the person; sharing an app with other
-projects asks, and an app's own capability question is still answered by the person alone. The limits on agents
+be forgotten or revoked from the orchestrator, which makes the next attempt ask the person (a forgotten "deny" too: the
+app asks the person again, never the orchestrator, so no card guards it); sharing an app with other projects asks, and an
+app's own capability question is still answered by the person alone. Every card quotes what a manifest supplies (an app's
+name, description, the background work it declares) with control and format characters escaped, so a line break or a
+bidi override in someone's repository cannot make the card say something it does not; a project's folder is named whole.
+A project whose machine cannot be reached is refused before any card, and a card for a linked machine's project says its
+apps are as that machine listed them just now. The limits on agents
 (read-only tools in ordinary sessions, running agents per project, levels that may start agents) bound the
 orchestrator's own children too, so every change to them asks, narrowing as well as widening.
 
