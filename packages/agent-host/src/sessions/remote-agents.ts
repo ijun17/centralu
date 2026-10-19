@@ -6,7 +6,7 @@ import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
-import { ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
@@ -633,12 +633,15 @@ export class RemoteAgents {
     if (!this.reportArmed(rec)) return
     this.host.children.dropLinkedReport(rec.sessionId)
     if (wait || this.pending.has(rec.sessionId)) return
+    const what = `${why ?? 'took a turn there that you did not give it (the person on that machine, most likely)'}. ` +
+      'What you gave it is not followed from here, and nothing of that turn is yours to read: agent_session status gives only its state.'
     void this.host.tellSession(
       rec.callerId,
-      `[Centralu] "${rec.name}" [${rec.sessionId}] on ${rec.machine} ${why ?? 'took a turn there that you did not give it (the person on that machine, most likely)'}. ` +
-        'What you gave it is not followed from here, and nothing of that turn is yours to read: agent_session status gives only its state.',
+      `[Centralu] "${rec.name}" [${rec.sessionId}] on ${rec.machine} ${what}`,
       { sessionId: rec.sessionId, name: rec.name },
       true,
+      // What the model reads (#1186): all of it but the names, which are not Centralu's words (#120)
+      `[Centralu] The session [${rec.sessionId}] on its machine ${what}`,
     )
   }
 
@@ -773,13 +776,13 @@ export class RemoteAgents {
     // The turn ended: what it said is the caller's only through the gate
     if (!this.gateNow(rec).owned) return this.notYours(rec, this.gateNow(rec), false, 'idle' as SessionState)
     if (r.step === 'failed') return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
-    const answer = clipAnswer(reader ? await reader.lastWords(rec.sessionId, 20_000).catch(() => '') : '', rec.name)
+    const words = await this.lastWords(rec, reader)
     // The turn left the child's own background work running there (#721): the report waits for that work's end
     const running: BackgroundTask[] = this.host.linkedTasksRunning(rec.sessionId)
     if (running.length) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false, paused: running })
     return {
-      ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer, readable: [], outside: [],
-      notice: `It works on ${rec.machine}: the paths it names are that machine's, not readable from here.${running.length ? ' Its own background work still runs there; a final report follows when that work ends.' : ''}`,
+      ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, readable: [], outside: [],
+      notice: `It works on ${rec.machine}: the paths it names are that machine's, not readable from here.${running.length ? ' Its own background work still runs there; a final report follows when that work ends.' : ''}${words.notice}`,
     }
   }
 
@@ -834,8 +837,18 @@ export class RemoteAgents {
 
   /** The child at rest, its last words: only ever called past the gate */
   private async atRest(rec: RemoteAgent, state: SessionState, reader: LinkedSessions): Promise<ChildRunResult> {
-    const answer = clipAnswer(await reader.lastWords(rec.sessionId, 20_000).catch(() => ''), rec.name)
-    return { ok: true, state: 'at_rest', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer, sessionState: state }
+    const words = await this.lastWords(rec, reader)
+    return { ok: true, state: 'at_rest', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, sessionState: state, ...(words.notice ? { notice: words.notice.trim() } : {}) }
+  }
+
+  /**
+   * The child's last words, read there and cut as an answer is cut here, the cut naming the read that shows the rest
+   * (#1186). A read that failed is said in the notice, where it used to come back as an empty answer
+   */
+  private async lastWords(rec: RemoteAgent, reader: LinkedSessions | null): Promise<{ answer: string; notice: string }> {
+    const words = reader ? await reader.lastWords(rec.sessionId, ANSWER_READ_MAX_CHARS).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
+    if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${rec.sessionId}") reads it once the machine answers.` }
+    return { answer: clipAnswer(words.text, rec.name, words.seq !== null ? { sessionId: rec.sessionId, seq: words.seq } : undefined), notice: '' }
   }
 
   /**
@@ -935,12 +948,15 @@ export class RemoteAgents {
       const report = this.host.children.linkedReports.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || this.toldDown.has(rec.sessionId)) continue
       this.toldDown.add(rec.sessionId)
+      const rest = 'It cannot be followed until the link is back: ' +
+        'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.'
       void this.host.tellSession(
         rec.callerId,
-        `[Centralu] The link to ${name} dropped while "${rec.name}" [${rec.sessionId}] was working there. It cannot be followed until the link is back: ` +
-          'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.',
+        `[Centralu] The link to ${name} dropped while "${rec.name}" [${rec.sessionId}] was working there. ${rest}`,
         { sessionId: rec.sessionId, name: rec.name },
         true,
+        // What the model reads (#1186): all of it but the names, which are not Centralu's words (#120)
+        `[Centralu] The link to its machine dropped while the session [${rec.sessionId}] was working there. ${rest}`,
       )
     }
   }

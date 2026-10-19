@@ -3,10 +3,10 @@
  * stopping it in order (docs/plans/remote-hub.md §10.4).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, openSync, renameSync, writeSync } from 'node:fs'
+import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
-import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
+import { answerLine, isAlive, renameRetrying, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
 import { SERVE_LOG_FILE, serveDataDir, ensureServeState } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
@@ -22,20 +22,24 @@ import { describe, runServe, serveFolder } from './serve-run.mjs'
  */
 export const CARRIED_ENV = ['CC_DATA_DIR', 'CENTRALU_HOST_ENTRY', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM']
 
-export function encodeChildSpec({ env, log }) {
+/**
+ * `start` is how the launcher was started and why (`through WMI: <reason>`), which it writes into its first serve.log
+ * line, so a host that ended up outside the Windows sign-in says why (#1223)
+ */
+export function encodeChildSpec({ env, log, start = null }) {
   const carried = {}
   for (const k of CARRIED_ENV) if (typeof env[k] === 'string' && env[k]) carried[k] = env[k]
-  return Buffer.from(JSON.stringify({ log, env: carried }), 'utf8').toString('base64url')
+  return Buffer.from(JSON.stringify({ log, env: carried, ...(start ? { start } : {}) }), 'utf8').toString('base64url')
 }
 
-/** `{ log, env }` from `--detached-child=`, only the carried variables; null when it is not one */
+/** `{ log, env, start? }` from `--detached-child=`, only the carried variables; null when it is not one */
 export function decodeChildSpec(raw) {
   try {
     const v = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
     if (typeof v?.log !== 'string' || !v.log) return null
     const env = {}
     for (const k of CARRIED_ENV) if (typeof v.env?.[k] === 'string') env[k] = v.env[k]
-    return { log: v.log, env }
+    return { log: v.log, env, ...(typeof v.start === 'string' && v.start ? { start: v.start } : {}) }
   } catch {
     return null
   }
@@ -135,40 +139,58 @@ export async function runDetach({
   }
   if (await answered(true)) return 0
 
+  const log = join(dataDir, SERVE_LOG_FILE)
+  /*
+   * One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows. So a log
+   * that cannot be moved aside (a reader holds `serve.log.1`) is removed rather than left to read as a start
+   */
+  const freshLog = () => {
+    try {
+      renameRetrying(log, `${log}.1`)
+    } catch (e) {
+      if (e?.code !== 'ENOENT') rmSync(log, { force: true, maxRetries: 5 })
+    }
+  }
+
   /*
    * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
    * when nobody is. WMI's process keeps this ssh session's network logon, where Git cannot use the credentials saved in
    * Windows. A task-started host that does not answer in time is left to the lock: the WMI start below then either
-   * holds the folder or is refused by it, never a second host on it.
+   * holds the folder or is refused by it, never a second host on it. Which way it went, and why, is one line of
+   * serve.log (#1223): the task's serve writes no serve.log, so that line is written here; a WMI launcher writes its own
    */
+  let notInSignIn = null
   if (how === 'wmi') {
     const s = await signIn({ dataDir, env, home, platform })
     if (s.started) {
-      say(`started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`)
+      const line = `started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`
+      say(line)
+      freshLog()
+      try {
+        writeFileSync(log, `[centralu serve] ${line}\n`)
+      } catch {
+        // the line on stderr is all there is
+      }
       const t0 = Date.now()
       while (Date.now() - t0 < signInMs) {
         if (await answered(false, 'task')) return 0
         await sleep(250)
       }
-      say(`the host the sign-in task started did not answer within ${Math.round(signInMs / 1000)} s; starting one through WMI instead`)
-    } else if (s.reason === 'nosession') {
-      say('nobody is signed in to Windows here: starting the host through WMI, outside any sign-in, where Git cannot use the credentials saved in Windows')
-    } else if (s.reason === 'error') {
-      say(`could not start the host in the Windows sign-in (${s.message}); starting it through WMI`)
+      notInSignIn = `the host the sign-in task "${s.name}" started did not answer within ${Math.round(signInMs / 1000)} s`
+      // The WMI launcher's first line says so; the task's line goes, so `serve.log.1` keeps the start before this one
+      rmSync(log, { force: true, maxRetries: 5 })
+    } else {
+      notInSignIn = signInMissed(s)
     }
+    say(`${notInSignIn}: starting the host through WMI${s.reason === 'nosession' ? ', outside any sign-in, where Git cannot use the credentials saved in Windows' : ''}`)
   }
 
-  const log = join(dataDir, SERVE_LOG_FILE)
-  // One start per log: the last one's is kept beside it, and its absence is how a start that never ran shows
-  try {
-    renameSync(log, `${log}.1`)
-  } catch {
-    // there was none
-  }
+  freshLog()
   // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
   const asked = serveFrom(env, from)
   const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
-  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log })}`]
+  const startedHow = `through ${how === 'wmi' ? 'WMI' : how === 'wsl' ? 'a WMI-created wsl.exe' : how}${notInSignIn ? `: ${notInSignIn}` : ''}`
+  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log, start: startedHow })}`]
   let started
   try {
     started = await start({ how, execPath, args, env, cwd })
@@ -198,6 +220,26 @@ export async function runDetach({
   return fail('timeout', `the host did not answer within ${Math.round(timeoutMs / 1000)} s${why ? `:\n${why}` : ''}`)
 }
 
+/** Why the host was not started in the Windows sign-in, from `startInSignIn`'s answer, for serve.log and stderr */
+export function signInMissed(s) {
+  if (s.reason === 'nosession') {
+    const n = s.desktops
+    const unread = s.unreadable ? `, ${s.unreadable} of them with an owner WMI would not tell` : ''
+    const seen =
+      typeof n !== 'number'
+        ? 'no Explorer of this account in a desktop session'
+        : n === 0
+          ? 'no Explorer in any desktop session'
+          : `none of the ${n} Explorer${n === 1 ? '' : 's'} in desktop sessions is this account's${unread}`
+    return `no Windows sign-in of this user was found (${seen})`
+  }
+  // It travels on the launcher's command line: bounded
+  if (s.reason === 'error') return `the sign-in task failed: ${String(s.message).slice(0, 300)}`
+  if (s.reason === 'off') return 'the sign-in task is turned off (CENTRALU_SIGNIN_TASK=off)'
+  if (s.reason === 'no_launcher') return 'there is no launcher in the data folder for the sign-in task to run'
+  return `the sign-in task was not used (${s.reason})`
+}
+
 /**
  * The launcher `--detach` started: `runServe` writing to serve.log. The carried variables are
  * already in `env` (centralu.mjs merges them before it looks for the host).
@@ -216,7 +258,8 @@ export async function runDetachedChild({ spec, ...opts }) {
   } catch {
     // no log: say() keeps stderr, which nobody reads; --detach then reports the start as never run
   }
-  say(`started in the background (pid ${process.pid}, Node ${process.version})`)
+  // One line saying how it was started and why (#1223), and what runs
+  say(`started in the background${spec.start ? ` ${spec.start}` : ''} (pid ${process.pid}, Node ${process.version})`)
   try {
     return await runServe({ ...opts, logFd: fd })
   } catch (e) {

@@ -14,11 +14,19 @@
     "knownFailuresIssue": 368,
     "waitMinutes": 40,
     "pollSeconds": 30,
-    "fullTier": "full tier"
+    "fullTier": "full tier",
+    "landTier": "quick"
   },
   "queue": {
     "batch": { "min": 1, "max": 4 },
     "flakyJobs": ["windows tests (vitest 1/2)", "windows tests (vitest 2/2)", "host tests, remote Node (windows-2022)"],
+    "guard": {
+      "maxMainRuns": 3,
+      "jobPaths": {
+        "keeper e2e": ["apps/desktop/", "packages/agent-host/", "packages/protocol/", "packages/core/", "scripts/", "package.json", "pnpm-lock.yaml"],
+        "host tests, remote Node": ["packages/agent-host/", "packages/protocol/", "packages/core/", "packaging/remote-runtime.json", "package.json", "pnpm-lock.yaml"]
+      }
+    },
     "conflicts": {
       "mechanical": [
         { "files": ["pnpm-lock.yaml"], "run": [["pnpm", "install", "--lockfile-only", "--ignore-scripts"]] },
