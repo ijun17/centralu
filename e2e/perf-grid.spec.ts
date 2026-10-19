@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup } from './fixtures/control.js'
 import { startSession } from './fixtures/new-session.js'
 
 /**
@@ -39,20 +40,8 @@ type Result = {
 }
 
 async function boot(page: Page, count: number): Promise<string[]> {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  // The first project is registered as the way out of the empty orchestrator screen (#63)
-  await page.evaluate(() => {
-    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  // Registering a project the first time leads straight into creating a session — this test
-  // only needs the project, so close it
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
+  // First run to a registered project, as every spec does it
+  await setup(page, { projects: ['/tmp/alpha'] })
 
   const ids: string[] = []
   for (let i = 0; i < count; i++) {

@@ -90,11 +90,18 @@ afterEach(async () => {
 describe('starts only the first time it is needed', () => {
   it('zero processes even after scanning and checking the list — one starts when the tool list is asked for', async () => {
     plant('notes')
+    plant('control')
     make()
     expect(status('notes')).toBe('stopped')
-    // The fixture writes its first line roughly 100ms after starting — a secret startup during scanning would show up in that window
-    await new Promise((r) => setTimeout(r, 400))
+    /*
+     * The fixture writes its first line shortly after starting. A secret startup of `notes` during scanning would have
+     * written it by the time a second app, started now, has written its own: that one is the clock, not a stretch of
+     * time that a loaded machine can overrun (#845)
+     */
+    await rt.tools(ref('control'))
+    await until(() => starts('control').length, (n) => n === 1)
     expect(starts('notes')).toHaveLength(0)
+    expect(hostLog('notes')).not.toContain('starting:') // written at the spawn itself
 
     const tools = await rt.tools(ref('notes'))
     expect(tools.map((t) => t.name)).toEqual(['echo'])
@@ -262,11 +269,17 @@ describe('an idle app stops', () => {
 
   it('never stops while a screen is open — the count starts once the screen is closed', async () => {
     plant('notes')
+    plant('control')
     make({ idleMs: 200 })
     const release = rt.retainView(ref('notes'))
     await rt.tools(ref('notes'))
     const pid = starts('notes')[0]!.pid
-    await new Promise((r) => setTimeout(r, 600))
+    // `control` is the clock: it idles out on the same count, started after `notes`, so by the time it has stopped the
+    // idle count of `notes` has run out too, and it is still running because a screen is open (#845)
+    await rt.tools(ref('control'))
+    const controlPid = starts('control')[0]!.pid
+    await until(() => alive(controlPid), (a) => a === false, 10_000)
+    expect(status('notes')).toBe('running') // its idle count would have stopped it, and `halt` says so at once
     expect(alive(pid)).toBe(true)
     release()
     await until(() => alive(pid), (a) => a === false)

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup } from './fixtures/control.js'
 import { startSession } from './fixtures/new-session.js'
 
 /**
@@ -64,17 +65,8 @@ async function boot(page: Page): Promise<string> {
     }
   })
 
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    ;(window as never as { __mock: any }).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
+  // First run to a registered project, as every spec does it
+  await setup(page, { projects: ['/tmp/alpha'] })
 
   await startSession(page, 'alpha')
   await expect(page.getByTestId('new-session-dialog')).toBeHidden()
