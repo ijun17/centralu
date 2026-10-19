@@ -20,6 +20,7 @@ import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } 
 import { SecretStore, secretValueProblem } from './secrets.js'
 import { AppStartEnv } from './app-start-env.js'
 import { AppResources } from './app-resources.js'
+import { BusyBook } from './busy-book.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
 import { carryAppFiles, sweepCarryLeftovers } from './carry.js'
@@ -108,6 +109,12 @@ export class ExternalApps {
   /** Handover (E) — the staging area for an imported app and the person's confirmation (`handover.ts`) */
   private handover: AppHandover
 
+  /** The apps holding busy, kept so the next host resumes them (#1236) — `busy-book.ts` */
+  private busyBook: BusyBook
+  /** The one wait before resuming them, from the first scan (`refresh`) */
+  private resumeTimer: NodeJS.Timeout | null = null
+  private resumeScheduled = false
+
   /** An app process's lifecycle (A-3) — `app-lifecycle.ts` */
   private lifecycle: AppLifecycle
   /** Reflecting a changed app folder (C-4) — `change-reflector.ts` */
@@ -117,6 +124,7 @@ export class ExternalApps {
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
+    this.busyBook = new BusyBook(join(deps.dataRoot, 'app-busy.json'))
     this.lifecycle = new AppLifecycle({
       timing: this.timing,
       disposed: () => this.disposed,
@@ -130,6 +138,8 @@ export class ExternalApps {
       find: (ref) => this.find(ref),
       holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
+      busyRecorded: (e, reason) =>
+        this.busyBook.set(this.holdKey(e.ref), reason === null ? null : { projectId: e.ref.projectId, appId: e.ref.appId, reason, at: Date.now() }),
     })
     this.reflector = new ChangeReflector({
       timing: this.timing,
@@ -309,6 +319,31 @@ export class ExternalApps {
       else this.scopes.set(scope.key, { scope, apps: new Map() })
       this.rescan(scope.key)
     }
+    if (!this.resumeScheduled) {
+      this.resumeScheduled = true
+      this.resumeTimer = setTimeout(() => this.resumeBusy(), this.timing.resumeBusyMs)
+      this.resumeTimer.unref()
+    }
+  }
+
+  /**
+   * Starts again the apps that held busy when the last host stopped (#1236) — the one exception to "never starts
+   * anything": an app that keeps working on its own clock (a merge queue) would otherwise stand still from a restart or
+   * a swap until something calls it. Each record is spent here: a started app that still has work holds busy again
+   * (and is recorded again), one that has none goes on the idle rule. An app that is gone, may not run (untrusted,
+   * unconfirmed, failed) or no longer declares `uses.background` is not started.
+   */
+  private resumeBusy(): void {
+    this.resumeTimer = null
+    if (this.disposed) return
+    for (const rec of this.busyBook.list()) {
+      const ref = { projectId: rec.projectId, appId: rec.appId }
+      this.busyBook.set(this.holdKey(ref), null)
+      const e = this.find(ref)
+      if (!e || this.blocker(e) || !e.manifest?.uses.background) continue
+      console.error(`[apps] ${this.label(ref)} was busy (${rec.reason}) when Centralu last stopped — starting it again`)
+      this.lifecycle.use(e, async () => undefined).catch((err: Error) => console.error(`[apps] ${this.label(ref)} could not start again: ${err.message}`))
+    }
   }
 
   /** Every discovered external app — an untrusted project's app and one with a broken manifest appear too, with their reason */
@@ -461,6 +496,8 @@ export class ExternalApps {
     ref = this.resolve(ref)
     const e = this.require(ref)
     await this.lifecycle.halt(e, 'restart requested')
+    // The person stopped it: a busy hold it had is not resumed by the next host either (#1236)
+    this.busyBook.set(this.holdKey(e.ref), null)
     resetLife(e.life)
     // A stopped app had been detached from sessions — announce so it can attach again. A crashed app's
     // reason is also cleared, changing its status in the list (A-8)
@@ -756,6 +793,7 @@ export class ExternalApps {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    if (this.resumeTimer) clearTimeout(this.resumeTimer)
     this.watchers.close()
     this.handover.dispose()
     this.reflector.dispose()

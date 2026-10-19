@@ -108,6 +108,11 @@ export type RuntimeTiming = {
   capabilityQuestionMs: number
   /** The window for counting how many times one app has started an agent (D-5, `AGENT_RUNS_PER_WINDOW`) — one minute. Reduced by tests */
   agentRateWindowMs: number
+  /**
+   * After the host's first scan, the wait before it starts again the apps that held busy when the last host stopped
+   * (#1236, `BusyBook`): in a swap the previous host is stopping its own copies meanwhile
+   */
+  resumeBusyMs: number
 }
 
 export const DEFAULT_TIMING: RuntimeTiming = {
@@ -133,6 +138,7 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   turnEndDebounceMs: 300,
   brokerKeepaliveMs: BROKER_KEEPALIVE_MS,
   capabilityQuestionMs: 5 * 60_000,
+  resumeBusyMs: 3_000,
   agentRateWindowMs: 60_000,
 }
 

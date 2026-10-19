@@ -621,13 +621,14 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     }
   },
 
-  async stopApp(key) {
+  async stopApp({ key, appId, projectId, machine }) {
     const platform = get().platform
-    const pv = get().pinnedViews.find((p) => p.key === key)
-    if (!platform || !pv) return
-    const { appId, projectId, machine } = pv
-    // Closed first: an open view holds its app, and reopening it would start the app again
-    get().closeApp(key)
+    if (!platform) return
+    // Its view, if one is open, is closed first (teardown, then close): an open view holds its app, and reopening it would start the app again
+    if (get().pinnedViews.some((p) => p.key === key)) {
+      await pinnedFrames.get(key)?.teardown().catch(() => {})
+      get().closeApp(key)
+    }
     try {
       await platform.apps.restart(appId, projectId, machine ?? undefined)
     } catch (e) {

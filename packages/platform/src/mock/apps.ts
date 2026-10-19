@@ -194,6 +194,8 @@ export class AppsMock {
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
       if (!a) throw new Error(noSuchAppText({ projectId, appId }))
       if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
+      // Its process went, and a busy hold with it (#1236)
+      delete a.busy
       this.emit({ type: 'external_apps_changed' })
     },
   }

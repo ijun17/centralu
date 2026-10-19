@@ -188,10 +188,11 @@ export type AppViewsSlice = {
   restartApp(key: string): Promise<void>
   /**
    * Stops an app the person no longer wants running (#1236): an app keeping itself running for background work is
-   * stopped with its view closed, so nothing on this screen starts it again. The host stops the process (`apps.restart`
-   * never starts one); the next need does. The caller calls teardown first.
+   * stopped with its view, if one is open, torn down and closed, so nothing on this screen starts it again. The host
+   * stops the process (`apps.restart` never starts one); the next need does. From its sidebar row, Settings' app row or
+   * its view; an app with no view has the first two.
    */
-  stopApp(key: string): Promise<void>
+  stopApp(app: { key: string; appId: string; projectId: string | null; machine?: string | null }): Promise<void>
   /**
    * Reopens a pinned view with the app's new code (M4 C-4) — the slot stays put (same row, same
    * focus), only the instance is new. Sends teardown to the drawn frame first, releases the old

@@ -24,6 +24,8 @@ export type LifecycleHost = {
   find(ref: AppRef): AppEntry | undefined
   holdKey(ref: AppRef): string
   label(ref: AppRef): string
+  /** An app took a busy hold (`reason`) or let it go (`null`) (#1236) — kept so a host that starts again resumes it */
+  busyRecorded(e: AppEntry, reason: string | null): void
 }
 
 /**
@@ -241,6 +243,8 @@ export class AppLifecycle {
     if (L.proc !== proc) return
     L.proc = null
     L.tools = null
+    // A crashed app is not started again by itself (A-3), a host start included
+    if (L.busy) this.host.busyRecorded(e, null)
     L.busy = null
     this.clearIdle(e)
     // If it died after running well for a long time, this is not a consecutive failure — counted from zero
@@ -322,6 +326,7 @@ export class AppLifecycle {
     if (pipeId < L.pipeId) return "refused: this process is no longer the app's current one"
     const was = this.busyReason(e)
     L.busy = reason === null ? null : { pipeId, reason }
+    this.host.busyRecorded(e, reason)
     const now = this.busyReason(e)
     if (now !== null) this.clearIdle(e)
     else this.armIdle(e)

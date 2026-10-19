@@ -286,7 +286,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const stop = useStore((s) => s.stopApp)
   const onStop = async () => {
     await frame.current?.teardown()
-    await stop(pv.key)
+    await stop({ key: pv.key, appId: pv.appId, projectId: pv.projectId, machine: pv.machine })
   }
   const busy = app?.info.status === 'running' ? (app.info.busy ?? null) : null
 

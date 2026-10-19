@@ -48,6 +48,7 @@ export function AppRow({
   onFold: (folded: boolean) => void
 }) {
   const openApp = useStore((s) => s.openApp)
+  const stopApp = useStore((s) => s.stopApp)
   /*
    * A linked machine's user-folder app (#82) opens like this computer's, through the hub (remote-hub.md §11); only
    * its machine has to be named, since it has no project to say so. A project app's id already names its machine.
@@ -76,8 +77,9 @@ export function AppRow({
   )
   const waitsForYou = asking || sessionWaiting
   /*
-   * An app keeping itself running for background work (#1236) says what it is doing: a process that stays with nothing
-   * open is something the person should be able to see, and stop from its screen (PinnedApps' Stop)
+   * An app keeping itself running for background work (#1236) says what it is doing, and has Stop right on its row: a
+   * process that stays with nothing open is something the person should see and be able to end, an app with no view
+   * included (its view and Settings' app row have Stop too)
    */
   const busy = app.info.status === 'running' && app.info.busy ? `Running: ${app.info.busy}` : null
   const hint = waitsForYou ? 'asks you' : (busy ?? APP_HINT[app.info.status])
@@ -139,7 +141,7 @@ export function AppRow({
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-3 text-left text-md transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${busy ? 'pr-14' : 'pr-3'} text-left text-md transition-colors ${
           active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
@@ -164,6 +166,19 @@ export function AppRow({
           </span>
         )}
       </button>
+      {busy && (
+        // A sibling of the row, not inside it: a button inside a button is neither valid nor reachable by keyboard
+        <button
+          type="button"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1.5 py-0.5 text-2xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+          onClick={() => void stopApp({ key: app.key, appId: app.appId, projectId: app.projectId, machine })}
+          title={`${busy}. Stop it; it starts again the next time something needs it`}
+          aria-label={`Stop ${app.title}`}
+          data-testid={`app-stop-${app.key}`}
+        >
+          Stop
+        </button>
+      )}
       {machine && (
         <MachineBadge
           machine={machine}

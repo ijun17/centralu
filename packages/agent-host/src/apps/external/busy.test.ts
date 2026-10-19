@@ -1,7 +1,11 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { AppLifecycle, type LifecycleHost } from './app-lifecycle.js'
+import type { AppEntry } from './app-entry.js'
+import type { AppProcess } from './app-process.js'
 import { ExternalApps, resultText, type AppRef } from './runtime.js'
+import { DEFAULT_TIMING } from './runtime-types.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 import { alive } from '../../process.test-helpers.js'
@@ -34,6 +38,7 @@ afterEach(async () => {
 })
 
 const IDLE_MS = 200
+const RESUME_MS = 50
 const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
 const caller = { kind: 'session' as const, sessionId: 's1' }
 
@@ -70,7 +75,7 @@ function runtime(): ExternalApps {
     projects: () => [{ id: 'p1', path: projRoot, trusted: true }],
     dataRoot,
     reservedIds: [],
-    timing: { idleMs: IDLE_MS, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
+    timing: { idleMs: IDLE_MS, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, resumeBusyMs: RESUME_MS },
   })
   rt.refresh()
   return rt
@@ -131,5 +136,104 @@ describe('an app busy with background work is not stopped for being idle (#1236)
     await until(() => alive(pid), (a) => a === false)
     expect(info(r, 'stoppable')).toMatchObject({ status: 'stopped' })
     expect(info(r, 'stoppable')?.busy).toBeUndefined()
+  })
+})
+
+describe('a host that starts again resumes the apps that were busy (#1236)', () => {
+  const busyFile = () => join(dataRoot, 'app-busy.json')
+  const recorded = () => (existsSync(busyFile()) ? Object.values(JSON.parse(readFileSync(busyFile(), 'utf8')) as Record<string, { appId: string }>).map((r) => r.appId) : [])
+  /** Long enough for the resume (RESUME_MS) to have run and a start it began to show */
+  const pastResume = () => new Promise((resolve) => setTimeout(resolve, RESUME_MS + 1_500))
+
+  it('starts an app that held busy when the host stopped, with no call, and it holds again', async () => {
+    plant('queue', { atStart: true })
+    const first = runtime()
+    await call(first, 'queue', 'pid')
+    await until(() => info(first, 'queue')?.busy, (b) => b === 'started busy')
+    await first.dispose()
+    expect(recorded()).toEqual(['queue'])
+
+    // The next host (a restart or a swap): nothing calls the app, and it runs again
+    const r = runtime()
+    expect(info(r, 'queue')?.status).toBe('stopped')
+    await until(() => info(r, 'queue'), (a) => a?.status === 'running' && a.busy === 'started busy')
+    expect(recorded()).toEqual(['queue'])
+  })
+
+  it('does not start one that let its hold go, nor one the person stopped', async () => {
+    plant('released')
+    plant('stopped')
+    const first = runtime()
+    await call(first, 'released', 'hold', { reason: 'work' })
+    await call(first, 'released', 'release')
+    await call(first, 'stopped', 'hold', { reason: 'work' })
+    await first.restart(ref('stopped'))
+    expect(recorded()).toEqual([])
+    await first.dispose()
+
+    const r = runtime()
+    await pastResume()
+    expect([info(r, 'released')?.status, info(r, 'stopped')?.status]).toEqual(['stopped', 'stopped'])
+  })
+
+  it('does not start one that no longer declares uses.background, and spends its record', async () => {
+    plant('queue')
+    const first = runtime()
+    await call(first, 'queue', 'hold', { reason: 'work' })
+    await first.dispose()
+    expect(recorded()).toEqual(['queue'])
+    // Its manifest no longer declares it
+    const manifest = join(projRoot, '.centralu', 'apps', 'queue', 'centralu.app.json')
+    writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, 'utf8')), uses: {} }, null, 2))
+
+    const r = runtime()
+    await pastResume()
+    expect(info(r, 'queue')?.status).toBe('stopped')
+    expect(recorded()).toEqual([])
+  })
+})
+
+describe('a hold belongs to the process that made it (#1236)', () => {
+  /** An entry whose current process is pipe 2 and alive, under a manifest that declares (or not) uses.background */
+  function world(background = true) {
+    const recordedHolds: (string | null)[] = []
+    const host = {
+      timing: { ...DEFAULT_TIMING, idleMs: 60_000 },
+      appsChanged: () => {},
+      holdKey: (r: AppRef) => r.appId,
+      busyRecorded: (_e: AppEntry, reason: string | null) => void recordedHolds.push(reason),
+    } as unknown as LifecycleHost
+    const lifecycle = new AppLifecycle(host)
+    const e = {
+      ref: { projectId: 'p1', appId: 'a' },
+      manifest: { uses: background ? { background: 'work' } : {} },
+      life: { proc: { alive: true } as unknown as AppProcess, pipeId: 2, busy: null, idle: null, inflight: 0 },
+    } as unknown as AppEntry
+    return { lifecycle, e, recordedHolds }
+  }
+
+  it("refuses a report from a process older than the app's current one, and ignores a hold once its process is not current", () => {
+    const { lifecycle, e, recordedHolds } = world()
+    expect(lifecycle.setBusy(e, 1, 'from the old process')).toMatch(/no longer the app's current one/)
+    expect(lifecycle.busyReason(e)).toBe(null)
+    expect(recordedHolds).toEqual([])
+
+    expect(lifecycle.setBusy(e, 2, 'now')).toBe(null)
+    expect(lifecycle.busyReason(e)).toBe('now')
+    // A newer process starting (pipe 3) holds only once it is the current one
+    expect(lifecycle.setBusy(e, 3, 'starting')).toBe(null)
+    expect(lifecycle.busyReason(e)).toBe(null)
+    e.life.pipeId = 3
+    expect(lifecycle.busyReason(e)).toBe('starting')
+    // Its process ended: the hold holds nothing
+    ;(e.life as { proc: unknown }).proc = { alive: false }
+    expect(lifecycle.busyReason(e)).toBe(null)
+  })
+
+  it('refuses a hold from an app that does not declare uses.background, and records nothing', () => {
+    const { lifecycle, e, recordedHolds } = world(false)
+    expect(lifecycle.setBusy(e, 2, 'work')).toMatch(/does not declare/)
+    expect(lifecycle.busyReason(e)).toBe(null)
+    expect(recordedHolds).toEqual([])
   })
 })

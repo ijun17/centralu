@@ -1328,8 +1328,11 @@ then who may call it:
   asks for nothing outside the app: it only keeps the app's own process from the idle rule, and only
   when the manifest declares `uses.background` (in `uses`, so an imported app adding it is reviewed
   again and the trust card lists it). The hold is the app's row ("Running: <reason>"), it ends with
-  the process, and the person stops it from the app's view (`app-lifecycle.ts` `setBusy`;
-  `busy.test.ts`).
+  the process, and the person stops it from its sidebar row, its row in Settings or its view
+  (`app-lifecycle.ts` `setBusy`; `busy.test.ts`, `e2e/apps.spec.ts`). A host that starts again
+  starts the apps that held busy when the last one stopped (`app-busy.json`), but only one still
+  allowed to run (trusted, enabled, not failed) and still declaring `uses.background`; the person's
+  Stop and a crash remove its record (`busy-book.ts`, `ExternalApps.resumeBusy`).
 - What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
   each capability once (an agent tool, another app, a host data name), asked where the chain
   started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
