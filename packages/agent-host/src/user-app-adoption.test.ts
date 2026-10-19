@@ -110,6 +110,7 @@ beforeEach(async () => {
   store.grid.setGridView([{ kind: 'app', projectId: null, appId: 'notes', span: { cols: 2, rows: 1 } }])
   store.settings.setAppSetting('apps.viewPorts', JSON.stringify({ assigned: { [OLD]: 21234 }, retired: [] }))
   // The name the orchestrator has called it by (#1141): the same app keeps it under its new key
+  session('orch', { kind: 'orchestrator' })
   store.settings.setAppSetting('session_app_names:orch', JSON.stringify({ [OLD]: 'app-notes', '_user/gone': 'app-gone' }))
   store.settings.saveWorkspace({ appSpans: { [OLD]: { cols: 3, rows: 2 } }, focusedApp: { projectId: null, appId: 'notes' } })
   // A half copy a host stopped mid-carry left beside its place
@@ -197,6 +198,16 @@ describe('a user-folder app becomes a project in place', () => {
 
   it('carries the names sessions have called it by, so the same app keeps its name and no other takes it', () => {
     expect(JSON.parse(store.settings.appSetting('session_app_names:orch')!)).toEqual({ [newKey()]: 'app-notes', '_user/gone': 'app-gone' })
+  })
+
+  // #1205: the orchestrator is given the user-folder apps, and attaches a root app when it needs one
+  it('keeps it attached to the orchestrator that had it, under the name it called it by, as an attachment of its own', () => {
+    expect(JSON.parse(store.settings.appSetting('session_apps:orch')!)).toEqual([
+      { projectId: project()!.id, appId: 'notes', server: 'app-notes', consent: 'none', at: expect.any(Number) },
+    ])
+    const hub = (mgr as unknown as { apps: { appsHub: { refsFor(k: AppSessionKey): { server: string; ref: { projectId: string | null } }[] } } }).apps.appsHub
+    // helper became a project too, and this orchestrator had never seen it: it finds it when it needs it
+    expect(hub.refsFor({ id: 'orch', kind: 'orchestrator', projectId: null }).map((h) => [h.server, h.ref.projectId])).toEqual([['app-notes', project()!.id]])
   })
 
   it('keeps its view origin port, so its browser storage stays its own', () => {

@@ -760,7 +760,8 @@ export function orchestratorToolsFor(
       }
     },
 
-    // On-demand app attachment is a project session's (#371 part A, readerToolsFor) — no profile here exposes it
+    // On-demand app attachment: a project session's (#371 part A, readerToolsFor) and the central orchestrator's (#1205,
+    // SessionTools.orchestratorToolsFor); a coordinator's scope has none
     findApps: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     attachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     detachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),

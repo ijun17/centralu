@@ -89,9 +89,13 @@ export class SessionAppWiring {
         /*
          * Only while the session holds the reader set (#382): attach_app and detach_app are part of it, so a
          * session the person turned the set off for (or that became a manager) would keep tools it can no
-         * longer detach. The records stay; they count again once the set is back.
+         * longer detach. The records stay; they count again once the set is back. The orchestrator holds them
+         * as commands (#1205), for the root apps it attaches.
          */
-        allowed: (session, app) => this.host.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
+        allowed: (session, app) => {
+          const profile = this.host.toolProfileOf(session.id)
+          return (profile === 'reader' || (profile === 'orchestrator' && session.kind === 'orchestrator')) && (this.appAccess?.allowed(session, app) ?? false)
+        },
       },
     })
     this.appAccess = new AppAccess({
