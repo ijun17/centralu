@@ -142,6 +142,8 @@ describe('get_preferences', () => {
     expect(r.text).toContain('- Check for updates automatically: on (checkForUpdates); apply updates automatically when idle: off')
     expect(r.text).toContain('running 1.0.0, latest known 1.1.0 (newer)')
     expect(r.text).toContain('- Move idle sessions to a newly installed agent CLI: on')
+    // The accent colour is gone from the product (owner decision 2026-10-20): not offered, so not listed
+    expect(r.text).not.toMatch(/accent/i)
     // Read only: nothing was set, and nothing was asked of the registry (the stand-in would have said so)
     expect(updates.calls).toEqual(['check:false'])
     expect(sleeper.calls).toEqual([])
@@ -582,7 +584,7 @@ describe('what set_preferences does not reach', () => {
   it('has no field for what stays with the person: an unknown or trust-changing setting is refused by name', async () => {
     const orc = await mgr.orchestrator()
     const before = await prefs()
-    for (const args of [{ sessionTools: false }, { agentCeiling: 0 }, { agentDepth: 3 }, { agentModels: {} }, { sendWithModifierEnter: true }, { themeMode: 'system' }, { fontSize: 14 }]) {
+    for (const args of [{ sessionTools: false }, { agentCeiling: 0 }, { agentDepth: 3 }, { agentModels: {} }, { sendWithModifierEnter: true }, { themeMode: 'system' }, { fontSize: 14 }, { accent: '#ff0000' }]) {
       const r = await run(orc.id, 'set_preferences', args)
       expect(r.isError, JSON.stringify(args)).toBe(true)
       expect(r.text, JSON.stringify(args)).toMatch(/Unrecognized key/)

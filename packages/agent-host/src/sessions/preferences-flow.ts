@@ -85,7 +85,6 @@ export class PreferencesFlow {
       `- Text size: ${p.textSize} (${TEXT_SIZES.join(', ')}; 1 is the default)`,
       `- Body font: ${p.bodyFont ? plainQuoted(p.bodyFont, 200) : "the app's own"}; code font: ${p.codeFont ? plainQuoted(p.codeFont, 200) : "the app's own"}`,
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
-      `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
       'Notifications (set_preferences notifications)',
       `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval or error one off, or the sound while either notifies, asks the person`,
       'Background',
