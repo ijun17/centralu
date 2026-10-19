@@ -39,7 +39,7 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
@@ -435,7 +435,10 @@ async function landNext(b, ctx) {
     lowerBranches = (await Promise.all(mine.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
   const subject = squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
   const checks = pr.state === 'OPEN' && pr.mergeStateStatus === 'UNSTABLE' ? await readChecks(repo, pr.headRefOid) : null
-  const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, subject, subjectMax: SUBJECT_MAX, now, ref })
+  // UNSTABLE may also come from a run its own successful run made moot (a duplicate started in the same second, #1015),
+  // as on the single path: without this, a green batch waited 30 minutes, went back and was batched again, for ever
+  const superseded = checks ? [...supersededSuites((await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })).runs)] : []
+  const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, superseded, subject, subjectMax: SUBJECT_MAX, now, ref })
   const n = ref(repo, step.pr)
   const view = mine ? { ...mine, title: pr.title } : { repo, pr: step.pr, lowers: [], title: pr.title }
   const tested = ` Tested in batch ${b.branch} with ${list(b, prs.filter((p) => p !== step.pr), ref) || 'nothing else'}.`

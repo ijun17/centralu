@@ -480,6 +480,22 @@ describe('what the merge queue decides for a batch (#962)', () => {
     b.uncleanSince = waits.patch.uncleanSince
     expect(decideLanding({ b, step: b.steps[0], pr: unstable, item: q.items[0], mainTree: 'T0', prevTree: 'T0', defaultBranch: 'main', checks: [run('failure', 52)], subject: 's', subjectMax: 72, now: NOW + 31 * 60_000, ref })).toMatchObject({ do: 'stop' })
   })
+
+  // queue/batch-89, 2026-10-19: #1264 alone, green, stayed in landing 20+ minutes; its head had two pull_request runs
+  // created in the same second, one cancelled (a duplicate), so GitHub said UNSTABLE, and only the single path knew why
+  it('lands an UNSTABLE member whose other failures are runs a successful one superseded, the batch\'s cancelled runs, or both; a real failure still waits', () => {
+    const run = (conclusion: string | null, suiteId: number) => ({ kind: 'run', name: 'verify', status: conclusion ? 'completed' : 'queued', conclusion, suiteId })
+    const unstable = openPr({ number: 1, headRefOid: A, mergeStateStatus: 'UNSTABLE' })
+    // The same-second cancelled duplicate (suite 53) of a run that passed (suite 52)
+    expect(landing({ pr: unstable, checks: [run('success', 52), run('cancelled', 53)], superseded: [53] })).toEqual({ do: 'merge' })
+    // Without knowing it was superseded, it waits, as before
+    expect(landing({ pr: unstable, checks: [run('success', 52), run('cancelled', 53)] })).toMatchObject({ do: 'wait' })
+    // A batch-cancelled run (suite 51) and a duplicate together
+    expect(landing({ pr: unstable, checks: [run('cancelled', 51), run('success', 52), run('cancelled', 53)], superseded: [53] })).toEqual({ do: 'merge' })
+    // A real failure in another suite still waits, whatever else is moot
+    expect(landing({ pr: unstable, checks: [run('success', 52), run('cancelled', 53), run('failure', 54)], superseded: [53] })).toMatchObject({ do: 'wait' })
+    expect(onlyCancelledByBatch([run('failure', 54)], [51], [53])).toBe(false)
+  })
 })
 
 /*
@@ -2225,6 +2241,29 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', `status ${SHA}`, 'merge 77', 'delete feat/b77', 'delete queue/batch-1'])
     expect(writes().find((w) => w[0] === 'status')).toEqual(['status', SHA, 'success', 'merge-queue', 'Passed CI in queue/batch-1'])
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else.'])
+  })
+
+  // queue/batch-89, 2026-10-19: the batch went green, then sat in landing because its member's head was UNSTABLE from a
+  // cancelled duplicate of its own quick run (created in the same second); after 30 minutes it went back and looped
+  it('lands a batch member GitHub calls UNSTABLE because of a cancelled duplicate of its own run on its head', async () => {
+    // Both runs created in the same second; the duplicate's checks were cancelled before the passing run's finished
+    const at = '2026-10-17T08:01:00Z'
+    const own = [ghCheck('full tier', 'skipped', 10, at), ghCheck('verify', 'success', 11, at), ghCheck('windows tests', 'success', 12, at)]
+    const dup = [{ ...ghCheck('verify', 'cancelled', 21, '2026-10-17T08:00:30Z'), check_suite: { id: 5001 } }, { ...ghCheck('windows tests', 'cancelled', 22, '2026-10-17T08:00:30Z'), check_suite: { id: 5001 } }]
+    runtime(
+      tieredState({
+        prs: { '77': ghPr(77, { mergeStateStatus: 'UNSTABLE' }) },
+        runs: {
+          [SHA]: [ghRun('success', 1, SHA, { id: 900, workflow_id: 7, check_suite_id: 5000 }), ghRun('cancelled', 1, SHA, { id: 901, workflow_id: 7, check_suite_id: 5001 })],
+        },
+        checks: { [SHA]: [...own, ...dup] },
+      }),
+      TIERS,
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    expect(writes().map(short2)).toContain('merge 77')
+    expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
   })
 
   it('batches four ready pull requests in one run, its quick run still going or finished, cancels what still runs, and lands them in order', async () => {
