@@ -3,6 +3,7 @@ import { isPlainEscape } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { Button } from '../../components/Button.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { lazyComponent } from '../../components/lazy.jsx'
 
@@ -79,14 +80,16 @@ export function Overlay() {
     <div className="absolute inset-0 z-20 flex flex-col bg-surface-floor" data-testid="overlay">
       {/* The panel's header height (h-10), so the two header lines meet in one line across the window (owner, 2026-10-18) */}
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-surface-side px-3">
-        <span className="text-xs uppercase text-ink-faint">{overlay.kind === 'git' ? 'Git' : 'Files'}</span>
-        <button
-          className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover/50 hover:text-ink"
+        <span className="text-sm text-ink-muted">{overlay.kind === 'git' ? 'Git' : 'Files'}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto flex items-center gap-1.5"
           onClick={close}
           data-testid="overlay-close"
         >
-          <Kbd>esc</Kbd> back to chat
-        </button>
+          <Kbd>esc</Kbd> Back to chat
+        </Button>
       </header>
       {overlay.kind === 'viewer' ? (
         <CodeViewer projectId={projectId} sessionId={sessionId} />

@@ -188,13 +188,25 @@ test('Collapsing the panel leaves a rail, and it re-expands from there', async (
   })
   await newSession(page, 'alpha', 'task')
 
+  const collapse = (await page.getByTestId('evidence-close').boundingBox())!
   await page.getByTestId('evidence-close').click()
   await expect(page.getByTestId('evidence-panel')).toBeHidden()
 
-  // Gone and collapsed are different — the rail stays, and the change count is readable even
-  // while collapsed
-  await expect(page.getByTestId('evidence-rail')).toBeVisible()
-  await expect(page.getByTestId('evidence-rail-count')).toHaveText('2')
+  // Gone and collapsed are different — the rail stays, and it is the expand button alone (owner, 2026-10-19):
+  // no change count, no running dot and no label; the sidebar's changes capsule says what changed
+  const rail = page.getByTestId('evidence-rail')
+  await expect(rail).toBeVisible()
+  await expect(rail.getByTestId('evidence-open')).toBeVisible()
+  await expect(rail.locator('button')).toHaveCount(1)
+  await expect(rail.getByTestId('evidence-rail-count')).toHaveCount(0)
+  await expect(rail.getByTestId('evidence-rail-running')).toHaveCount(0)
+  await expect(rail).toHaveText('')
+  // It stands at the height of the collapse button and is the same size
+  const expand = (await page.getByTestId('evidence-open').boundingBox())!
+  expect(expand.width).toBeCloseTo(collapse.width, 0)
+  expect(expand.height).toBeCloseTo(collapse.height, 0)
+  // (the header's own bottom border takes the half pixel the rail, which has none, does not)
+  expect(Math.abs(expand.y + expand.height / 2 - (collapse.y + collapse.height / 2))).toBeLessThanOrEqual(1)
 
   await page.getByTestId('evidence-open').click()
   await expect(page.getByTestId('evidence-panel')).toBeVisible()
