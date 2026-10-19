@@ -398,7 +398,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     runtime()
     const r = await call('open_pr', PR)
     expect(r.isError).toBe(false)
-    expect(r.text).toBe('Opened #900 "feat(apps): add contribution tools to the board" from feat/tools into main: https://github.com/ijun17/centralu/pull/900')
+    expect(r.text).toBe('Opened #900 "feat(apps): add contribution tools to the board" from feat/tools into main: https://github.com/ijun17/centralu/pull/900 Labelled tier:deep.')
     const [post] = writes()
     expect(post!.args).toEqual(['api', '-X', 'POST', 'repos/ijun17/centralu/pulls', '--input', '-'])
     expect(JSON.parse(post!.stdin!)).toEqual({
@@ -406,7 +406,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
@@ -858,6 +858,19 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(r.isError, r.text).toBe(false)
     expect(prePrCalls()).toEqual([])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain('Tests.\n\n`pnpm pre-pr` was not run: The new test guards a Windows path that this branch only documents.')
+    // Not judged, so deep: skipping pre-pr never lowers the review (#1259)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain('only documents.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).')
+    expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  it('labels deep when pre-pr answers no tier (#1259)', async () => {
+    const c = prePrCheckout()
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain('Tier: deep (pnpm pre-pr answered no tier, so the paths were not judged).')
+    expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
   })
 
   it('refuses a bad title before spending minutes on pre-pr, and says when pre-pr could not run', async () => {

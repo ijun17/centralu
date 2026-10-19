@@ -168,9 +168,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 
 - **Risk tiers (#1259 step 2), not read by the queue yet.** `open_pr` writes pre-pr's tier into Verified
   and labels the pull request `tier:auto|light|deep|person` (a person may raise it by hand). The label is
-  what the paths said when it opened: commits pushed later, or a `skipPrePr` (a fork's pull request), leave
-  it stale or missing. The hook for the queue: the tier of what it is about to land is the higher of
-  `tierOfChange` (`scripts/tier.mjs`) at that head over main and `tierOfLabels` of its labels.
+  what the paths said when it opened, so commits pushed later leave it stale. A `skipPrePr` (a fork's pull
+  request) or a pre-pr that answers no tier labels `tier:deep`. The hook for the queue: the tier of what it
+  is about to land is the higher of `tierOfChange` (`scripts/tier.mjs`) at that head over main and
+  `tierOfLabels` of its labels; no label, rules missing or unreadable, or any failure, is deep.
 
 - **`queue_merge`** (`pr`, `lowers?`, `owner?`, `author?`, `deleteBranch?`; model only): one pull request, or a
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top

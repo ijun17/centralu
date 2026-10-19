@@ -121,6 +121,8 @@ async function commitCheck({ message, messages, repo }) {
   return bad.length ? asError(a) : a
 }
 
+const SKIPPED_TIER_LINE = 'Tier: deep (pnpm pre-pr was not run, so the paths were not judged).'
+
 const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
 
 export async function openPr({ title, head, base, draft, repo, sections, dryRun, verifiedNote, labels = [], alsoWarn = [], signal, ...named }) {
@@ -217,7 +219,9 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
   if (skipPrePr !== undefined) {
     const why = String(skipPrePr).trim()
     if (!why) throw new GitHubError('input', 'skipPrePr needs the reason the checks are skipped; it goes into the description.')
-    note = `\`pnpm pre-pr\` was not run: ${why}`
+    // Not run, the paths were not judged: deep, so skipping pre-pr never lowers the review (#1259)
+    note = `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`
+    labels.push('tier:deep')
   } else {
     if (String(args.head).includes(':')) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${args.head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
     const r = repoOf(args.repo)
@@ -257,10 +261,10 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
       ...res.exempted.map((x) => `Not run, the ${x.check} check: ${x.reason}`),
       ...res.warnings.map((w) => `Warning (${w.check}): ${w.message}`),
       // The risk tier by the paths changed (#1259): a line in Verified, and the label the merge queue reads
-      ...(res.tier ? [res.tier.line] : []),
+      res.tier.line,
     ].join('\n')
     alsoWarn.push(...res.warnings.map((w) => `[${w.check}] ${w.message}`))
-    if (res.tier) labels.push(`tier:${res.tier.name}`)
+    labels.push(`tier:${res.tier.name}`)
   }
   return serially(openPr)({ ...args, verifiedNote: note, labels, alsoWarn, signal }, ctx)
 }
@@ -340,7 +344,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name>; then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
+        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name> (deep when pre-pr is skipped or answers none); then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),

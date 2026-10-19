@@ -1,5 +1,5 @@
 {
-  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a change takes the highest tier of its files. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either.",
+  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a test (x.test.ts, x.test-helpers.ts, a folder's tests.rs) also takes the tier of the file it tests (x.ts, the folder's mod.rs), so the guard of a deep file is deep. A change takes the highest tier of its files. Without these rules, or when they cannot be read, a change is deep. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either.",
   "tiers": ["auto", "light", "deep", "person"],
   "fallback": "light",
   "rules": [
@@ -18,24 +18,17 @@
       "why": "documents nothing runs; AGENTS.md, CLAUDE.md and CONTRIBUTING.md are left light, since every agent session follows them"
     },
     {
-      "id": "tests",
+      "id": "fixture-data",
       "tier": "auto",
-      "paths": [
-        "**/*.{test,spec}.{ts,tsx,mts,cts,js,mjs,cjs}",
-        "**/*.test-helpers.{ts,tsx,mts,js,mjs}",
-        "**/{fixtures,__tests__,tests}/**",
-        "**/*-fixtures/**",
-        "**/tests.rs",
-        "e2e/**",
-        "packages/agent-host/src/dev-services/store-migrations*.golden.json"
-      ],
-      "why": "tests and the data they read change no shipped behaviour; a test under a deep path stays deep, as it guards that boundary"
+      "paths": ["**/fixtures/**", "**/*-fixtures/**", "packages/agent-host/src/dev-services/store-migrations*.golden.json"],
+      "except": ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+      "why": "data only tests read; code in a fixtures folder, and the tests themselves, are light (a weakened test lets a later bug through)"
     },
     {
-      "id": "ui-styles",
+      "id": "ui-assets",
       "tier": "auto",
-      "paths": ["packages/ui/src/**/*.css", "packages/ui/src/assets/**"],
-      "why": "how the UI looks, not what it does; copy inside .tsx is light, since a path cannot tell copy from logic"
+      "paths": ["packages/ui/src/assets/**"],
+      "why": "icons and fonts, loaded as images and font files, never run; CSS is light, since one rule can hide a consent or permission card"
     },
     {
       "id": "store",
@@ -77,14 +70,8 @@
     {
       "id": "desktop-permissions",
       "tier": "deep",
-      "paths": [
-        "apps/desktop/src-tauri/capabilities/**",
-        "apps/desktop/src-tauri/permissions/**",
-        "apps/desktop/src-tauri/tauri*.conf.json",
-        "tooling/desktop-permissions.test.ts",
-        "tooling/desktop-csp.test.ts"
-      ],
-      "why": "the desktop commands the webview may call and its CSP, with the guards that hold them"
+      "paths": ["apps/desktop/src-tauri/capabilities/**", "apps/desktop/src-tauri/permissions/**", "apps/desktop/src-tauri/tauri*.conf.json"],
+      "why": "the desktop commands the webview may call, and its CSP"
     },
     {
       "id": "processes",
@@ -113,7 +100,7 @@
         "scripts/local-manifest.mjs",
         "packaging/shell/**",
         "packaging/remote-runtime.json",
-        "apps/desktop/content-verify/src/**",
+        "apps/desktop/content-verify/**",
         "packages/agent-host/src/updates.ts"
       ],
       "why": "signed content, releases and updates: what reaches every person's machine, and how it is checked there"
@@ -125,19 +112,37 @@
       "why": "messages between UI, host and linked machines of different versions: additions only, and a mistake reaches every pair"
     },
     {
+      "id": "guards",
+      "tier": "deep",
+      "paths": ["tooling/**"],
+      "why": "the repository-wide guards and the test, lint and type setup every change is checked by: a weakened guard lets every later change through"
+    },
+    {
+      "id": "e2e-harness",
+      "tier": "deep",
+      "paths": ["e2e/**", "scripts/e2e-web-server.mjs"],
+      "except": ["e2e/**/*.spec.ts", "e2e/fixtures/**", "e2e/ux/*.task.ts"],
+      "why": "what CI runs the UI scenarios with: Playwright's configs (retries, what runs), the flaky reporter that sets flaky=true, the web server, the UX baseline; the scenarios themselves are light"
+    },
+    {
+      "id": "dependencies",
+      "tier": "deep",
+      "paths": ["**/package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"],
+      "why": "new dependencies and install scripts run on every machine that installs, CI's included"
+    },
+    {
       "id": "ci",
       "tier": "deep",
       "paths": [
-        ".github/workflows/**",
-        ".github/scripts/**",
-        "tooling/actions-pinned.test.ts",
+        ".github/**",
         "scripts/pre-pr.mjs",
         ".centralu/apps/project-board/queue*.mjs",
         ".centralu/apps/project-board/release*.mjs",
-        ".centralu/apps/project-board/wait-checks.mjs",
+        ".centralu/apps/project-board/{wait-checks,ci,batch,run-failure,pre-pr,contribute-tools}.mjs",
+        ".centralu/apps/project-board/project.json",
         ".centralu/apps/project-board/bin/**"
       ],
-      "why": "what CI runs and may skip, and the checks, merge queue and release tools that land and publish: a loosened gate lets every later change through"
+      "why": "what CI runs and may skip, and the checks, merge queue and release tools that decide what lands and is published: a loosened gate lets every later change through"
     },
     {
       "id": "tier-rules",

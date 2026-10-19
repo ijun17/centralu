@@ -1,9 +1,10 @@
 // A change's risk tier, by the paths it touches (#1259 step 2): `pnpm tier`.
 //
 // The rules are .centralu/tiers.json. Each file takes the highest tier of the rules that match it
-// (light when none does), and the change takes the highest tier of its files:
+// (light when none does), a test also its subject's (x.test.ts: x.ts), and the change takes the
+// highest tier of its files. No rules, rules that cannot be read, or any failure: deep.
 //
-//   auto    lands after the fast gate with no review (docs, tests, styles).
+//   auto    lands after the fast gate with no review (docs, fixture data, UI assets).
 //   light   one review by another model inside the author's session before it says done.
 //   deep    a separate review session that runs real-environment cases.
 //   person  the owner decides; never given by path, only by the label tier:person set by hand.
@@ -20,7 +21,7 @@
 //
 // The merge queue's hook: the tier of what it lands is the higher of `tierOfChange` at that head
 // and `tierOfLabels(labels)` (the highest tier:<name> label: open_pr's, from when it opened, or a
-// person's, raised by hand). The label alone goes stale when commits are pushed after it.
+// person's, raised by hand; none is deep). The label alone goes stale when commits are pushed after it.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -104,13 +105,40 @@ export function parseRules(text, source = RULES_FILE) {
 const rank = (tier) => TIERS.indexOf(tier)
 const higher = (a, b) => (rank(b) > rank(a) ? b : a)
 
-/** One file's tier: { path, tier, rules } with the ids of the rules that gave it (none: the fallback). */
+/** A path's own tier by the rules: { tier, rules } with the ids of the rules that gave it (none: the fallback). */
+function ownTier(p, rules) {
+  const hits = rules.rules.filter((r) => r.paths.some((re) => re.test(p)) && !r.except.some((re) => re.test(p)))
+  if (!hits.length) return { tier: rules.fallback, rules: [] }
+  const tier = hits.map((r) => r.tier).reduce(higher)
+  return { tier, rules: hits.filter((r) => r.tier === tier).map((r) => r.id) }
+}
+
+const CODE_EXTENSIONS = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs']
+
+/**
+ * The files a test file tests, by name: x.test.ts and x.test-helpers.ts test x.<any code extension>
+ * (their own first); a folder's tests.rs tests its mod.rs and the folder's <name>.rs. Whether those
+ * exist does not matter: the rules are paths. A Playwright x.spec.ts tests the UI, not a file beside it.
+ */
+export function subjectsOf(path) {
+  const m = /^(.+?)\.(?:test|test-helpers)\.([cm]?[jt]sx?)$/.exec(path)
+  if (m) return [m[2], ...CODE_EXTENSIONS.filter((e) => e !== m[2])].map((e) => `${m[1]}.${e}`)
+  const rs = /^(.+)\/tests\.rs$/.exec(path)
+  return rs ? [`${rs[1]}/mod.rs`, `${rs[1]}.rs`] : []
+}
+
+/**
+ * One file's tier: { path, tier, rules }, and `tests` when it took the tier of the file it tests (a test
+ * of a deep file guards that boundary, so weakening it is deep too).
+ */
 export function tierOfFile(path, rules) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
-  const hits = rules.rules.filter((r) => r.paths.some((re) => re.test(p)) && !r.except.some((re) => re.test(p)))
-  if (!hits.length) return { path: p, tier: rules.fallback, rules: [] }
-  const tier = hits.map((r) => r.tier).reduce(higher)
-  return { path: p, tier, rules: hits.filter((r) => r.tier === tier).map((r) => r.id) }
+  let best = { path: p, ...ownTier(p, rules) }
+  for (const s of subjectsOf(p)) {
+    const t = ownTier(s, rules)
+    if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }
+  }
+  return best
 }
 
 /**
@@ -127,7 +155,15 @@ export function classify(paths, rules) {
 /** Why a file has its tier, in a few words: its rules, or that none matched. */
 export function reasonOf(file, rules) {
   if (!file.rules.length) return `no rule matches: ${rules.fallback}`
-  return file.rules.join(', ')
+  return `${file.rules.join(', ')}${file.tests ? `, as the test of ${file.tests}` : ''}`
+}
+
+/**
+ * The answer when there is nothing to judge by (no rules, rules that cannot be read, a failure): deep,
+ * so a missing or broken rule never lets a change through unreviewed.
+ */
+export function unjudged(why) {
+  return { tier: 'deep', files: [], because: [], counts: {}, rulesFrom: null, unjudged: why, line: `Tier: deep (${why}).`, text: `tier: deep\n${why}, so it is deep.` }
 }
 
 /** The one line for a pull request's Verified: "Tier: deep (rules; path: rule, …)". At most `max` files are named. */
@@ -148,7 +184,7 @@ export function report(result, rules) {
   if (!result.files.length) return [...lines, 'No files changed.'].join('\n')
   lines.push(`${result.because.length} file(s) put it there:`)
   for (const f of result.because) {
-    lines.push(`  ${f.path}`)
+    lines.push(`  ${f.path}${f.tests ? ` (a test of ${f.tests}, which takes its tier)` : ''}`)
     if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
     for (const id of f.rules) lines.push(`      ${id}: ${byId.get(id).why}`)
   }
@@ -157,10 +193,13 @@ export function report(result, rules) {
   return lines.join('\n')
 }
 
-/** A pull request's tier from its labels: the highest tier:<name>, or null when it has none. The merge queue's hook. */
+/**
+ * A pull request's tier from its labels: the highest tier:<name>. None (opened without pre-pr, or the
+ * label lost) is deep: an unknown tier is never taken as a lower one. The merge queue's hook.
+ */
 export function tierOfLabels(labels) {
   const tiers = (labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((l) => typeof l === 'string' && l.startsWith(LABEL_PREFIX)).map((l) => l.slice(LABEL_PREFIX.length)).filter((t) => TIERS.includes(t))
-  return tiers.length ? tiers.reduce(higher) : null
+  return tiers.length ? tiers.reduce(higher) : 'deep'
 }
 
 // --- Reading a checkout -------------------------------------------------------------------------
@@ -199,11 +238,12 @@ export function changedFiles(root, base, head) {
 
 /**
  * The tier of what `head` adds over `base`, judged by the rules at `rulesRef` (base by default; the
- * head's when that has none). null when neither has a rules file.
+ * head's when that has none). Deep (`unjudged`) when neither has a rules file; throws when a ref is
+ * not there or the rules cannot be read, which callers answer as deep too.
  */
 export function tierOfChange({ root, base, head, rulesRef = base }) {
   const found = rulesAt(root, rulesRef, head)
-  if (!found) return null
+  if (!found) return unjudged(`no ${RULES_FILE} at ${rulesRef} or ${head}`)
   const result = classify(changedFiles(root, base, head), found.rules)
   return { ...result, rulesFrom: found.from, line: tierLine(result, found.rules), text: report(result, found.rules) }
 }
@@ -229,23 +269,26 @@ function main() {
   let o
   try {
     o = parseArgs(process.argv.slice(2))
+  } catch (e) {
+    console.error(`tier: ${e.message}`)
+    process.exitCode = 2
+    return
+  }
+  // Anything that keeps the change from being judged answers deep, with why (and exit 2)
+  let r
+  try {
     const root = resolve(git(process.cwd(), ['rev-parse', '--show-toplevel']).trim())
-    let r
     if (o.paths) {
       const rules = parseRules(readFileSync(join(root, RULES_FILE), 'utf8'))
       const result = classify(o.paths, rules)
       r = { ...result, rulesFrom: 'the working tree', line: tierLine(result, rules), text: report(result, rules) }
-    } else {
-      r = tierOfChange({ root, base: o.base, head: o.head })
-      if (!r) throw new Error(`${RULES_FILE} is at neither ${o.base} nor ${o.head}.`)
-    }
-    if (o.json) process.stdout.write(`${JSON.stringify({ tier: r.tier, line: r.line, because: r.because, counts: r.counts, rulesFrom: r.rulesFrom })}\n`)
-    else console.log(`${r.text}\n(rules: ${RULES_FILE} from ${r.rulesFrom})`)
+    } else r = tierOfChange({ root, base: o.base, head: o.head })
   } catch (e) {
-    if (o?.json) process.stdout.write(`${JSON.stringify({ error: e.message })}\n`)
-    else console.error(`tier: ${e.message}`)
+    r = unjudged(`the change could not be judged: ${String(e.message).trim()}`)
     process.exitCode = 2
   }
+  if (o.json) process.stdout.write(`${JSON.stringify({ tier: r.tier, line: r.line, because: r.because, counts: r.counts, rulesFrom: r.rulesFrom, ...(r.unjudged ? { unjudged: r.unjudged } : {}) })}\n`)
+  else console.log(r.rulesFrom ? `${r.text}\n(rules: ${RULES_FILE} from ${r.rulesFrom})` : r.text)
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main()

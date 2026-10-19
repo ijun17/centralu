@@ -14,6 +14,8 @@ import { git, remoteFor, topLevel } from './git.mjs'
 const SPACE = 'refs/centralu-pre-pr'
 // A tier's name as it goes into a label; which names exist is the repository's (scripts/tier.mjs), not the board's
 const TIER_NAME = /^[a-z][a-z-]{0,30}$/
+/** The tier of a change nobody could judge (a script that answers none, or an unreadable one): deep, never lower */
+export const UNKNOWN_TIER = { name: 'deep', line: 'Tier: deep (pnpm pre-pr answered no tier, so the paths were not judged).', because: [] }
 // A stack of three builds three heads, then runs the changed tests twice: minutes, not seconds
 const LIMIT_MS = 30 * 60_000
 const BEAT_MS = 60_000
@@ -134,8 +136,8 @@ export async function runPrePr({ dir, repo, head, base, main, lowers = [], exemp
       notes: a.notes ?? [],
       head: a.head ?? null,
       heads: a.heads ?? [],
-      // The risk tier (#1259): { name, line, because }, or null from a script or checkout without tiers
-      tier: TIER_NAME.test(a.tier?.name ?? '') && typeof a.tier.line === 'string' ? { name: a.tier.name, line: a.tier.line, because: Array.isArray(a.tier.because) ? a.tier.because : [] } : null,
+      // The risk tier (#1259): { name, line, because }; deep when the script answered none
+      tier: TIER_NAME.test(a.tier?.name ?? '') && typeof a.tier.line === 'string' ? { name: a.tier.name, line: a.tier.line, because: Array.isArray(a.tier.because) ? a.tier.because : [] } : UNKNOWN_TIER,
       refsLeft,
     }
   } finally {

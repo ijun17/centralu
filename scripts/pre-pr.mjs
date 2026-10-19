@@ -26,8 +26,8 @@
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
 //             request count; one that was already there passing is no news.
 //   tier      never a refusal: the pull request's risk tier by the paths it changes over its base, by
-//             main's .centralu/tiers.json (scripts/tier.mjs, #1259). The board writes it into Verified
-//             and labels the pull request tier:<name>.
+//             main's .centralu/tiers.json (scripts/tier.mjs, #1259); deep when there are no rules or
+//             they cannot be read. The board writes it into Verified and labels the pull request tier:<name>.
 //
 // Each check runs in a temporary worktree of its own commit, in one folder per run, so the person's
 // checkout is never touched. `--exempt <check>=<reason>` leaves one check out and says why. The
@@ -47,7 +47,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { tierOfChange } from './tier.mjs'
+import { tierOfChange, unjudged } from './tier.mjs'
 
 // --- What a path is ------------------------------------------------------------------------------
 
@@ -568,12 +568,15 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   let tier = null
   const answer = (heads) => ({ ok: findings.length === 0, findings, warnings, exempted, notes, heads: heads.map((h) => ({ sha: h.sha, names: h.names })), head: at.head, tier })
 
-  // tier: never a refusal. The review this pull request needs, from the paths it changes over its base, by main's rules
+  // tier: never a refusal. The review this pull request needs, from the paths it changes over its base, by main's
+  // rules; when it cannot be read it is deep, so a broken rules file never lets a change through unreviewed
   try {
     const t = tierOfChange({ root, base: at.base, head: at.head, rulesRef: at.main })
-    if (t) tier = { name: t.tier, line: t.line, because: t.because.map((f) => f.path) }
+    tier = { name: t.tier, line: t.line, because: t.because.map((f) => f.path) }
   } catch (e) {
-    warnings.push({ check: 'tier', message: `The tier could not be read: ${e.message}` })
+    const t = unjudged(`the tier could not be read: ${String(e.message).trim()}`)
+    tier = { name: t.tier, line: t.line, because: [] }
+    warnings.push({ check: 'tier', message: `The tier could not be read, so it is deep: ${e.message}` })
   }
 
   // main: a warning, not a finding. The merge queue merges main in anyway; what matters is that a merge would not conflict

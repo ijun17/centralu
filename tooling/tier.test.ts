@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — a plain .mjs script, so pre-pr and the board can run it with Node alone
-import { classify, globToRegExp, parseArgs, parseRules, RULES_FILE, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
+import { classify, globToRegExp, parseArgs, parseRules, RULES_FILE, subjectsOf, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
 
 /**
  * Risk tiers by path (#1259 step 2): the repository's own .centralu/tiers.json on representative
@@ -22,18 +22,42 @@ const RULES: Rules = parseRules(readFileSync(join(ROOT, RULES_FILE), 'utf8'))
 const without = (id: string): Rules => ({ ...RULES, rules: RULES.rules.filter((r) => r.id !== id) })
 const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules)
 
-const CASES: { name: string; paths: string[]; tier: string; rule: string; because?: string[] }[] = [
+/** `rule`: the rule the case stands on; null when it is light because no rule matches */
+const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
   { name: 'documents only', paths: ['docs/apps.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
   { name: 'a change to docs/security-boundaries.md', paths: ['docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc' },
   { name: 'docs with docs/security-boundaries.md among them', paths: ['docs/apps.md', 'docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc', because: ['docs/security-boundaries.md'] },
   {
-    name: 'tests only, of every kind',
-    paths: ['packages/agent-host/src/sessions/manager.test.ts', 'packages/ui/src/features/inbox/Inbox.test.tsx', 'e2e/control-grid.spec.ts', 'e2e/fixtures/control.ts', 'packages/agent-host/src/fake-exe.test-helpers.ts', 'apps/desktop/content-verify/tests/verify.rs', 'packages/agent-host/src/adapters/surface-fixtures/codex-help.txt'],
+    name: 'fixture data only',
+    paths: ['packages/agent-host/src/adapters/surface-fixtures/claude-2.1.302-help.txt', 'packages/agent-host/src/dev-services/store-fixtures/v1.sql', 'packages/agent-host/src/dev-services/store-migrations.golden.json'],
     tier: 'auto',
-    rule: 'tests',
+    rule: 'fixture-data',
   },
-  { name: 'the store migrations\' golden output', paths: ['packages/agent-host/src/dev-services/store-migrations.golden.json'], tier: 'auto', rule: 'tests' },
-  { name: 'UI styles and icons', paths: ['packages/ui/src/styles/index.css', 'packages/ui/src/assets/file-icons/file_type_text.svg'], tier: 'auto', rule: 'ui-styles' },
+  {
+    name: 'tests of ordinary code, scenarios and fixture code',
+    paths: ['packages/agent-host/src/sessions/manager.test.ts', 'packages/ui/src/features/inbox/Inbox.test.tsx', 'e2e/control-grid.spec.ts', 'e2e/fixtures/control.ts', 'e2e/ux/core.task.ts', 'packages/agent-host/src/fake-exe.test-helpers.ts', 'packages/agent-host/src/apps/external/test-fixtures/app.mjs'],
+    tier: 'light',
+    rule: null,
+  },
+  { name: 'UI icons and fonts', paths: ['packages/ui/src/assets/file-icons/file_type_text.svg', 'packages/ui/src/assets/fonts/x.woff2'], tier: 'auto', rule: 'ui-assets' },
+  { name: 'global CSS, which can hide a card', paths: ['packages/ui/src/styles/index.css'], tier: 'light', rule: null },
+  {
+    name: 'tests next to deep files, which guard them',
+    paths: ['packages/agent-host/src/sessions/app-access.test.ts', 'packages/agent-host/src/sessions/project-consents.test.ts', 'packages/agent-host/src/dev-services/path-guard.test.ts', 'packages/agent-host/src/apps/external/capabilities.test.ts'],
+    tier: 'deep',
+    rule: 'trust',
+  },
+  { name: 'signed content checking\'s tests and their data', paths: ['apps/desktop/content-verify/tests/copy.rs', 'apps/desktop/content-verify/tests/fixtures/paths.json'], tier: 'deep', rule: 'release' },
+  { name: 'repository-wide guards', paths: ['tooling/test-timing.test.ts', 'tooling/rpc-recovery.test.ts', 'tooling/build-workflow.test.ts', 'tooling/desktop-permissions.test.ts', 'tooling/test-timing.ts'], tier: 'deep', rule: 'guards' },
+  { name: 'what CI runs the UI scenarios with', paths: ['e2e/playwright.config.ts', 'e2e/flaky-report.ts', 'e2e/ux/playwright.config.ts', 'e2e/ux/baseline.json', 'scripts/e2e-web-server.mjs'], tier: 'deep', rule: 'e2e-harness' },
+  { name: 'dependencies', paths: ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'packages/agent-host/package.json'], tier: 'deep', rule: 'dependencies' },
+  {
+    name: 'the board\'s merge and check decisions',
+    paths: ['.centralu/apps/project-board/ci.mjs', '.centralu/apps/project-board/batch.mjs', '.centralu/apps/project-board/run-failure.mjs', '.centralu/apps/project-board/pre-pr.mjs', '.centralu/apps/project-board/contribute-tools.mjs', '.centralu/apps/project-board/project.json'],
+    tier: 'deep',
+    rule: 'ci',
+  },
+  { name: 'everything under .github', paths: ['.github/PULL_REQUEST_TEMPLATE.md', '.github/ISSUE_TEMPLATE/bug.md'], tier: 'deep', rule: 'ci' },
   { name: 'a store migration', paths: ['packages/agent-host/src/dev-services/store/migrations/v58.ts'], tier: 'deep', rule: 'store' },
   { name: 'a test under the store, which guards it', paths: ['packages/agent-host/src/dev-services/store/json.test.ts'], tier: 'deep', rule: 'store' },
   { name: 'the store\'s entry', paths: ['packages/agent-host/src/dev-services/store.ts'], tier: 'deep', rule: 'store' },
@@ -42,7 +66,6 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string; becaus
   { name: 'Codex\'s launch trust', paths: ['packages/agent-host/src/adapters/codex/launch-config.ts'], tier: 'deep', rule: 'trust' },
   { name: 'the host\'s transport', paths: ['packages/agent-host/src/transport/http.ts'], tier: 'deep', rule: 'transport' },
   { name: 'the desktop capabilities', paths: ['apps/desktop/src-tauri/capabilities/default.json'], tier: 'deep', rule: 'desktop-permissions' },
-  { name: 'the guard of the desktop permissions, a test', paths: ['tooling/desktop-permissions.test.ts'], tier: 'deep', rule: 'desktop-permissions' },
   { name: 'a linked machine\'s tunnel', paths: ['packages/agent-host/src/links/tunnel.ts'], tier: 'deep', rule: 'processes' },
   { name: 'centralu serve', paths: ['packaging/npm/centralu/bin/serve-run.mjs'], tier: 'deep', rule: 'processes' },
   { name: 'the keeper', paths: ['apps/desktop/src-tauri/keeper/src/keeper/swap.rs'], tier: 'deep', rule: 'processes' },
@@ -63,7 +86,7 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string; becaus
     paths: ['docs/apps.md', 'packages/ui/src/app/labelClock.test.ts', 'packages/ui/src/app/labelClock.ts', 'packages/ui/src/styles/index.css'],
     tier: 'light',
     rule: 'docs',
-    because: ['packages/ui/src/app/labelClock.ts'],
+    because: ['packages/ui/src/app/labelClock.test.ts', 'packages/ui/src/app/labelClock.ts', 'packages/ui/src/styles/index.css'],
   },
   {
     name: 'a mixed change reaching the protocol',
@@ -81,10 +104,10 @@ describe('the repository\'s tier rules', () => {
     if (because) expect(r.because.map((f) => f.path)).toEqual(because)
   })
 
-  it.each(CASES)('$name stands on the $rule rule', ({ paths, tier, rule }) => {
+  it.each(CASES.filter((c) => c.rule))('$name stands on the $rule rule', ({ paths, tier, rule }) => {
     expect(RULES.rules.map((r) => r.id)).toContain(rule)
     // A mixed light change stands on its auto rules too: without docs, docs/apps.md is light like the logic
-    const r = tierOf(paths, without(rule))
+    const r = tierOf(paths, without(rule!))
     if (tier === 'light') expect(r.files.find((f) => f.path === paths[0])!.tier).not.toBe(tierOf(paths).files[0]!.tier)
     else expect(r.tier).not.toBe(tier)
   })
@@ -93,6 +116,21 @@ describe('the repository\'s tier rules', () => {
     const r = tierOf(['packages/ui/src/components/TextField.tsx', 'packages/agent-host/src/sessions/manager.ts', 'AGENTS.md'])
     expect(r.tier).toBe('light')
     expect(r.files.every((f) => f.rules.length === 0)).toBe(true)
+  })
+
+  it('gives a test the tier of the file it tests, and says so', () => {
+    const r = tierOf(['packages/agent-host/src/sessions/app-access.test.ts'])
+    expect(r.files[0]).toEqual({ path: 'packages/agent-host/src/sessions/app-access.test.ts', tier: 'deep', rules: ['trust'], tests: 'packages/agent-host/src/sessions/app-access.ts' })
+    expect(tierLine(r, RULES)).toBe('Tier: deep, from `packages/agent-host/src/sessions/app-access.test.ts` (trust, as the test of packages/agent-host/src/sessions/app-access.ts).')
+    expect(subjectsOf('a/b.test.tsx').slice(0, 2)).toEqual(['a/b.tsx', 'a/b.ts'])
+    expect(subjectsOf('e2e/grid.spec.ts')).toEqual([])
+    expect(subjectsOf('a/b.test-helpers.ts')[0]).toBe('a/b.ts')
+    expect(subjectsOf('k/server/tests.rs')).toEqual(['k/server/mod.rs', 'k/server.rs'])
+    expect(subjectsOf('a/b.ts')).toEqual([])
+    const rules = parseRules(JSON.stringify({ tiers: ['auto', 'light', 'deep', 'person'], fallback: 'light', rules: [{ id: 'k', tier: 'deep', paths: ['k/server/mod.rs'], why: 'k' }, { id: 'a', tier: 'auto', paths: ['a/**'], why: 'a' }] }))
+    expect(classify(['k/server/tests.rs'], rules).tier).toBe('deep')
+    // Never lower: a test of an auto file keeps its own tier
+    expect(classify(['a/x.test.ts', 'b/x.test.ts'], rules).files.map((f: { tier: string }) => f.tier)).toEqual(['auto', 'light'])
   })
 
   it('takes nothing changed as auto', () => {
@@ -146,11 +184,11 @@ describe('the rules file and its globs', () => {
 })
 
 describe('a pull request\'s tier from its labels: the merge queue\'s hook', () => {
-  it('takes the highest tier:<name> label, and none without one', () => {
+  it('takes the highest tier:<name> label, and deep without one: an unknown tier is never a lower one', () => {
     expect(tierOfLabels(['bug', 'tier:light'])).toBe('light')
     expect(tierOfLabels([{ name: 'tier:light' }, { name: 'tier:person' }])).toBe('person')
-    expect(tierOfLabels(['tier:huge', 'bug'])).toBe(null)
-    expect(tierOfLabels([])).toBe(null)
+    expect(tierOfLabels(['tier:huge', 'bug'])).toBe('deep')
+    expect(tierOfLabels([])).toBe('deep')
   })
 })
 
@@ -200,14 +238,27 @@ describe('pnpm tier on a git repository', () => {
     expect(tierOfChange({ root: repo, base: 'main', head: 'top' }).files.map((f: { path: string }) => f.path)).toEqual(['src/a.ts'])
   })
 
-  it('takes the head\'s rules when the base has none, and answers nothing when neither has', () => {
+  it('takes the head\'s rules when the base has none, and answers deep when neither has', () => {
     git('checkout', '-q', '--orphan', 'bare')
     git('rm', '-rq', '--cached', '.')
     rmSync(join(repo, '.centralu'), { recursive: true, force: true })
     write('x.txt', 'x\n')
     commit('no rules')
-    expect(tierOfChange({ root: repo, base: 'bare', head: 'bare' })).toBe(null)
+    expect(tierOfChange({ root: repo, base: 'bare', head: 'bare' })).toMatchObject({ tier: 'deep', line: 'Tier: deep (no .centralu/tiers.json at bare or bare).' })
     expect(tierOfChange({ root: repo, base: 'top', head: 'main', rulesRef: 'bare' }).rulesFrom).toBe('main')
+  })
+
+  it('answers deep, and exits 2, when the change cannot be judged', () => {
+    let out = ''
+    let status = 0
+    try {
+      execFileSync(process.execPath, [join(ROOT, 'scripts/tier.mjs'), '--json', '--base', 'nowhere'], { cwd: repo, encoding: 'utf8', env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      out = String((e as { stdout?: string }).stdout ?? '')
+      status = (e as { status?: number }).status ?? 0
+    }
+    expect(status).toBe(2)
+    expect(JSON.parse(out)).toMatchObject({ tier: 'deep', line: 'Tier: deep (the change could not be judged: nowhere is not a commit here.).' })
   })
 
   it('reads its arguments, and refuses one it does not know', () => {

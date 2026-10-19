@@ -190,13 +190,23 @@ describe('pre-pr on a stack of two pull requests', () => {
   })
 
   it('answers the pull request\'s risk tier by the paths it changes over its base (#1259)', () => {
-    expect(run().tier).toBe(null)
+    // No rules anywhere: nothing to judge by, so deep
+    expect(run().tier).toMatchObject({ name: 'deep', because: [], line: expect.stringMatching(/^Tier: deep \(no \.centralu\/tiers\.json at /) })
     const rule = (id: string, tier: string, paths: string[]) => ({ id, tier, paths, why: id })
     write('.centralu/tiers.json', JSON.stringify({ tiers: ['auto', 'light', 'deep', 'person'], fallback: 'light', rules: [rule('docs', 'auto', ['docs/**']), rule('a', 'deep', ['src/a.mjs'])] }))
     commit('rules')
-    expect(run().tier).toMatchObject({ name: 'deep', because: ['src/a.mjs'], line: expect.stringMatching(/^Tier: deep, from `src\/a\.mjs` \(a\)/) })
+    // src/a.test.mjs tests src/a.mjs, so it is deep too
+    expect(run().tier).toMatchObject({ name: 'deep', because: ['src/a.mjs', 'src/a.test.mjs'], line: expect.stringMatching(/^Tier: deep, from `src\/a\.mjs` \(a\)/) })
     // Over the lower pull request, the top changes no src/a.mjs
     expect(run({ base: 'lower' }).tier).toMatchObject({ name: 'light', because: ['.centralu/tiers.json', 'src/b.mjs', 'src/b.test.mjs'] })
+  })
+
+  it('answers deep, with a warning, when the rules cannot be read (#1259)', () => {
+    write('.centralu/tiers.json', '{ not json')
+    commit('broken rules')
+    const r = run()
+    expect(r.tier).toMatchObject({ name: 'deep', line: expect.stringMatching(/^Tier: deep \(the tier could not be read: \.centralu\/tiers\.json at .* is not JSON/) })
+    expect(r.warnings.map((w: { check: string }) => w.check)).toContain('tier')
   })
 
   it('reverts only what the pull request changes over its base, in a stack', () => {
