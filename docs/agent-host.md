@@ -1472,6 +1472,11 @@ ids).
   in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
   project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
   may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is.
+- `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
+  folded): each rule's id, what it allows, the project or session it belongs to, and since when.
+  `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only
+  narrows, and that action asks again. An id no rule has is refused. **No command adds or widens a rule**: the window has
+  no such call either, and a rule comes only from the person answering a card "always" (`ApprovalRules.rememberAlways`).
 
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
@@ -1510,7 +1515,7 @@ window's channel), grouped, and for each group one of three states.
 | Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: taking trust away acts at once; trusting asks, with a card naming the folder and each app with what it may ask for, checked again after Allow |
 | Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
-| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
+| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
 | App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |

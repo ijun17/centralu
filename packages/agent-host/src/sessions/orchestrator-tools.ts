@@ -325,6 +325,8 @@ const HANDLERS: ToolHandlers = {
   // Trust (#1219): the flow writes each answer; trusting a project waits for the person's card there
   list_projects: (_args, call) => trustCommand({ action: 'list_projects' }, call),
   set_project_trust: ({ project, trusted }, call) => trustCommand({ action: 'project_trust', project, trusted }, call),
+  list_approval_rules: ({ project }, call) => trustCommand({ action: 'list_rules', ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  remove_approval_rule: ({ id }, call) => trustCommand({ action: 'remove_rule', id }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
   get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),

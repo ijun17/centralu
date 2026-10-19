@@ -58,7 +58,11 @@ export type TrashRequest =
  * One request of the orchestrator's trust commands (#1219, third slice), as the tool runner reads its arguments: what
  * changes what agents and apps may do. Widening waits for the person's card; narrowing acts at once.
  */
-export type TrustRequest = { action: 'list_projects' } | { action: 'project_trust'; project: string; trusted: boolean }
+export type TrustRequest =
+  | { action: 'list_projects' }
+  | { action: 'project_trust'; project: string; trusted: boolean }
+  | { action: 'list_rules'; project?: string }
+  | { action: 'remove_rule'; id: number }
 
 export type OrchestratedSession = {
   sessionId: string

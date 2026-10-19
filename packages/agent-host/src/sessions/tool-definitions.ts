@@ -276,6 +276,16 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), trusted: z.boolean() }).strict(),
   },
   {
+    name: 'list_approval_rules',
+    description: 'Lists the approval rules: the standing "always allow" answers the person gave on cards, with what each allows and where.',
+    schema: z.object({ project: z.string().optional().describe('Only this project\'s rules: its name or id.') }).strict(),
+  },
+  {
+    name: 'remove_approval_rule',
+    description: 'Removes an approval rule, so that action asks again. Acts at once. No command adds a rule: only the person\'s "always" on a card does.',
+    schema: z.object({ id: z.number().int().describe('The id list_approval_rules gives.') }).strict(),
+  },
+  {
     name: 'create_session',
     description:
       'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it is the person\'s job.',

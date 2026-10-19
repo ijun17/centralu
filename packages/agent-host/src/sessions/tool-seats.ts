@@ -123,6 +123,8 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'empty_trash',
     'list_projects',
     'set_project_trust',
+    'list_approval_rules',
+    'remove_approval_rule',
     'find_apps',
     'attach_app',
     'detach_app',

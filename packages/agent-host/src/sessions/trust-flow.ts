@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_CHANGE, usesLines, type ExternalAppInfo, type MachineInfo, type ProjectInfo } from '@cc/protocol'
+import { ORCHESTRATOR_CHANGE, usesLines, type ExternalAppInfo, type MachineInfo, type ProjectInfo, type RpcResult } from '@cc/protocol'
 import type { TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -21,6 +21,9 @@ const ROWS = 50
 function rows<T>(items: readonly T[], line: (t: T) => string): string[] {
   return [...items.slice(0, ROWS).map(line), ...(items.length > ROWS ? [`- and ${items.length - ROWS} more`] : [])]
 }
+
+/** One rule as Settings lists it */
+type ApprovalRuleRow = RpcResult<'approvals.rules'>[number]
 
 /** The projects and machines as the window reads them, for naming and finding a project */
 type Projects = { projects: ProjectInfo[]; machines: Map<string, string> }
@@ -69,6 +72,10 @@ export class TrustFlow {
           return await this.listProjects(rpc)
         case 'project_trust':
           return await this.projectTrust(rpc, sessionId, req.project, req.trusted, signal)
+        case 'list_rules':
+          return await this.listRules(rpc, req.project)
+        case 'remove_rule':
+          return await this.removeRule(rpc, req.id)
       }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -146,6 +153,64 @@ export class TrustFlow {
     }
     await callWindow(rpc, 'projects.setTrusted', { projectId: p.id, trusted: true })
     return { ok: true, text: `${label} is trusted now: its apps may run and its settings apply.` }
+  }
+
+  // ── Approval rules ──
+  //
+  // A rule is a standing "always allow" the person gave on a card: removing one narrows what runs unasked, so it acts at
+  // once, as Settings' delete does. There is no command that adds or widens one: the window has no such call either, and
+  // a rule comes only from the person answering a card "always" (`ApprovalRules.rememberAlways`).
+
+  /** The rules as Settings lists them (`approvals.rules`, linked machines' merged with their ids folded) */
+  private async rules(rpc: WindowRpc): Promise<ApprovalRuleRow[]> {
+    return callWindow(rpc, 'approvals.rules', {})
+  }
+
+  /** What a rule belongs to, by name: its project, or its session */
+  private async owners(rpc: WindowRpc): Promise<{ all: Projects; sessions: Map<string, string> }> {
+    const [all, sessions] = await Promise.all([this.projects(rpc), callWindow(rpc, 'sessions.list', {}).catch(() => [])])
+    return { all, sessions: new Map(sessions.map((s) => [s.id, s.name])) }
+  }
+
+  private ruleLine(r: ApprovalRuleRow, o: { all: Projects; sessions: Map<string, string> }): string {
+    const project = r.projectId ? o.all.projects.find((p) => p.id === r.projectId) : undefined
+    const owner = r.sessionId
+      ? `the session ${o.sessions.has(r.sessionId) ? `${shown(o.sessions.get(r.sessionId)!)} ` : ''}[${r.sessionId}]`
+      : project
+        ? `the project ${shown(project.name)} [${project.id}]`
+        : r.projectId
+          ? `a project no longer registered [${r.projectId}]`
+          : 'nothing (it applies to no session)'
+    const machine = r.machine ? ` on the linked machine ${shown(o.all.machines.get(r.machine) ?? r.machine)}` : ''
+    return `- [${r.id}] ${r.decision} ${shown(r.matcher)} for ${owner}${machine}, since ${new Date(r.createdAt).toISOString().slice(0, 10)}`
+  }
+
+  private async listRules(rpc: WindowRpc, named?: string): Promise<TrustAnswer> {
+    const [rules, o] = await Promise.all([this.rules(rpc), this.owners(rpc)])
+    let shownRules = rules
+    let of = ''
+    if (named?.trim()) {
+      const found = this.find(o.all, named)
+      if ('error' in found) return { ok: false, error: found.error }
+      shownRules = rules.filter((r) => r.projectId === found.project.id)
+      of = ` of ${shown(found.project.name)}`
+    }
+    if (!shownRules.length) return { ok: true, text: `No approval rule${of}: every action that asks, asks.` }
+    return {
+      ok: true,
+      text: [
+        `${shownRules.length} approval ${shownRules.length === 1 ? 'rule' : 'rules'}${of}, each a standing answer the person gave on a card (remove_approval_rule removes one; adding one is the person's own "always" on a card):`,
+        ...rows(shownRules, (r) => this.ruleLine(r, o)),
+      ].join('\n'),
+    }
+  }
+
+  private async removeRule(rpc: WindowRpc, id: number): Promise<TrustAnswer> {
+    const [rules, o] = await Promise.all([this.rules(rpc), this.owners(rpc)])
+    const rule = rules.find((r) => r.id === id)
+    if (!rule) return { ok: false, error: `No approval rule has the id ${id}; list_approval_rules shows them.` }
+    await callWindow(rpc, 'approvals.deleteRule', { id })
+    return { ok: true, text: `Removed the approval rule ${this.ruleLine(rule, o).slice(2)}. That action asks again from now on (a running session takes it at its next start).` }
   }
 
   // ── The card ──

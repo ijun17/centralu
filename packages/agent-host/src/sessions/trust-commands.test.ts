@@ -18,7 +18,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * on a real store, so the host checks it as it checks the window. Widening trust waits for the person's card, which
  * names exactly what changes and is checked again after Allow; narrowing acts at once.
  */
-const COMMANDS = ['list_projects', 'set_project_trust'] as const
+const COMMANDS = ['list_projects', 'set_project_trust', 'list_approval_rules', 'remove_approval_rule'] as const
 type Command = (typeof COMMANDS)[number]
 
 let root: string
@@ -225,10 +225,69 @@ describe('set_project_trust', () => {
   })
 })
 
+describe('approval rules', () => {
+  type Rule = { id: number; matcher: string; projectId: string | null; sessionId: string | null }
+  const rules = async () => (await rpc('approvals.rules', {})) as Rule[]
+
+  it('lists each rule with what it allows and what it belongs to, all or one project\'s, and says when there is none', async () => {
+    const orc = await mgr.orchestrator()
+    expect((await run(orc.id, 'list_approval_rules')).text).toBe('No approval rule: every action that asks, asks.')
+    const a = await project('Alpha')
+    const b = await project('Beta')
+    await rpc('projects.setTrusted', { projectId: a.id, trusted: true })
+    const s = (await rpc('agents.createSession', { projectId: a.id, cwd: a.path, tool: 'claude' })) as { id: string; name: string }
+    store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm test', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'session', sessionId: s.id, matcher: 'Bash:git status', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: b.id, matcher: 'Bash:make', decision: 'allow' })
+    const all = await run(orc.id, 'list_approval_rules')
+    expect(all.isError).toBeFalsy()
+    expect(all.text).toContain('3 approval rules, each a standing answer the person gave on a card')
+    const ids = Object.fromEntries((await rules()).map((r) => [r.matcher, r.id]))
+    expect(all.text).toContain(`- [${ids['Bash:npm test']}] allow "Bash:npm test" for the project "Alpha" [${a.id}], since `)
+    expect(all.text).toContain(`- [${ids['Bash:git status']}] allow "Bash:git status" for the session "${s.name}" [${s.id}], since `)
+    const onlyB = await run(orc.id, 'list_approval_rules', { project: 'Beta' })
+    expect(onlyB.text).toContain('1 approval rule of "Beta"')
+    expect(onlyB.text).toContain('"Bash:make"')
+    expect(onlyB.text).not.toContain('npm test')
+    expect((await run(orc.id, 'list_approval_rules', { project: 'Nobody' })).isError).toBe(true)
+  })
+
+  it('removes a rule at once, with no card, through the window\'s call, naming what it was', async () => {
+    const a = await project('Alpha')
+    store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm test', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm run lint', decision: 'allow' })
+    const [one] = (await rules()).filter((r) => r.matcher === 'Bash:npm test')
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'remove_approval_rule', { id: one!.id })
+    expect(card(orc.id)).toBeUndefined()
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain(`Removed the approval rule [${one!.id}] allow "Bash:npm test" for the project "Alpha"`)
+    expect(r.text).toContain('That action asks again from now on')
+    expect((await rules()).map((x) => x.matcher)).toEqual(['Bash:npm run lint'])
+  })
+
+  it('refuses an id no rule has, removing nothing', async () => {
+    const a = await project('Alpha')
+    store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm test', decision: 'allow' })
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'remove_approval_rule', { id: 987654 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe('Nothing changed: No approval rule has the id 987654; list_approval_rules shows them.')
+    expect(await rules()).toHaveLength(1)
+  })
+
+  it('has no command that adds or widens a rule', () => {
+    expect(commandsFor('orchestrator', 'commands').filter((n) => /rule/.test(n))).toEqual(['list_approval_rules', 'remove_approval_rule'])
+  })
+})
+
 describe('who may run them', () => {
   it('are found through centralu_commands', async () => {
     const orc = await mgr.orchestrator()
-    const found = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trust' })).text
+    const found = [
+      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trust' })).text,
+      (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'rule' })).text,
+    ].join('\n')
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
   })
 
@@ -248,11 +307,14 @@ describe('who may run them', () => {
     await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
     const caller = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     const target = await project('Target')
+    store.permissions.addApprovalRule({ scope: 'project', projectId: target.id, matcher: 'Bash:npm test', decision: 'allow' })
+    const ruleId = ((await rpc('approvals.rules', {})) as { id: number }[])[0]!.id
     for (const name of COMMANDS) {
-      const args = { project: target.id, trusted: true }
+      const args = name.includes('rule') ? { id: ruleId } : { project: target.id, trusted: true }
       await expect(mgr.runOrchestratorTool(caller.id, name, args), name).rejects.toThrow(`Not a tool of this session: ${name}`)
       await expect(mgr.runOrchestratorTool(caller.id, 'centralu_run', { command: name, args }), name).rejects.toThrow(/Not a tool of this session/)
     }
     expect(await trusted(target.id)).toBe(false)
+    expect((await rpc('approvals.rules', {})) as unknown[]).toHaveLength(1)
   })
 })
