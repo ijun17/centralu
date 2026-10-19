@@ -191,6 +191,17 @@ export const hostMethods = {
    */
   'machines.activity': { params: z.object({ machineId: MachineId }), result: z.object({ activity: HostActivity.nullable() }) },
   /**
+   * A linked machine's own "Allow auto from a linked computer" switch (#1273 review, owner decision 2026-10-19), read,
+   * or set when `allowed` is given (`host.hubAuto` / `host.setHubAuto` there), for the hub's Settings → Machines: a
+   * machine with no window of its own (`centralu serve`) is set here. The machine reads it at each start; this is the
+   * person's say, no boundary against the hub. `older`: that machine's Centralu predates it; `unreachable`: the link is
+   * not up. Additive
+   */
+  'machines.hubAuto': {
+    params: z.object({ machineId: MachineId, allowed: z.boolean().optional() }),
+    result: z.object({ state: z.enum(['on', 'off', 'older', 'unreachable']) }),
+  },
+  /**
    * Lets a linked machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7,
    * owner decision 2026-10-18): the per-machine switch, off by default, stored with the machine. Each pair (a session
    * there, a project here) is asked on this computer's card once; off forgets every pair approved for it. Additive
@@ -229,6 +240,20 @@ export const hostMethods = {
     result: HostReadSessionResult,
   },
   'host.recall': { params: z.object({ query: z.string(), limit: z.number().int().positive().optional() }), result: z.array(HostRecallHit) },
+  /**
+   * Whether this host takes `auto` for a session a hub's `auto` session starts here (#1273, start_agent with a
+   * machine): its own "Allow auto from a linked computer" switch (`UiPreferences.hubAuto`, on by default). The hub reads
+   * it before it decides whether to raise its card; `agents.createSession`'s `fromHub` reads the switch again. Asked by
+   * the hub directly, never routed. A host from before it answers "Unknown method", and the hub keeps `normal`.
+   */
+  'host.hubAuto': { params: z.object({}), result: z.object({ allowed: z.boolean() }) },
+  /**
+   * Sets that switch from the hub (#1273 review, owner decision 2026-10-19): the hub's Settings → Machines shows it for
+   * each machine, so a machine with no window of its own (`centralu serve`) can be set too. It restricts what the
+   * person allows and is no boundary against the hub, which holds this host's token and could ask for `auto` outright.
+   * Answers the switch as it now reads. Asked by the hub directly, never routed; an older host answers "Unknown method".
+   */
+  'host.setHubAuto': { params: z.object({ allowed: z.boolean() }), result: z.object({ allowed: z.boolean() }) },
   /**
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
    * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an

@@ -54,6 +54,8 @@ async function remoteHost(
     activity?: () => HostActivity
     immediate?: boolean
     without?: readonly string[]
+    /** Runs as each call reaches the host, before it is answered: a test acts at that moment */
+    onCall?: (method: string) => void
     elevated?: () => boolean | null
     logon?: () => HostLogon | null
     handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
@@ -66,7 +68,7 @@ async function remoteHost(
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? []),
+    onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? [], o.onCall),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
@@ -86,8 +88,9 @@ async function remoteHost(
 }
 
 /** An RPC handler without these methods, as a build from before them answers */
-function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly string[]): ReturnType<typeof createRpcHandler> {
+function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly string[], onCall?: (method: string) => void): ReturnType<typeof createRpcHandler> {
   return (method, ...rest) => {
+    onCall?.(method)
     if (methods.includes(method)) return Promise.reject(new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`))
     return handler(method, ...rest)
   }
@@ -1706,7 +1709,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
    * project's session h1 starts the child. `remote`: how the machine's host answers (a synchronous agent, methods an
    * older build lacks)
    */
-  async function rig(o: { remote?: { immediate?: boolean; without?: readonly string[] } } = {}) {
+  async function rig(o: { remote?: { immediate?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-other', path: checkout('git@github.com:me/other.git'), name: 'other' })
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout' })
@@ -1818,18 +1821,184 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(card()).toBeFalsy()
   })
 
-  // #1038 review, as create_session over a link (#838): auto is never carried to another computer, and the card is always asked
-  it('asks an auto caller with the card too, and starts the child there under normal', async () => {
-    const { remote, hub, answer, start } = await rig()
-    await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
-    const call = start({ lsp: true })
-    const c = await answer('allow')
-    expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', preset: 'normal' })
-    const r = await call
-    expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('it runs under normal on Remote box') })
-    expect((r as { notice: string }).notice).toContain('lsp is not passed to another machine')
-    if (!r.ok) return
-    expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+  /**
+   * An auto caller's child on another machine runs auto there too (#1273), where that machine's "Allow auto from a
+   * linked computer" switch lets it, and then no card is raised (owner decision 2026-10-19). A machine whose switch is
+   * off, or one from before this, keeps normal behind the card, which says why.
+   */
+  describe("an auto caller's child there (#1273)", () => {
+    /** The start, withdrawn the moment a card stands in the caller: a card where none belongs fails at once */
+    const unasked = async (hub: Awaited<ReturnType<typeof rig>>['hub'], card: () => unknown) => {
+      const ac = new AbortController()
+      const watch = setInterval(() => card() && ac.abort(), 10)
+      try {
+        return await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', lsp: true }, ac.signal)
+      } finally {
+        clearInterval(watch)
+      }
+    }
+
+    it('runs it under auto there, starts it without a card, and both machines show its preset', async () => {
+      const { remote, hub, card, start } = await rig()
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const r = await unasked(hub, card)
+      expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('it runs under auto on Remote box') })
+      expect((r as { notice: string }).notice).toContain('lsp is not passed to another machine')
+      if (!r.ok) return
+      const id = r.sessionId.slice('m1.'.length)
+      expect(remote.mgr.listSessions().find((s) => s.id === id)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
+      // The hub's windows read the same of it, for its row and header
+      const u = await ui(hub.port)
+      expect((await u.call('sessions.list')).find((s: { id: string }) => s.id === r.sessionId)).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
+      // A normal caller is asked, and its child runs under normal there
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'normal' })
+      const call = start({ task: 'once more' })
+      await eventually(() => !!card())
+      expect(card()!.detail).toMatchObject({ kind: 'agent_start', preset: 'normal' })
+      expect((card()!.detail as { autoWithheld?: string }).autoWithheld).toBeUndefined()
+      await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+      const normal = await call
+      if (!normal.ok) throw new Error(normal.error)
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === normal.sessionId)).toMatchObject({ permissionPreset: 'normal', startedFromHub: true })
+    })
+
+    it("asks with the card and runs it under normal where the machine's switch is off, and says why", async () => {
+      const { remote, hub, answer, start } = await rig()
+      remote.mgr.setUiPreferences({ hubAuto: false })
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const call = start()
+      const c = await answer('allow')
+      expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', preset: 'normal', autoWithheld: 'machine_off' })
+      const r = await call
+      expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('it runs under normal on Remote box: that computer does not take auto') })
+      if (!r.ok) return
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+    })
+
+    it('asks with the card and keeps normal on a machine from before this, and says so', async () => {
+      const { remote, hub, answer, start } = await rig({ remote: { without: ['host.hubAuto'] } })
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const call = start()
+      const c = await answer('allow')
+      expect(c.detail).toMatchObject({ kind: 'agent_start', preset: 'normal', autoWithheld: 'older' })
+      const r = await call
+      expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('runs a Centralu from before #1273') })
+      if (!r.ok) return
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+    })
+
+    // #1273 review (owner decision): a machine with no window of its own is set from the hub's Settings → Machines
+    it("reads and sets the machine's own switch from the hub, which the machine then keeps to", async () => {
+      const { remote, hub, answer, start } = await rig()
+      const u = await ui(hub.port)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'on' })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).toEqual({ state: 'off' })
+      expect(remote.mgr.uiPreferences().hubAuto).toBe(false)
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const call = start()
+      expect((await answer('allow')).detail).toMatchObject({ preset: 'normal', autoWithheld: 'machine_off' })
+      expect(await call).toMatchObject({ ok: true })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: true })).toEqual({ state: 'on' })
+      expect(remote.mgr.uiPreferences().hubAuto).toBe(true)
+    })
+
+    // #1273 review: any failure there read as the link being down
+    it('says a failure there in its own words, not as the link being down', async () => {
+      const { hub } = await rig({
+        remote: {
+          onCall: (method) => {
+            if (method === 'host.setHubAuto') throw new Error('the store is read-only')
+          },
+        },
+      })
+      const u = await ui(hub.port)
+      await expect(u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).rejects.toThrow(/did not answer for its "Allow auto from a linked computer": .*the store is read-only/)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'on' })
+    })
+
+    it('says a machine from before the switch has none to set', async () => {
+      const { hub } = await rig({ remote: { without: ['host.hubAuto', 'host.setHubAuto'] } })
+      const u = await ui(hub.port)
+      expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'older' })
+      expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).toEqual({ state: 'older' })
+    })
+
+    // #1273 review (RVIA 1): a caller that left auto kept giving its auto child work there
+    it('gives no work to a child that runs above its caller, once the caller has less', async () => {
+      const { hub, card, agent } = await rig()
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const r = await unasked(hub, card)
+      if (!r.ok) throw new Error(r.error)
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'safe' })
+      expect(await agent(r.sessionId, 'send', 'now do more')).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('now has more permissions (auto) than this session (safe), so this session cannot give it work'),
+      })
+      // Back under auto, the caller may again
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      expect(await agent(r.sessionId, 'send', 'now do more')).toMatchObject({ ok: true })
+    })
+
+    // #1273 review (RVIA 2): the preset was decided from the caller as it was before the machine was asked
+    it('decides from the caller as it is once the machine answered: one that left auto meanwhile gets its own card and child', async () => {
+      // The caller leaves auto while the machine is asked whether it takes auto
+      let leave = () => {}
+      const { remote, hub, answer, card, start } = await rig({ remote: { onCall: (method) => method === 'host.hubAuto' && leave() } })
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      // Still under auto when the machine answers: no card, and an auto child
+      const first = await unasked(hub, card)
+      if (!first.ok) throw new Error(first.error)
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === first.sessionId)).toMatchObject({ permissionPreset: 'auto' })
+      leave = () => void hub.mgr.updateSettings('h1', { permissionPreset: 'normal' })
+      const call = start({ task: 'once more' })
+      const c = await answer('allow')
+      expect(c.detail).toMatchObject({ kind: 'agent_start', preset: 'normal' })
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+    })
+
+    it("starts nothing when the caller's preset falls below the card's while it stands", async () => {
+      const { remote, hub, card, start } = await rig()
+      const call = start()
+      await eventually(() => !!card())
+      const pending = card()!
+      expect(pending.detail).toMatchObject({ preset: 'normal' })
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'safe' })
+      await hub.mgr.respondApproval('h1', pending.requestId, 'allow')
+      expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('now runs under safe, below the normal the child would have run under') })
+      expect(remote.mgr.listSessions().filter((s) => s.startedFromHub)).toEqual([])
+    })
+
+    // #1273 review (RVIA 4): a caller that left auto while the machine made its child kept that auto child
+    it('starts nothing when the caller leaves auto while the machine makes its child', async () => {
+      const { remote, hub, card } = await rig()
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const create = remote.mgr.createSession.bind(remote.mgr)
+      vi.spyOn(remote.mgr, 'createSession').mockImplementation(async (...a) => {
+        void hub.mgr.updateSettings('h1', { permissionPreset: 'normal' })
+        return create(...a)
+      })
+      const r = await unasked(hub, card)
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('this session now runs under normal, below the auto the session made there runs under') })
+      expect(remote.mgr.listSessions().filter((s) => s.startedFromHub)).toEqual([])
+      expect(remote.store.trash.listTrash()).toHaveLength(1)
+    })
+
+    it('starts nothing when the switch goes off between its answer and the start, as no card was asked', async () => {
+      const { remote, hub, card } = await rig()
+      await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+      const create = remote.mgr.createSession.bind(remote.mgr)
+      vi.spyOn(remote.mgr, 'createSession').mockImplementation(async (...a) => {
+        remote.mgr.setUiPreferences({ hubAuto: false })
+        return create(...a)
+      })
+      const r = await unasked(hub, card)
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box no longer takes auto from this computer') })
+      expect(remote.mgr.listSessions().filter((s) => s.startedFromHub)).toEqual([])
+      // It was given no task, and waits in that machine's trash
+      expect(remote.store.trash.listTrash()).toHaveLength(1)
+    })
   })
 
   it('reports the end of a turn it was not waited on to the session that started it, and takes sends, a stop and a delete', async () => {
@@ -1965,7 +2134,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
   })
 
   it("tells the caller of an approval there once, and leaves it to the person, as the caller's preset does not cross machines", async () => {
-    const { hub, answer, start, agent, told } = await rig()
+    const { remote, hub, answer, start, agent, told } = await rig()
+    // An auto caller whose child runs normal there (#1273: that machine does not take auto), so the child asks there
+    remote.mgr.setUiPreferences({ hubAuto: false })
     await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
     const call = start({ task: 'please approve the command', wait: false })
     await answer('allow')

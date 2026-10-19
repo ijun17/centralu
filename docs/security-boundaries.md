@@ -251,8 +251,8 @@ machine as the less trusted side: a compromised server must not reach the person
   app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
   call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
-  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review,
-  as start_agent's on another computer, #1038). It names the machine and the asking session there, quoted on one line;
+  answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).
+  It names the machine and the asking session there, quoted on one line;
   turning the switch off closes it. Approving it is remembered for the
   pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
 - **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
@@ -406,10 +406,40 @@ stored and shown as the orchestrator's (`from`), not the person's. It was `norma
 under, with the instruction recorded as the person's, so a `safe` orchestrator that read a planted instruction could
 start a `normal` session carrying it without a card.
 
-**`start_agent` on a linked machine** (#1038) follows the same rule: the child there runs under the caller's preset,
-`normal` at most (`auto` gets `normal`; Codex's `auto` would be `danger-full-access` on that computer), and the card
-naming the machine is raised every time, for an `auto` caller too (`askHost`'s `alwaysAsk`), with no "always": nothing
-is remembered for another machine's project. The machine keeps the child one level below the caller in the agent
+**`start_agent` on a linked machine** (#1038) runs the child there under the caller's preset. A `normal` or `safe`
+caller's is carried as it is, behind the card naming the machine, raised every time (`askHost`'s `alwaysAsk`) with no
+"always": nothing is remembered for another machine's project.
+
+An `auto` caller's child runs under `auto` there too (#1273, owner decision 2026-10-19), and then no card is raised: the
+person let that session act without asking, and the orchestrator's own remote work otherwise went back to a
+hand-written script that made `auto` sessions there directly. What is carried is the caller's preset only, as
+`agents.createSession`'s `fromHub: { callerPreset }`; the machine decides. It takes `auto` that way only while its own
+Settings → "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`, on by default, so a person can
+refuse it on a machine they share; a record that cannot be read, or a value that is not true or false, reads as off,
+#1273 review); it reads the switch at each start (`presetFromHub`), and anything else sent with
+`fromHub` runs `normal` at most there. The machine does not tell the hub's call from any other holder of its token:
+whoever holds the token could already ask for `auto` outright (`permissionPreset`), so `fromHub` gives no one more. The hub asks the
+machine first (`host.hubAuto`): a machine whose switch is off keeps the card, which says the child runs under `normal`
+and why (`autoWithheld: "machine_off"`), and so does a machine from before #1273 (`"older"`), which drops `fromHub`
+and keeps `normal`; the start's answer to the caller says the same, never silently. A switch turned off between the
+hub's question and the start starts nothing there: the child made without a card is given no task and goes to that
+machine's trash. The child is never above its caller (#1273 review): the preset is decided from the caller as it is once
+the machine has answered, so the card states the preset the child will get; the caller is read again after the card
+(a caller lowered while it stood starts nothing) and once the machine has made the child (one made above the caller as
+it is then is given no task and goes to that machine's trash); and `agent_session send` refuses work to a child whose
+preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's row and header show its preset on both machines (`SessionInfo.startedFromHub`).
+**Residual:** the hub holds the machine's token, so the switch is the person's say over what Centralu's own
+start_agent carries, not a wall against a hub that is not Centralu. An `auto` child there runs as `auto` runs on that
+computer (Codex's `auto` is `danger-full-access` there), with that computer's logins, and an `auto` caller's starts
+there are bounded only as its local ones are (the project's ceiling, unlimited under `auto` unless the person set one,
+and the agent depth), no longer by a card each. A missing switch reads as on (the default); a damaged one as off. The hub's Settings → Machines sets the switch of
+each linked machine over the link (`host.setHubAuto`), so a machine with no window of its own (`centralu serve`) can be
+set too, and so the hub can also turn back on a switch a person turned off at that machine; the machine still reads it at each start, and setting it from the hub is no boundary against the hub (any
+holder of the token could ask for `auto` outright). A start interrupted between the machine making the child and its
+task (a hub restart, a link drop) leaves an idle session there under the child's preset, with no task, which nothing
+on the hub follows; nothing runs in it until a person types into it.
+
+The machine keeps the child one level below the caller in the agent
 depth (`agentDepth`); a machine whose build would drop it (it has no `projects.origin`) is refused, so two machines
 linked both ways cannot start each other's sessions past the setting. The checkout is matched by its origin's
 repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
@@ -505,6 +535,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `start_agent`, first time for a session, trusted project | asks (consent card: once, always for this session, always for this project) | allowed (the project's trust is the consent, #673) | allowed | open | asks | allowed | allowed | open | `ensureAgentConsent` (`trustIsAgentConsent`) in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`); a card past the setup bound stays, and the call answers `pending` (#673) |
 | `start_agent` (or a fork) from a session at the agent depth (default 1: one that was itself started or asked) | refused | refused | refused | refused | refused | refused | refused | refused | `setUpAgent`, `agentStartGateError`, `forkTrustError` through `agentDepthRefusal` (`prefs.agentDepth`, 1–3, #867; `askProject` refuses the same sessions) |
 | `start_agent` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (the project's trust, #382) |
+| `start_agent` with `machine` (a child on a linked machine, #1038, #1273) | asks every time, no "always"; the child runs under `safe` | asks every time; the child runs under `normal` | asks every time; `normal` | open: no card, the child runs under `auto` there while that machine's "Allow auto from a linked computer" is on; otherwise asks, the child under `normal`, the card saying why | asks; `safe` | asks; `normal` | asks; `normal` | open, as Claude `auto` (Codex's `auto` there is `danger-full-access`) | `RemoteAgents.startAgent` (`askHost` with `alwaysAsk`, the caller read again after the machine answered, after the card and after the child is made) and, on the machine, `presetFromHub` at each start; `agent_session send` refuses a child above its caller |
 | `start_agent` past 4 running children in the project, default setting | refused | refused | refused | open | refused | refused | refused | open | `agentCeilingError` (`prefs.agentCeiling`; empty: auto unlimited, otherwise `AGENT_CEILING`; 0: unlimited) |
 | `agent_session` on a session the caller did not start (except delete without a worktree) | refused | refused | refused | open | refused | refused | refused | open | `agentSession` (same project in every preset; ownership opens under auto) |
 | `agent_session` delete without a worktree, a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (#637): requires `askedBy` or `parentSessionId` equal to the caller in the same project. An owned child is moved to the sidebar trash; mid-turn deletion requires the caller's own unsettled delegation and otherwise protects the person's turn/cards. |

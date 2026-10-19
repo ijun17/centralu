@@ -4,6 +4,7 @@ import { windowAround } from './snippet.js'
 import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { hubAskDepthKey } from './agent-depth.js'
+import { withHubMark } from './hub-preset.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -386,7 +387,8 @@ export class SessionManager {
       const stale = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
       // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
-      this.meta.set(s.id, fixed)
+      // Started from a linked computer (#1273): kept beside the row, as its depth is
+      this.meta.set(s.id, withHubMark(store.settings, fixed))
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list

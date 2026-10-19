@@ -80,6 +80,13 @@ describe('SessionListRow', () => {
     expect(render(session({ id: 'm1.c1', machine: 'm1' }), false)).not.toContain('session-machine-')
   })
 
+  // #1273: a child a linked computer's session started runs under the preset it carried; its row says which
+  it('shows the preset of a session a linked computer started, and of no other', () => {
+    expect(render(session({ permissionPreset: 'auto', startedFromHub: true }), false)).toMatch(/data-testid="session-preset-s1"[^>]*>auto</)
+    expect(render(session({ permissionPreset: 'normal', startedFromHub: true }), false)).toMatch(/data-testid="session-preset-s1"[^>]*>normal</)
+    expect(render(session({ permissionPreset: 'auto' }), false)).not.toContain('session-preset-')
+  })
+
   it('keeps each list its own test id and indentation', () => {
     expect(render(session(), false)).toContain('data-testid="session-row-s1"')
     expect(render(session(), true)).toContain('data-testid="app-session-row-s1"')

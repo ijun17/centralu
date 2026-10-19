@@ -150,6 +150,13 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
      * "always": the consent is for this call only, as for ask_project's (#700).
      */
     machine: z.string().optional(),
+    /**
+     * The caller runs under `auto` and the child on `machine` will not (#1273): `machine_off`, that machine's "Allow auto
+     * from a linked computer" switch is off; `older`, it runs a Centralu that cannot take `auto` from another computer.
+     * Absent: the child runs under the caller's preset (an `auto` caller's start on a machine that takes it raises no
+     * card at all), or an older host.
+     */
+    autoWithheld: z.enum(['machine_off', 'older']).optional(),
   }),
   /**
    * An ordinary session asks to check or install Centralu itself (#581). Applying the installed build (#665) is not an
