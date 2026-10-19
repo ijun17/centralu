@@ -84,11 +84,11 @@ function fakeOps() {
     },
     install: async (id) => {
       calls.push(['install', id])
-      return { machine: find(id), current: { version: '0.1.0-beta.29' } }
+      return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     update: async (id) => {
       calls.push(['update', id])
-      return { machine: find(id), current: { version: '0.1.0-beta.29' } }
+      return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     autostart: async (id, on) => {
       calls.push(['autostart', id, on])
@@ -218,11 +218,11 @@ describe('install_machine', () => {
     const orc = await mgr.orchestrator()
     const install = await answered(orc.id, 'install_machine', { machine: 'laptop' }, 'allow')
     expect(install.question).toContain("Install this computer's Centralu on Laptop (me@laptop, Windows, PowerShell)?")
-    expect(install.r.text).toContain('Installed Centralu 0.1.0-beta.29 on Laptop.')
+    expect(install.r.text).toContain('Installed Centralu 9.9.9-test.1 on Laptop.')
     const update = await answered(orc.id, 'install_machine', { machine: 'Laptop', action: 'update' }, 'allow')
     expect(update.question).toContain('stops the Centralu there')
     expect(update.question).toContain('a turn in progress is lost')
-    expect(update.r.text).toContain('Updated to Centralu 0.1.0-beta.29 on Laptop.')
+    expect(update.r.text).toContain('Updated to Centralu 9.9.9-test.1 on Laptop.')
     expect(ops.changes()).toEqual([
       ['install', 'laptop'],
       ['update', 'laptop'],
