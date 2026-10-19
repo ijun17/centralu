@@ -1,6 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { memoryCapabilityBook } from './capabilities.js'
+import { BrokerDesk, type DeskApps } from './desk.js'
+import type { AppManifest } from './manifest.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { fakeBrokerHost, memoryLedger, until } from './test-helpers.js'
@@ -162,5 +165,36 @@ describe("an app's notice into a session that called it (#1161 item 1)", () => {
     await call(r, 'queue', 'later', { to: goneAddress, text: 'too late' })
     expect(await taken('queue')).toBe(false)
     expect(r.runs(ref('queue'), 20).find((x) => x.tool === 'notify' && x.status === 'rejected')?.error).toContain('that session is gone')
+  })
+})
+
+describe("the desk's own checks on a notice (#1161 item 1)", () => {
+  /** A desk whose every address opens to session s1: only its own checks stand between the app and the session */
+  function desk() {
+    const told: string[] = []
+    const apps = { noticeSession: () => 's1', redactor: () => (t: string) => t } as unknown as DeskApps
+    const d = new BrokerDesk(apps, memoryCapabilityBook(), () => ({ questionMs: 1_000, agentRateWindowMs: 60_000 }), memoryLedger())
+    d.attach(fakeBrokerHost({ appNotice: async (_sessionId, text) => void told.push(text) }))
+    const app = (uses: AppManifest['uses']) => ({ ref: ref('queue'), name: 'queue', manifest: { uses } as AppManifest })
+    return { d, told, app }
+  }
+
+  it('refuses an app that does not declare uses.notices, even with an address that opens', async () => {
+    const { d, told, app } = desk()
+    expect(await d.notice(app({}), 's1.any', 'hello')).toMatch(/does not declare "uses": \{ "notices": true \}/)
+    expect(await d.notice(app({ notices: false }), 's1.any', 'hello')).toMatch(/does not declare/)
+    expect(told).toEqual([])
+    expect(await d.notice(app({ notices: true }), 's1.any', 'hello')).toBe(null)
+    expect(told).toEqual(['hello'])
+  })
+
+  it('refuses empty text, text over the cap, and more than 10 a minute', async () => {
+    const { d, told, app } = desk()
+    const a = app({ notices: true })
+    expect(await d.notice(a, 's1.any', '   ')).toMatch(/empty/)
+    expect(await d.notice(a, 's1.any', 'x'.repeat(4_001))).toMatch(/over 4000/)
+    for (let i = 0; i < 10; i++) expect(await d.notice(a, 's1.any', `n${i}`)).toBe(null)
+    expect(await d.notice(a, 's1.any', 'one too many')).toMatch(/10 notices in the last minute/)
+    expect(told).toHaveLength(10)
   })
 })
