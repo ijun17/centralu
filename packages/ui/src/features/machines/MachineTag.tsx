@@ -43,7 +43,7 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
 // In the project name's own ink, text and border (owner, 2026-10-20): beside a project's changes badge, the faint chip read as one more
 // count. Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
 // of the generated CSS, not of the class attribute
-const BADGE = 'shrink-0 truncate rounded-md border border-ink px-1 text-2xs leading-body text-ink max-w-24'
+const BADGE = 'shrink-0 truncate rounded-md border border-ink px-1 pb-0.5 pt-px text-2xs leading-none text-ink max-w-24'
 
 export function MachineBadge({
   machine,
