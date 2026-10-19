@@ -23,6 +23,7 @@ import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
+import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -31,7 +32,7 @@ import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
 import { orchestratorMemory } from './transcript-view.js'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type {
   RebuildCause,
   ApprovalDecision,
@@ -42,8 +43,6 @@ import type {
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
-  ProjectInfo,
-  SavedCommand,
   SessionInfo,
   SessionState,
   ToolName,
@@ -82,8 +81,7 @@ import type { UpdateApplyBroker } from '../update-apply.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
-import { gitSummary } from '../dev-services/git.js'
-import { gitValidBranchName, gitWorktreeDirty } from '../dev-services/git-worktree.js'
+import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
 import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
 import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
@@ -108,7 +106,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -155,6 +153,8 @@ export class SessionManager {
   private readonly toolRegistry: ToolRegistry
   /** The remembered "always allow" answers: written, read for a launch, listed in Settings (approval-rules.ts) */
   private readonly approvalRules: ApprovalRules
+  /** The registered projects: rows, folders, trust, `ProjectInfo` and the settings kept on them (project-registry.ts) */
+  private readonly projectRegistry: ProjectRegistry
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -298,14 +298,15 @@ export class SessionManager {
     } = {},
   ) {
     this.files = new ProjectFiles({
-      rootOf: (projectId) => this.cwdOf(projectId),
-      trust: (projectId) => this.gitTrust(projectId),
+      rootOf: (projectId) => this.projectRegistry.cwdOf(projectId),
+      trust: (projectId) => this.projectRegistry.gitTrust(projectId),
       session: (sessionId) => this.meta.get(sessionId),
       store,
       // `this.emit` is wrapped below; looked up when a change goes out, not now
       emit: (e) => this.emit(e),
     })
     this.toolRegistry = new ToolRegistry(this.parts())
+    this.projectRegistry = new ProjectRegistry(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
@@ -579,7 +580,7 @@ export class SessionManager {
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
-    const root = this.projectRow(projectId)?.path
+    const root = this.projectRegistry.projectRow(projectId)?.path
     this.store.trash.deleteProject(projectId)
     // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
     this.apps.appsHub?.rt.forgetProject(projectId)
@@ -603,7 +604,7 @@ export class SessionManager {
    * why. The flag is written before this returns; the promise settles when the idle restarts are done.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
-    const was = this.projectRow(projectId)?.trusted
+    const was = this.projectRegistry.projectRow(projectId)?.trusted
     if (!this.store.projects.setProjectTrusted(projectId, trusted)) {
       throw rpcError(`Project not found: ${projectId}`)
     }
@@ -628,18 +629,6 @@ export class SessionManager {
       )
     }
     return this.launches.refreshLaunchSettings(projectId, true)
-  }
-
-  /**
-   * Is this project trusted (decision 3, #92) — passed to the adapter when launching a session. False
-   * if the project does not exist.
-   *
-   * Read fresh from the store on every call, the same as the app runtime — holding a cached copy
-   * would keep answering "yes" even after trust was turned off.
-   */
-  private projectTrusted(projectId: string | null): boolean {
-    if (!projectId) return false
-    return this.store.projects.projectRoots().some((p) => p.id === projectId && p.trusted)
   }
 
   /**
@@ -690,98 +679,22 @@ export class SessionManager {
      * already decided by the person through trust.
      */
     if (m.projectId === null && this.apps.isAppAgentSession(m)) return { projectTrusted: false }
-    return { projectTrusted: this.projectTrusted(m.projectId) }
+    return { projectTrusted: this.projectRegistry.projectTrusted(m.projectId) }
   }
 
-  private async projectInfo(id: string, path: string): Promise<ProjectInfo> {
-    /*
-     * **Reads the stored value.** 'claude' used to be hardcoded here, which meant the DB's
-     * default_tool column was never read anywhere — and since nothing wrote to it either, nobody
-     * noticed (2026-08-27, caught by a test while adding the remember-tool feature).
-     */
-    const row = this.projectRow(id)
-    const git = await gitSummary(path, { trusted: row?.trusted ?? false })
-    const stored = row?.defaultTool
-    return {
-      id, path, name: basename(path), defaultTool: this.toolRegistry.firstTool(stored),
-      // Trust (M4, decision 3) — reads the same column as the app runtime. The trust toggle on screen shows
-      // this value
-      trusted: row?.trusted ?? false,
-      // Default model/effort per tool (#107) — read separately since it is JSON, like commands and
-      // worktreeSetup
-      defaultModels: this.store.projects.projectToolDefaults(id),
-      // Saved shell commands ride along with the project so the Run menu never has a
-      // "loading" state to distinguish from an empty one (issue #44)
-      commands: this.store.projects.projectCommands(id),
-      // Worktree provisioning (#69) rides along too — a new session window prefills it without a separate
-      // fetch
-      worktreeSetup: this.store.projects.worktreeSetup(id),
-      // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
-      // is archived — so the screen never navigates to a ghost slot, this side (which knows about
-      // sessions) does the check
-      /*
-       * The trunk, in the shape the window has read since #76. The session is the former manager's, or empty: the
-       * manager was folded into ordinary sessions (#561 part 3), and the window reads only `baseBranch`
-       */
-      worktreeManager: (() => {
-        const trunk = this.store.projects.worktreeTrunk(id)
-        return trunk ? { sessionId: this.store.projects.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
-      })(),
-      git: git.isRepo ? git : null,
-    }
+  /** `ProjectRegistry.setProjectCommands` (project-registry.ts), kept on the manager for its callers */
+  setProjectCommands(...a: Parameters<ProjectRegistry['setProjectCommands']>): ReturnType<ProjectRegistry['setProjectCommands']> {
+    return this.projectRegistry.setProjectCommands(...a)
   }
 
-  /**
-   * Replace this project's saved shell commands (issue #44).
-   *
-   * Blank entries are dropped here rather than trusted to the caller: a row that runs
-   * nothing when clicked is worse than no row, and this is the one place every edit —
-   * from any client — has to pass through.
-   *
-   * Nothing else is inspected. These are the user's own commands and go to their own
-   * shell; the approval machinery exists for what an agent proposes, and running these
-   * through it would put a permission prompt in front of what the person just typed.
-   */
-  setProjectCommands(projectId: string, commands: readonly SavedCommand[]): SavedCommand[] {
-    this.requireProject(projectId)
-    // Drop empty commands, and turn an empty alias into no alias — the label is display-only, so all it needs
-    // is normalizing
-    const clean = commands.flatMap((c): SavedCommand[] => {
-      const command = c.command.trim()
-      if (!command) return []
-      const label = c.label?.trim()
-      return [{ command, ...(label ? { label } : {}) }]
-    })
-    const was = JSON.stringify(this.store.projects.projectCommands(projectId))
-    this.store.projects.setProjectCommands(projectId, clean)
-    // The Run menu of every other window reads the project's commands (#719)
-    if (was !== JSON.stringify(clean)) this.emit({ type: 'projects_changed' })
-    return clean
+  /** `ProjectRegistry.setWorktreeSetup` (project-registry.ts), kept on the manager for its callers */
+  setWorktreeSetup(...a: Parameters<ProjectRegistry['setWorktreeSetup']>): ReturnType<ProjectRegistry['setWorktreeSetup']> {
+    return this.projectRegistry.setWorktreeSetup(...a)
   }
 
-  /** Worktree provisioning settings (#69) — saved by the new session window's worktree section */
-  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    this.requireProject(projectId)
-    const clean = setup
-      ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
-      : null
-    const saved = clean && (clean.command || clean.copyFiles.length) ? clean : null
-    const was = JSON.stringify(this.store.projects.worktreeSetup(projectId))
-    this.store.projects.setWorktreeSetup(projectId, saved)
-    if (was !== JSON.stringify(this.store.projects.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
-  }
-
-  /**
-   * Sidebar order (the person sets it by dragging).
-   *
-   * Anything missing from the received list is **left at the end, as-is** — something that was off
-   * screen should never jump to the front just because an order was saved once.
-   */
-  async reorderProjects(orderedIds: readonly string[]): Promise<ProjectInfo[]> {
-    const known = this.store.projects.listProjects().map((p) => p.id)
-    const rest = known.filter((id) => !orderedIds.includes(id))
-    this.store.projects.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
-    return this.listProjects()
+  /** `ProjectRegistry.reorderProjects` (project-registry.ts), kept on the manager for its callers */
+  reorderProjects(...a: Parameters<ProjectRegistry['reorderProjects']>): ReturnType<ProjectRegistry['reorderProjects']> {
+    return this.projectRegistry.reorderProjects(...a)
   }
 
   reorderSessions(projectId: string, orderedIds: readonly string[]): SessionInfo[] {
@@ -1025,28 +938,14 @@ export class SessionManager {
     }
   }
 
-  async listProjects(): Promise<ProjectInfo[]> {
-    return Promise.all(this.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path)))
+  /** `ProjectRegistry.listProjects` (project-registry.ts), kept on the manager for its callers */
+  listProjects(...a: Parameters<ProjectRegistry['listProjects']>): ReturnType<ProjectRegistry['listProjects']> {
+    return this.projectRegistry.listProjects(...a)
   }
 
-  /**
-   * One project, re-measured (issue #41).
-   *
-   * The caller is a refresh loop — the sidebar count is re-read every time a turn ends —
-   * so this has to cost **one** `git status`. Answering it by calling `listProjects` and
-   * discarding all but one row would run a status per registered project on every turn,
-   * which is exactly the quiet cost that keeps this out of the hot path.
-   */
-  async projectGitStatus(projectId: string): Promise<ProjectInfo> {
-    const p = this.requireProject(projectId)
-    /*
-     * Merge detection (#69) piggybacks here — the UI's call is debounced to fire whenever a turn
-     * ends, which happens to be the same rhythm as "something just moved". A merge done in a
-     * terminal is caught on the next refresh too. It does not block the response: the badge flows
-     * separately as an event.
-     */
-    this.merges.checkMergedInBackground(projectId)
-    return this.projectInfo(p.id, p.path)
+  /** `ProjectRegistry.projectGitStatus` (project-registry.ts), kept on the manager for its callers */
+  projectGitStatus(...a: Parameters<ProjectRegistry['projectGitStatus']>): ReturnType<ProjectRegistry['projectGitStatus']> {
+    return this.projectRegistry.projectGitStatus(...a)
   }
 
   listSessions(): SessionInfo[] {
@@ -1117,7 +1016,7 @@ export class SessionManager {
     if (!this.restartPolicy.trustRestartNotice.delete(sessionId)) return
     const m = this.meta.get(sessionId)
     if (!m || !this.handles.has(sessionId)) return
-    const text = this.projectTrusted(m.projectId)
+    const text = this.projectRegistry.projectTrusted(m.projectId)
       ? "Restarted the agent to apply this project's new trust: it now reads the project's own settings and instruction files (CLAUDE.md, AGENTS.md)."
       : "Restarted the agent to apply this project's removed trust: it now reads only your own settings, not the project's files."
     this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'restart', text })
@@ -1704,17 +1603,9 @@ export class SessionManager {
 
   /** A project's working directory. Used by the terminal to decide its own key (cwd) */
   cwdOfProject(projectId: string): string {
-    return this.cwdOf(projectId)
+    return this.projectRegistry.cwdOf(projectId)
   }
 
-  // ── Git (B-1) — only path resolution happens here; the actual work is delegated to dev-services ──
-  /**
-   * A project's working directory. **The orchestrator (projectId=null) uses a neutral location.**
-   *
-   * Placing it inside a project would have it touching the same files as that project's sessions —
-   * creating with our own hands exactly the concurrent-session conflict FR-2 warns about. The
-   * orchestrator has no hands of its own: sessions do the work, and the orchestrator instructs and reads.
-   */
   /**
    * Where this session actually runs. **The stored path beats the recomputed one** (issue #28).
    *
@@ -1737,20 +1628,14 @@ export class SessionManager {
   private cwdFor(m: SessionInfo): string {
     const stored = this.store.sessions.sessionCwd(m.id)
     if (stored) return stored
-    const derived = m.worktree?.path ?? this.cwdOf(m.projectId)
+    const derived = m.worktree?.path ?? this.projectRegistry.cwdOf(m.projectId)
     this.store.sessions.setSessionCwd(m.id, derived)
     return derived
   }
 
-  /**
-   * "Our own folders" — the search scope used when hunting for stray processes (strays.ts).
-   *
-   * Project directories plus the worktree root. Why the worktree root is included separately:
-   * everything under it is **a folder the app itself created**, so anything running there is by
-   * definition our own business, and it can still exist even after the project is removed from the list.
-   */
-  folderRoots(): string[] {
-    return [...this.store.projects.listProjects().map((p) => p.path), this.worktreeRoot]
+  /** `ProjectRegistry.folderRoots` (project-registry.ts), kept on the manager for its callers */
+  folderRoots(...a: Parameters<ProjectRegistry['folderRoots']>): ReturnType<ProjectRegistry['folderRoots']> {
+    return this.projectRegistry.folderRoots(...a)
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
@@ -1761,7 +1646,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m?.worktree) return null
     // A failed read is not a clean worktree: the delete dialog then warns instead of removing quietly (#850 review)
-    const state = await gitWorktreeDirty(m.worktree.path, this.gitTrust(m.projectId)).catch(() => ({
+    const state = await gitWorktreeDirty(m.worktree.path, this.projectRegistry.gitTrust(m.projectId)).catch(() => ({
       dirty: true,
       changedFiles: 0,
       unknown: true as const,
@@ -1779,19 +1664,9 @@ export class SessionManager {
     return this.handoffNotes.exportHandoffNote(...a)
   }
 
-  private cwdOf(projectId: string | null): string {
-    if (projectId === null) return orchestratorHome()
-    const p = this.requireProject(projectId)
-    return p.path
-  }
-
-  /**
-   * The project's trust as a git read needs it (#407): before trust, a read runs none of the
-   * repository's hooks, filters, textconv or fsmonitor (`git-exec.ts`). Read fresh on every call,
-   * like `projectTrusted`.
-   */
-  gitTrust(projectId: string | null): { trusted: boolean } {
-    return { trusted: this.projectTrusted(projectId) }
+  /** `ProjectRegistry.gitTrust` (project-registry.ts), kept on the manager for its callers */
+  gitTrust(...a: Parameters<ProjectRegistry['gitTrust']>): ReturnType<ProjectRegistry['gitTrust']> {
+    return this.projectRegistry.gitTrust(...a)
   }
 
   /** `ProjectFiles.projectOrigin` (dev-services/project-files.ts), kept on the manager for its callers */
@@ -2180,6 +2055,7 @@ export class SessionManager {
       get children() {
         return self.children
       },
+      checkMergedInBackground: (...a) => self.merges.checkMergedInBackground(...a),
       cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
       get lettingGo() {
         return self.lettingGo()
@@ -2189,7 +2065,7 @@ export class SessionManager {
       },
       createSession: (...a) => self.createSession(...a),
       cwdFor: (...a) => self.cwdFor(...a),
-      cwdOf: (...a) => self.cwdOf(...a),
+      cwdOf: (...a) => self.projectRegistry.cwdOf(...a),
       defaultToolFor: (...a) => self.toolRegistry.defaultToolFor(...a),
       get delegationFlow() {
         return self.delegationFlow
@@ -2216,7 +2092,7 @@ export class SessionManager {
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
-      gitTrust: (...a) => self.gitTrust(...a),
+      gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),
       handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
       handleSink: () => self.handleSink(),
@@ -2289,10 +2165,10 @@ export class SessionManager {
       get prCheckedAt() {
         return self.merges.prCheckedAt
       },
-      projectInfo: (...a) => self.projectInfo(...a),
+      projectInfo: (...a) => self.projectRegistry.projectInfo(...a),
       projectOrigin: (...a) => self.files.projectOrigin(...a),
-      projectRow: (...a) => self.projectRow(...a),
-      projectTrusted: (...a) => self.projectTrusted(...a),
+      projectRow: (...a) => self.projectRegistry.projectRow(...a),
+      projectTrusted: (...a) => self.projectRegistry.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
       get queue() {
         return self.queue
@@ -2370,7 +2246,7 @@ export class SessionManager {
       get trashing() {
         return self.trash.trashing
       },
-      trunkOf: (...a) => self.trunkOf(...a),
+      trunkOf: (...a) => self.projectRegistry.trunkOf(...a),
       turnRunning: (...a) => self.turnRunning(...a),
       get turnObservers() {
         return self.turnObservers
@@ -2734,20 +2610,9 @@ export class SessionManager {
     return this.apps.setAppShared(...a)
   }
 
-  /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
-   * part 3). null if none was set — HEAD is then used as the baseline */
-  private trunkOf(projectId: string): string | null {
-    return this.store.projects.worktreeTrunk(projectId)
-  }
-
-  /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
-  async setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void> {
-    this.requireProject(projectId)
-    const branch = baseBranch.trim()
-    if (!branch) throw rpcError('Pick the branch worktrees should fork from')
-    if (!(await gitValidBranchName(branch))) throw rpcError(`Not a branch name: ${branch}`)
-    this.store.projects.setWorktreeTrunk(projectId, branch)
-    this.emit({ type: 'projects_changed' })
+  /** `ProjectRegistry.setWorktreeTrunk` (project-registry.ts), kept on the manager for its callers */
+  setWorktreeTrunk(...a: Parameters<ProjectRegistry['setWorktreeTrunk']>): ReturnType<ProjectRegistry['setWorktreeTrunk']> {
+    return this.projectRegistry.setWorktreeTrunk(...a)
   }
 
   /**
@@ -3009,18 +2874,6 @@ export class SessionManager {
   private openSession(sessionId: string): SessionInfo {
     this.notBeingRemoved(sessionId)
     return this.sessionOf(sessionId)
-  }
-
-  /** A registered project's row, read now (trust and paths change under a running host) */
-  private projectRow(projectId: string | null | undefined): ReturnType<Store['projects']['listProjects']>[number] | undefined {
-    return projectId ? this.store.projects.listProjects().find((p) => p.id === projectId) : undefined
-  }
-
-  /** A registered project's row, or `Project not found` */
-  private requireProject(projectId: string): ReturnType<Store['projects']['listProjects']>[number] {
-    const p = this.projectRow(projectId)
-    if (!p) throw rpcError(`Project not found: ${projectId}`)
-    return p
   }
 
   /**
