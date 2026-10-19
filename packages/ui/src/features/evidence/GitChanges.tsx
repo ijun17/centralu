@@ -9,6 +9,8 @@ import { useLoad } from '../../app/useLoad.js'
 import { Button } from '../../components/Button.jsx'
 import { Badge } from '../../components/Badge.jsx'
 import { TextInput } from '../../components/TextField.jsx'
+import { Pill } from '../../components/Pill.jsx'
+import { Tooltip } from '../../components/primitives.jsx'
 
 /**
  * Changed files — the most frequently viewed list in this app.
@@ -45,14 +47,15 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
   const unstaged = files?.filter((f) => !f.staged) ?? []
   const staged = files?.filter((f) => f.staged) ?? []
 
-  const run = async (fn: () => Promise<void>) => {
+  /** `verb` names the action in a failure's toast ("Could not commit: …"), the shape every error takes (docs/ux-writing.md 1.5) */
+  const run = async (fn: () => Promise<void>, verb: string) => {
     setBusy(true)
     try {
       await fn()
       await refresh()
     } catch (e) {
       // When the RPC throws (disconnect, timeout), nothing caught it and it looked like a success — no silent failures
-      setToast((e as Error).message)
+      setToast(`Could not ${verb}: ${(e as Error).message}`)
     } finally {
       setBusy(false)
       setCancelling(false)
@@ -79,17 +82,10 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
       {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
       {files && files.length > 0 && (
         <TabActions>
-          <span className="readout text-2xs text-ink-muted" data-testid="evidence-change-count">
-            {changedFileCount(files)}
-          </span>
-          <button
-            className="rounded-md px-1.5 py-0.5 text-2xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"
-            onClick={() => openGit()}
-            data-testid="evidence-git-full"
-            title="Open in wide view"
-          >
-            Expand
-          </button>
+          <ChangeCount count={changedFileCount(files)} />
+          <Button variant="ghost" size="xs" onClick={() => openGit()} data-testid="evidence-git-full">
+            Open wide
+          </Button>
         </TabActions>
       )}
 
@@ -104,11 +100,16 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
         />
       )}
       {denied ? (
-        <p className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
-          Folder access permission required — System Settings → Privacy & Security → Files and Folders
-        </p>
+        <div className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
+          <p>Folder access is off for this project</p>
+          <p className="text-ink-faint">
+            Turn it on in System Settings, under Privacy & Security, Files and Folders
+          </p>
+        </div>
       ) : files === undefined ? (
-        status.error === null && <SkeletonLines lines={3} className="px-3 pb-2 pt-1" label="Loading the changes" />
+        status.error === null && (
+          <SkeletonLines lines={3} className="px-3 pb-2 pt-1" label="Loading the changes" />
+        )
       ) : files.length === 0 ? (
         <p className="px-3 pb-2 text-xs text-ink-faint" data-testid="evidence-clean">
           No changes
@@ -132,7 +133,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
                 id: 'unstage',
                 one: 'Unstage',
                 all: 'Unstage all',
-                run: (paths) => run(() => gitStage(projectId, paths, true)),
+                run: (paths) => run(() => gitStage(projectId, paths, true), 'unstage'),
               }}
             />
             <ChangeGroup
@@ -144,7 +145,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
                 id: 'stage',
                 one: 'Stage',
                 all: 'Stage all',
-                run: (paths) => run(() => gitStage(projectId, paths)),
+                run: (paths) => run(() => gitStage(projectId, paths), 'stage'),
               }}
             />
           </div>
@@ -179,9 +180,11 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               onClick={() =>
                 void run(async () => {
                   const r = await gitCommit(projectId, message.trim())
-                  setToast(r.ok ? 'Committed' : r.cancelled ? 'Commit cancelled' : (r.message ?? 'Commit failed'))
+                  setToast(
+                    r.ok ? 'Committed' : r.cancelled ? 'Commit cancelled' : failure('commit', r.message),
+                  )
                   if (r.ok) setMessage('')
-                })
+                }, 'commit')
               }
             >
               Commit
@@ -194,8 +197,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               onClick={() =>
                 void run(async () => {
                   const r = await platform.git.push(projectId)
-                  setToast(r.ok ? 'Pushed' : r.cancelled ? 'Push cancelled' : (r.message ?? 'Push failed'))
-                })
+                  setToast(r.ok ? 'Pushed' : r.cancelled ? 'Push cancelled' : failure('push', r.message))
+                }, 'push')
               }
             >
               Push
@@ -238,14 +241,16 @@ function ChangeGroup({
       <header className="sticky top-0 flex items-center gap-1.5 bg-surface-side px-3 py-1">
         <Badge as="h4">{title}</Badge>
         <span className="readout text-2xs text-ink-faint">{files.length}</span>
-        <button
-          className="ml-auto text-2xs text-ink-faint transition-colors hover:text-ink disabled:opacity-50"
+        <Button
+          variant="ghost"
+          size="xs"
+          className="ml-auto"
           disabled={busy}
           onClick={() => void action.run(files.map((f) => f.path))}
           data-testid={`evidence-${action.id}-all`}
         >
           {action.all}
-        </button>
+        </Button>
       </header>
       <ul>
         {files.map((f) => (
@@ -279,38 +284,66 @@ function ChangeRow({
   actionLabel: string
   onAction: () => void
 }) {
+  // The row whose diff the wide view shows is the selected one: the same pair as a commit row and a file tree row
+  const selected = useStore(
+    (s) =>
+      s.overlay?.kind === 'git' &&
+      s.overlay.sub === 'changes' &&
+      s.overlay.path === file.path &&
+      !!s.overlay.staged === file.staged,
+  )
   return (
     <li className="group/file relative">
       <button
-        className="flex w-full items-center gap-2 px-3 py-1 pr-12 text-left transition-colors hover:bg-surface-hover/25"
+        className={`flex w-full items-center gap-2 px-3 py-1 pr-14 text-left transition-colors ${
+          selected ? 'bg-surface-selected text-ink' : 'text-ink-muted hover:bg-surface-hover/20'
+        }`}
         onClick={onOpen}
         data-testid={`evidence-file-${file.path}`}
         title={`${file.path} — view diff`}
       >
         {/* The kind is told apart by a letter, not a color (strict grayscale) */}
-        <span className="readout w-3 shrink-0 text-2xs text-ink-muted">{statusMark(file.status)}</span>
-        <span className="truncate text-sm text-ink-muted" dir="rtl">
-          {file.path}
-        </span>
+        <span className="readout w-3 shrink-0 text-2xs">{statusMark(file.status)}</span>
+        <span className="readout truncate text-xs">{file.path}</span>
       </button>
       {/*
         A way to stage or unstage just this one file. Without it, doing "commit everything except
         this one" meant dropping out to the terminal — it must be possible to finish it right where
         it was being reviewed.
       */}
-      <button
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1 text-2xs text-ink-faint opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/file:opacity-100 disabled:opacity-50"
-        disabled={busy}
-        onClick={onAction}
-        data-testid={`evidence-${actionId}-${file.path}`}
-        title={`${file.path} ${actionLabel}`}
-      >
-        {actionLabel}
-      </button>
+      {/* Its own positioned box: the tooltip's anchor is `relative`, and two positions on one element race in the CSS order */}
+      <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/file:opacity-100">
+        <Tooltip content={`${actionLabel} ${file.path}`} align="right">
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={busy}
+            onClick={onAction}
+            data-testid={`evidence-${actionId}-${file.path}`}
+          >
+            {actionLabel}
+          </Button>
+        </Tooltip>
+      </span>
     </li>
   )
 }
 
+/** How many files changed, in the label capsule; the words are in its tooltip, as on the top bar's capsules */
+function ChangeCount({ count }: { count: number }) {
+  return (
+    <Tooltip content={`${count} changed ${count === 1 ? 'file' : 'files'}`} align="right">
+      <Pill size="label" edge="quiet" data-testid="evidence-change-count">
+        <span className="readout">{count}</span>
+      </Pill>
+    </Tooltip>
+  )
+}
+
+/** A write that answered with a failure: what failed and git's own reason, or what failed alone when it gave none */
+function failure(verb: string, reason: string | undefined): string {
+  return reason ? `Could not ${verb}: ${reason}` : `Could not ${verb}`
+}
 
 /**
  * The single letter in front of a row (user request, 2026-09-10: "a new file shows up as a
