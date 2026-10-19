@@ -2652,7 +2652,8 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     expect(issues()).toHaveLength(1)
     expect(mainRedNotices()).toHaveLength(1)
     expect(guardOnDisk().hunt).toMatchObject({ red: repo.shas[0], outcome: 'reverting', culprit: { sha: repo.shas[0] } })
-    expect(gh().dispatched ?? []).toEqual([])
+    // No bisect: the only candidate needs no probe (a batch for the revert the queue lands is its own run)
+    expect((gh().dispatched ?? []).filter((d: { ref: string }) => d.ref.startsWith('queue/bisect-'))).toEqual([])
   })
 
   /** A probe's branch, and a dispatch of it answered with a finished run on its commit */
