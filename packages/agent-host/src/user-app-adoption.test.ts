@@ -423,6 +423,36 @@ describe('a deleted project gives its folder back', () => {
     expect(trashed()).toEqual([])
   })
 
+  it('keeps a folder a project lives inside', async () => {
+    const pid = project()!.id
+    await door('projects.delete', { projectId: pid })
+    await settling
+    mkdirSync(join(appDir(), 'ui'))
+    store.projects.addProject({ id: 'inside', path: join(appDir(), 'ui'), name: 'ui' })
+    // A sibling whose name only starts the same is not inside it
+    store.projects.addProject({ id: 'sibling', path: join(dataRoot, 'apps', 'notes-site'), name: 'notes-site' })
+    await door('trash.empty', {})
+    await settling
+    expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)
+    expect(trashed()).toEqual([])
+    rt.refresh()
+    await door('projects.delete', { projectId: 'inside' })
+    await settling
+    expect(existsSync(appDir())).toBe(false)
+  })
+
+  it.runIf(process.platform === 'win32')('keeps the folder while a project is on a drive that is not there now (a subst gone since a restart)', async () => {
+    const pid = project()!.id
+    await door('projects.delete', { projectId: pid })
+    await settling
+    const absent = 'QRSTUVWXYZ'.split('').find((d) => !existsSync(`${d}:\\`))!
+    store.projects.addProject({ id: 'unplugged', path: `${absent}:\\notes`, name: 'notes' })
+    await door('trash.empty', {})
+    await settling
+    expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)
+    expect(trashed()).toEqual([])
+  })
+
   it.runIf(process.platform !== 'win32')('keeps the folder while a project path cannot be resolved (a link loop)', async () => {
     const pid = project()!.id
     await door('projects.delete', { projectId: pid })

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
@@ -98,19 +98,22 @@ const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => dr
  * real path cannot be told. It errs toward yes: a folder wrongly kept is only kept, while one wrongly moved is a live
  * project's. Both sides are compared by their real paths (`realFolder`), so a project added through a symbolic link, a
  * junction, a `subst` drive or a short name is the same folder, and with ASCII case folded on every system (a
- * case-sensitive disk may keep one folder too many). A kept path whose real path cannot be told counts as this folder,
- * and so does one on a share, which is never resolved: it may not answer
+ * case-sensitive disk may keep one folder too many). A project inside the folder counts too: the folder would move from
+ * under it. A kept path whose real path cannot be told counts as this folder (a drive not there now, a link loop, no
+ * access), and so does a UNC path, which is never resolved: a share may not answer
  */
 function folderMatcher(dir: string): ((kept: string) => boolean) | null {
   const fold = (path: string) => path.replace(/[A-Z]/g, (c) => c.toLowerCase())
   const real = realFolder(dir)
   if (real === null) return null
-  const near = new Set([fold(resolve(dir)), fold(real)])
+  const near = [fold(resolve(dir)), fold(real)]
+  /** The folder itself, or something inside it */
+  const within = (path: string) => near.some((n) => path === n || path.startsWith(n.endsWith(sep) ? n : n + sep))
   return (kept) => {
     const k = resolve(kept)
-    if (near.has(fold(k)) || k.startsWith('\\\\')) return true
+    if (within(fold(k)) || k.startsWith('\\\\')) return true
     const r = realFolder(k)
-    return r === null || near.has(fold(r))
+    return r === null || within(fold(r))
   }
 }
 
@@ -126,7 +129,8 @@ function realFolder(path: string): string | null {
     const code = (e as NodeJS.ErrnoException).code
     if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
     const parent = dirname(full)
-    if (parent === full) return full
+    // A root that is not there (a drive unplugged, a `subst` gone since a restart) says nothing of where it pointed
+    if (parent === full) return null
     const up = realFolder(parent)
     return up === null ? null : join(up, basename(full))
   }

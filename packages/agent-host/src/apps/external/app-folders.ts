@@ -234,16 +234,16 @@ export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, ta
   }
 }
 
-/**
- * Where a user-folder app's folder goes when it leaves (`<data folder>/app-trash/<id>-<ms>`): removed from Settings, or
- * given back by a deleted project it had become (#1204). Moved, never deleted: it may be a hand-made app, and a person
- * brings it back by moving it into the user folder again. Returns where it went
- */
 /** Where a user-folder app's folder goes in `app-trash/` at this moment (`<id>-<ms>`) */
 export function appTrashEntry(dataRoot: string, appId: string, at: number): string {
   return join(dataRoot, 'app-trash', `${appId}-${at}`)
 }
 
+/**
+ * Where a user-folder app's folder goes when it leaves (`<data folder>/app-trash/<id>-<ms>`): removed from Settings, or
+ * given back by a deleted project it had become (#1204). Moved, never deleted: it may be a hand-made app, and a person
+ * brings it back by moving it into the user folder again. Returns where it went
+ */
 export function moveToAppTrash(dataRoot: string, dir: string, appId: string, at = Date.now()): string {
   const trash = join(dataRoot, 'app-trash')
   mkdirSync(trash, { recursive: true })

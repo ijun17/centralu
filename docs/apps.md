@@ -111,8 +111,10 @@ visibility is not read as the default: the side that is wrong stays closed.
   returned: they went with the project, and the folder put back gets what `_user/<id>` still holds.
   Moving the folder back into the user folder makes it a new project, with its data. Nothing moves
   while a project is registered at that folder (the person added it again, in any spelling, or through
-  a link, a junction or a `subst` drive: real paths are compared) or a session in the trash names it,
-  nor while a project's path cannot be resolved (a share, which is never resolved, or a link loop). Only
+  a link, a junction or a `subst` drive: real paths are compared; or inside the folder) or a session in
+  the trash names it, nor while a project's path cannot be resolved (a drive that is not there now, a
+  link loop, no access, or a UNC path, which is never resolved). Such a project holds every give-back
+  until it resolves or goes; a mapped drive letter is resolved, and a dead server can make that slow. Only
   the folder that carries the adoption's mark moves: another folder of that name, and what is kept for
   it, is never touched.
   Checked at each start once the host is ready, after a project is deleted, and after the trash is
