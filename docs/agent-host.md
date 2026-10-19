@@ -127,7 +127,9 @@ the set at 1,375). #581 adds the consented update tool, deferred on Claude like 
 instructions pointer: 1,709 characters against a 1,750 ceiling. The full reader profile's resident
 and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11.
 
-The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) ride on
+The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
+orchestrator's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
+when it needs one ([tool-cost.md](tool-cost.md) §12). In an ordinary session they ride on
 the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
 set grows into the other's headroom. Claude defers all three, which adds +31 tokens per request (the
 same probe, 2026-10-05, measured on the #320 set before `ask_project` joined it: +192 to +223), and
