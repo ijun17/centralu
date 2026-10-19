@@ -1,3 +1,4 @@
+import { errorKind } from './error-kind.js'
 import type { SessionInfo } from '@cc/protocol'
 import {
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
@@ -94,17 +95,17 @@ export class ObservedTurns {
   /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
   async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
     const name = this.host.nameOf(sessionId)
-    const rest =
-      `id: ${sessionId}\n\n` +
-      `Reason: ${why.slice(0, 600)}\n\n` +
-      `Send it again with ${namedCall(this.host.toolProfileOf(observerId), 'agent_session', { sessionId, action: 'send', text: FILL })}, or read that session's recent conversation with read_session.`
+    const again = `Send it again with ${namedCall(this.host.toolProfileOf(observerId), 'agent_session', { sessionId, action: 'send', text: FILL })}, or read that session's recent conversation with read_session.`
     await this.host.tellSession(
       observerId,
-      `[Centralu] Your note to another session was not delivered.\nSession: ${frameField(name)}\n${rest}`,
+      `[Centralu] Your note to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}\n\n${again}`,
       { sessionId, name },
       true,
-      // What the model reads (#1186): all of it but the session's name, which is not Centralu's words (#120)
-      `[Centralu] Your note to another session was not delivered.\n${rest}`,
+      /*
+       * What the model reads (#1186): not the session's name, nor the refusal's words, which are its tool's error
+       * (#1186 review): their kind, and the notice on screen keeps them
+       */
+      `[Centralu] Your note to another session was not delivered.\nid: ${sessionId}\n\nReason, by kind: ${errorKind(why)} (its words are its tool's, kept in this notice on the person's screen).\n\n${again}`,
     )
   }
 }
