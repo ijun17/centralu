@@ -667,21 +667,29 @@ fn a_child_of_the_host_in_its_group_is_refused() {
     }
     let d = temp_dir("group");
     let keeper = Children::start(&d.0).unwrap();
+    // The keeper refuses by closing the connection as it accepts it, never writing to it. That close may
+    // come before the hello is sent (EPIPE on Linux, EPROTOTYPE too on macOS), after it (ECONNRESET on
+    // the read) or show as an end of file: every socket error is that close. The send used to be outside
+    // the `try`, so a close that won the race ended the child unanswered yet printing nothing (#1274).
+    // A keeper that neither answers nor closes is `silent`, not refused; 10 s leaves room under load.
     const ASK: &str = r#"
 import socket, sys
 s = socket.socket(socket.AF_UNIX)
-s.settimeout(3)
+s.settimeout(10)
 s.connect(sys.argv[1])
-s.sendall(b'{"op":"hello","protocol":1}\n')
 try:
-    got = s.recv(4096)
+    s.sendall(b'{"op":"hello","protocol":1}\n')
+    got = 'answered' if s.recv(4096) else 'closed'
+except socket.timeout:
+    got = 'silent'
 except OSError:
-    got = b''
-print('answered' if got else 'closed')
+    got = 'closed'
+print(got)
 "#;
-    // Waits for its stdin to end first, so the keeper names it before anything connects
+    // Waits for its stdin to end first, so the keeper names it before anything connects. A child that
+    // printed nothing says why.
     let host = format!(
-        "import subprocess, sys\nsys.stdin.read()\nASK = {ASK:?}\nchild = subprocess.run([sys.executable, '-c', ASK, sys.argv[1]], capture_output=True, text=True).stdout.strip()\nprint('child', child, flush=True)\nexec(ASK)\n"
+        "import subprocess, sys\nsys.stdin.read()\nASK = {ASK:?}\nr = subprocess.run([sys.executable, '-c', ASK, sys.argv[1]], capture_output=True, text=True)\nprint('child', r.stdout.strip() or 'failed: ' + r.stderr.strip(), flush=True)\nexec(ASK)\n"
     );
     let mut child = std::process::Command::new("python3")
         .args(["-c", &host, &socket_path(&d.0).to_string_lossy()])

@@ -11,7 +11,7 @@ import { inOrder, omitKey, stillInOrder } from './patch.js'
  */
 
 /** What a project carries that any client may change through the host (#719); `git` and the identity stay as the window has them */
-const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'worktreeManager', 'defaultTool', 'defaultModels'] as const satisfies readonly (keyof ProjectInfo)[]
+const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'agentInstructions', 'worktreeManager', 'defaultTool', 'defaultModels'] as const satisfies readonly (keyof ProjectInfo)[]
 
 /*
  * The writes this window has made to a project and not seen settle (#719). A list read that began before a write
@@ -134,6 +134,7 @@ type ProjectActions = Pick<
   | 'gitCommit'
   | 'gitCheckout'
   | 'saveWorktreeSetup'
+  | 'saveAgentInstructions'
   | 'setProjectCommands'
   | 'loadCommandRuns'
   | 'runCommand'
@@ -375,6 +376,19 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       set((s) => {
         const now = s.projects[projectId]
         return now ? { projects: { ...s.projects, [projectId]: { ...now, worktreeSetup: clean } } } : {}
+      })
+    })
+  },
+
+  async saveAgentInstructions(projectId, text) {
+    const platform = get().platform
+    if (!platform || !get().projects[projectId]) return
+    await writingProject(projectId, () => void get().refreshProjects(), async () => {
+      await platform.projects.setAgentInstructions(projectId, text)
+      // As the host keeps them (trimmed), so the dialog opens on what is stored
+      set((s) => {
+        const now = s.projects[projectId]
+        return now ? { projects: { ...s.projects, [projectId]: { ...now, agentInstructions: text.trim() } } } : {}
       })
     })
   },

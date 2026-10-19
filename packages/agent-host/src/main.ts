@@ -590,6 +590,8 @@ mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router
 mgr.useMachineList(() => links.list())
 // And changes them, behind the person's card where it matters (#1219)
 mgr.useMachineOps(links)
+// And the window's own calls, for its settings commands: the same router the window's socket reaches (#1219)
+mgr.useWindowRpc((method, params) => router.handle(method, params))
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity
@@ -604,6 +606,8 @@ const activity = (): ActivitySnapshot => ({
 })
 const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, {
+    // A deleted project gives back the user-folder app it had become, once the trash cannot restore it (#1204)
+    settleDeletedProjects: () => userAppAdoption.settle(),
     themes,
     terminals,
     updates,

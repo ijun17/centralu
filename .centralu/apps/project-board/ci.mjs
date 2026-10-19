@@ -281,7 +281,7 @@ export function ranTier(checks, name) {
 
 /** The refusal for a head whose own CI ran only the quick tier: what lands needs a full run. */
 export const quickTierReason = (n, branch) =>
-  `${n} ran only the quick tier of CI, and nothing lands without a full run on what lands. Queue it with queue_merge, which lands it through a batch built on main and run in full, or start the full tier on its branch (gh workflow run build.yml --ref ${branch ?? '<branch>'}) and try again once that run is green.`
+  `${n} ran only the quick tier of CI, and nothing lands without a full run on what lands. Queue it with queue_merge, which lands it through a batch built on main (after the fast tier where project.json ci.landTier is quick, #1259), or start the full tier on its branch (gh workflow run build.yml --ref ${branch ?? '<branch>'}) and try again once that run is green.`
 
 // --- Whether to merge -----------------------------------------------------------------------------
 

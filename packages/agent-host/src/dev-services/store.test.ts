@@ -1503,6 +1503,21 @@ describe('worktree_setup round-trip (#69)', () => {
   })
 })
 
+/** #1161 item 2: a project's instructions for started agents, an app setting of the project */
+describe('agent instructions of a project (#1161 item 2)', () => {
+  it('save, read back, clear with an empty text, and go with the project', () => {
+    const s = seeded()
+    expect(s.projects.agentInstructions('p1')).toBe('')
+    s.projects.setAgentInstructions('p1', 'Never use git stash.')
+    expect(s.projects.agentInstructions('p1')).toBe('Never use git stash.')
+    s.projects.setAgentInstructions('p1', '')
+    expect(s.settings.appSetting('agent_instructions:p1')).toBeNull()
+    s.projects.setAgentInstructions('p1', 'Use pwsh.')
+    s.trash.deleteProject('p1')
+    expect(s.settings.appSetting('agent_instructions:p1')).toBeNull()
+  })
+})
+
 /** v27 (#76): the manager slot and trunk are held by the project — a link, not a flag on the session */
 describe('worktree_manager round-trip (#76)', () => {
   it('saves, reads back, and clears', () => {

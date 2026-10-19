@@ -450,8 +450,11 @@ default 4: the owner's, 2026-10-19, this repository's too).
   checks, subject, lowers and branches as alone), each only while the default branch's tree is the
   tree the batch had before it; the last one leaves exactly the tree CI tested, and the batch's end
   says whether it did. A member's own runs were cancelled, so GitHub may call it UNSTABLE: that alone
-  does not stop it when every check that did not pass is a run the batch cancelled
-  (`onlyCancelledByBatch`); anything else waits 30 minutes, then the rest go back. Before each merge
+  does not stop it when every check that did not pass is a run the batch cancelled, or a run a
+  successful run of the same workflow superseded (a duplicate started in the same second, an older
+  run: `supersededSuites`, as on the single path, #1015), or a mix of both (`onlyCancelledByBatch`;
+  queue/batch-89 sat in landing for a same-second duplicate and looped back); anything else waits 30
+  minutes, then the rest go back. Before each merge
   a `merge-queue` success status on its head names the batch run. The default branch moved by
   something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
   rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
@@ -475,10 +478,18 @@ at once, and every push of every pull request started one. The owner chose two t
 request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests); the **full
 tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
 bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
-alone is green on what it reports. **Invariant: nothing lands that has not passed the full tier on
-what lands.** On while `project.json` has `ci.fullTier`, the name of the check that passes on a full
-run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it passed, `quick` when it
-finished otherwise, null while not reported).
+alone is green on what it reports. On while `project.json` has `ci.fullTier`, the name of the check
+that passes on a full run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it
+passed, `quick` when it finished otherwise, null while not reported).
+
+**What lands on what (`ci.landTier`, #1259).** With `full` (the default, and this repository's until
+2026-10-19), nothing lands that has not passed the full tier on what lands. With `quick` (this
+repository's since the owner's decision of 2026-10-19), a change lands after the **fast tier**: its
+own quick run, then its batch's run of the quick tier on what lands (the batch's dispatch asks for
+`tier: quick`; `ci-changes.mjs` answers the full tier anyway for a release bump or a commit on main).
+No e2e, Windows end to end or keeper before the merge: the full tier runs on main after it lands. The
+rules below are `full`'s where they say "full tier"; with `quick`, a batch lands from its green quick
+run and the full tier's check is not asked for.
 
 - **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
@@ -506,8 +517,79 @@ finished otherwise, null while not reported).
 - **The release** takes a bump PR's run as evidence only when the full tier's check passed on it,
   when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
 - `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
-  without them); the queue's app tests run both ways. Tests: `tooling/project-board-queue.test.ts`,
+  without them), and `PROJECT_BOARD_CI_LAND_TIER` the landing tier; the queue's app tests run each way. Tests: `tooling/project-board-queue.test.ts`,
   `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
+
+### The main guard (#1259)
+
+With changes landing after the fast tier, the full tier runs on main after they land. The **main
+guard** (`main-guard.mjs`, its actions in `main-revert.mjs`) watches it: on while `ci.landTier` is
+`quick` (unless `queue.guard.enabled` is false), one step at most every 2 minutes once the queue has landed something, in the same ticks as
+the queue and by whichever driver holds the lease. Its state is the queue file's `guard`: `green` (the
+last fully green commit of main), `pending` (main's newest push run still going), `hunt` (a red being
+looked into).
+
+- **Main's state** (`mainVerdict`): build.yml's push runs on the default branch, newest first. A run
+  on main is never cancelled by a newer push (build.yml's concurrency: `cancel-in-progress` is false
+  for `refs/heads/main`, #1259 review), so every landed commit's full run finishes and is seen. One
+  still running (or cancelled by hand) says nothing; the newest that passed is `green`; the newest
+  that failed, when newer than it, is the red to look into; `unfinished` counts those still going.
+- **Holding landing**: while more than `queue.guard.maxMainRuns` (3) of main's full runs are
+  unfinished, the queue lands nothing and moves nothing (`tick` answers `held`; `merge_queue` says
+  "Landing held: N of main's full runs unfinished"): each landing adds a full run, and the runners
+  are shared.
+- **The candidates** are the first-parent commits after the last green one up to the red one, with
+  their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
+  `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
+  no checkout: the guard reports the red without a culprit.
+- **The culprit**, in order: the only candidate; else a **suspect by the failed jobs' paths**
+  (`queue.guard.jobPaths`: a job's name, or the start of a matrix job's, → path prefixes or exact
+  paths; `keeper e2e` lists the host's build inputs too, `host tests, remote Node` the Node version
+  file, the lockfile and `packages/core`), when every failed job has paths, exactly one candidate
+  touches them and it touches nothing outside them; a suspect is **confirmed** before anything is done
+  about it, with the full tier on the commit before it (must pass) and on it (must fail), and when
+  either answers otherwise the hunt bisects what is left (`refuted` names the suspect); else
+  **bisect**: the full tier (`tier: full`) on the middle candidate, on a branch `queue/bisect-<sha>`
+  at that commit, halving the range by its outcome until the first red commit is next to the last
+  green one (`nextStep`). A probe's branch is deleted once its run has spoken; a probe cancelled twice,
+  or one whose run has not finished after 2 hours (`PROBE_MAX_MS`), ends the hunt without a culprit,
+  and the issue says why.
+- **Known culprits** (`guard.known`: each culprit found, with its revert's pull request, or none when it
+  was not reverted) are never candidates again, and neither is a revert of one (by the pull request in
+  its subject) (#1259 review). A commit that still **carries** a known culprit (landed after it, before
+  its revert) is probed **without** it: a commit on it with the culprit's change taken out
+  (`commitWithout`, the revert's own way, pushed to the probe's branch). When the red commit itself
+  carries one, its own run proves nothing: the last candidate is probed without it first, and if that
+  passes the red is the known culprit's (`explained`: nothing filed or said again).
+- **One red at a time, none dropped**: a hunt under way goes on, and a newer red waits for it. Once it
+  has ended, the newest red not yet looked into (`guard.hunted`) starts the next hunt, over the commits
+  since the last green one without what is known. Main green during a hunt (a flake) ends it. The range
+  starts at the last fully green commit, not at a revert: a revert that lands while another culprit is
+  on main is red too, so the commits before it may still hold one.
+- **Acting** (`actOnRed`): the culprit is **reverted** in a pull request (`revert: <its subject>`,
+  branch `revert/<sha>`): the reverse of its change applied to the default branch's tip in a temporary
+  index from the checkout (nothing in the checkout moves) and pushed. It is **queued at the front**
+  (`front`), for the session that queued the culprit (owner, author and notice address of its merged
+  item), and lands through the fast tier like any change. **A release bump is never reverted** (a
+  subject `chore(release): …`, or a change to project.json `release.source`); nor is anything when
+  the reverse no longer applies (later commits changed the same lines) or there is no checkout: then
+  the issue says to fix or revert it by hand. Either way, an issue with the failure (the run, the
+  failed jobs, the first failing line, the candidates, how the culprit was found and what the queue
+  did), and a message to the session that queued the culprit (its merged item, by the commit it
+  landed as, else by the pull request in the subject: posted into that session as its notices are,
+  and seen by its watch command). Kind `main-red`. The hunt then ends `reverting` or `reported`.
+- **Acting again is safe**: a `revert/<sha>` branch an earlier try pushed is used as it is, an open pull
+  request from it is the revert (not a second one), and the issue filed for a red is kept (`guard.acting`)
+  until the hunt records it, so a try that stopped half way files nothing twice.
+- **The release** still needs a fully green commit: its CI gate reads main's own push run (always
+  the full tier) on that exact commit, never a batch's quick run on it (`ciForRelease`; test
+  "refuses to tag a commit whose only green run is a batch's quick run …").
+- **Keeping running**: the board holds busy while main's newest run is going or a hunt is under way
+  (`queueBusy`), so the guard sees the full run that follows a landing.
+- `PROJECT_BOARD_QUEUE_GUARD` (`on`/`off`), `PROJECT_BOARD_QUEUE_GUARD_MS`, `PROJECT_BOARD_QUEUE_PROBE_MS`
+  and `PROJECT_BOARD_QUEUE_MAX_MAIN_RUNS` are for tests only.
+  Tests: `tooling/project-board-queue.test.ts` ("the main guard …"), with a real git checkout and a
+  fake `gh`.
 
 ## Which tool for which task (#957)
 

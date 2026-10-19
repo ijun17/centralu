@@ -5,6 +5,9 @@ import { parseJson, readJsonList } from './json.js'
 import { z } from 'zod'
 
 /** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
+/** Where a project's instructions for started agents are kept (#1161 item 2) */
+export const agentInstructionsKey = (projectId: string): string => `agent_instructions:${projectId}`
+
 export class ProjectRecords {
   constructor(private readonly db: Database.Database) {}
 
@@ -86,6 +89,24 @@ export class ProjectRecords {
     this.db
       .prepare(`UPDATE projects SET worktree_setup = ? WHERE id = ?`)
       .run(setup ? JSON.stringify(setup) : null, projectId)
+  }
+
+  /**
+   * The person's instructions for agents started in this project (#1161 item 2), '' when none. Kept as an app setting
+   * of the project (`agent_instructions:<projectId>`), not a column: no store step, and an older build serving the same
+   * store during a swap leaves it alone. Goes with the project (`TrashStore.deleteProject`).
+   */
+  agentInstructions(projectId: string): string {
+    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(agentInstructionsKey(projectId)) as
+      { value: string } | undefined
+    return row?.value ?? ''
+  }
+
+  /** Written whole; an empty text removes the setting */
+  setAgentInstructions(projectId: string, text: string): void {
+    const key = agentInstructionsKey(projectId)
+    if (!text) this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)
+    else this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, text)
   }
 
   /**

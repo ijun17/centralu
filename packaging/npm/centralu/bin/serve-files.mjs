@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
-import { isAlive, replaceFile, sleepSync } from './serve-util.mjs'
+import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
 
 /**
  * The file in the data folder that holds the token and the port, mode 0600.
@@ -31,14 +31,28 @@ export const SERVE_LOGS_KEPT = 3
 /**
  * Makes room for a new start's serve.log (#1143): the earlier ones move down a place, and the oldest past
  * `SERVE_LOGS_KEPT` goes. A hub that starts a host again after it stopped makes at most three starts in ten minutes,
- * so the log of the start that failed first is still here when it stops trying. Never fatal
+ * so the log of the start that failed first is still here when it stops trying. The last one is moved aside with
+ * `renameRetrying` (a reader may hold the file on Windows, #1223); one that cannot be moved is removed rather than
+ * left to read as the new start's. Never fatal
  */
-export function rotateServeLog(log, kept = SERVE_LOGS_KEPT) {
-  for (let i = kept - 1; i >= 0; i--) {
+export function rotateServeLog(log, kept = SERVE_LOGS_KEPT, rename = renameRetrying) {
+  // No log to move aside, no room to make: a second call for the same start (the task's line removed before a WMI start)
+  if (!existsSync(log)) return
+  for (let i = kept - 1; i >= 1; i--) {
     try {
-      renameSync(i === 0 ? log : `${log}.${i}`, `${log}.${i + 1}`)
+      renameSync(`${log}.${i}`, `${log}.${i + 1}`)
     } catch {
-      // there was none
+      // there was none, or a reader holds it: the older log stays where it is
+    }
+  }
+  try {
+    rename(log, `${log}.1`)
+  } catch (e) {
+    if (e?.code === 'ENOENT') return
+    try {
+      rmSync(log, { force: true, maxRetries: 5 })
+    } catch {
+      // nothing more to do
     }
   }
 }

@@ -193,6 +193,11 @@ export class Links {
     return this.need(id).activity()
   }
 
+  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
+  hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'> {
+    return this.need(id).hubAuto(allowed)
+  }
+
   /** The reverse direction's switch for one machine (#550) */
   async setAsks(id: string, on: boolean): Promise<MachineInfo> {
     const m = this.need(id)
