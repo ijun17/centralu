@@ -46,7 +46,6 @@ import type {
   SessionState,
   ToolName,
   SettingsApplied,
-  FsResolvePurpose,
   MachineAskConsent,
 } from '@cc/protocol'
 import {
@@ -82,38 +81,17 @@ import type { UpdateApplyBroker } from '../update-apply.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
-import {
-  gitSummary,
-  gitStatusFiles,
-  gitOriginUrl,
-  gitDiff,
-  gitLog,
-  gitCommitDetail,
-  gitBranches,
-  gitIgnoredEntries,
-} from '../dev-services/git.js'
-import { gitCheckout, gitStage, gitCommit, gitPush, GitWriteRuns } from '../dev-services/git-write.js'
+import { gitSummary } from '../dev-services/git.js'
 import { gitValidBranchName, gitWorktreeDirty } from '../dev-services/git-worktree.js'
 import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
-import {
-  importFile,
-  listDir,
-  moveEntry,
-  readTextFile,
-  resolveEntry,
-  resolveProjectFolder,
-  resolveTarget,
-} from '../dev-services/fs.js'
-import { DirWatchers, type WatchHolder } from '../dev-services/watch.js'
-import { invalidateFileIndex } from '../dev-services/file-search.js'
-import { attachCommitSessions } from '../dev-services/git-attrib.js'
+import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
-import { canonicalPath, isInside, pathParts } from '../dev-services/path-guard.js'
+import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { HostCards, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
@@ -168,16 +146,10 @@ export class SessionManager {
     string,
     { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }
   >()
-  /**
-   * Watcher for the file tree (#34). Only watches expanded directories — the UI sends the set via
-   * fs.watch. Changes go out as an fs_changed event (it is a project-level event, so it has no
-   * sessionId).
-   */
-  private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
-  /** The git panel's writes still running, so the person can cancel one (`git.cancel`, #1007) */
-  private readonly gitWrites = new GitWriteRuns()
+  /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
+  private readonly files: ProjectFiles
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -320,6 +292,14 @@ export class SessionManager {
       handoffTimings?: HandoffTimings
     } = {},
   ) {
+    this.files = new ProjectFiles({
+      rootOf: (projectId) => this.cwdOf(projectId),
+      trust: (projectId) => this.gitTrust(projectId),
+      session: (sessionId) => this.meta.get(sessionId),
+      store,
+      // `this.emit` is wrapped below; looked up when a change goes out, not now
+      emit: (e) => this.emit(e),
+    })
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
@@ -597,13 +577,12 @@ export class SessionManager {
     // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
     this.apps.appsHub?.rt.forgetProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
-    this.watchers.drop(projectId)
-    if (root) invalidateFileIndex(root)
+    this.files.forgetProject(projectId, root)
   }
 
   /** How many of a project's directories are watched (tests) */
   watchedDirCount(projectId: string): number {
-    return this.watchers.watchedCount(projectId)
+    return this.files.watchedDirCount(projectId)
   }
 
   /**
@@ -1821,113 +1800,99 @@ export class SessionManager {
     return { trusted: this.projectTrusted(projectId) }
   }
 
-  /** The project's `origin` remote (#1038), read as a git read is, under its trust; null with no repository or no origin */
-  projectOrigin(projectId: string): Promise<string | null> {
-    return gitOriginUrl(this.cwdOf(projectId), this.gitTrust(projectId))
+  /** `ProjectFiles.projectOrigin` (dev-services/project-files.ts), kept on the manager for its callers */
+  projectOrigin(...a: Parameters<ProjectFiles['projectOrigin']>): ReturnType<ProjectFiles['projectOrigin']> {
+    return this.files.projectOrigin(...a)
   }
 
-  gitStatusFiles(projectId: string) {
-    return gitStatusFiles(this.cwdOf(projectId), this.gitTrust(projectId))
-  }
-  gitDiff(projectId: string, path: string, staged?: boolean) {
-    return gitDiff(this.cwdOf(projectId), path, { staged, ...this.gitTrust(projectId) })
-  }
-  async gitLog(projectId: string, limit?: number) {
-    const commits = await gitLog(this.cwdOf(projectId), limit)
-    // Tags which session created each commit (#50) — passes through untouched wherever there is no record
-    // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
-    const trashed = this.store.trash.trashedIds()
-    return attachCommitSessions(commits, this.store.sessions.commitSessions(projectId), (sid) =>
-      this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
-    )
-  }
-  gitCommitDetail(projectId: string, sha: string) {
-    return gitCommitDetail(this.cwdOf(projectId), sha, this.gitTrust(projectId))
-  }
-  gitBranches(projectId: string) {
-    return gitBranches(this.cwdOf(projectId))
-  }
-  /** Things a fresh worktree will not have (#76) — used to point out candidates to copy */
-  gitIgnoredEntries(projectId: string) {
-    return gitIgnoredEntries(this.cwdOf(projectId), undefined, this.gitTrust(projectId))
-  }
-  gitCheckout(projectId: string, branch: string, dryRun?: boolean) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitCheckout(cwd, branch, { dryRun, signal, ...this.gitTrust(projectId) }))
-  }
-  gitStage(projectId: string, paths: string[], unstage?: boolean) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitStage(cwd, paths, unstage, signal))
-  }
-  gitCommit(projectId: string, message: string) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitCommit(cwd, message, signal))
-  }
-  gitPush(projectId: string) {
-    const cwd = this.cwdOf(projectId)
-    return this.gitWrites.run(projectId, (signal) => gitPush(cwd, signal))
-  }
-  /** Ends the git panel's write still running for this project (#1007); whether there was one */
-  gitCancel(projectId: string): { cancelled: boolean } {
-    return { cancelled: this.gitWrites.cancel(projectId) }
+  /** `ProjectFiles.gitStatusFiles` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitStatusFiles(...a: Parameters<ProjectFiles['gitStatusFiles']>): ReturnType<ProjectFiles['gitStatusFiles']> {
+    return this.files.gitStatusFiles(...a)
   }
 
-  // ── File tree/viewer (C-1) ──
-  listDir(projectId: string, path: string) {
-    return listDir(this.cwdOf(projectId), path, this.gitTrust(projectId))
+  /** `ProjectFiles.gitDiff` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitDiff(...a: Parameters<ProjectFiles['gitDiff']>): ReturnType<ProjectFiles['gitDiff']> {
+    return this.files.gitDiff(...a)
   }
 
-  /**
-   * Updates the file tree's watch set (#34). When the UI sends the whole set of expanded
-   * directories, changes come back as an `fs_changed` event — this lives here because the direction
-   * is round-trip: the request arrives via RPC, but the answer (a change) goes out through the same
-   * broadcast path as a session event.
-   */
-  watchDirs(projectId: string, paths: readonly string[], holder?: WatchHolder): number {
-    return this.watchers.setWatched(projectId, this.cwdOf(projectId), paths, holder)
+  /** `ProjectFiles.gitLog` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitLog(...a: Parameters<ProjectFiles['gitLog']>): ReturnType<ProjectFiles['gitLog']> {
+    return this.files.gitLog(...a)
   }
 
-  /** A window's connection closed: the folders only it had open stop being watched (#842 item 6) */
-  forgetWatchHolder(holder: WatchHolder): void {
-    this.watchers.forgetHolder(holder)
-  }
-  readTextFile(projectId: string, path: string, sessionId?: string) {
-    return readTextFile(this.folderOf(projectId, sessionId), path)
+  /** `ProjectFiles.gitCommitDetail` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCommitDetail(...a: Parameters<ProjectFiles['gitCommitDetail']>): ReturnType<ProjectFiles['gitCommitDetail']> {
+    return this.files.gitCommitDetail(...a)
   }
 
-  /**
-   * The folder a file link of this session is in (#1209): its worktree, or the project's when it has none. Without a
-   * session, the project's. A session of another project is refused, so a project's id cannot carry another's folder.
-   * The answer is the root the caller both checks the path against and reads through: one string, never re-derived.
-   */
-  private folderOf(projectId: string, sessionId: string | undefined): string {
-    if (sessionId === undefined) return this.cwdOf(projectId)
-    const m = this.meta.get(sessionId)
-    if (!m) throw sessionNotFound(sessionId)
-    if (m.projectId !== projectId) throw rpcError(`Session ${sessionId} is not a session of this project`)
-    return m.worktree?.path ?? this.cwdOf(projectId)
+  /** `ProjectFiles.gitBranches` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitBranches(...a: Parameters<ProjectFiles['gitBranches']>): ReturnType<ProjectFiles['gitBranches']> {
+    return this.files.gitBranches(...a)
   }
 
-  // ── File operations (#19) — only path resolution happens here; validation and execution are delegated to
-  // dev-services ──
-  moveEntry(projectId: string, from: string, toDir: string) {
-    return moveEntry(this.cwdOf(projectId), from, toDir)
+  /** `ProjectFiles.gitIgnoredEntries` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitIgnoredEntries(...a: Parameters<ProjectFiles['gitIgnoredEntries']>): ReturnType<ProjectFiles['gitIgnoredEntries']> {
+    return this.files.gitIgnoredEntries(...a)
   }
-  importFile(projectId: string, toDir: string, name: string, dataBase64: string) {
-    return importFile(this.cwdOf(projectId), toDir, name, Buffer.from(dataBase64, 'base64'))
+
+  /** `ProjectFiles.gitCheckout` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCheckout(...a: Parameters<ProjectFiles['gitCheckout']>): ReturnType<ProjectFiles['gitCheckout']> {
+    return this.files.gitCheckout(...a)
   }
-  /** The absolute path handed to the OS by the desktop shell (trash, file manager, IDE). Built by the side that
-   * knows the project: for the trash the entry itself, a link included; otherwise what it is, a link followed inside the
-   * project; never the project folder (#838) */
-  resolveFile(projectId: string, path: string, purpose?: FsResolvePurpose, sessionId?: string) {
-    // A session's folder is only revealed and opened: the trash and the project folder stay the project's (#1209)
-    if (sessionId !== undefined && (purpose === 'trash' || purpose === 'project'))
-      throw rpcError(`A session's folder is not resolved for ${purpose}`)
-    if (sessionId !== undefined) return resolveTarget(this.folderOf(projectId, sessionId), path)
-    const root = this.cwdOf(projectId)
-    // The project folder for its delete dialog only (#838); an older window's dialog sends the literal root and no purpose
-    if (purpose === 'project' || (purpose === undefined && pathParts(root, path).length === 0)) return resolveProjectFolder(root)
-    return purpose === 'trash' ? resolveEntry(root, path) : resolveTarget(root, path)
+
+  /** `ProjectFiles.gitStage` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitStage(...a: Parameters<ProjectFiles['gitStage']>): ReturnType<ProjectFiles['gitStage']> {
+    return this.files.gitStage(...a)
+  }
+
+  /** `ProjectFiles.gitCommit` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCommit(...a: Parameters<ProjectFiles['gitCommit']>): ReturnType<ProjectFiles['gitCommit']> {
+    return this.files.gitCommit(...a)
+  }
+
+  /** `ProjectFiles.gitPush` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitPush(...a: Parameters<ProjectFiles['gitPush']>): ReturnType<ProjectFiles['gitPush']> {
+    return this.files.gitPush(...a)
+  }
+
+  /** `ProjectFiles.gitCancel` (dev-services/project-files.ts), kept on the manager for its callers */
+  gitCancel(...a: Parameters<ProjectFiles['gitCancel']>): ReturnType<ProjectFiles['gitCancel']> {
+    return this.files.gitCancel(...a)
+  }
+
+  /** `ProjectFiles.listDir` (dev-services/project-files.ts), kept on the manager for its callers */
+  listDir(...a: Parameters<ProjectFiles['listDir']>): ReturnType<ProjectFiles['listDir']> {
+    return this.files.listDir(...a)
+  }
+
+  /** `ProjectFiles.watchDirs` (dev-services/project-files.ts), kept on the manager for its callers */
+  watchDirs(...a: Parameters<ProjectFiles['watchDirs']>): ReturnType<ProjectFiles['watchDirs']> {
+    return this.files.watchDirs(...a)
+  }
+
+  /** `ProjectFiles.forgetWatchHolder` (dev-services/project-files.ts), kept on the manager for its callers */
+  forgetWatchHolder(...a: Parameters<ProjectFiles['forgetWatchHolder']>): ReturnType<ProjectFiles['forgetWatchHolder']> {
+    return this.files.forgetWatchHolder(...a)
+  }
+
+  /** `ProjectFiles.readTextFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  readTextFile(...a: Parameters<ProjectFiles['readTextFile']>): ReturnType<ProjectFiles['readTextFile']> {
+    return this.files.readTextFile(...a)
+  }
+
+  /** `ProjectFiles.moveEntry` (dev-services/project-files.ts), kept on the manager for its callers */
+  moveEntry(...a: Parameters<ProjectFiles['moveEntry']>): ReturnType<ProjectFiles['moveEntry']> {
+    return this.files.moveEntry(...a)
+  }
+
+  /** `ProjectFiles.importFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  importFile(...a: Parameters<ProjectFiles['importFile']>): ReturnType<ProjectFiles['importFile']> {
+    return this.files.importFile(...a)
+  }
+
+  /** `ProjectFiles.resolveFile` (dev-services/project-files.ts), kept on the manager for its callers */
+  resolveFile(...a: Parameters<ProjectFiles['resolveFile']>): ReturnType<ProjectFiles['resolveFile']> {
+    return this.files.resolveFile(...a)
   }
 
   /** `UiPreferenceStore.saveWorkspace` (ui-preferences.ts), kept on the manager for its callers */
@@ -2365,7 +2330,7 @@ export class SessionManager {
         return self.merges.prCheckedAt
       },
       projectInfo: (...a) => self.projectInfo(...a),
-      projectOrigin: (...a) => self.projectOrigin(...a),
+      projectOrigin: (...a) => self.files.projectOrigin(...a),
       projectRow: (...a) => self.projectRow(...a),
       projectTrusted: (...a) => self.projectTrusted(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
@@ -3087,7 +3052,7 @@ export class SessionManager {
     this.linkedReports.dispose()
     // So does a start waiting for memory (#686); handing over, it stays stored for the next host
     this.memoryGate?.close()
-    this.watchers.close()
+    this.files.close()
     // Ends a merge check's gh; the check itself is waited for with the processes (#368). The next host checks merges
     // again at its start
     this.merges.mergeChecksStop.abort()

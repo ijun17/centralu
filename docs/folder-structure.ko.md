@@ -134,7 +134,8 @@ centralu/
 │        ├─ views/              # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지
 │        ├─ links/              # 링크된 기기(#82): links.ts가 문(다시 내보내기). 기기 하나의 연결과 작업, 링크 목록, 원격 클라이언트, ssh로 하는 설치와 업데이트
 │        ├─ dev-services/       # 이름과 달리 prod 경로다(agent-host.ko.md §5): git, fs, store(sqlite), 감시자,
-│        │                      #   터미널과 명령
+│        │                      #   터미널과 명령. project-files: 매니저가 넘겨 주는 프로젝트의 git 패널, 파일 트리,
+│        │                      #   파일 작업(#1143)
 │        │  └─ store/           # Store(store.ts)를 이루는 부분. Store는 파일을 열고 마이그레이션을 돌리며 호출을 넘겨 준다
 │        │     ├─ migrations/   # 단계 목록을 버전 범위별 파일로 담는다. 새 단계가 따르는 규칙은 index.ts에 있다
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # Store가 상속하는 것: 러너(와 Store.inspect), 최소 읽기 버전 관문

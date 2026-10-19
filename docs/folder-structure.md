@@ -135,7 +135,8 @@ centralu/
 │        ├─ views/              # app views: the view host, its CSP, the proxy page
 │        ├─ links/              # linked machines (#82): links.ts is the door (re-exports); one machine's connection and its operations, the registry of links, the remote client, install and update over ssh
 │        ├─ dev-services/       # despite the name, the prod path (agent-host.md §5): git, fs, store (sqlite),
-│        │                      #   the watcher, terminals and commands
+│        │                      #   the watcher, terminals and commands; project-files: a project's git panel, file
+│        │                      #   tree and file operations as the manager passes them on (#1143)
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner (and `Store.inspect`), the min-reader gate
