@@ -121,9 +121,15 @@ visibility is not read as the default: the side that is wrong stays closed.
   emptied or loses a session; a move that fails (a folder in use on Windows) is tried again a few
   times, then at the next start.
   The host marks such a project, and one added again at its folder by its spelling alone (`ProjectInfo.fromUserFolder`, only
-  ever `true`, absent from a host before #1301), and the Delete project dialog says what will happen to its folder: when it
-  moves, where to, that nothing is deleted and what putting it back is; a project without the mark (one reached through a
-  link or a `subst` drive is not marked) keeps "The folder on disk is left alone." (`features/project/deleteNote.ts`).
+  ever `true`, absent from a host before #1301), and the Delete project dialog asks the host once when it opens
+  (`projects.deleteOutlook`, `UserAppAdoption.outlook`): by real paths, as the give-back compares them, so a re-add through a
+  junction, a link or a `subst` drive counts; a UNC or unresolvable path is `unsure` (the give-back counts it as at the folder;
+  the dialog says it could not check where the folder is); a project inside an app folder whose own project is gone is told that
+  the folder around it may move. Resolved off the event loop and within 2 s per path. The dialog shows "Checking what happens to
+  the folder…" and offers no Delete until the answer comes (3 s at most, then the mark decides). The dialog says the host **may** move the
+  folder, when (no session that could bring the project back left in the trash, no other project at the folder), where to, that nothing is deleted and
+  what putting it back is; a host without the call leaves the mark deciding, and a project that stays keeps "The folder on disk
+  is left alone." (`features/project/deleteNote.ts`).
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes

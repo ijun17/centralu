@@ -57,6 +57,8 @@ export type RpcServices = {
    * that folder back once nothing in the trash can restore it (#1204, `UserAppAdoption.settle`)
    */
   settleDeletedProjects?: () => Promise<void>
+  /** What deleting a project may do to its folder (#1301, `UserAppAdoption.outlook`); absent: nothing does */
+  deleteOutlook?: (projectId: string) => Promise<'stays' | 'may_move' | 'around_may_move' | 'unsure'>
   terminals?: TerminalService
   updates?: UpdateService
   commands?: CommandRunner
@@ -138,7 +140,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -656,6 +658,7 @@ export function createRpcHandler(
     'projects.origin': async (p) => ({ origin: await mgr.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
+    'projects.deleteOutlook': async (p) => ({ folder: (await deleteOutlook?.(RpcMethods['projects.deleteOutlook'].params.parse(p).projectId)) ?? 'stays' }),
     'projects.delete': async (p) => {
       const { projectId } = RpcMethods['projects.delete'].params.parse(p)
       /*

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import type { ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, type ExternalApps } from './apps/external/runtime.js'
@@ -94,18 +95,15 @@ export function adoptedProjectOf(store: Pick<Store, 'adoption'>, appId: string):
 const spelled = (path: string) => resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
 
 /**
- * Whether a path is, or lies inside, one of these folders by its spelling alone (#1301): resolved, ASCII case folded, no
- * file system read. For the Delete project dialog, which asks on every project list: a project added again at an adopted
- * folder (another spelling of the path) is found, one reached through a link or a `subst` drive is not, and keeps the
- * dialog's ordinary sentence. `folderMatcher` (below) is the exact test the give-back uses.
+ * Whether a path is one of these folders by its spelling alone (#1301): resolved, ASCII case folded, no file system read.
+ * For the mark on every project list (`ProjectInfo.fromUserFolder`): a project added again at an adopted folder in another
+ * spelling is found; one inside the folder, or reached through a link or a `subst` drive, is not. The Delete project dialog
+ * asks `UserAppAdoption.outlook` for the exact answer when it opens.
  */
 export function atAdoptedFolder(path: string, dirs: readonly string[]): boolean {
   const fold = (p: string) => resolve(p).replace(/[A-Z]/g, (c) => c.toLowerCase())
   const here = fold(path)
-  return dirs.some((dir) => {
-    const d = fold(dir)
-    return here === d || here.startsWith(d.endsWith(sep) ? d : d + sep)
-  })
+  return dirs.some((dir) => here === fold(dir))
 }
 
 /**
@@ -149,6 +147,63 @@ function realFolder(path: string): string | null {
     const up = realFolder(parent)
     return up === null ? null : join(up, basename(full))
   }
+}
+
+/** How long the dialog's question waits for one path to be resolved before it counts as one that cannot be (#1301) */
+const RESOLVE_WAIT_MS = 2000
+
+/** `realFolder` without holding the host's event loop: a path on a dead share or an unplugged drive answers late, or not at all */
+async function realFolderAsync(path: string): Promise<string | null> {
+  const full = resolve(path)
+  try {
+    return await realpath(full)
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+    const parent = dirname(full)
+    if (parent === full) return null
+    const up = await realFolderAsync(parent)
+    return up === null ? null : join(up, basename(full))
+  }
+}
+
+/** A path's real path within `RESOLVE_WAIT_MS`, else null (cannot be told) */
+function resolvedWithin(path: string): Promise<string | null> {
+  return new Promise((done) => {
+    const timer = setTimeout(() => done(null), RESOLVE_WAIT_MS)
+    timer.unref?.()
+    realFolderAsync(path).then(
+      (r) => {
+        clearTimeout(timer)
+        done(r)
+      },
+      () => {
+        clearTimeout(timer)
+        done(null)
+      },
+    )
+  })
+}
+
+/**
+ * How a kept path stands to an adopted folder (#1301), by real paths as `folderMatcher` compares them: the folder itself, inside
+ * it, elsewhere, or not to be told (a UNC path, which is never resolved, a drive that is not there, a link loop, no access, a
+ * path that does not answer in time) — which the give-back counts as this folder, and the dialog says it is not sure of
+ */
+async function standing(dir: string, kept: string): Promise<'same' | 'inside' | 'other' | 'unsure'> {
+  const fold = (path: string) => path.replace(/[A-Z]/g, (c) => c.toLowerCase())
+  const k = resolve(kept)
+  if (k.startsWith('\\\\')) return 'unsure'
+  const inside = (path: string, folder: string) => path.startsWith(folder.endsWith(sep) ? folder : folder + sep)
+  const spelled = fold(resolve(dir))
+  if (fold(k) === spelled) return 'same'
+  if (inside(fold(k), spelled)) return 'inside'
+  const [realDir, realKept] = await Promise.all([resolvedWithin(dir), resolvedWithin(k)])
+  if (realDir === null || realKept === null) return 'unsure'
+  const folded = fold(realKept)
+  const root = fold(realDir)
+  if (folded === root) return 'same'
+  return inside(folded, root) || inside(folded, spelled) ? 'inside' : 'other'
 }
 
 export class UserAppAdoption {
@@ -253,6 +308,33 @@ export class UserAppAdoption {
     const here = folderMatcher(dir)
     if (!here) return false
     return !projects.some((p) => here(p.path)) && !this.deps.store.trash.trashedProjectPaths().some(here)
+  }
+
+  /**
+   * What deleting this project may do to its folder (#1301, `projects.deleteOutlook`), by the same real-path matching as
+   * the give-back (`released`), nothing changed. `may_move`: it is the project of an adopted folder that still carries the
+   * adoption's mark, or stands at that folder. `around_may_move`: it lies inside such a folder whose own project is gone.
+   * `unsure`: such a folder's own project is gone, and this one's path cannot be told from it (a UNC path, a drive that is not
+   * there, no answer in time), which the give-back counts as at the folder. Else `stays`. "May" because the give-back also waits for the trash and for any other
+   * project at the folder (`released`), which the dialog says; this does not read those, as they change while it is open.
+   */
+  async outlook(projectId: string): Promise<'stays' | 'may_move' | 'around_may_move' | 'unsure'> {
+    const projects = this.deps.store.projects.listProjects()
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return 'stays'
+    for (const [appId, record] of Object.entries(this.deps.store.adoption.adopted())) {
+      const dir = this.deps.rt.userAppDir(appId)
+      // Only the folder the record names moves: another of that name, or none, does not (`giveBack`)
+      if (adoptionMark(dir) !== record.mark) continue
+      if (record.projectId === projectId) return 'may_move'
+      // The record's own project is still registered: deleting this one cannot release the folder
+      if (projects.some((p) => p.id === record.projectId)) continue
+      // Resolved off the event loop and within a time: a project on a dead share must not hold the host (the give-back's own read does)
+      const where = await standing(dir, project.path)
+      if (where === 'other') continue
+      return where === 'same' ? 'may_move' : where === 'inside' ? 'around_may_move' : 'unsure'
+    }
+    return 'stays'
   }
 
   /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */

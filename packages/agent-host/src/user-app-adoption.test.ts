@@ -154,11 +154,13 @@ describe('a user-folder app becomes a project in place', () => {
     expect(listed.find((x) => x.path === appDir())).toMatchObject({ name: 'notes', fromUserFolder: true })
     expect(listed.find((x) => x.name === 'helper')).toMatchObject({ fromUserFolder: true })
     expect(listed.find((x) => x.path === ordinary)).not.toHaveProperty('fromUserFolder')
-    // A project added again at the folder, in another spelling, is marked too: deleting it moves the folder (#1204)
+    // A project added again at the folder, in another spelling, is marked too; one inside it is not (the dialog asks the host, below)
     const first = project()!.id
     await door('projects.delete', { projectId: first })
     store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
     expect(((await door('projects.list', {})) as ProjectInfo[]).find((x) => x.id === 'again')).toMatchObject({ fromUserFolder: true })
+    store.projects.addProject({ id: 'inside', path: join(appDir(), 'sub'), name: 'sub' })
+    expect(((await door('projects.list', {})) as ProjectInfo[]).find((x) => x.id === 'inside')).not.toHaveProperty('fromUserFolder')
     // Deleted and given back, nothing of it is left to mark
     await door('projects.delete', { projectId: 'again' })
     expect(((await door('projects.list', {})) as ProjectInfo[]).find((x) => x.id === 'again')).toBeUndefined()
@@ -320,6 +322,104 @@ describe('a user-folder app becomes a project in place', () => {
  * user folder skips adopted folders, no project points at it) and removable by nothing, with what it kept beside it.
  * It is given back once nothing in the trash can restore the project: to `app-trash/`, as a removed user-folder app.
  */
+/**
+ * What deleting a project may do to its folder (#1301, `projects.deleteOutlook`): the Delete project dialog asks when it opens, with
+ * the real-path matching the give-back uses, where the list's mark goes by spelling.
+ */
+describe('what deleting a project may do to its folder', () => {
+  const door = (name: string, params: unknown) =>
+    createRpcHandler(mgr, new Map(), { externalApps: rt, deleteOutlook: (id) => adoption.outlook(id) })(name as never, params)
+  const outlook = async (projectId: string) => ((await door('projects.deleteOutlook', { projectId })) as { folder: string }).folder
+  const gone = async () => {
+    // The adopted project deleted: its builder is in the trash, so the folder stays where it is
+    await door('projects.delete', { projectId: project()!.id })
+    expect(existsSync(appDir())).toBe(true)
+  }
+
+  it('may move the folder of the adopted project; an ordinary project, or one it does not know, leaves its folder alone', async () => {
+    const ordinary = join(root, 'ordinary')
+    mkdirSync(ordinary, { recursive: true })
+    store.projects.addProject({ id: 'ordinary', path: ordinary, name: 'ordinary' })
+    expect(await outlook(project()!.id)).toBe('may_move')
+    expect(await outlook('ordinary')).toBe('stays')
+    expect(await outlook('no-such-project')).toBe('stays')
+  })
+
+  it('answers "stays" without the call wired (a host that links nothing)', async () => {
+    const bare = createRpcHandler(mgr, new Map(), { externalApps: rt })
+    expect(await bare('projects.deleteOutlook' as never, { projectId: project()!.id })).toEqual({ folder: 'stays' })
+  })
+
+  it('counts a project added again through a junction or a link, which the list\'s mark by spelling does not find', async () => {
+    await gone()
+    const link = join(root, 'linked-notes')
+    symlinkSync(appDir(), link, 'junction')
+    store.projects.addProject({ id: 'linked', path: link, name: 'notes' })
+    const listed = (await door('projects.list', {})) as ProjectInfo[]
+    expect(listed.find((x) => x.id === 'linked')).not.toHaveProperty('fromUserFolder')
+    expect(await outlook('linked')).toBe('may_move')
+  })
+
+  it('counts a project added again at the folder in another spelling', async () => {
+    await gone()
+    store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
+    expect(await outlook('again')).toBe('may_move')
+  })
+
+  it('leaves a project added again alone while the adopted project is still registered: deleting it cannot release the folder', async () => {
+    store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
+    expect(await outlook('again')).toBe('stays')
+  })
+
+  it('says the folder around a project inside it may move once the adopted project is gone, and leaves it alone before', async () => {
+    mkdirSync(join(appDir(), 'sub'), { recursive: true })
+    store.projects.addProject({ id: 'inside', path: join(appDir(), 'sub'), name: 'sub' })
+    expect(await outlook('inside')).toBe('stays')
+    await gone()
+    expect(await outlook('inside')).toBe('around_may_move')
+  })
+
+  // Not called an app folder: the give-back counts such a path as at the folder, but nothing says it is one
+  it.runIf(process.platform === 'win32')('says it is not sure of a path it cannot resolve: a UNC path, a drive that is not there', async () => {
+    await gone()
+    store.projects.addProject({ id: 'share', path: '\\\\server\\share\\notes', name: 'notes' })
+    expect(await outlook('share')).toBe('unsure')
+    const letter = 'QRSTUVWXYZ'.split('').find((l) => !existsSync(`${l}:\\`))!
+    store.projects.addProject({ id: 'unplugged', path: `${letter}:\\notes`, name: 'notes' })
+    expect(await outlook('unplugged')).toBe('unsure')
+  })
+
+  it('does not mistake an unrelated project for one of an app folder before the adopted project is gone', async () => {
+    const elsewhere = join(root, 'elsewhere')
+    mkdirSync(elsewhere, { recursive: true })
+    store.projects.addProject({ id: 'elsewhere', path: elsewhere, name: 'elsewhere' })
+    expect(await outlook('elsewhere')).toBe('stays')
+    await gone()
+    // The adopted project is gone, its folder waits in the trash's hold: a project elsewhere is still not one of it
+    expect(await outlook('elsewhere')).toBe('stays')
+  })
+
+  it('reads each adopted folder on its own: with two, the one whose project is gone decides for a project at it', async () => {
+    const helper = store.projects.listProjects().find((p) => p.name === 'helper')!
+    expect(await outlook(helper.id)).toBe('may_move')
+    await gone()
+    store.projects.addProject({ id: 'again', path: join(dataRoot, 'apps', 'NOTES'), name: 'notes' })
+    expect(await outlook('again')).toBe('may_move')
+    expect(await outlook(helper.id)).toBe('may_move')
+  })
+
+  it('leaves it alone when the folder is not the one the adoption recorded (another folder of that name)', async () => {
+    const pid = project()!.id
+    writeFileSync(join(appDir(), '.centralu', 'adopted'), 'someone-else')
+    expect(await outlook(pid)).toBe('stays')
+  })
+
+  it('is routed to the machine of a project, as the delete is', async () => {
+    const { ROUTES } = await import('./links/routes.js')
+    expect(ROUTES['projects.deleteOutlook']).toEqual(ROUTES['projects.delete'])
+  })
+})
+
 describe('a deleted project gives its folder back', () => {
   const adopted = () => JSON.parse(store.settings.appSetting(ADOPTED_USER_APPS_KEY) ?? '{}') as Record<string, unknown>
   const trashed = () => (existsSync(join(dataRoot, 'app-trash')) ? readdirSync(join(dataRoot, 'app-trash')) : [])

@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ProjectInfo } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
 import { TextInput } from '../../components/TextField.jsx'
-import { folderNote } from './deleteNote.js'
+import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { folderNote, type DeleteOutlook } from './deleteNote.js'
+
+/** How long the dialog waits for the host's answer about the folder before it goes by the list's mark */
+const OUTLOOK_WAIT_MS = 3000
 
 /**
  * Deleting a project (a dogfooding request).
@@ -33,6 +37,26 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
   const [withFiles, setWithFiles] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * What deleting may do to the folder, asked of the host once when the dialog opens (#1301): its real-path answer, where the
+   * list's mark goes by spelling. A host without the call (or one that does not answer) leaves the mark deciding.
+   */
+  const platform = usePlatform()
+  const [outlook, setOutlook] = useState<DeleteOutlook | 'pending' | null>('pending')
+  useEffect(() => {
+    let current = true
+    // The sentence waits for the answer, and so does Delete: a guess shown for a moment could be read, and confirmed. A host that
+    // does not answer in time, or has no such call, leaves the list's mark deciding
+    const gaveUp = setTimeout(() => current && setOutlook(null), OUTLOOK_WAIT_MS)
+    platform.projects.deleteOutlook(project.id).then(
+      (r) => current && setOutlook(r.folder),
+      () => current && setOutlook(null),
+    )
+    return () => {
+      current = false
+      clearTimeout(gaveUp)
+    }
+  }, [platform, project.id])
   // Only whitespace is trimmed off; it must match exactly, including case — a similarly named project may sit right next to it
   const armed = typed.trim() === project.name
 
@@ -42,7 +66,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         className="w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
         onSubmit={async (e) => {
           e.preventDefault()
-          if (!armed || busy) return
+          if (!armed || busy || outlook === 'pending') return
           setBusy(true)
           setError(null)
           try {
@@ -86,7 +110,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s
             trash — Settings → Trash restores them or deletes them for good.{' '}
             <span className="text-ink" data-testid="delete-project-folder-note">
-              {folderNote(project)}
+              {folderNote(project, outlook)}
             </span>
           </p>
         )}
@@ -151,7 +175,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             Cancel
           </button>
           {/* The action button is also in the delete palette — the trigger for something irreversible must not be a neutral color */}
-          <Button type="submit" variant="danger" disabled={!armed || busy} data-testid="delete-project-confirm">
+          <Button type="submit" variant="danger" disabled={!armed || busy || outlook === 'pending'} data-testid="delete-project-confirm">
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
           </Button>
         </div>

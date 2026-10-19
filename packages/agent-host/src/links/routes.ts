@@ -138,6 +138,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Projects, git, files, terminals, commands ───────────────────────────────────────────
   'agents.listExternalSessions': project((r, q) => q.externalSessions(r)),
   'projects.delete': project(),
+  'projects.deleteOutlook': project(),
   'projects.setTrusted': project(),
   'projects.setCommands': project(),
   'projects.setWorktreeSetup': project(),
