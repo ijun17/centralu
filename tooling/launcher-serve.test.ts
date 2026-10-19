@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -63,7 +63,7 @@ import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
 import { SLOW } from './test-timing.js'
-import { alive } from '../packages/agent-host/src/process.test-helpers.js'
+import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -1314,12 +1314,17 @@ async function cli(dataDir: string, args: string[]) {
 
 
 describe('centralu serve --detach and --stop, end to end (a host from source, a temporary data folder)', () => {
-  /** Ends what a failed test left running: only the processes this data folder's files name, which this test started */
+  // What a test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
+  let own = ownProcesses()
+  const alive = (pid: number) => own.alive(pid)
+  beforeEach(() => {
+    own = ownProcesses()
+  })
+  /** Ends what a failed test left running: only the processes this data folder's files name, which this test started and has not seen end */
   function cleanup(d: string) {
     for (const file of [SERVE_PID_FILE, 'host.lock']) {
       try {
-        const pid = (JSON.parse(readFileSync(join(d, file), 'utf8')) as { pid: number }).pid
-        if (alive(pid)) process.kill(pid, 'SIGKILL')
+        own.end([(JSON.parse(readFileSync(join(d, file), 'utf8')) as { pid: number }).pid])
       } catch {
         // not there
       }

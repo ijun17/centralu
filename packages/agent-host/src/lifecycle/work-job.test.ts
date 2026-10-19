@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { endsWorkWithJob, systemTool } from '../os.js'
-import { alive, settle } from '../dev-services/process-tree.test-helpers.js'
+import { settle } from '../dev-services/process-tree.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 import { WORK_JOB_LIMITS, joinWorkJob, workJobLine, workJobWanted } from './work-job.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -95,15 +96,21 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
   let dir = ''
   let host: ChildProcess | undefined
   const started: number[] = []
+  // What the test has seen end is not ended again afterwards: its number may be someone else's by then (#1308)
+  let own = ownProcesses()
+  const alive = (pid: number) => own.alive(pid)
   afterEach(async () => {
-    if (host?.pid && alive(host.pid)) host.kill()
-    // Only what this test started, the terminal's grandchild above all (it is meant to stay)
-    for (const pid of started.splice(0)) if (alive(pid)) process.kill(pid)
+    // Before the host goes: closing its job ends the work too, and a number it frees must not be signalled after
+    // Only what this test started and has not seen end, the terminal's grandchild above all (it is meant to stay)
+    own.end(started.splice(0))
+    // By its handle: Node sends nothing once the child has exited
+    host?.kill()
     await new Promise((r) => setTimeout(r, 500))
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   })
 
   async function standIn(): Promise<{ pid: (name: string) => number; job: { state: string; handle?: number; broker?: number } }> {
+    own = ownProcesses()
     dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-work-job-')))
     host = spawn(process.execPath, ['--import', 'tsx', HELPER, dir, 'join'], { cwd: ROOT, stdio: 'ignore', windowsHide: true })
     const pid = (name: string) => (existsSync(join(dir, `${name}.pid`)) ? Number(readFileSync(join(dir, `${name}.pid`), 'utf8')) : 0)

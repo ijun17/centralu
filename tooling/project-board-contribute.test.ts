@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
@@ -891,14 +892,9 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
 
 describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { timeout: 120_000 * SLOW }, () => {
   const grandchild = () => (existsSync(join(root, 'pre-pr-grandchild.pid')) ? Number(readFileSync(join(root, 'pre-pr-grandchild.pid'), 'utf8')) : 0)
-  const isAlive = (pid: number) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch {
-      return false
-    }
-  }
+  // What the test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
+  let own = ownProcesses()
+  const isAlive = (pid: number) => own.alive(pid)
   const until = async (what: string, ok: () => boolean, ms = 30_000 * SLOW) => {
     const end = Date.now() + ms
     while (!ok()) {
@@ -907,9 +903,9 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     }
   }
   afterEach(() => {
-    // A grandchild a failed test left running is the test's own process: stop it by its id
-    const pid = grandchild()
-    if (pid && isAlive(pid)) process.kill(pid)
+    // A grandchild a failed test left running is the test's own process: stop it by its id, unless the test saw it end
+    own.end([grandchild()], { signal: 'SIGTERM' })
+    own = ownProcesses()
   })
 
   it('leaves out one check with its reason, and opens with a warning instead of refusing a branch behind main', async () => {
