@@ -253,8 +253,8 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
   const ptyModule = createRequire(import.meta.url)('node-pty') as PtyModule
   let dir = ''
   let pids: number[] = []
-  afterEach(async () => {
-    await cleanUp(pids)
+  afterEach(async (test) => {
+    await cleanUp(pids, test)
     pids = []
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   })
