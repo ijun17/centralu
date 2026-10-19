@@ -390,6 +390,12 @@ export class SessionEvents {
      * A wake or a restart waited out here takes seconds, and the trust a task was let through on can go meanwhile.
      */
     stillAllowed?: () => string | null,
+    /**
+     * For a relayed message, what the agent reads instead of the bare wake (#1186): the words Centralu wrote about the
+     * other session, never that session's own (`ChildReports.tellSession`'s `forModel`). The rest of the input, a
+     * line Centralu adds once (`rootAppsNotice`), goes with it as with any other text
+     */
+    relayedText?: string,
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
@@ -467,6 +473,7 @@ export class SessionEvents {
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
       // A hub's orchestrator directs as this host's own does (`sendFromHub`)
+      : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
@@ -479,6 +486,8 @@ export class SessionEvents {
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
     else h.send(input)
+    // It takes messages again: what could not be told it before goes in now (#1186)
+    this.host.reports.deliverHeld(sessionId)
   }
 
   /**

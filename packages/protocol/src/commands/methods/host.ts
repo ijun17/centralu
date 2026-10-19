@@ -3,6 +3,7 @@ import { SessionId, UpdateStatus } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
 import {
   HostActivity,
+  HostLastAnswerResult,
   HostReadSessionResult,
   HostRecallHit,
   HostSessionRow,
@@ -219,10 +220,24 @@ export const hostMethods = {
       around: z.number().int().optional(),
       /** Tool calls in full rather than one line each */
       tools: z.boolean().optional(),
+      /**
+       * With `around`, the one line that starts there, from this character of its text on (#1186): a long line is cut,
+       * and says this offset to read on from. Additive: an older machine ignores it and answers the plain read
+       */
+      offset: z.number().int().min(0).optional(),
     }),
     result: HostReadSessionResult,
   },
   'host.recall': { params: z.object({ query: z.string(), limit: z.number().int().positive().optional() }), result: z.array(HostRecallHit) },
+  /**
+   * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
+   * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an
+   * older machine's lines instead
+   */
+  'host.lastAnswer': {
+    params: z.object({ sessionId: SessionId, maxChars: z.number().int().positive().max(100_000).optional() }),
+    result: HostLastAnswerResult,
+  },
   /**
    * An instruction from a hub's orchestrator to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
    * step 2): delivered as the orchestrator's `send_to_session` is here, recorded as sent by `from.name`. Only a session

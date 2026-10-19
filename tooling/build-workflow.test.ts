@@ -143,6 +143,13 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
   })
 
+  // #1259: changes land after the fast tier, so every push to main needs its full run to the end; a pull request's are superseded
+  it("never cancels a run on main for a newer push, and still supersedes a branch's or pull request's run", () => {
+    const block = /^concurrency:\n((?: {2}.*\n)+)/m.exec(workflow)?.[1] ?? ''
+    expect(block).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}")
+    expect(block).toMatch(/^ {2}group: build-\$\{\{ github\.ref \}\}/m)
+  })
+
   // 2026-10-19 (owner): a failed verify was heard only after every e2e shard had finished, about 10 minutes later
   it('cancels the rest of a manual run once verify has failed, from a job of its own, as `changes` says', () => {
     const ff = job('fail-fast').body
@@ -191,6 +198,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect([...new Set(script.match(/GITHUB_(EVENT|REF|HEAD_REF|BASE_REF)\w*|github\.event/g))]).toEqual(['GITHUB_EVENT_PATH'])
     expect(script).toContain('?.pull_request?.draft === true')
     expect(changes).toContain('EVERYTHING: ${{ inputs.everything }}')
+    expect(changes).toContain('DISPATCH_TIER: ${{ inputs.tier }}')
     expect(workflow).toMatch(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}everything:\n/m)
   })
 })
@@ -249,6 +257,11 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     // A build or CI change is still the quick tier: the full one runs in the merge queue's batch
     expect(tierOf({ files: ['.github/workflows/build.yml'] }).tier).toBe('quick')
     expect(tierOf({ files: null, onMain: true }).tier).toBe('full')
+    // The merge queue's batch asks for the quick tier (#1259); a release bump or a commit on main still runs in full
+    expect(tierOf({ files: ['packages/ui/src/a.ts'], dispatch: true, dispatchTier: 'quick' }).tier).toBe('quick')
+    expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE], dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
+    expect(tierOf({ files: null, onMain: true, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
+    expect(tierOf({ files: null, dispatch: true, dispatchTier: 'quick' }).tier).toBe('full')
     expect(tierOf({ files: ['docs/a.md'], dispatch: true }).tier).toBe('full')
     expect(tierOf({ files: null }).tier).toBe('full')
     expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE] })).toMatchObject({ tier: 'full', why: expect.stringContaining('release bump') })

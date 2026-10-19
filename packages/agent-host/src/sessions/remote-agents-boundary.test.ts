@@ -94,7 +94,7 @@ class Machine {
       machineLinked: () => true,
       machineNamed: (n: string) => (n === 'Box' ? { id: 'm1', name: 'Box' } : null),
       describe: () => ({ name: 'Child', project: 'app' }),
-      lastWords: async () => (this.reachable ? (lastOf('assistant')?.payload.text ?? '') : ''),
+      lastWords: async () => (this.reachable ? ({ ok: true as const, text: lastOf('assistant')?.payload.text ?? '', length: 0, seq: null }) : { ok: false as const, error: 'not reachable' }),
       lastUserMessage: async () => {
         if (!this.reachable) return { ok: false, error: 'not reachable' }
         const m = lastOf('user')
