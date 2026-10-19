@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { hasPs } from '../os.js'
 import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { alive } from '../process.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 
 /**
  * Choosing a leftover process (user request, 2026-09-07).
@@ -197,13 +197,15 @@ describe('stopStrays', () => {
     const sh = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} </dev/null >/dev/null 2>&1 &`], { cwd: dir, detached: true, stdio: 'ignore' })
     await new Promise((r) => sh.once('exit', r))
     let pid = 0
+    // Once the wait below has seen the leftover end, its number is no longer ours to signal (#1308)
+    const own = ownProcesses()
     try {
       await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
       // Not this test's process: the host's descendants are not leftovers
       expect(await stopStrays([pid], [dir], 999_999)).toEqual({ stopped: 1 })
-      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
+      await vi.waitFor(() => expect(own.alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
     } finally {
-      if (pid && alive(pid)) process.kill(pid, 'SIGKILL')
+      own.end([pid])
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000 * SLOW)

@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
-import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers } from '../adapters/fake-agent-cli.test-helpers.js'
+import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli } from '../adapters/fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent, type LocalAgentProcess } from '../adapters/local-process.js'
 import { AgentVersionService } from '../agent-versions.js'
 import { Store } from '../dev-services/store.js'
@@ -72,7 +72,7 @@ class Adapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     const p = spawnLocalAgent({ ...fakeAgentCli(), cwd: tmpdir(), env: process.env })
     const helper = await helperPid(p.stdout)
-    started.push(helper, p.pid!)
+    started.push(helper, ownCli(p))
     const h = new Handle(opts.sessionId, opts, emit, p, helper, this.cli)
     this.created.push(h)
     return h

@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runGit, stopGitChildren } from './git-exec.js'
 import { cloneFailure } from './project-clone.js'
-import { alive, settle } from './process-tree.test-helpers.js'
+import { settle } from './process-tree.test-helpers.js'
+import { ownProcesses } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 function git(cwd: string, ...args: string[]): string {
@@ -72,9 +73,13 @@ describe("git's messages untranslated, text still UTF-8 (#982)", () => {
 describe('a git that runs past its time ends with what it started (#982)', () => {
   let root: string
   let childPid: number | undefined
+  // The wait below sees the child end; a number seen ended is not signalled afterwards (#1308)
+  let own = ownProcesses()
+  const alive = (pid: number) => own.alive(pid)
   afterEach(() => {
-    if (childPid !== undefined && alive(childPid)) process.kill(childPid)
+    if (childPid !== undefined) own.end([childPid])
     childPid = undefined
+    own = ownProcesses()
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
