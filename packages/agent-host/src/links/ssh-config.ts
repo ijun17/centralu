@@ -205,8 +205,18 @@ export function readSshConfig(opts: { file: string; home: string }): ConfigRead 
   return { hosts, notes }
 }
 
-/** What `ssh -G <alias>` resolves, the three fields the dialog shows */
-export type ResolvedHost = { hostName: string | null; user: string | null; port: number | null; error: string | null }
+/**
+ * What `ssh -G <alias>` resolves: the three fields the dialog shows, and the proxy ssh would go through, which the
+ * orchestrator's add_machine card shows too (#1219; null when none is set)
+ */
+export type ResolvedHost = {
+  hostName: string | null
+  user: string | null
+  port: number | null
+  proxyCommand?: string | null
+  proxyJump?: string | null
+  error: string | null
+}
 
 /** `ssh -G`'s lines, `keyword value`, the first of each keyword */
 export function parseSshG(stdout: string): Omit<ResolvedHost, 'error'> {
@@ -216,7 +226,18 @@ export function parseSshG(stdout: string): Omit<ResolvedHost, 'error'> {
     if (m && !first.has(m[1]!.toLowerCase())) first.set(m[1]!.toLowerCase(), m[2]!)
   }
   const port = Number(first.get('port'))
-  return { hostName: first.get('hostname') || null, user: first.get('user') || null, port: Number.isInteger(port) && port > 0 ? port : null }
+  // ssh -G prints `none` for a proxy that is not set, or leaves the keyword out
+  const set = (keyword: string) => {
+    const v = first.get(keyword)
+    return v && v.toLowerCase() !== 'none' ? v : null
+  }
+  return {
+    hostName: first.get('hostname') || null,
+    user: first.get('user') || null,
+    port: Number.isInteger(port) && port > 0 ? port : null,
+    proxyCommand: set('proxycommand'),
+    proxyJump: set('proxyjump'),
+  }
 }
 
 export type SshGOptions = {

@@ -85,7 +85,8 @@ export function currentRareTier(): RareTier {
  * lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its
  * every request over its ceiling, and the instructions name start_agent.
  * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
- * the instructions; the first of the orchestrator's window functions to come as commands (#1219).
+ * the instructions; the first of the orchestrator's window functions to come as commands (#1219). In since #1219's
+ * second slice: the six machine commands, which the instructions name in one line.
  * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
  * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
  * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
@@ -106,6 +107,12 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'agent_session',
     'add_project',
     'list_machines',
+    'add_machine',
+    'install_machine',
+    'remove_machine',
+    'reconnect_machine',
+    'set_machine_connect',
+    'set_machine_autostart',
     'find_apps',
     'attach_app',
     'detach_app',

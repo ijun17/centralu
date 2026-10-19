@@ -783,7 +783,7 @@ is bounded by things the person set up for that session: its own project's apps,
 builder, and for the orchestrator the user folder, where an MCP server the person approved for it lands
 (A-7). Measured with the app `create_app` makes (two agent tools and the host's `run_status`), with 0, 3
 and 10 trusted root apps: before, Codex 6,800 / 9,179 / 14,733 characters and 11 / 20 / 41 tools, Claude
-6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 144 characters of
+6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 75 characters of
 instructions once (`sessions/orchestrator-app-cost.test.ts`, [tool-cost.md](tool-cost.md) §12).
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list

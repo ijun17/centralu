@@ -336,6 +336,7 @@ window of the host's build answers it:
 | `project_add` (#1220) | the release after beta.29 | drops the card from before #844; from #844 on, shows the fallback with the question whole (`text`), the path and the machine |
 | a remembered `agents` consent (#561), in Settings' list of consents | beta.17 | lists it without saying what it allows |
 | the apply card (#665) and the handoff card (#694) | beta.23, beta.25 | reads them, since they ride on `other` |
+| the orchestrator's machine card (#1219, `about: "machine_change"`) | the release after beta.29 | reads it, since it rides on `other`; offers "always", which the host reads as allow, once |
 
 So a new card kind that has to reach released windows rides on `other` with an `about`, the question whole in `raw`,
 as the apply and handoff cards do; a kind of its own is for a card a generic one can stand in for.
