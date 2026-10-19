@@ -257,6 +257,21 @@ export type RemoteSpec = {
 export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
 
 /**
+ * Why WSL would not take `name` as a distro name, or null when it would. The one rule for it: `machines.add` refuses
+ * such a name in these words, and so does every command built for a WSL remote, where the name goes on the line unquoted
+ */
+export function wslDistroError(name: string | null | undefined): string | null {
+  return WSL_DISTRO_RE.test(name ?? '') ? null : `Not a WSL distro name: ${name || '(none)'}`
+}
+
+/** The spec's distro, checked by `wslDistroError` */
+function distroOf(spec: RemoteSpec): string {
+  const why = wslDistroError(spec.wslDistro)
+  if (why) throw new Error(why)
+  return spec.wslDistro!
+}
+
+/**
  * What every PowerShell script sent to a Windows remote starts with. The first line makes its output UTF-8.
  * The second gives it the machine's module path: a Windows PowerShell started from PowerShell 7 (pwsh)
  * inherits pwsh's `PSModulePath`, whose first folder holds 7.x copies of the built-in modules that 5.1
@@ -319,8 +334,7 @@ function powershellScript(script: string): RemoteCommand {
  */
 export function wslKeepAlive(spec: RemoteSpec | undefined): string | null {
   if (spec?.shell !== 'wsl') return null
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   return `wsl.exe -d ${distro} --exec sleep infinity`
 }
 
@@ -438,8 +452,7 @@ function remoteCommand(
     `elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec "$HOME/.centralu/bin/centralu" ${args}; ` +
     `else echo ${NOT_FOUND}; exit 127; fi`
   if (spec.shell === 'posix') return custom ? `${custom} ${args}` : `sh -c '${lookup}'`
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   const script = custom
     ? `${custom} ${args}`
     : `PATH=$(printf %s "$PATH" | tr : '\\n' | grep -v '^/mnt/' | paste -sd: -); ${lookup}`
@@ -456,8 +469,7 @@ export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string 
   if (spec.shell === 'powershell') return powershellScript(script.ps)
   const b64 = Buffer.from(script.sh, 'utf8').toString('base64')
   if (spec.shell === 'posix') return `printf %s ${b64} | base64 -d | sh`
-  const distro = spec.wslDistro ?? ''
-  if (!WSL_DISTRO_RE.test(distro)) throw new Error(`Not a WSL distro name: ${distro || '(none)'}`)
+  const distro = distroOf(spec)
   const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
   if (inline.length <= WINDOWS_INLINE_MAX) return inline
   // Too long for cmd.exe's line: the script on stdin, passed through to the distro (`-i`: PowerShell adds CRLF)

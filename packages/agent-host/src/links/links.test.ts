@@ -549,6 +549,9 @@ describe('a hub linked to another host (#82)', () => {
     const u = await ui(hub.port)
     await expect(u.call('machines.add', { name: 'x', sshTarget: '-oProxyCommand=evil' })).rejects.toThrow(/Not an ssh target/)
     await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl' })).rejects.toThrow(/distro/)
+    // A name WSL would not take is refused at add, by the rule its commands apply, not stored to fail every connect
+    await expect(u.call('machines.add', { name: 'x', sshTarget: 'box', shell: 'wsl', wslDistro: 'Ubuntu 22.04' })).rejects.toThrow(/Not a WSL distro name: Ubuntu 22.04/)
+    expect(await u.call('machines.list')).toEqual([])
     const added: MachineInfo = await u.call('machines.add', { name: 'Remote box', sshTarget: 'box' })
     expect(added).toMatchObject({ id: 'remote-box', shell: 'posix' })
     await eventually(() => status(hub) === 'connected')
