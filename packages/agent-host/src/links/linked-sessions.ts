@@ -51,6 +51,17 @@ function onePath(value: unknown): string {
   return text.length > PATH_MAX ? `${text.slice(0, PATH_MAX)}…` : text
 }
 
+/** Whether a machine answered a read from an offset as one: no line, or one line that says what it shows (`lineText`) */
+function offsetAnswered(lines: readonly string[]): boolean {
+  if (lines.length === 0) return true
+  if (lines.length > 1) return false
+  try {
+    return typeof (JSON.parse(lines[0]!) as { shown?: unknown }).shown === 'string'
+  } catch {
+    return false
+  }
+}
+
 /** A machine's line of a conversation: kept when it is one line, as the machine's code makes it; quoted as one otherwise */
 function fencedLine(line: string): string {
   return NOT_ONE_LINE.test(line) ? trustedJsonText(line) : line
@@ -527,6 +538,13 @@ export function linkedSessions(
         })
         const r = HostReadSessionResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
+        /*
+         * A read from an offset that an older machine answered as its plain read (#1186): it ignores `offset`, so the same
+         * cut lines would come back on every read on, and the model would read them again and again. Said instead
+         */
+        if (opts?.offset !== undefined && !offsetAnswered(r.data.lines)) {
+          return { ok: false, error: `${m.name} runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters` }
+        }
         return { ok: true, state: oneLine(r.data.state, 40), lines: r.data.lines.map(fencedLine) }
       } catch (err) {
         return { ok: false, error: cause(m, err) }

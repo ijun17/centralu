@@ -245,7 +245,7 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    goes on (`readOn`: the same call with `around` at the line's first seq and `offset`), and a read with `offset`
    shows up to 8,000 characters of that one line (`sessions/session-lines.ts`). `offset` is in no tool definition:
    the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
-   (`host.readSession`'s `offset`, additive: an older machine answers the plain read). The cut used to send the caller
+   (`host.readSession`'s `offset`, additive: an older machine answers its plain read, and the hub says that machine cannot read from an offset rather than showing the same cut lines again; a read from an offset always says what it shows, which is how the hub tells them apart). The cut used to send the caller
    to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
    the middle of a long answer could not be read back at all. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
