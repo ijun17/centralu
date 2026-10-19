@@ -38,7 +38,7 @@ const UNREAD_KEPT_MS = 60 * 60_000
  * session asks a project of this computer, as `ask_project` does here, behind this computer's card for the pair.
  *
  *   - Only while that machine's switch is on (Settings → Machines), read at every step that waits: before the card,
- *     after it, and when a pair is remembered.
+ *     after it, when a pair is remembered, and once the session is awake to take the task.
  *   - The card is this computer's, in the session here that would get the task, so only this computer's windows can
  *     answer it; it names the machine and the asking session there. Approving it is remembered for the pair (that
  *     session, this project) until withdrawn in Settings → Machines, or until the switch goes off; a remembered pair
@@ -228,8 +228,11 @@ export class MachineAsks {
     // One level below the asker on its machine (#867): the session cannot start agents or ask on past the depth
     this.host.store.settings.setAppSetting(depthKey, String(p.depth))
     const from = { sessionId: MACHINE_ASKER, name: `${oneLineText(p.caller.name, 120) || 'A session'} on ${machine.name}` }
+    // The switch and the project are read once more when the session is awake: waking or restarting it takes seconds
+    const stillAllowed = () =>
+      this.gate(machine) ?? (this.host.store.projects.listProjects().some((x) => x.id === target.id) ? null : `${target.name} was removed from ${this.selfName()}, so it was not reached.`)
     try {
-      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task), undefined, from, false)
+      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
     } catch (e) {
       given.wait.fail(e as Error)
       this.given.delete(key)

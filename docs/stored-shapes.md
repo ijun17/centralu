@@ -71,7 +71,7 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 | An app shared with other projects | `app_settings.app_shared:<appKey>` | agent-host sessions | `sessions/app-access.ts:107` | anything but `1` is not shared: a refusal | not shared | not shared | `app-access.test.ts` (all three) |
 | App permissions | `app_permissions` | agent-host apps | `PermissionRecords` `agent-host/src/dev-services/store/permissions.ts:71`; `desk.ts:587` | any decision but `allow` refuses, without asking, and the record stays | a decision recorded for an older `uses` asks again | (rows) | `app-capabilities.test.ts` (all three) |
 | App secrets | `app-secrets.json` | agent-host apps | `SecretStore` `agent-host/src/apps/external/secrets.ts:25` on `PrivateJsonFile` `private-json-file.ts:68` | extra apps and keys kept on write | (map) | moved aside as `.unreadable-<time>`, one stderr line naming the file, and the app's screen says its secrets could not be read; a file that cannot be read at all stays and refuses writes | `private-json-file.test.ts`, `app-secrets.test.ts` |
-| Imported-app marks | `app-imports.json` | agent-host apps | `ImportBook` `agent-host/src/apps/external/import-book.ts:53`; the gate `AppHandover.gate` `handover.ts:103` | extra fields on an entry kept by `confirm` | (map) | moved aside and said on stderr, as for secrets; with the marks gone, an imported app reads as one of the person's own and runs without asking again ✗3 ([Left](#left)) | `private-json-file.test.ts`, `imports.test.ts` (none for the gate after a broken file) |
+| Imported-app marks | `app-imports.json` | agent-host apps | `ImportBook` `agent-host/src/apps/external/import-book.ts:61`; the gate `AppHandover.gate` `handover.ts:103` | extra fields on an entry kept by `confirm` (an older build keeps `lost`, #1172) | (map); an entry without `lost` is an import | moved aside and said on stderr, as for secrets, and since the file is the only record of which apps were imported, a new file is written at once with a `lost` mark for every app then in the user folder, each `unconfirmed` until reviewed; a file that cannot be read at all stays and refuses writes, and every app without a mark is held meanwhile (`ImportBook.doubt`) | `private-json-file.test.ts`, `imports.test.ts` "a marks file that cannot be read holds the apps instead of running them" |
 | App versions | `app-versions/<app>/<id>/meta.json` | agent-host apps | `AppVersions.list` `agent-host/src/apps/external/versions.ts:79` | extra fields kept | a missing `depth` is the legacy depth | a record without `id` and `at` is skipped, like a half-deleted one, with no word | `versions.test.ts` |
 | View origin ports | `app_settings.apps.viewPorts` | agent-host views | `parsePortBook` / `readBook` `agent-host/src/views/origin-ports.ts:108`, `:81`, through `parseStoredPortBook` `main.ts:464` | top-level fields a newer build added are kept when the book is written back; an assignment in a shape this build cannot read is not used, and the port in it is retired, so it never goes to another app | — | not a JSON object: every number in the text that could be a port is retired, its apps get new ports (losing what they kept under the old origin, never reaching another app's), and the row is named on stderr once | `origin-ports.test.ts` (all three) |
 | Builder links | `app_settings.apps.builders` | agent-host sessions | `sessions/app-sessions.ts:433` | — | — | `{}` with no word, and the next link written over every other app's ✗4 ([Left](#left)) | `app-sessions.test.ts` |
@@ -123,15 +123,8 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 
 ## Left
 
-What this inventory found and the pull requests of #384 do not change, with the reason. The first one needs a
-decision before code.
+What this inventory found and the pull requests of #384 do not change, with the reason.
 
-- **A broken `app-imports.json` lets imported apps run as the person's own.** The file is moved aside and said on
-  stderr, but it is also the only record of which apps were imported, so with it gone `AppHandover.gate` sees no mark
-  and asks nothing. The comment in `ImportBook` names the risk. Fixing it means choosing what an unmarked user-folder
-  app is while the marks are unreadable: every one of them asks (the person's own apps too), or the marks are kept a
-  second time somewhere a broken file cannot take with it (inside each imported app's folder). That is the owner's
-  call; this inventory records it.
 - **Builder links (`apps.builders`)** are read and written in `sessions/app-sessions.ts`, which #1141 is reworking;
   a row that is not JSON is replaced by the next link with no word. `listSetting`'s rule fits it once that lands.
 - **Saving a theme from Settings drops the tokens this build does not know.** The window sends the theme it read

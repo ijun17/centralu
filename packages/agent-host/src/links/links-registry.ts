@@ -9,7 +9,7 @@ import type {
   SshHostList,
 } from '@cc/protocol'
 import { probeTarget } from './probe.js'
-import { listSshHosts } from './ssh-config.js'
+import { listSshHosts, resolveAlias, type ResolvedHost } from './ssh-config.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
 import type { RemoteSpec } from './tunnel.js'
 import { isObj } from '../json-value.js'
@@ -100,6 +100,14 @@ export class Links {
     }
   }
 
+  /**
+   * What ssh would connect to for a target (`ssh -G`, which opens no connection and loads no key): the orchestrator's
+   * add_machine card shows it before anything connects (#1219)
+   */
+  resolve(sshTarget: string): Promise<ResolvedHost> {
+    return resolveAlias(sshTarget, this.deps.ssh ?? {})
+  }
+
   /** One BatchMode ssh to tell what runs there (probe.ts); the target need not be linked or in the config */
   probe(sshTarget: string): Promise<MachineProbe> {
     return probeTarget(sshTarget, this.deps.ssh ?? {})
@@ -146,6 +154,11 @@ export class Links {
     }
     m.acceptVersions()
     return m.info()
+  }
+
+  /** Why installing on or updating the machine would be refused before it starts, or null (#1219) */
+  installRefusal(id: string, kind: 'install' | 'update'): string | null {
+    return this.need(id).operationRefusal(kind)
   }
 
   install(id: string): Promise<MachineInstallResult> {

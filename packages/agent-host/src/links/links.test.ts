@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fakeExe } from '../fake-exe.test-helpers.js'
-import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -55,6 +55,8 @@ async function remoteHost(
     immediate?: boolean
     without?: readonly string[]
     elevated?: () => boolean | null
+    logon?: () => HostLogon | null
+    handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
     /** What happens on the host before it listens: no hub can see it yet */
     beforeListen?: (mgr: SessionManager) => Promise<void>
   } = {},
@@ -67,6 +69,8 @@ async function remoteHost(
     onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? []),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
     ...(o.elevated ? { elevated: o.elevated } : {}),
+    ...(o.logon ? { logon: o.logon } : {}),
+    ...(o.handover ? { handover: o.handover } : {}),
   })
   await o.beforeListen?.(mgr)
   const p = await server.listen()
@@ -116,6 +120,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
   // As main.ts wires it: the orchestrator's list_machines reads what machines.list answers (#1220)
   mgr.useMachineList(() => links.list())
+  mgr.useMachineOps(links)
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   const port = await server.listen()
@@ -442,6 +447,42 @@ describe('a hub linked to another host (#82)', () => {
     elevated = null
     await u.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.links.list()[0]!.elevated === null)
+  })
+
+  it('says on the row when the machine’s host runs in a network logon, as its hello said, and stops once it runs in the sign-in (#1224)', async () => {
+    let logon: HostLogon | null = 'network'
+    const remote = await remoteHost(0, new Store(), { logon: () => logon })
+    const hub = await hubHost(() => lineFor(remote.port, { install: undefined }))
+    const u = await ui(hub.port)
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.logon).toBe('network')
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'connected'))
+    expect(u.events().filter((e) => e.type === 'machine_status').at(-1)!.machine.logon).toBe('network')
+    // The host moved into the person's sign-in: its next hello says so, and the row follows
+    logon = 'interactive'
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.list()[0]!.logon === 'interactive')
+    // A host that says nothing (not Windows, or one that predates it) is not reported either way
+    logon = null
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.list()[0]!.logon === null)
+  })
+
+  /** #1224's review: the sign-in's serve waits for the host's work to end, 30 minutes at most, and the row says which */
+  it('keeps the hand-over a machine’s host says, from its hello and its host_handover events, on the row only', async () => {
+    let handover: { state: 'waiting' | 'gave_up'; since: number } | null = { state: 'waiting', since: 7 }
+    const remote = await remoteHost(0, new Store(), { logon: () => 'network', handover: () => handover })
+    const hub = await hubHost(() => lineFor(remote.port, { install: undefined }))
+    const u = await ui(hub.port)
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.handover).toEqual({ state: 'waiting', since: 7 })
+    // It gave up while the link was up: the event says so, and the row follows
+    handover = { state: 'gave_up', since: 9 }
+    remote.server.broadcast({ type: 'host_handover', handover })
+    await eventually(() => hub.links.list()[0]!.handover?.state === 'gave_up')
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.handover?.state === 'gave_up'))
+    // Kept on the row; the window never gets the machine's own event
+    expect(u.events().some((e) => e.type === 'host_handover')).toBe(false)
   })
 
   it('tells a PowerShell machine’s person to type centralu.cmd and npm.cmd, never the bare names a default execution policy blocks (#688)', async () => {
@@ -2279,5 +2320,66 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     const lines = r.text.split('\n').filter((l) => l.startsWith('- '))
     expect(lines).toEqual(listed.map((m) => `- ${JSON.stringify(m.name)} [${m.id}]: ${m.status}; macOS or Linux, Unix shell; connects at start`))
     expect(lines).toEqual(['- "Remote box" [m1]: connected; macOS or Linux, Unix shell; connects at start'])
+  })
+})
+
+/**
+ * The orchestrator's machine commands against a real hub (#1219): the same calls on the links as the Machines screen's,
+ * a card where the change is the person's, none for reconnecting or the connect mode.
+ */
+describe('the machine commands on a real hub (#1219)', () => {
+  const machineCard = (hub: Hub, orcId: string) => {
+    const pending = hub.mgr.listSessions().find((s) => s.id === orcId)?.pendingApproval
+    return pending?.detail.kind === 'other' && pending.detail.about === 'machine_change' ? pending : undefined
+  }
+  const run = (hub: Hub, orcId: string, command: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
+
+  it('sets when a machine connects and reconnects it with no card, as the row does', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const orc = await hub.mgr.orchestrator()
+    const r = await run(hub, orc.id, 'set_machine_connect', { machine: 'remote box', connect: 'when_needed' })
+    expect(r.isError).toBeFalsy()
+    expect(hub.links.list()[0]!.connect).toBe('when_needed')
+    expect(r.text).toContain('connects when needed')
+    expect((await run(hub, orc.id, 'reconnect_machine', { machine: 'm1' })).isError).toBeFalsy()
+    expect(machineCard(hub, orc.id)).toBeUndefined()
+  })
+
+  it("removes a machine only after the card, and its projects leave the hub's list", async () => {
+    const remote = await remoteHost()
+    await remote.mgr.addProject(folder())
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const u = await ui(hub.port)
+    expect((await u.call('projects.list')).length).toBe(1)
+    // A session of the machine the person let ask a project of this computer (#550)
+    const here = await hub.mgr.addProject(folder())
+    hub.store.machines.setLinkedMachineAsks('m1', true)
+    expect(hub.store.machines.setMachineAskConsent({ machineId: 'm1', sessionId: 's-there', sessionName: 'worker', projectId: here.id })).toBe(true)
+    const orc = await hub.mgr.orchestrator()
+    const call = run(hub, orc.id, 'remove_machine', { machine: 'Remote box' })
+    await eventually(() => !!machineCard(hub, orc.id))
+    expect(hub.links.list().length).toBe(1)
+    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    expect((await call).isError).toBeFalsy()
+    expect(hub.links.list()).toEqual([])
+    expect((await u.call('projects.list')).map((p: { id: string }) => p.id)).toEqual([here.id])
+    // What the machine was let ask is forgotten with it, as the card says
+    expect(hub.store.machines.listMachineAskConsents()).toEqual([])
+    expect(hub.store.machines.linkedMachineAsks('m1')).toBe(false)
+    // Nothing on the machine changed: its project is still there
+    expect(remote.store.projects.listProjects().length).toBe(1)
+  })
+
+  it('refuses an install this computer cannot make before any card', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const orc = await hub.mgr.orchestrator()
+    const r = await run(hub, orc.id, 'install_machine', { machine: 'Remote box', action: 'update' })
+    expect(r).toEqual({ text: 'Nothing changed: This computer cannot install on Remote box', isError: true })
+    expect(machineCard(hub, orc.id)).toBeUndefined()
   })
 })

@@ -74,6 +74,8 @@ export class MachinesMock {
         elevated: null,
         // The reverse direction is off for a machine just linked (#550)
         asks: { on: false, note: null },
+        logon: null,
+        handover: null,
         connect: 'at_start',
       }
       this.machinesList.push(info)
