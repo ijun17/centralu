@@ -77,7 +77,7 @@ export class MockPlatform implements Platform {
   private readonly updatesMock = new UpdatesMock(this.clock, this.forward)
   private readonly keeperMock = new KeeperMock(this.updatesMock)
   private readonly machinesMock = new MachinesMock(this.forward, this.projectStore)
-  private readonly preferencesMock = new PreferencesMock()
+  private readonly preferencesMock = new PreferencesMock(this.forward)
   private readonly projectsMock = new ProjectsMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.gridMock, this.machinesMock, this.trashMock)
   private readonly proposalsMock = new ProposalsMock(this.forward)
   private readonly systemMock = new SystemMock()

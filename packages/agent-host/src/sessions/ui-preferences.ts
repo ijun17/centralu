@@ -1,5 +1,5 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { parseUiPreferences, textSizeFromLegacyStep } from '@cc/protocol'
+import { parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import type { AppAccess } from './app-access.js'
@@ -19,7 +19,7 @@ const UI_PREFS_KEY = 'ui_preferences'
  * What the screen preferences reach of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type UiPreferenceStoreHost = Pick<DelegationHost, 'meta' | 'store'> &
+export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'store'> &
   Pick<SessionTrashHost, 'appsHub'> & {
     /** Another project's apps attached on demand (#371 part A); null exactly when `appsHub` is */
     readonly appAccess: AppAccess | null
@@ -67,6 +67,18 @@ export class UiPreferenceStore {
       }
     }
     /*
+     * The notification switches moved here from the workspace snapshot (#1306), the same way and for the same reason as the
+     * text size: the first read that finds no `notifyPolicy` in the record takes the snapshot's (the defaults, when the
+     * window never saved one) and writes it, and from then on the record has the field, so a snapshot an older window still
+     * writes never overrides a switch chosen since. The window keeps writing the snapshot too (an older build reads it); this
+     * record is the one read here. The row is read again for the write: the text size above may just have been added to it.
+     */
+    if (!('notifyPolicy' in stored) && !this.brokenRow()) {
+      const carried = readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
+      prefs.notifyPolicy = carried
+      this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), notifyPolicy: carried }))
+    }
+    /*
      * "Allow auto from a linked computer" fails closed (#1273 review, owner decision 2026-10-19): its only job is to
      * restrict, and a damaged record must not bring back what the person turned off. Absent still reads as on (the
      * default); a row that is not an object, or a value that is not true or false, reads as off.
@@ -84,6 +96,13 @@ export class UiPreferenceStore {
    */
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
     const current = this.uiPreferences()
+    // The switches are merged one by one (#1306): a patch carries only those that change, and two writers (the window, the
+    // orchestrator) changing different ones do not undo each other. `current` has the field once the read above carried it; a
+    // row that is not a JSON object has none, and the switches then start from the snapshot's, as the window shows them
+    const { notifyPolicy: switches, ...rest } = patch
+    const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
+    const notifyPolicy = switches ? { ...base, ...switches } : undefined
+    const written = { ...rest, ...(notifyPolicy ? { notifyPolicy } : {}) }
     const stored = this.storedUiPreferences()
     /*
      * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273
@@ -92,14 +111,16 @@ export class UiPreferenceStore {
      */
     const damaged = this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')
     const kept = damaged && patch.hubAuto === undefined ? { hubAuto: false } : {}
-    this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, ...kept, ...patch }))
+    this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, ...kept, ...written }))
     // The session tools switch also decides the apps a session attached through them (#382): recount every live one
     if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
       // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)
       if (!patch.sessionTools) this.host.appAccess?.dropOnce(this.host.meta.keys())
       for (const id of this.host.meta.keys()) this.host.appsHub?.sessionAppsChanged(id)
     }
-    return { ...current, ...patch }
+    // Every window hears it (`prefs_changed`): one that did not make the change reads the record again
+    if (Object.keys(patch).length) this.host.emit({ type: 'prefs_changed' })
+    return { ...current, ...written }
   }
 
   /** The stored record as written, every field kept; `{}` for none or for one that is not a JSON object */

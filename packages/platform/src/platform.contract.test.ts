@@ -28,7 +28,10 @@ import { broadcastAppChanges } from '../../agent-host/src/app-change-events.js'
 import { storeRunLedger } from '../../agent-host/src/app-run-ledger.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import { APP_VERSION, DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
+import { APP_VERSION, DEFAULT_NOTIFY_POLICY, DEFAULT_UI_PREFERENCES as UI_DEFAULTS, agentDepthOf } from '@cc/protocol'
+
+/** The defaults as a fresh install reads them: the host has carried the notification switches into the record on the first read (#1306) */
+const DEFAULT_UI_PREFERENCES = { ...UI_DEFAULTS, notifyPolicy: DEFAULT_NOTIFY_POLICY }
 import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
@@ -998,6 +1001,34 @@ describe.each([
    * step comes across once; after that the record has its own value, and a snapshot that still
    * carries the old step (written by an older window) does not override a size chosen since.
    */
+  /**
+   * The notification switches moved from the workspace snapshot into the preferences (#1306), the way the text size did.
+   * The snapshot's come across once; after that the record is the source, and a snapshot an older window still writes does
+   * not override a switch chosen since. A change carries only the switches that changed, and every change is announced.
+   */
+  describe('the notification switches (#1306)', () => {
+    it('come across from the snapshot once, then the record is the source', async () => {
+      await h.platform.workspace.save({ textScale: 4, notifyPolicy: { approval: true, error: true, done: false, allDone: true, whenFocused: false, sound: false } } as never)
+      // Both moves in one first read: the second does not lose the first
+      expect((await h.platform.prefs.load()).textSize).toBe(1.25)
+      expect((await h.platform.prefs.load()).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false, sound: false })
+      expect((await h.platform.prefs.save({ notifyPolicy: { sound: true } })).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false })
+      // An older window writes its snapshot again: the record keeps the switch chosen since
+      await h.platform.workspace.save({ notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, sound: false, done: true } } as never)
+      expect((await h.platform.prefs.load()).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false })
+    })
+
+    it('start at the defaults with no snapshot, a patch changes only the switches it names, and each change is announced', async () => {
+      expect((await h.platform.prefs.load()).notifyPolicy).toEqual(DEFAULT_NOTIFY_POLICY)
+      const seen: NormalizedEvent[] = []
+      const off = h.platform.agents.subscribe((e) => seen.push(e))
+      expect((await h.platform.prefs.save({ notifyPolicy: { approval: false } })).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false })
+      expect((await h.platform.prefs.save({ notifyPolicy: { whenFocused: true } })).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false, whenFocused: true })
+      await waitFor(() => seen.filter((e) => e.type === 'prefs_changed').length >= 2)
+      off()
+    })
+  })
+
   describe('a fresh install with a snapshot from before #312', () => {
     it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
       await h.platform.workspace.save({ textScale: 4 })

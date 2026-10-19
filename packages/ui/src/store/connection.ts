@@ -326,7 +326,9 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
   if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
   const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
-  if (savedPolicy != null) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
+  // The host's record is the one source (#1306); the snapshot's copy is read only from a host that has none, and it is not
+  // read at all once the host answered (the preferences arrive before the snapshot is applied)
+  if (savedPolicy != null && get().prefs.notifyPolicy === undefined) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
   // Whether the tree shows ignored files is a way of looking, so it comes back with
   // the rest of the panel's layout rather than being re-chosen every launch (#17).
   //
@@ -560,6 +562,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         gridPanels,
         tools,
         prefs,
+        // The switches are the host's (#1306); a host from before them answers without, and the snapshot's are read later
+        ...(prefs.notifyPolicy ? { notifyPolicy: prefs.notifyPolicy } : {}),
         externalApps,
         themeFiles,
         lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
@@ -702,6 +706,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // So is a proposal list change (#703): a missed `orchestrator_proposals_changed` leaves a card, the count and the badge stale
     void get().refreshMcpProposals()
     void get().refreshSkillProposals()
+    // So are the preferences (#1306): a missed `prefs_changed` leaves the orchestrator's change to a setting unseen
+    void get().refreshPrefs()
     // So are the links' states (#82): a machine that went away or came back during the gap
     void get().refreshMachines()
     // The pinned views this window shows are leased to its connection, which just ended (#392)

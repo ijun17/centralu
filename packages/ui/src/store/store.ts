@@ -186,6 +186,22 @@ export function stampToasts(set: StoreSet): StoreSet {
     }, replace)) as StoreSet
 }
 
+/**
+ * This window's own saves of the preferences that are on their way (#1306). Every save is announced to every window,
+ * this one too (`prefs_changed`), and reading the record again while one is in flight would put an older reading over
+ * the change (a fold saved meanwhile may not be in it yet, #666): the reading waits for the saves, then happens.
+ */
+let prefsSaves = 0
+let prefsRefreshWaiting = false
+
+function prefsSaved(get: () => { refreshPrefs(): Promise<void> }): void {
+  prefsSaves--
+  if (prefsSaves === 0 && prefsRefreshWaiting) {
+    prefsRefreshWaiting = false
+    void get().refreshPrefs()
+  }
+}
+
 export const useStore = create<AppState>((rawSet, get) => {
   const set = stampToasts(rawSet)
   return {
@@ -316,9 +332,33 @@ export const useStore = create<AppState>((rawSet, get) => {
       }
     },
 
+    async refreshPrefs() {
+      const platform = get().platform
+      if (!platform) return
+      // A save of this window's own is on its way: the reading would be older than it, so it waits for the save
+      if (prefsSaves > 0) {
+        prefsRefreshWaiting = true
+        return
+      }
+      try {
+        const prefs = parseUiPreferences(await platform.prefs.load())
+        // A save started while the reading was on its way: the reading may be older than it, so it is read again after
+        if (prefsSaves > 0) {
+          prefsRefreshWaiting = true
+          return
+        }
+        // A host from before the switches answers without them: the window keeps the snapshot's. The snapshot's copy, for a
+        // build that reads it there, catches up with the next save of the snapshot
+        set({ prefs, ...(prefs.notifyPolicy ? { notifyPolicy: prefs.notifyPolicy } : {}) })
+      } catch {
+        /* the host did not answer this time — the screen keeps what it has */
+      }
+    },
+
     async setPrefs(patch) {
       const platform = get().platform
       if (!platform) return
+      prefsSaves++
       try {
         const saved = parseUiPreferences(await platform.prefs.save(patch))
         /*
@@ -339,13 +379,25 @@ export const useStore = create<AppState>((rawSet, get) => {
       } catch (e) {
         // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
         set({ toast: `Could not save that: ${(e as Error).message}` })
+      } finally {
+        prefsSaved(get)
       }
     },
 
     setNotifyPolicy(notifyPolicy) {
+      const before = get().notifyPolicy
       set({ notifyPolicy })
-      // The policy is carried in the workspace snapshot too (E-5) — saving goes through the single writer
+      // The policy is carried in the workspace snapshot too (E-5, and an older build reads it there) — saving goes through the single writer
       get().saveWorkspace()
+      // And the host keeps it (#1306): only the switches that changed
+      const changed = Object.fromEntries(Object.entries(notifyPolicy).filter(([k, v]) => before[k as keyof typeof before] !== v))
+      const platform = get().platform
+      if (!platform || Object.keys(changed).length === 0) return
+      prefsSaves++
+      platform.prefs
+        .save({ notifyPolicy: changed })
+        .catch((e: Error) => set({ toast: `Could not save that: ${e.message}` }))
+        .finally(() => prefsSaved(get))
     },
 
     ...connectionActions(set, get),

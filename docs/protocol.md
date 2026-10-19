@@ -105,6 +105,7 @@ type NormalizedEvent =
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
+  | { type: 'prefs_changed' }                                 // #1306: the screen preferences changed (a window, or the orchestrator) — re-read prefs.get
   | { type: 'orchestrator_proposals_changed' }                // #703: an MCP-server or skill proposal was saved, approved or dismissed — re-read agents.mcpProposals and agents.skillProposals
   | { type: 'machine_status';   machine: MachineInfo }          // #82: a linked machine's link changed state; the whole record (§6)
   | { type: 'machine_resync';   machineId }                     // #82: re-read that machine's sessions and projects, wake what died (§6)
@@ -362,6 +363,7 @@ same thing another way:
 | `projects_changed` | beta.16 | sees a project another window or an agent added or removed after its next reload |
 | `session_live` | beta.18 | does not see a session go to sleep or wake (#568); the list says so on its next read |
 | `update_apply_request`, `update_apply_go` | beta.23 | never answers an agent's apply card's request (#665): after 5 seconds the agent's call ends with "No Centralu window answered", which tells it to ask the person to click Apply now |
+| `prefs_changed` (#1306) | the release after beta.30 | keeps the preferences it loaded until it reloads: a switch or a theme the orchestrator changes shows in a window of this build at once, in an older one after a reload |
 | `interruption`, `session_owner`, `orchestrator_proposals_changed` | beta.24 | shows no interruption line (#698); until it reads the list again, it keeps a moved child under its old owner and does not refresh the orchestrator's proposals |
 
 **Fields an older host strips.** A field a newer window sends that an older host does not declare is dropped there
@@ -465,7 +467,7 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   headers mirror, each row marked `unreachable: true`, with `live` as last heard. The UI keeps
   those rows and does not wake them. Calls to it fail at once (§5).
 - **Events.** A linked machine's session events reach the UI under the hub's own `seq`, with ids
-  qualified; one about the remote host itself (`update_status`, `themes_changed`,
+  qualified; one about the remote host itself (`update_status`, `themes_changed`, `prefs_changed`,
   `app_state_changed`, `agent_versions`, `external_app_questions_changed`,
   `orchestrator_proposals_changed`, an `error` with no
   session) is dropped. Terminal frames arrive with the qualified terminal id. `machine_status`

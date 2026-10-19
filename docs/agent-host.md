@@ -1393,16 +1393,25 @@ the params with the method's schema and reads the answer with its result schema,
 
 - `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
-  It also lists what no command changes (send key, session tools, agent ceiling and depth) and says the notification
-  switches are not reachable yet (they live in the window's workspace snapshot, §1.4).
+  It also lists what no command changes (send key, session tools, agent ceiling and depth).
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `checkForUpdates`, `applyUpdatesWhenIdle` and
-  `moveIdleSessionsToNewAgentCli`. The arguments are strict: a field it does not have (`sessionTools`, `agentCeiling`,
+  `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `error`, `done`, `allDone`,
+  `whenFocused`, `sound`; no card, merged one by one into the host's record, §1.4). The arguments are strict: a field it does not have (`sessionTools`, `agentCeiling`,
   `themeMode`) is refused by name. A theme names one preset (`THEME_PRESETS`, now in the protocol) or a theme file that
   reads cleanly; it sets the side of the theme's base and the stored mode to that same base, so the mode stays `dark` or
   `light`, never `system`. The text size lands on the nearest step, as `prefs.set` does. A theme, font or
   schema refusal comes before any write; a service the host lacks (no update service in a test) is reported next to the
   changes that did happen.
+- **The notification switches** (#1306) are in the preferences record (`UiPreferences.notifyPolicy`, optional), no longer only in the
+  window's workspace snapshot, so the window and the orchestrator share one source. `UiPreferenceStore.uiPreferences` carries
+  them once: the first read that finds none takes the snapshot's `notifyPolicy` (the defaults when the window never saved
+  one) and writes it, so a snapshot an older window still writes never overrides a switch chosen since (the text size moved
+  the same way, #312). A patch carries only the switches that change and the host merges them one by one
+  (`setUiPreferences`), so the window and the orchestrator changing different switches do not undo each other. Every change
+  is announced with `prefs_changed` (carries nothing; a window reads `prefs.get` again), which also brings the
+  orchestrator's other preferences (theme, text size) to an open window. The window keeps writing its snapshot's copy, for a
+  build that reads it there; against a host that answers without the field it keeps using the snapshot's.
 - Turning **on** "apply updates when idle" asks first, in every preset, and so does turning **on** checking for updates
   while apply is on (it is the other half of the same thing: `UpdateService.setAuto(true)` checks at once and installs what it
   finds when apply is on). With both on, a newer Centralu installs by itself and the desktop window relaunches into it when
@@ -1459,7 +1468,7 @@ window's channel), grouped, and for each group one of three states.
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "apply updates when idle" **on** asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
 | Agent CLIs. `agents.applyVersions` | Should: *next* | The header's "restart idle sessions on the new CLI"; each restart ends a turn only when idle |
-| Notifications | Should: *next*, **not reachable yet** | The switches (`approval`, `error`, `done`, `allDone`, `whenFocused`, `sound`) are not host settings: the window keeps them in its workspace snapshot (`notifyPolicy`, written whole by `saveWorkspace`), which the host neither reads nor can change without the window overwriting it. They have to move into the preferences record first (as the text size did, #312; #1306) |
+| Notifications. The switches `approval`, `error`, `done`, `allDone`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`) | **Has it** (#1306) | `set_preferences notifications`, no card. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
 | The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: *next*, read only |
 | Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |

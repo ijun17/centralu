@@ -12,6 +12,12 @@ export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
     return true
   }
 
+  // A setting changed (#1306): another window saved one, or the orchestrator did
+  if (e.type === 'prefs_changed') {
+    void get().refreshPrefs()
+    return true
+  }
+
   // The host made a project (#515): the orchestrator's, once approved, or another window's
   if (e.type === 'projects_changed') {
     const refreshed = get().refreshProjects()

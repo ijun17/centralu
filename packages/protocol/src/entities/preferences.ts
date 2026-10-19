@@ -41,6 +41,62 @@ export function textSizeFromLegacyStep(step: unknown): number | null {
   return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, Math.round(step)))]!
 }
 
+export type NotifyPolicy = {
+  /** Notify at once when an approval starts waiting */
+  approval: boolean
+  /** Notify at once when an error occurs */
+  error: boolean
+  /**
+   * When a single session finishes a response **somewhere it cannot be seen**.
+   *
+   * Originally the sound came only "once, when everything has finished". That fell out of step once every
+   * off-screen finish started leaving a card — the cards piled up every time but the sound came only at the
+   * end, so if two sessions finished while the person was away, two cards had quietly piled up. A card and
+   * a sound are the same event, so they go together.
+   */
+  done: boolean
+  /** Once, when every session has finished its work */
+  allDone: boolean
+  /**
+   * Whether to notify even while the app is in the foreground (default: no — a notification about something
+   * right in front of you is noise)
+   */
+  whenFocused: boolean
+  /**
+   * Whether to make a sound.
+   *
+   * Since we measured that the macOS banner path is dead, **sound has been the main signal while the person
+   * is away**. It is the only signal that reaches them even in the next room, so it is on by default.
+   */
+  sound: boolean
+}
+
+export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
+  approval: true,
+  error: true,
+  done: true,
+  allDone: true,
+  whenFocused: false,
+  sound: true,
+}
+
+/**
+ * Reads a policy from the workspace snapshot, field by field (#384). A snapshot an older build wrote
+ * lacks the switches added since (`done` came after `allDone`), and a missing switch must take its
+ * default rather than read as off; a value that is not a boolean is no choice either. Fields this
+ * build does not know are dropped: the screen rewrites the snapshot whole on its next change, so a
+ * newer build's extra switch falls back to its own default there.
+ */
+export function readNotifyPolicy(raw: unknown): NotifyPolicy {
+  const out = { ...DEFAULT_NOTIFY_POLICY }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  for (const key of Object.keys(out) as (keyof NotifyPolicy)[]) {
+    const v = (raw as Record<string, unknown>)[key]
+    if (typeof v === 'boolean') out[key] = v
+  }
+  return out
+}
+
 /** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */
 export const LineHeight = z.enum(['compact', 'normal', 'relaxed'])
 export type LineHeight = z.infer<typeof LineHeight>
@@ -137,6 +193,18 @@ export const UiPreferences = z.object({
    * patched by one entry.
    */
   foldedGroups: z.array(z.string().max(300)).max(500),
+  /**
+   * The notification switches (#1306): which events notify, and whether they make a sound. They lived in the window's
+   * workspace snapshot, which the window writes whole and the host cannot change; here the window and the orchestrator
+   * share one record. **Optional**, like `agentCeiling`: a record from before it has none, and a host from before it
+   * answers without it (the window then keeps the snapshot's). The host fills it once on the first read, from the
+   * snapshot's `notifyPolicy` or the defaults (`UiPreferenceStore`), so it is there from then on. Read field by field
+   * (`readNotifyPolicy`): a switch a build does not know is dropped, a missing one takes its default.
+   */
+  notifyPolicy: z
+    .unknown()
+    .transform((v) => readNotifyPolicy(v))
+    .optional(),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -148,7 +216,13 @@ export type UiPreferences = z.infer<typeof UiPreferences>
  * would post its own idea of the record and quietly undo the one it never knew about.
  * Saying only what changed cannot do that.
  */
-export const UiPreferencesPatch = UiPreferences.partial()
+export const UiPreferencesPatch = UiPreferences.partial().extend({
+  /** Only the switches that change (#1306): the host merges them into the record, so two writers changing different switches do not undo each other */
+  notifyPolicy: z
+    .object({ approval: z.boolean(), error: z.boolean(), done: z.boolean(), allDone: z.boolean(), whenFocused: z.boolean(), sound: z.boolean() })
+    .partial()
+    .optional(),
+})
 export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 
 /**

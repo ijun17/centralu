@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -75,6 +75,7 @@ export class PreferencesFlow {
       const c = choices.find((x) => x.id === id)
       return c ? `${plainQuoted(c.name)} [${c.id}]` : `[${plainQuoted(id)}] (no such theme; the stylesheet's own is shown)`
     }
+    const notify = p.notifyPolicy ?? DEFAULT_NOTIFY_POLICY
     const lines = [
       'Appearance',
       `- Theme mode: ${p.themeMode}; dark theme ${named(p.themeDark)}; light theme ${named(p.themeLight)}`,
@@ -83,6 +84,8 @@ export class PreferencesFlow {
       `- Body font: ${p.bodyFont ? plainQuoted(p.bodyFont, 200) : "the app's own"}; code font: ${p.codeFont ? plainQuoted(p.codeFont, 200) : "the app's own"}`,
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
       `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
+      'Notifications (set_preferences notifications)',
+      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
@@ -97,7 +100,6 @@ export class PreferencesFlow {
       'Kept by the person (no command changes these)',
       `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)}; Centralu's read-only tools in ordinary sessions: ${onOff(p.sessionTools)}`,
       `- Agents: running per project ${p.agentCeiling === undefined || p.agentCeiling === null ? 'by preset' : p.agentCeiling === 0 ? 'unlimited' : p.agentCeiling}; levels that may start agents ${p.agentDepth ?? 1}`,
-      'Notifications: the window keeps these switches; no command reaches them yet.',
     ]
     return { ok: true, text: lines.join('\n') }
   }
@@ -145,6 +147,14 @@ export class PreferencesFlow {
       await attempt('Appearance', async () => {
         const now = await callWindow(rpc, 'prefs.set', { patch: parsed.data })
         return appearanceText(now, patch, theme)
+      })
+    }
+    // The notification switches (#1306): only those named change, merged into the host's record one by one
+    const switches = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
+    if (Object.keys(switches).length) {
+      await attempt('Notifications', async () => {
+        const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+        return `Now: notifications: approval ${onOff(now.approval)}, error ${onOff(now.error)}, a session finishes out of sight ${onOff(now.done)}, every session finished ${onOff(now.allDone)}, even while focused ${onOff(now.whenFocused)}, sound ${onOff(now.sound)}.`
       })
     }
     if (sleep !== undefined) {

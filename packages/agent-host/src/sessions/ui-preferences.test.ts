@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 
@@ -23,7 +23,8 @@ afterEach(() => vi.restoreAllMocks())
 describe('screen preferences across builds', () => {
   it('an older record (fields missing) reads with the defaults for what it lacks', () => {
     const { mgr } = setup(JSON.stringify({ sendWithModifierEnter: true }))
-    expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
+    // The notification switches are carried into the record on the first read (#1306): from the defaults, with no snapshot
+    expect(mgr.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true, notifyPolicy: DEFAULT_NOTIFY_POLICY })
   })
 
   it('a newer record keeps what this build does not know through a change made here', () => {
@@ -33,7 +34,7 @@ describe('screen preferences across builds', () => {
     const out = mgr.setUiPreferences({ sendWithModifierEnter: true })
     expect(out.sendWithModifierEnter).toBe(true)
     // ...but writing a different field leaves the newer build's choices where they were
-    expect(row()).toEqual({ textSize: 1, themeMode: 'sepia-of-the-future', laterField: { a: 1 }, sendWithModifierEnter: true })
+    expect(row()).toEqual({ textSize: 1, themeMode: 'sepia-of-the-future', laterField: { a: 1 }, sendWithModifierEnter: true, notifyPolicy: DEFAULT_NOTIFY_POLICY })
   })
 
   it('the agent depth survives a restart; a record from before it, or with a value out of range, reads as 1 (#867)', () => {
@@ -81,6 +82,74 @@ describe('screen preferences across builds', () => {
    * finds no `textSize` in the record. A broken row has no field either, so that read wrote `{ textSize }` over it,
    * before the person had changed anything, and the next build to read it found every other choice gone.
    */
+  /*
+   * The notification switches moved from the workspace snapshot into this record (#1306), as the text size did. The first read
+   * that finds none takes the snapshot's, field by field, and writes the record once; after that the record is the source.
+   */
+  describe('the notification switches (#1306)', () => {
+    const snapshot = { approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: 'loud', volume: 11 }
+
+    it("come across from the workspace snapshot once, a switch it lacks or holds wrongly taking its default, and the move keeps the text size's", () => {
+      const store = new Store()
+      store.settings.saveWorkspace({ textScale: 4, notifyPolicy: snapshot })
+      store.settings.setAppSetting(KEY, JSON.stringify({ laterField: 1 }))
+      const mgr = new SessionManager(store, new Map(), () => {})
+      expect(mgr.uiPreferences().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false })
+      // Both moves happened in the one read, and what another build wrote stayed
+      expect(JSON.parse(store.settings.appSetting(KEY)!)).toEqual({ laterField: 1, textSize: 1.25, notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })
+    })
+
+    it('are the record\'s from then on: a snapshot an older window writes later does not override a switch chosen since', () => {
+      const store = new Store()
+      store.settings.saveWorkspace({ notifyPolicy: snapshot })
+      const mgr = new SessionManager(store, new Map(), () => {})
+      mgr.setUiPreferences({ notifyPolicy: { sound: false } })
+      store.settings.saveWorkspace({ notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, approval: true, sound: true } })
+      expect(mgr.uiPreferences().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false, sound: false })
+    })
+
+    it('are merged one by one: a patch carrying one switch leaves the others, and the answer is the record after the write', () => {
+      const { mgr, row } = setup(JSON.stringify({ notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, error: false } }))
+      const out = mgr.setUiPreferences({ notifyPolicy: { whenFocused: true } })
+      expect(out.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, error: false, whenFocused: true })
+      expect(row().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, error: false, whenFocused: true })
+    })
+
+    it('are announced to every window with prefs_changed, and a read announces nothing', () => {
+      const events: string[] = []
+      const mgr = new SessionManager(new Store(), new Map(), (e) => events.push(e.type))
+      mgr.uiPreferences()
+      expect(events).toEqual([])
+      mgr.setUiPreferences({ notifyPolicy: { sound: false } })
+      mgr.setUiPreferences({})
+      expect(events).toEqual(['prefs_changed'])
+    })
+
+    it("start from the snapshot's switches when the row is broken, so one change does not reset the others", () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const store = new Store()
+      store.settings.saveWorkspace({ notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })
+      store.settings.setAppSetting(KEY, '{"notifyPolicy": ')
+      const mgr = new SessionManager(store, new Map(), () => {})
+      const out = mgr.setUiPreferences({ notifyPolicy: { sound: false } })
+      // The window showed the snapshot's switches; the change keeps them, as the replaced row now holds
+      expect(out.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false, sound: false })
+      expect(JSON.parse(store.settings.appSetting(KEY)!).notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, approval: false, sound: false })
+    })
+
+    it('are not written over a broken row by reading it, and a switch a build does not know is dropped on reading', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const store = new Store()
+      store.settings.saveWorkspace({ notifyPolicy: snapshot })
+      store.settings.setAppSetting(KEY, '{"notifyPolicy": ')
+      const mgr = new SessionManager(store, new Map(), () => {})
+      expect(mgr.uiPreferences().notifyPolicy).toBeUndefined()
+      expect(store.settings.appSetting(KEY)).toBe('{"notifyPolicy": ')
+      const { mgr: mgr2 } = setup(JSON.stringify({ notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, volume: 11, sound: 'loud' } }))
+      expect(mgr2.uiPreferences().notifyPolicy).toEqual({ approval: true, error: true, done: true, allDone: true, whenFocused: false, sound: true })
+    })
+  })
+
   it('a broken row is not written over by reading it, even with an old text size to move', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const store = new Store()

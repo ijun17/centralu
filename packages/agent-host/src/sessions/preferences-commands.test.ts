@@ -24,6 +24,8 @@ import { eventually } from '../../../../tooling/test-timing.js'
 const COMMANDS = ['get_preferences', 'set_preferences'] as const
 
 let root: string
+/** What the host announced, to see that a change reaches every window */
+let announced: string[]
 let store: Store
 let mgr: SessionManager
 let rpc: (method: string, params: unknown) => Promise<unknown>
@@ -86,7 +88,8 @@ beforeEach(() => {
   store = new Store()
   const adapters = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
-  mgr = new SessionManager(store, agents, () => {})
+  announced = []
+  mgr = new SessionManager(store, agents, (e) => announced.push(e.type))
   updates = fakeUpdates()
   sleeper = fakeSleeper()
   versions = fakeVersions()
@@ -143,13 +146,13 @@ describe('get_preferences', () => {
     expect(sleeper.calls).toEqual([])
   })
 
-  it('says what stays with the person, and that the notification switches are not reachable yet', async () => {
+  it('says what stays with the person', async () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('Kept by the person (no command changes these)')
     expect(r.text).toContain("Centralu's read-only tools in ordinary sessions: on")
     expect(r.text).toContain('levels that may start agents 1')
-    expect(r.text).toContain('Notifications: the window keeps these switches')
+    expect(r.text).not.toContain('the window keeps these switches')
   })
 
   it('lists a theme file that reads cleanly, quoted, and leaves out a broken one', async () => {
@@ -246,6 +249,68 @@ describe('set_preferences: appearance', () => {
     const hidden = await run(orc.id, 'set_preferences', { codeFont: 'Menlo\u0007' })
     expect(hidden.text).toMatch(/codeFont has a control or formatting character/)
     expect(await prefs()).toEqual(before)
+  })
+})
+
+describe('the notification switches (#1306)', () => {
+  it('are read with the other settings', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'get_preferences')
+    expect(r.text).toContain('Notifications (set_preferences notifications)')
+    expect(r.text).toContain('- Approval needed: on; error: on; a session finishes out of sight: on; every session finished: on; even while the app is focused: off; sound: on')
+  })
+
+  it("start from the window's workspace snapshot, which the host reads once", async () => {
+    await rpc('workspace.save', { layout: { notifyPolicy: { approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: false } } })
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'get_preferences')
+    expect(r.text).toContain('- Approval needed: off; error: on; a session finishes out of sight: on; every session finished: on; even while the app is focused: off; sound: off')
+    // The snapshot is read once: a window of an older build writing it again changes nothing
+    await rpc('workspace.save', { layout: { notifyPolicy: { approval: true, error: true, done: true, allDone: true, whenFocused: true, sound: true } } })
+    expect(((await prefs()) as { notifyPolicy: { approval: boolean } }).notifyPolicy.approval).toBe(false)
+  })
+
+  it('change one switch at once with no card, the others staying, and every window is told', async () => {
+    const orc = await mgr.orchestrator()
+    announced.length = 0
+    const r = await run(orc.id, 'set_preferences', { notifications: { sound: false, whenFocused: true } })
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toBe('Now: notifications: approval on, error on, a session finishes out of sight on, every session finished on, even while focused on, sound off.')
+    expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: true, error: true, done: true, allDone: true, whenFocused: true, sound: false })
+    expect(announced.filter((t) => t === 'prefs_changed')).toEqual(['prefs_changed'])
+    expect(card(orc.id)).toBeUndefined()
+    // A second call changes only its own switch
+    await run(orc.id, 'set_preferences', { notifications: { approval: false } })
+    expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: true, sound: false })
+  })
+
+  it('merge into what the window saved meanwhile: a patch carrying one switch does not undo another', async () => {
+    const orc = await mgr.orchestrator()
+    await rpc('prefs.set', { patch: { notifyPolicy: { error: false } } })
+    await run(orc.id, 'set_preferences', { notifications: { done: false } })
+    expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: true, error: false, done: false, allDone: true, whenFocused: false, sound: true })
+  })
+
+  it('refuse a switch that does not exist, one that is not a boolean, and an empty list, changing nothing', async () => {
+    const orc = await mgr.orchestrator()
+    const before = await prefs()
+    for (const args of [{ notifications: { volume: true } }, { notifications: { sound: 'loud' } }, { notifications: { sound: 1 } }]) {
+      const r = await run(orc.id, 'set_preferences', args)
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+    }
+    const empty = await run(orc.id, 'set_preferences', { notifications: {} })
+    expect(empty.isError).toBe(true)
+    expect(empty.text).toMatch(/Nothing to change/)
+    expect(await prefs()).toEqual(before)
+  })
+
+  it('go with the other changes of one call, and a switch the window would refuse is refused as the window refuses it', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_preferences', { textSize: 1.1, notifications: { allDone: false } })
+    expect(r.text).toContain('Now: text size 1.1.')
+    expect(r.text).toContain('every session finished off')
+    // The window's own call, with a value that is no boolean, is refused by the same schema
+    await expect(rpc('prefs.set', { patch: { notifyPolicy: { sound: 'loud' } } })).rejects.toThrow(/sound/)
   })
 })
 
