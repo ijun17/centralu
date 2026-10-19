@@ -47,6 +47,10 @@ export function sessionLines(rows: readonly StoredMessage[], opts: { tools?: boo
       }
     } else if (r.kind === 'text') {
       lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'user', ...byWhom(r.payload), text: p.text ?? '' } })
+    } else if (r.role === 'system' && (r.payload as { type?: unknown } | null)?.type === 'error') {
+      // The error a turn ended with (#1186): its tool's words, which a report names by kind only and points here for
+      const error = (r.payload as { error?: { message?: unknown } }).error
+      lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'error', text: String(error?.message ?? '') } })
     } else if (r.kind === 'tool_call' && p.summary?.title) {
       const title = opts.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
       lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'tool', tool: p.summary.tool ?? '?', title } })

@@ -496,10 +496,14 @@ below retained for `safe` and `normal`:
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
-   ended (finished, failed, paused on its own background work, a usage limit, cut short), the session's id, its
-   tool's error as JSON, how to go on, and `read_session(sessionId, around=<its last response's seq>)`; the last
-   response itself, the session's and project's names and its tasks' descriptions stay in the stored report and the
-   screen (#120: nothing the reported session or a name could write goes into the receiver's input). The model used
+   ended (finished, failed, paused on its own background work, a usage limit, cut short), the session's id, the
+   kind of its tool's error (`errorKind`: overloaded, usage limit, network, refused, other), how to go on, and
+   `read_session(sessionId, around=<its last response's seq>)`, which shows the last response and the error, an error
+   row being one `role: "error"` line; the last response itself, the error's words, the session's and project's names
+   and its tasks' descriptions stay in the stored report and the screen (#120: nothing the reported session, its tool,
+   its machine or a name could write goes into the receiver's input; a CLI's error can carry a hook's output, and a
+   linked machine's is whatever it sends). A `Reason:` built from an error's text (a note or a queued request that was
+   not delivered) reaches the model by its kind too; one Centralu wrote is quoted as JSON. The model used
    to read "intersession message available" and an id alone, for every such notice. A report or notice that cannot
    be delivered (the receiver cannot be woken: its tool fails to start) is logged and kept in memory, and goes in
    once that session takes a message again (`deliverHeld`); it used to be dropped without a word. A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker

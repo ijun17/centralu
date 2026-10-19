@@ -11,6 +11,7 @@ import type { HostAsk } from './host-cards.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionTrashHost } from './session-trash.js'
 import { agentFrame, presetWithin } from './start-agent.js'
+import { errorKind } from './error-kind.js'
 import { labelOf } from './transcript-view.js'
 
 /**
@@ -181,7 +182,7 @@ export class QueuedRequests {
         d.wait.fail(e as Error)
       } else this.host.children.releaseTurn(sessionId, caller.id)
       this.host.children.dropQueued((x) => x.id === r.id)
-      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
+      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message, true)
       this.scheduleDrain(sessionId)
     }
   }
@@ -289,17 +290,22 @@ export class QueuedRequests {
     }
   }
 
-  /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
-  async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
+  /**
+   * A queued request could not be delivered (#677): said in the requester's session, as a report is. `fromError`: the
+   * reason is an error's text, not Centralu's own sentence, and reaches the model by its kind only (#1186 review)
+   */
+  async tellQueuedFailed(callerId: string, sessionId: string, why: string, fromError = false): Promise<void> {
     const name = this.host.nameOf(sessionId)
-    const rest = `id: ${sessionId}\n\nReason: ${why.slice(0, 600)}`
+    const reason = fromError
+      ? `Reason, by kind: ${errorKind(why)} (its words are an error's, kept in this notice on the person's screen).`
+      : `Reason (as JSON): ${JSON.stringify(why.slice(0, 600))}`
     await this.host.tellSession(
       callerId,
-      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\n${rest}`,
+      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
       { sessionId, name },
       true,
-      // What the model reads (#1186): all of it but the session's name, which is not Centralu's words (#120)
-      `[Centralu] Your queued request to another session was not delivered.\n${rest}`,
+      // What the model reads (#1186): not the session's name, which is not Centralu's words (#120), nor an error's words
+      `[Centralu] Your queued request to another session was not delivered.\nid: ${sessionId}\n\n${reason}`,
     )
   }
 
