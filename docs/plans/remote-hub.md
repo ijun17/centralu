@@ -714,7 +714,8 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
 - **The connection line says it** (`autostart: { on, how, linger }`) from a mark `--autostart` keeps in the data folder
   (`autostart.json`), so no link start asks systemd or Task Scheduler. `--autostart status` asks them and corrects the
   mark.
-- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart off`; it
+- **Uninstall removes the entry** after the stop and before `<data>/remote/` goes, through `serve --autostart remove`
+  (`off` of a serve from before it; since #1224 `off` keeps the Windows task without its trigger); it
   refuses to go on when the entry would not go. A version older than `--autostart` is passed by: it cannot have written
   one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
   leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).
