@@ -24,13 +24,12 @@ import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
+import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
-import { underGrant } from './ask-project.js'
-import { orchestratorMemory } from './transcript-view.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -58,7 +57,7 @@ import {
   appKeyOf,
   alwaysAllowKey,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -106,7 +105,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
@@ -155,6 +154,8 @@ export class SessionManager {
   private readonly approvalRules: ApprovalRules
   /** The registered projects: rows, folders, trust, `ProjectInfo` and the settings kept on them (project-registry.ts) */
   private readonly projectRegistry: ProjectRegistry
+  /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
+  private readonly launchInputs: LaunchInputs
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -307,6 +308,7 @@ export class SessionManager {
     })
     this.toolRegistry = new ToolRegistry(this.parts())
     this.projectRegistry = new ProjectRegistry(this.parts())
+    this.launchInputs = new LaunchInputs(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
     this.handoffNotes = new HandoffNotes(this.parts())
@@ -629,57 +631,6 @@ export class SessionManager {
       )
     }
     return this.launches.refreshLaunchSettings(projectId, true)
-  }
-
-  /**
-   * The settings files reachable from this session (M4 decision 3, #92, #152) — decided by **what
-   * the session is**. Both creating and waking a session go through this one place.
-   *
-   *   Orchestrator / coordinator session          No files at all — it has no project, and that
-   *                                                folder (orchestratorHome) is one a worker can
-   *                                                write to. An instruction arriving through a file
-   *                                                is exactly a privilege-escalation path.
-   *   Builder session of a user-folder app         Trusted — that folder belongs to the user
-   *                                                themselves (decision 3: a user-folder app is trusted)
-   *   Agent the user-folder app asked for (D-1)   Only the person's own settings — see the comment below
-   *   Builder session of a worker, manager or     Follows that project's trust as-is (same as a
-   *   project app; agent the project app          worker under #152)
-   *   asked for (D-1)
-   *
-   * **This is not split by whether the session has orchestrator tools.** It used to be: the adapter
-   * split "if it has orchestrator tools, no files at all", but the worktree manager (#69) and
-   * builder sessions (C-3) also receive those tools. That meant a builder session of a trusted
-   * project could read neither CLAUDE.md nor the user's own ~/.claude (global bypass), so it kept
-   * raising an approval card the person had already turned off everywhere else.
-   *
-   * Whether a session is a builder session is checked via the directory (builderRefOf) — the same
-   * check that decides the tool bundle (`builder`). If apps imported from outside ever exist (they
-   * do not yet), such an app is not trusted until verified (decision 3) — that is where the split
-   * would happen.
-   */
-  private settingFilesFor(
-    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
-  ): Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'> {
-    if (m.kind === 'orchestrator' || m.kind === 'coordinator') return { projectTrusted: false, noSettingFiles: true }
-    if (m.projectId === null && this.appSessions.builderRefOf(m)) return { projectTrusted: true }
-    /*
-     * Agent a user-folder app asked for (M4 D-1) — receives only the person's own settings
-     * (~/.claude, ~/.codex), not files from the folder.
-     *
-     * That session's text was written by the app, not the person. Its slot, like a coordinator
-     * session, is the orchestrator's empty folder (orchestratorHome), which a worker can write to —
-     * if it received the CLAUDE.md and settings placed there, an agent running on the app's text
-     * would take instructions someone else wrote as if they carried authority. The reason a builder
-     * session is trusted (that folder belongs to the person building the app) does not apply here:
-     * this session's folder belongs to neither the app nor the person. But giving it no files at all
-     * (as with a coordinator session) would mean the person's own rules for every agent (approvals,
-     * deny lists) are missing only for agents the app asked for — the one place it would get looser
-     * without the person knowing. A project app's version follows that project's trust like a worker
-     * (below): that session runs inside the project, and whether it gets the project's settings was
-     * already decided by the person through trust.
-     */
-    if (m.projectId === null && this.apps.isAppAgentSession(m)) return { projectTrusted: false }
-    return { projectTrusted: this.projectRegistry.projectTrusted(m.projectId) }
   }
 
   /** `ProjectRegistry.setProjectCommands` (project-registry.ts), kept on the manager for its callers */
@@ -2138,7 +2089,7 @@ export class SessionManager {
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
       migrateApprovedMcpServers: (...a) => self.proposals.migrateApprovedMcpServers(...a),
-      mayRead: (...a) => self.mayRead(...a),
+      mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
         return self.memoryGate
       },
@@ -2150,12 +2101,15 @@ export class SessionManager {
       notBeingRemoved: (...a) => self.notBeingRemoved(...a),
       observeCommit: (...a) => self.events.observeCommit(...a),
       openSession: (...a) => self.openSession(...a),
-      orchestratorMemory: (...a) => self.orchestratorMemory(...a),
+      orchestratorMemory: (...a) => self.launchInputs.orchestratorMemory(...a),
       orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
       pauseReport: (...a) => self.reports.pauseReport(...a),
       pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
+      get proposals() {
+        return self.proposals
+      },
       get prLookup() {
         return self.prLookup
       },
@@ -2216,12 +2170,12 @@ export class SessionManager {
       send: (...a) => self.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
       sessionOf: (...a) => self.sessionOf(...a),
-      settingFilesFor: (...a) => self.settingFilesFor(...a),
+      settingFilesFor: (...a) => self.launchInputs.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
       settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
       // Whose a linked child's turn is decides whether its report goes (#1038 review)
       reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
-      skillsPrompt: () => self.skillsPrompt(),
+      skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
@@ -2394,12 +2348,6 @@ export class SessionManager {
     return true
   }
 
-  /** Whether a session may read this path because another project handed it back (#371, `CreateSessionOpts.mayRead`) */
-  private mayRead(sessionId: string, path: string, cwd: string): boolean {
-    const grants = this.readGrants.get(sessionId)
-    return !!grants && grants.size > 0 && underGrant(path, grants, cwd)
-  }
-
   /** `AskProjectFlow.askProject` (ask-project-flow.ts), kept on the manager for its callers */
   askProject(...a: Parameters<AskProjectFlow['askProject']>): ReturnType<AskProjectFlow['askProject']> {
     return this.askProjectFlow.askProject(...a)
@@ -2447,11 +2395,6 @@ export class SessionManager {
   }
 
   /** MCP server proposals waiting on the person's approval */
-  /** The approved skills as a system prompt section (OrchestratorProposals.skillsPrompt) */
-  private skillsPrompt(): string {
-    return this.proposals.skillsPrompt()
-  }
-
   mcpProposals(): ReturnType<OrchestratorProposals['mcpProposals']> {
     return this.proposals.mcpProposals()
   }
@@ -2626,11 +2569,6 @@ export class SessionManager {
   /** `MergeChecks.refreshMergedWorktrees` (merge-checks.ts), kept on the manager for its callers */
   refreshMergedWorktrees(...a: Parameters<MergeChecks['refreshMergedWorktrees']>): ReturnType<MergeChecks['refreshMergedWorktrees']> {
     return this.merges.refreshMergedWorktrees(...a)
-  }
-
-  /** A summary of the orchestrator's past conversation for its next system prompt (transcript-view.ts) */
-  private orchestratorMemory(sessionId: string): string {
-    return orchestratorMemory(this.store.messages, sessionId)
   }
 
   /**
