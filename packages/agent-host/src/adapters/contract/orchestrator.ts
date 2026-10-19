@@ -127,14 +127,15 @@ export type LinkedSessions = {
   deleteSession(sessionId: string): Promise<Outcome>
   /**
    * The project's instructions for started agents as the machine has them now (#1161 item 2), '' for none; an error
-   * when it cannot be asked, so the caller keeps what it listed before
+   * when it cannot be asked, so the caller keeps what it listed before. Optional, as is `deleteAgentChild`: a reader
+   * from before them (a stand-in, a build that predates #1161) has neither, and its caller does as it did then
    */
-  agentInstructions(project: LinkedProject): Promise<Outcome<{ text: string }>>
+  agentInstructions?(project: LinkedProject): Promise<Outcome<{ text: string }>>
   /**
    * A start_agent child deleted there with the worktree made for it on `branch`, when nothing would be lost
    * (`agents.deleteAgentChild` there, #1161 item 3). `olderBuild`: the machine predates it, and nothing was deleted
    */
-  deleteAgentChild(
+  deleteAgentChild?(
     sessionId: string,
     branch: string,
   ): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> | { ok: false; error: string; olderBuild: true }>
