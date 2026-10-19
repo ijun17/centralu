@@ -283,8 +283,8 @@ describe('replacing a file that a reader holds open (#1041)', () => {
 describe('the connection line', () => {
   it('has exactly the fields the client reads, in one JSON object', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
-    // `takes`: the options an older serve refuses, so a hub sends them only to one that says so (#1223)
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from'] })
+    // `takes`: the options an older serve refuses, so a hub (`from`) or the window (`window`) uses them only on one that says so (#1223)
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window'] })
     expect(line).not.toContain('\n')
   })
 

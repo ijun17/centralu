@@ -19,6 +19,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use centralu_keeper_core::serve_window::{self, FallbackSink, ServeChoice, ServeFallback};
 use centralu_keeper_core::start_plan::{self, Env, Facts, Host, Plan};
 
 use serde::Serialize;
@@ -125,6 +126,11 @@ enum Choice {
 
 struct TauriSink(AppHandle);
 
+/// The direct path's sink: the window's, telling the serve fallback when an attempt is ready (#1223 review)
+fn direct_sink(start: &Start, app: AppHandle) -> Arc<dyn StatusSink> {
+    Arc::new(FallbackSink { inner: TauriSink(app), fallback: start.fallback.clone() })
+}
+
 impl StatusSink for TauriSink {
     fn status(&self, status: &HostStatus) {
         emit(&self.0, status);
@@ -148,6 +154,8 @@ struct Start {
     bundled: Option<PathBuf>,
     /// The data folder's `centralu` launcher, when the plan runs the serve host through it (#1223, `Host::Serve`).
     serve: Option<PathBuf>,
+    /// The way back to the bundled host when `serve --window` ends before its ready line (#1223 review)
+    fallback: Arc<ServeFallback>,
     #[cfg_attr(not(unix), allow(dead_code))]
     resources: Option<PathBuf>,
 }
@@ -156,9 +164,31 @@ fn start_plan(app: &AppHandle) -> Start {
     let resources = app.path().resource_dir().ok();
     let found = resources.as_ref().map(|d| d.join("resources/host")).filter(|p| p.join("main.mjs").exists());
     let serve = centralu_keeper_core::os::serve_launcher();
-    let facts = Facts::window(Env::current(), found.is_some(), serve.is_some());
+    let mut facts = Facts::window(Env::current(), found.is_some(), serve.is_some());
+    /*
+     * Only a serve that says it takes --window and speaks this window's protocol is used (#1223 review): the hub
+     * installed it, of whatever version. Asked only where the plan would choose it, so no other window pays for it.
+     */
+    if start_plan::plan(&facts).host == Some(Host::Serve) {
+        let choice = match (&serve, &found) {
+            (Some(launcher), Some(host_dir)) => {
+                let line = serve_window::ask_connection(launcher, serve_window::ASK_TIMEOUT).and_then(|o| serve_window::parse_connection_line(&o));
+                serve_window::choose(line.as_ref(), serve_window::bundle_protocol(host_dir))
+            }
+            _ => ServeChoice::NoAnswer,
+        };
+        eprintln!("[window] {}", choice.text());
+        facts.serve_usable = choice == ServeChoice::Use;
+    }
     let plan = start_plan::plan(&facts);
-    Start { bundled: found.filter(|_| !plan.dev), serve: serve.filter(|_| plan.host == Some(Host::Serve)), plan, facts, resources }
+    Start {
+        bundled: found.filter(|_| !plan.dev),
+        serve: serve.filter(|_| plan.host == Some(Host::Serve)),
+        fallback: Arc::new(ServeFallback::default()),
+        plan,
+        facts,
+        resources,
+    }
 }
 
 impl Supervisor {
@@ -204,7 +234,7 @@ impl Supervisor {
         if let Ok(mut c) = self.inner.lock() {
             *c = Choice::Direct;
         }
-        self.direct.start(Arc::new(TauriSink(app)), direct_launcher(&start));
+        self.direct.start(direct_sink(&start, app), direct_launcher(&start));
     }
 
     /// Retry from the failure screen (#184).
@@ -214,7 +244,7 @@ impl Supervisor {
             Choice::Keeper => self.link().ok().map(|l| l.restart(app)).unwrap_or(false),
             _ => {
                 let start = start_plan(&app);
-                self.direct.restart(Arc::new(TauriSink(app)), direct_launcher(&start))
+                self.direct.restart(direct_sink(&start, app), direct_launcher(&start))
             }
         }
     }

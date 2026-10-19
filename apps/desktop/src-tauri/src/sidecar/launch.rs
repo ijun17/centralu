@@ -1,16 +1,25 @@
 //! The direct path: the window starts the host as its own child.
 
 use super::*;
+use centralu_keeper_core::serve_window::Pick;
 
 /// The direct path's launch: the bundled host through the system Node, `CC_HOST_CMD`, or the
 /// source through tsx — exactly what the app ran before the keeper existed. The plan's `host` says
 /// which. On Windows with `centralu serve` installed in the data folder, the folder's serve host
 /// through its launcher (`Host::Serve`, #1223).
 pub(super) fn direct_launcher(start: &Start) -> Launcher {
-    let (host, dev, bundled, serve) = (start.plan.host, start.plan.dev, start.bundled.clone(), start.serve.clone());
+    let (host, dev, bundled, serve, fallback) = (start.plan.host, start.plan.dev, start.bundled.clone(), start.serve.clone(), start.fallback.clone());
     Arc::new(move || {
         if let (Some(Host::Serve), Some(launcher)) = (host, &serve) {
-            return Ok(serve_launch(launcher));
+            // A `serve --window` that ended before its ready line hands every later attempt to the bundled host (#1223 review)
+            match (fallback.next(), &bundled) {
+                (Pick::Bundle, Some(dir)) => {
+                    let mut launch = host_proc::bundled_launch(&dir.join("main.mjs"), &[])?;
+                    launch.env.push(started_by_app());
+                    return Ok(launch);
+                }
+                _ => return Ok(serve_launch(launcher)),
+            }
         }
         let mut launch: HostLaunch = match (host, host_proc::host_cmd_override(), &bundled) {
             (Some(Host::Command), Some((program, args)), _) => HostLaunch { program, args, env: Vec::new(), token: None },
@@ -57,5 +66,30 @@ mod tests {
         assert_eq!(l.args, vec!["serve".to_string(), "--window".to_string()]);
         assert!(l.token.is_none());
         assert!(l.env.is_empty());
+    }
+
+    /// #1223's review: a `serve --window` attempt that ends before its ready line makes the next one the bundled host
+    #[test]
+    fn the_launcher_runs_the_bundled_host_after_a_serve_attempt_that_never_got_ready() {
+        use centralu_keeper_core::start_plan::{Build, Env, Facts, Os, Shell};
+        let facts = Facts { os: Os::Windows, build: Build::Release, env: Env::default(), bundled_host: true, keeper_answering: false, shell: Shell::Untried, serve_usable: true };
+        let plan = start_plan::plan(&facts);
+        assert_eq!(plan.host, Some(Host::Serve));
+        let dir = std::env::temp_dir().join(format!("cc-launch-fallback-{}", std::process::id()));
+        let start = Start {
+            plan,
+            facts,
+            bundled: Some(dir.clone()),
+            serve: Some(dir.join("centralu.cmd")),
+            fallback: Arc::new(ServeFallback::default()),
+            resources: None,
+        };
+        let launcher = direct_launcher(&start);
+        let first = launcher().expect("a launch");
+        assert_eq!(first.args, vec!["serve".to_string(), "--window".to_string()]);
+        // No ready line came: the bundled host, said to be the window's
+        let second = launcher().expect("a launch");
+        assert!(second.args.iter().any(|a| a.ends_with("main.mjs")), "{second:?}");
+        assert!(second.env.contains(&("CC_STARTED_BY".to_string(), "app".to_string())));
     }
 }

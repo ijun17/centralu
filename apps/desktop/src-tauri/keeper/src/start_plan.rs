@@ -156,14 +156,15 @@ pub struct Facts {
     /// A keeper answers on `<data>/keeper.sock`.
     pub keeper_answering: bool,
     pub shell: Shell,
-    /// This data folder has the `centralu` launcher `centralu serve` keeps (`os::serve_launcher`, Windows only, #1223):
-    /// a linked hub's serve may hold the folder.
-    pub serve_launcher: bool,
+    /// This data folder has the `centralu` launcher `centralu serve` keeps (`os::serve_launcher`, Windows only, #1223),
+    /// and that serve said it takes `--window` and speaks this window's protocol (`serve_window::choose`): a linked
+    /// hub's serve may hold the folder, and the window can use its host.
+    pub serve_usable: bool,
 }
 
 impl Facts {
     /// The window's facts on this platform and build, before it has looked for a keeper.
-    pub fn window(env: Env, bundled_host: bool, serve_launcher: bool) -> Facts {
+    pub fn window(env: Env, bundled_host: bool, serve_usable: bool) -> Facts {
         Facts {
             os: Os::current(),
             build: Build::current(),
@@ -171,7 +172,7 @@ impl Facts {
             bundled_host,
             keeper_answering: false,
             shell: Shell::Untried,
-            serve_launcher,
+            serve_usable,
         }
     }
 }
@@ -304,7 +305,7 @@ pub fn plan(f: &Facts) -> Plan {
     }
     match f.os {
         // One host per data folder: a linked hub's serve holds this one, or will (#1223). A dev build has its own folder
-        Os::Windows if f.serve_launcher && !dev => {
+        Os::Windows if f.serve_usable && !dev => {
             return Plan { mode: StartMode::Direct, host: Some(Host::Serve), dev, reason: Reason::ServeInstalled };
         }
         Os::Windows => return direct(Reason::NoKeeperHere),

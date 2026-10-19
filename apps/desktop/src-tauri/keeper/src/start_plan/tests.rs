@@ -15,7 +15,7 @@ fn window(os: Os, build: Build) -> Facts {
         bundled_host: false,
         keeper_answering: false,
         shell: Shell::Untried,
-        serve_launcher: false,
+        serve_usable: false,
     }
 }
 
@@ -166,7 +166,7 @@ fn every_row_of_the_start_table() {
         ),
         (
             "Windows release, centralu serve installed in the data folder: the serve host, through its launcher (#1223)",
-            Facts { serve_launcher: true, ..packaged(WIN) },
+            Facts { serve_usable: true, ..packaged(WIN) },
             Direct,
             Some(Serve),
             false,
@@ -174,7 +174,7 @@ fn every_row_of_the_start_table() {
         ),
         (
             "Windows debug with serve installed: the source host, in the dev data folder",
-            Facts { serve_launcher: true, ..window(WIN, DEBUG) },
+            Facts { serve_usable: true, ..window(WIN, DEBUG) },
             Direct,
             Some(Source),
             true,
@@ -182,7 +182,7 @@ fn every_row_of_the_start_table() {
         ),
         (
             "Windows release, CC_HOST_CMD with serve installed: that command",
-            env(Facts { serve_launcher: true, ..packaged(WIN) }, Env { host_cmd: Var::Set, ..Env::default() }),
+            env(Facts { serve_usable: true, ..packaged(WIN) }, Env { host_cmd: Var::Set, ..Env::default() }),
             Direct,
             Some(Command),
             false,
@@ -201,7 +201,7 @@ fn every_row_of_the_start_table() {
 fn legacy(f: &Facts) -> (StartMode, Option<Host>, bool) {
     let release = f.build == Build::Release;
     // Added on purpose by #1223: a Windows release whose data folder has serve's launcher uses that host
-    if f.os == Os::Windows && f.serve_launcher && release && f.bundled_host && f.env.host_cmd == Var::Unset {
+    if f.os == Os::Windows && f.serve_usable && release && f.bundled_host && f.env.host_cmd == Var::Unset {
         return (StartMode::Direct, Some(Host::Serve), false);
     }
     let unix = f.os != Os::Windows;
@@ -283,7 +283,7 @@ fn the_plan_is_the_code_it_replaced() {
                             bundled_host: bit(2),
                             keeper_answering: bit(3),
                             shell: if bit(4) { Shell::FellBack } else { Shell::Untried },
-                            serve_launcher: bit(5),
+                            serve_usable: bit(5),
                         };
                         let p = plan(&f);
                         assert_eq!((p.mode, p.host, p.dev), legacy(&f), "{f:?}");

@@ -37,9 +37,10 @@ export function protocolVersionOf(entry) {
 export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
-   * when the line says so, since an older serve answers an option it does not know with an error
+   * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
+   * desktop window on Windows uses this serve's host through `--window` only when it is listed (#1223 review)
    */
-  const takes = ['from']
+  const takes = ['from', 'window']
   return JSON.stringify({
     v: 1,
     port,
