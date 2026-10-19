@@ -201,6 +201,24 @@ export const projectMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * What deleting this project may do to its folder (#1301), read when the Delete project dialog opens: nothing changed. A folder of
+   * the user folder registered in place as a project (#1141) is moved to `app-trash/` once nothing can restore it (#1204), which
+   * the dialog says. The answer is exact where the list's mark (`ProjectInfo.fromUserFolder`) is not: it compares real paths, as that
+   * give-back does, so a project added again through a junction, a symbolic link or a `subst` drive counts, and a path it cannot
+   * resolve (a UNC path, a drive that is not there) counts as "may move" (`unsure`, which the dialog words as not sure).
+   *   stays            deleting it leaves its folder alone
+   *   may_move         the project is the app's folder itself: the host may move that folder
+   *   around_may_move  the project lies inside an app folder, whose own project is gone: the host may move the folder around it
+   *   unsure           an app folder's own project is gone and this project's path cannot be told from it (a UNC path, a drive that
+   *                    is not there, no answer in time): the give-back counts that as at the folder, so it may be
+   * "May" because the move also waits for the trash and for any other project at the folder. A host without this method answers
+   * "Unknown method", and the dialog goes by the mark.
+   */
+  'projects.deleteOutlook': {
+    params: z.object({ projectId: ProjectId }),
+    result: z.object({ folder: z.enum(['stays', 'may_move', 'around_may_move', 'unsure']) }),
+  },
+  /**
    * Whether this project's code is allowed to run on this machine (M4 A-2, plan decision 3).
    *
    * The default is "no" — simply opening a repository someone handed over must not let the app

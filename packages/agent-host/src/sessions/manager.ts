@@ -2050,6 +2050,10 @@ export class SessionManager {
         return self.children
       },
       checkMergedInBackground: (...a) => self.merges.checkMergedInBackground(...a),
+      userAppFolders: () => {
+        const rt = self.apps.appsHub?.rt
+        return rt ? Object.keys(self.store.adoption.adopted()).map((appId) => rt.userAppDir(appId)) : []
+      },
       cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
       get lettingGo() {
         return self.lettingGo()

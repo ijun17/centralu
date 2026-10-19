@@ -27,6 +27,14 @@ export function putInOrder<T extends { id: string }>(items: readonly T[], ordere
 
 /** The project port: adding, creating (#515), trust, commands and worktree settings */
 export class ProjectsMock {
+  /** For tests: what deleting a project may do to its folder, by project id (#1301); absent: by the project's mark */
+  readonly deleteOutlooks = new Map<string, 'stays' | 'may_move' | 'around_may_move' | 'unsure'>()
+  /** For tests: the project ids the Delete project dialog asked about, in order */
+  readonly deleteOutlooksAsked: string[] = []
+  /** For tests: answer as a host before the call does */
+  deleteOutlookUnknown = false
+  /** For tests: the answer waits for this to settle, as one from a slow or far host does */
+  deleteOutlookHold: Promise<void> | null = null
   /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
   takenPaths = new Set<string>()
   /** Every `projects.create` call, as asked (#515) */
@@ -168,6 +176,18 @@ export class ProjectsMock {
       // The project's apps leave the grid with it, as in the host's store
       this.gridMock.gridPanels = this.gridMock.gridPanels.filter((p) => !(p.kind === 'app' && p.projectId === projectId))
       return { ok: true as const }
+    },
+    /**
+     * What deleting a project may do to its folder (#1301): what a test set in `deleteOutlooks`, else what the project's mark says.
+     * A test sets `deleteOutlookUnknown` to stand in for a host before the call.
+     */
+    deleteOutlook: async (projectId: string) => {
+      if (this.deleteOutlookUnknown) throw mockError('Unknown method: projects.deleteOutlook')
+      await this.deleteOutlookHold
+      const p = this.projectStore.list.find((x) => x.id === projectId)
+      this.deleteOutlooksAsked.push(projectId)
+      // As the host: a project it does not know leaves its folder alone
+      return { folder: this.deleteOutlooks.get(projectId) ?? (p?.fromUserFolder ? ('may_move' as const) : ('stays' as const)) }
     },
     /**
      * The registered shell commands (issue #44).

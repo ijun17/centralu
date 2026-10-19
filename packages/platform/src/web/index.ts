@@ -275,6 +275,9 @@ class WebProjectPort implements ProjectPort {
   remove(projectId: string) {
     return this.rpc.call('projects.delete', { projectId })
   }
+  deleteOutlook(projectId: string) {
+    return this.rpc.call('projects.deleteOutlook', { projectId })
+  }
   setCommands(projectId: string, commands: SavedCommand[]) {
     return this.rpc.call('projects.setCommands', { projectId, commands })
   }

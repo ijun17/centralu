@@ -792,6 +792,108 @@ test('Deleting a project: leaving the file checkbox off keeps the folder untouch
 })
 
 /**
+ * A folder of the user folder registered in place as a project (#1141) may be moved to app-trash/ by the host once nothing can
+ * restore it (#1204), so "The folder on disk is left alone." would be wrong for it (#1301). The dialog asks the host when it opens
+ * (`projects.deleteOutlook`, real paths); a host without the call leaves the list's mark (`ProjectInfo.fromUserFolder`) deciding,
+ * and a host without the mark, like an ordinary project, keeps today's sentence.
+ */
+test('Deleting a project that is an app folder: the dialog asks the host and says the folder may move; an ordinary one keeps its sentence', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta', '/tmp/gamma', '/tmp/delta'] })
+  const open = async (name: string) => {
+    await page.getByTestId(`project-header-${name}`).hover()
+    await page.getByTestId(`project-menu-${name}`).click()
+    await page.getByTestId(`delete-project-${name}`).click()
+  }
+  const close = async () => {
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('delete-project-dialog')).toBeHidden()
+  }
+  const idOf = (name: string) => page.evaluate((n) => Object.values<any>((window as any).__store.getState().projects).find((p) => p.name === n).id, name)
+  const note = page.getByTestId('delete-project-folder-note')
+  const alpha = await idOf('alpha')
+  const gamma = await idOf('gamma')
+  const delta = await idOf('delta')
+  // The host's answers: alpha is an app folder reached by a junction the list's mark does not see, gamma lies inside one, delta is marked
+  // by the list but the host says its folder stays (the folder is not the one the adoption recorded)
+  await page.evaluate(
+    ([a, g, d]) => {
+      const m = (window as any).__mock
+      m.deleteOutlooks.set(a, 'may_move')
+      m.deleteOutlooks.set(g, 'around_may_move')
+      m.deleteOutlooks.set(d, 'stays')
+    },
+    [alpha, gamma, delta],
+  )
+  await page.evaluate((d) => {
+    const store = (window as any).__store
+    store.setState((s: any) => ({ projects: { ...s.projects, [d]: { ...s.projects[d], fromUserFolder: true } } }))
+  }, delta)
+
+  // 1. Unmarked in the list, an app folder by the host's real-path answer: it may move, never put as certain
+  await open('alpha')
+  await expect(note).toContainText('The host may move the folder to app-trash/')
+  await expect(note).toContainText('Nothing is deleted')
+  await expect(note).toContainText('no other project is at the folder')
+  await expect(page.getByTestId('delete-project-note')).not.toContainText('left alone')
+  await close()
+  // 2. Inside an app folder: not called one
+  await open('gamma')
+  await expect(note).toContainText('This project lies inside an app folder')
+  await expect(note).not.toContainText('This project is an app folder')
+  await close()
+  // 3. Marked in the list, but the host's answer is the one that counts
+  await open('delta')
+  await expect(note).toHaveText('The folder on disk is left alone.')
+  await close()
+  // 4. An ordinary project keeps today's sentence
+  await open('beta')
+  await expect(note).toHaveText('The folder on disk is left alone.')
+  await close()
+  // Asked once for each time the dialog opened
+  expect(await page.evaluate(() => (window as any).__mock.deleteOutlooksAsked.length)).toBe(4)
+})
+
+test('Deleting a project waits for the host\'s answer about the folder: nothing is said on a guess, and Delete is not offered until it comes', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.deleteOutlookHold = new Promise<void>((release) => ((window as any).__release = release))
+    m.deleteOutlooks.set(Object.values<any>((window as any).__store.getState().projects)[0].id, 'around_may_move')
+  })
+  await page.getByTestId('project-header-alpha').hover()
+  await page.getByTestId('project-menu-alpha').click()
+  await page.getByTestId('delete-project-alpha').click()
+  const note = page.getByTestId('delete-project-folder-note')
+  await expect(note).toHaveText('Checking what happens to the folder…')
+  await page.getByTestId('delete-project-name-input').fill('alpha')
+  await expect(page.getByTestId('delete-project-confirm')).toBeDisabled()
+  await page.evaluate(() => (window as any).__release())
+  await expect(note).toContainText('This project lies inside an app folder')
+  await expect(page.getByTestId('delete-project-confirm')).toBeEnabled()
+})
+
+test('Deleting a project from a host without the call: the list\'s mark decides, and an unmarked project keeps its sentence', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
+  await page.evaluate(() => {
+    const store = (window as any).__store
+    ;(window as any).__mock.deleteOutlookUnknown = true
+    const alpha = Object.values<any>(store.getState().projects).find((p) => p.name === 'alpha')
+    store.setState((s: any) => ({ projects: { ...s.projects, [alpha.id]: { ...alpha, fromUserFolder: true } } }))
+  })
+  const open = async (name: string) => {
+    await page.getByTestId(`project-header-${name}`).hover()
+    await page.getByTestId(`project-menu-${name}`).click()
+    await page.getByTestId(`delete-project-${name}`).click()
+  }
+  await open('alpha')
+  await expect(page.getByTestId('delete-project-folder-note')).toContainText('The host may move the folder to app-trash/')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('delete-project-dialog')).toBeHidden()
+  await open('beta')
+  await expect(page.getByTestId('delete-project-folder-note')).toHaveText('The folder on disk is left alone.')
+})
+
+/**
  * "Connected" is never written; it speaks up **only when disconnected** (requested by the
  * person, 2026-09-09).
  *

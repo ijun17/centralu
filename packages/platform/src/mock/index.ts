@@ -433,6 +433,12 @@ export class MockPlatform implements Platform {
   get applyReports() { return this.updatesMock.applyReports }
   set applyReports(value: UpdatesMock['applyReports']) { this.updatesMock.applyReports = value }
 
+  // projects.ts: the Delete project dialog's question (#1301)
+  get deleteOutlooks() { return this.projectsMock.deleteOutlooks }
+  get deleteOutlooksAsked() { return this.projectsMock.deleteOutlooksAsked }
+  set deleteOutlookUnknown(value: boolean) { this.projectsMock.deleteOutlookUnknown = value }
+  set deleteOutlookHold(value: Promise<void> | null) { this.projectsMock.deleteOutlookHold = value }
+
   // themes.ts
   get themeFiles() { return this.themesMock.themeFiles }
   set themeFiles(value: ThemesMock['themeFiles']) { this.themesMock.themeFiles = value }

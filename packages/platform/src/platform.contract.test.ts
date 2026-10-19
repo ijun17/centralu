@@ -1069,6 +1069,12 @@ describe.each([
     off()
   })
 
+  // The Delete project dialog asks what deleting may do to the folder (#1301); an ordinary project's folder stays
+  it("the Delete project dialog's question: an ordinary project leaves its folder alone", async () => {
+    const p = await aProject()
+    expect(await h.platform.projects.deleteOutlook(p.id)).toEqual({ folder: 'stays' })
+  })
+
   it('unsubscribing works', async () => {
     const seen: NormalizedEvent[] = []
     const off = h.platform.agents.subscribe((e) => seen.push(e))

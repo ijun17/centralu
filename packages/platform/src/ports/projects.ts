@@ -31,6 +31,12 @@ export interface ProjectPort {
    */
   remove(projectId: string): Promise<{ ok: true }>
   /**
+   * What deleting this project may do to its folder (#1301), asked once when the Delete project dialog opens: `stays`, or the
+   * host `may_move` it (a folder of the user folder registered in place) or the folder `around_may_move` it. A host before this
+   * answers "Unknown method"; the dialog then goes by `ProjectInfo.fromUserFolder`.
+   */
+  deleteOutlook(projectId: string): Promise<{ folder: 'stays' | 'may_move' | 'around_may_move' | 'unsure' }>
+  /**
    * Replace this project's saved shell commands, whole (issue #44).
    *
    * Adding and deleting come through the same door, as `reorder` above does: for a short
