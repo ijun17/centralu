@@ -189,6 +189,16 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.ok).toBe(false)
   })
 
+  it('answers the pull request\'s risk tier by the paths it changes over its base (#1259)', () => {
+    expect(run().tier).toBe(null)
+    const rule = (id: string, tier: string, paths: string[]) => ({ id, tier, paths, why: id })
+    write('.centralu/tiers.json', JSON.stringify({ tiers: ['auto', 'light', 'deep', 'person'], fallback: 'light', rules: [rule('docs', 'auto', ['docs/**']), rule('a', 'deep', ['src/a.mjs'])] }))
+    commit('rules')
+    expect(run().tier).toMatchObject({ name: 'deep', because: ['src/a.mjs'], line: expect.stringMatching(/^Tier: deep, from `src\/a\.mjs` \(a\)/) })
+    // Over the lower pull request, the top changes no src/a.mjs
+    expect(run({ base: 'lower' }).tier).toMatchObject({ name: 'light', because: ['.centralu/tiers.json', 'src/b.mjs', 'src/b.test.mjs'] })
+  })
+
   it('reverts only what the pull request changes over its base, in a stack', () => {
     const r = run({ base: 'lower' })
     expect(r.findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/b.test.mjs: "has a"'])

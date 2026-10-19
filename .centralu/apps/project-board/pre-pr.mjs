@@ -12,6 +12,8 @@ import { join } from 'node:path'
 import { git, remoteFor, topLevel } from './git.mjs'
 
 const SPACE = 'refs/centralu-pre-pr'
+// A tier's name as it goes into a label; which names exist is the repository's (scripts/tier.mjs), not the board's
+const TIER_NAME = /^[a-z][a-z-]{0,30}$/
 // A stack of three builds three heads, then runs the changed tests twice: minutes, not seconds
 const LIMIT_MS = 30 * 60_000
 const BEAT_MS = 60_000
@@ -92,7 +94,7 @@ function runScript(args, cwd, { signal, limitMs, beat }) {
 /**
  * Runs the repository's pre-PR script in the checkout at `dir` on `head` (with `lowers`, the branches
  * of the pull requests under it, oldest first). Answers { ran: false, why, refsLeft } when it cannot
- * run here or was stopped, or { ran: true, ok, findings, warnings, exempted, notes, head, heads,
+ * run here or was stopped, or { ran: true, ok, findings, warnings, exempted, notes, head, heads, tier,
  * refsLeft } from the script. `exempt` maps a check to the reason it is left out. `beat` is called
  * while it runs; `signal` cancels it.
  */
@@ -132,6 +134,8 @@ export async function runPrePr({ dir, repo, head, base, main, lowers = [], exemp
       notes: a.notes ?? [],
       head: a.head ?? null,
       heads: a.heads ?? [],
+      // The risk tier (#1259): { name, line, because }, or null from a script or checkout without tiers
+      tier: TIER_NAME.test(a.tier?.name ?? '') && typeof a.tier.line === 'string' ? { name: a.tier.name, line: a.tier.line, because: Array.isArray(a.tier.because) ? a.tier.because : [] } : null,
       refsLeft,
     }
   } finally {

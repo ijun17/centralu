@@ -192,6 +192,11 @@ if (args[0] === 'api' && args[1] === '-X') {
   if (method === 'POST' && path === 'repos/' + REPO + '/issues') json({ number: 901, html_url: 'https://github.com/' + REPO + '/issues/901' })
   const comment = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path)
   if (method === 'POST' && comment) json({ id: 1, node_id: 'IC_1', html_url: 'https://github.com/' + REPO + '/issues/' + comment[1] + '#issuecomment-1', body: body.body, created_at: '2026-10-12T10:00:00Z', user: { login: 'owner' } })
+  const labels = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels$/.exec(path)
+  if (method === 'POST' && labels) {
+    if (st.labelsRefused) fail('gh: Resource not accessible by integration (HTTP 403)\n', 1, '{"message":"Resource not accessible by integration"}')
+    json(body.labels.map((name) => ({ name })))
+  }
   const pull = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path)
   if (method === 'PATCH' && pull) {
     st.prs[pull[1]].baseRefName = body.base
@@ -219,7 +224,7 @@ let rt: ExternalApps | null = null
 let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string }
-type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean }
+type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean }
 
 const pr = (number: number, extra: Partial<Pr>): Pr => ({
   number,
@@ -817,6 +822,30 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     const ns = spaceOf(args)
     expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no new test passes without the change.`)
+  })
+
+  it('writes the tier pre-pr answers into Verified and labels the pull request with it (#1259)', async () => {
+    const c = prePrCheckout()
+    const line = 'Tier: deep, from `packages/protocol/src/a.ts` (protocol); the other files: 1 auto.'
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'deep', line, because: ['packages/protocol/src/a.ts'] } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toContain('Labelled tier:deep.')
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`no new test passes without the change.\n${line}`)
+    const label = writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!
+    expect(JSON.parse(label.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  it('opens the pull request when GitHub refuses the tier label, and says how to add it', async () => {
+    const c = prePrCheckout()
+    patchState((s) => (s.labelsRefused = true))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'light', line: 'Tier: light, from `a.ts` (no rule matches: light).', because: ['a.ts'] } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toMatch(/^Opened #900 /)
+    expect(r.text).toContain('Add the label yourself: gh pr edit 900 --add-label tier:light.')
   })
 
   it('opens without it only with a stated reason, which goes into Verified', async () => {
