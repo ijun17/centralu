@@ -117,20 +117,27 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         to show it would be a spot that never accepts the drop anyway. If a session's own project
         is folded, there is no row to drag from it in the first place.
       */}
-      {!folded && (
-        <ProjectSessionList
-          projectId={projectId}
-          sessions={sessions}
-          groupedSessions={groupedSessions}
-          renaming={renaming}
-          setRenaming={setRenaming}
-          sessionMenu={sessionMenu}
-          setSessionMenu={setSessionMenu}
-          setHandingOff={setHandingOff}
-          setConfirming={setConfirming}
-        />
+      {/* An open project with no session and no app draws nothing below its line: no empty gap under the header */}
+      {!folded && (sessions.length > 0 || projectApps.length > 0) && (
+        <div className="mt-1.5">
+          <ProjectSessionList
+            projectId={projectId}
+            sessions={sessions}
+            groupedSessions={groupedSessions}
+            renaming={renaming}
+            setRenaming={setRenaming}
+            sessionMenu={sessionMenu}
+            setSessionMenu={setSessionMenu}
+            setHandingOff={setHandingOff}
+            setConfirming={setConfirming}
+          />
+          <AppRows
+            apps={projectApps}
+            sessionsByApp={groupedSessions.byApp}
+            testId={`project-apps-${project.name}`}
+          />
+        </div>
       )}
-      {!folded && <AppRows apps={projectApps} sessionsByApp={groupedSessions.byApp} testId={`project-apps-${project.name}`} />}
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}

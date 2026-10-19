@@ -93,7 +93,7 @@ const SHORTCUTS: [string[], string][] = [
    * The names listed here were once "chat · files · git · viewer": tabs that predate the
    * three-lane layout. Nobody noticed because the shortcut itself didn't exist until #20.
    */
-  [['mod', '⇧1~4'], 'Panel tab (git · history · files · terminal)'],
+  [['mod', '⇧1~4'], 'Panel tab (changes · history · files · terminal)'],
   [['y / n / a'], 'Approve · deny · always allow'],
   [['alt', 'a'], 'Always allow (project scope)'],
   // In the composer y/n/a are letters of the message; these answer the card from there (ApprovalCard's APPROVAL_COMBOS)

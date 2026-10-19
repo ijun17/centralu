@@ -117,7 +117,7 @@ export function CommandPalette() {
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
       // Import (#1141): its sidebar door went with "Your apps"; an imported app lands as a project of its own
       { kind: 'action', id: 'import-app', label: 'Import an app', sub: 'From a folder, a .zip or a link', run: () => useStore.getState().openImport() },
-      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · Git · files`, run: () => togglePanel() },
+      { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · changes · files`, run: () => togglePanel() },
       /*
         The two waiting-list shortcuts are here because they stopped being printed on the
         top bar (issue #33). The bar advertised them next to the count, which is the one
