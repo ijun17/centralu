@@ -267,7 +267,8 @@ describe('remove_machine', () => {
   it("asks, saying its sessions and projects leave this computer's lists and nothing on it changes, then removes it", async () => {
     const orc = await mgr.orchestrator()
     const { question, r } = await answered(orc.id, 'remove_machine', { machine: 'Laptop' }, 'allow')
-    expect(question).toContain("Its sessions and projects leave this computer's lists. Nothing on Laptop changes")
+    expect(question).toContain("Its sessions and projects leave this computer's lists, and what this computer let its sessions ask is forgotten.")
+    expect(question).toContain('Nothing on Laptop changes')
     expect(r.text).toContain('Removed "Laptop" [laptop]')
     expect(ops.changes()).toEqual([['remove', 'laptop']])
     expect(ops.ops.list()).toEqual([])

@@ -101,8 +101,8 @@ export class MachineFlow {
         case 'remove': {
           const refused = await this.ask(
             sessionId,
-            `Remove the linked machine ${m.name} (${m.sshTarget})? Its sessions and projects leave this computer's lists. Nothing on ${m.name} changes: ` +
-              'its sessions keep running there, and adding it again lists them again.',
+            `Remove the linked machine ${m.name} (${m.sshTarget})? Its sessions and projects leave this computer's lists, and what this computer let ` +
+              `its sessions ask is forgotten. Nothing on ${m.name} changes: its sessions keep running there, and adding it again lists them again.`,
             signal,
           )
           if (refused) return { ok: false, error: refused }
