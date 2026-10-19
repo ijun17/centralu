@@ -492,7 +492,7 @@ export function orchestratorToolsFor(
           ok: true,
           state: target.state,
           ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
-          lines: line ? [lineText(line, opts.offset, LINE_WINDOW_CHARS)] : [],
+          lines: line ? [lineText(line, opts.offset, LINE_WINDOW_CHARS, true)] : [],
         }
       }
       const read = around

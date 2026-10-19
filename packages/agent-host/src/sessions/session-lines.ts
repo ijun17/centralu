@@ -47,6 +47,10 @@ export function sessionLines(rows: readonly StoredMessage[], opts: { tools?: boo
       }
     } else if (r.kind === 'text') {
       lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'user', ...byWhom(r.payload), text: p.text ?? '' } })
+    } else if (r.role === 'system' && (r.payload as { type?: unknown } | null)?.type === 'error') {
+      // The error a turn ended with (#1186): its tool's words, which a report names by kind only and points here for
+      const error = (r.payload as { error?: { message?: unknown } }).error
+      lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'error', text: String(error?.message ?? '') } })
     } else if (r.kind === 'tool_call' && p.summary?.title) {
       const title = opts.tools ? p.summary.title : p.summary.title.split('\n')[0]!.slice(0, 100)
       lines.push({ seq: r.seq, fields: { ts: stamp(r.ts), role: 'tool', tool: p.summary.tool ?? '?', title } })
@@ -60,12 +64,15 @@ export function sessionLines(rows: readonly StoredMessage[], opts: { tools?: boo
  * characters. A line cut says so on itself, still one JSON object: which characters it shows of how many, and the
  * read that goes on (#1186). The call is named without the session's id, which the reader already used and which a
  * linked machine writes in its own, unqualified, form.
+ *
+ * `offsetRead`: the line answers a read from an offset, and says what it shows even when that is all of it. A hub
+ * tells an older machine, which ignores the offset and answers its plain read, by its lines lacking this
  */
-export function lineText(line: SessionLine, from = 0, max = LINE_MAX_CHARS): string {
+export function lineText(line: SessionLine, from = 0, max = LINE_MAX_CHARS, offsetRead = false): string {
   const key = typeof line.fields.text === 'string' ? 'text' : typeof line.fields.title === 'string' ? 'title' : null
   if (!key) return JSON.stringify(line.fields)
   const whole = line.fields[key] as string
-  if (from === 0 && whole.length <= max) return JSON.stringify(line.fields)
+  if (from === 0 && whole.length <= max && !offsetRead) return JSON.stringify(line.fields)
   const start = Math.min(Math.max(0, from), whole.length)
   const end = Math.min(whole.length, start + max)
   const more = end < whole.length

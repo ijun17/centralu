@@ -48,6 +48,8 @@ export type SessionTrashHost = {
   forgetCommits: (sessionId: string) => void
   /** The rest a card of it was raised in, if one is remembered (`CardRests`) */
   forgetCardRest: (sessionId: string) => void
+  /** Notices kept for it because it could not be woken (#1186) */
+  forgetHeldNotices: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -304,6 +306,7 @@ export class SessionTrash {
     this.host.children.dropObserverNotesOf(sessionId)
     this.host.forgetCommits(sessionId)
     this.host.forgetCardRest(sessionId)
+    this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)

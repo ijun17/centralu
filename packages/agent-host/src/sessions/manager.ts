@@ -2292,6 +2292,7 @@ export class SessionManager {
       },
       firstTool: (...a) => self.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
+      forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),
