@@ -1510,22 +1510,59 @@ describe('starting another agent in the same project', () => {
     }
 
     // #1161 item 3: a hub's delete takes only the worktree made for that session, on the branch the hub asked for
-    it("a hub's delete leaves a worktree that is not the one made for the session on that branch, and trashes the session", async () => {
-      repo()
-      allowProject()
-      const s = await session()
-      await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/made', wait: false })
-      const c = childrenOf(s)[0]!
-      handleOf(c.id)!.answer('done')
-      await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
-      expect(await w.mgr.deleteHubChild(c.id, 'feat/other')).toEqual({
-        worktree: 'kept', path: c.worktree!.path, branch: 'feat/made', why: 'it is not the worktree Centralu made for this session on feat/other',
+    describe("a hub's delete of a child here with its worktree (#1161 item 3)", () => {
+      /** A worktree child on `branch` whose task is done and read */
+      const doneChild = async (branch: string) => {
+        const s = await session()
+        await w.mgr.startAgent(s, { task: `work on ${branch}`, branch, wait: false })
+        const c = childrenOf(s).find((x) => x.worktree?.branch === branch)!
+        handleOf(c.id)!.answer('done')
+        await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
+        return c
+      }
+      const trashed = (id: string) => w.store.trash.trashedSession(id) !== null
+
+      it('leaves a worktree that is not the one made for an agent on that branch, and trashes the session', async () => {
+        repo()
+        allowProject()
+        const c = await doneChild('feat/made')
+        expect(await w.mgr.deleteHubChild(c.id, 'feat/other')).toEqual({
+          worktree: 'kept', path: c.worktree!.path, branch: 'feat/made', why: 'it is not the worktree Centralu made for an agent started on feat/other',
+        })
+        expect([existsSync(c.worktree!.path), trashed(c.id)]).toEqual([true, true])
+        // The person's own worktree session, on the very branch asked for: not an agent's (#1161 review)
+        const mine = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', worktree: true, worktreeBranch: 'feat/mine' })
+        expect(await w.mgr.deleteHubChild(mine.id, 'feat/mine')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('not the worktree Centralu made for an agent') })
+        expect(existsSync(mine.worktree!.path)).toBe(true)
+        // A session in the project's own folder has no worktree to take
+        const plain = await session()
+        expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
+        expect(existsSync(w.caller.path)).toBe(true)
+        // Asked again, it is deleted already: said, not refused (#1161 review)
+        expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none', note: 'it had been deleted there already' })
       })
-      expect([existsSync(c.worktree!.path), w.store.trash.trashedSession(c.id) !== null]).toEqual([true, true])
-      // A session in the project's own folder has no worktree to take
-      const plain = await session()
-      expect(await w.mgr.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
-      expect(existsSync(w.caller.path)).toBe(true)
+
+      it('counts the commits of a checkout moved off the branch made for it', async () => {
+        repo()
+        allowProject()
+        const c = await doneChild('feat/moved')
+        git(c.worktree!.path, 'checkout', '-q', '-b', 'feat/elsewhere')
+        git(c.worktree!.path, 'commit', '-q', '--allow-empty', '-m', 'only on the other branch')
+        expect(await w.mgr.deleteHubChild(c.id, 'feat/moved')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('it has 1 commit that no remote and not the trunk has') })
+        expect(existsSync(c.worktree!.path)).toBe(true)
+      })
+
+      it('says what the cleanup did with a branch whose folder was already gone, not that nothing was unpushed', async () => {
+        repo()
+        allowProject()
+        const c = await doneChild('feat/gone')
+        git(c.worktree!.path, 'commit', '-q', '--allow-empty', '-m', 'kept work')
+        rmSync(c.worktree!.path, { recursive: true, force: true })
+        expect(await w.mgr.deleteHubChild(c.id, 'feat/gone')).toMatchObject({
+          worktree: 'removed', note: expect.stringContaining('Branch feat/gone was kept because it has 1 commit the trunk lacks'),
+        })
+        expect(trashed(c.id)).toBe(true)
+      })
     })
 
     it('keeps a missing worktree distinct from a same-folder child, including after reload', async () => {

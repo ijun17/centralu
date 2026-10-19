@@ -89,7 +89,9 @@ function remoteWorktreeLine(
     return `; its worktree there, on ${rec.worktree}, stays${done === 'older' ? `: ${rec.machine} runs a Centralu from before #1161, which does not remove it` : ''}. The person deletes it on that machine`
   }
   const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
-  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed${done.note ? ` (${bare(done.note)})` : ''}`
+  // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
+  if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
+  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed`
   if (done.worktree === 'none') return `; it had no worktree of its own there any more`
   return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
 }

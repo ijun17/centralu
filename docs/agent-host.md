@@ -602,14 +602,17 @@ works on it through the link: `status` and `wait` (the machine's state and last 
 (`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash), `answer`,
 and `list` names its machine. **`delete` takes the worktree made for it there too** (#1161 item 3,
 `agents.deleteAgentChild` on that machine, `WorktreeSessions.deleteHubChild`), when nothing would be lost by it. Only
-that one: a worktree Centralu made for the session (`worktree.base`) on the branch the hub's record names, so never the
-project's own folder, a worktree the person opened a session in, or one a child started without a worktree.
+that one: a worktree Centralu made (`worktree.base`) on the branch the hub's record names, for a session another
+session started (its recorded agent depth), so never the project's own folder, a worktree session of the person's, or
+one a child started without a worktree.
 Only when nothing is lost: nothing uncommitted in it, and every commit of its own (its checkout's `HEAD` and the branch
 made for it, which the agent may have left) on a remote-tracking ref or the trunk (`gitUnpublishedCommits`); a branch
 pushed from there passes, a commit only there does not. Then it goes as a local child's does (`cleanUpWorktreeChild`:
 its recovery snapshot in the trash, the worktree and the branch removed). Otherwise the session still goes to the trash,
 the worktree stays, and the answer says what was left and why ("it holds 2 uncommitted files", "it has 1 commit that no
-remote and not the trunk has: push …", work still running there, another session in its folder). A turn the hub just
+remote and not the trunk has: push …", work still running there, another session in its folder). A folder already gone
+is said in the cleanup's own words (#715: its branch kept when it holds commits the trunk lacks), never as "nothing was
+unpushed"; a delete asked again finds the session gone and says so. A turn the hub just
 stopped is waited out for up to 10 s first (`STOPPING_WAIT_MS`), as the cleanup refuses a session still in its turn. A
 machine whose build predates it answers "Unknown method": the hub deletes the session there as before and says the
 worktree stays because of that build. A local child's worktree was already removed by `delete` (#608); that is
