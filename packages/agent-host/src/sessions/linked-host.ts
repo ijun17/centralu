@@ -9,6 +9,7 @@ import { HUB_SENDER } from './hub-sender.js'
 import type { LinkedEvent, LinkedReports } from './linked-reports.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { SessionToolsHost } from './session-tools.js'
+import { lastResponse, lastResponseSeq } from './turn-answer.js'
 
 /**
  * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
@@ -16,6 +17,8 @@ import type { SessionToolsHost } from './session-tools.js'
  * cannot ask for a whole store over the link
  */
 const HOST_READ_MAX_LINES = 200
+/** The longest last response a hub reads of this host in one call (`host.lastAnswer`, #1186) */
+const HOST_ANSWER_MAX_CHARS = 100_000
 const HOST_RECALL_MAX_HITS = 50
 
 /**
@@ -126,11 +129,23 @@ export class LinkedHost {
    */
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
+    lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
     const view = this.host.orchestratorToolsFor('', undefined, undefined, true)
     return {
+      /*
+       * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
+       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown
+       */
+      lastAnswer: async (sessionId, maxChars) => {
+        const m = this.host.meta.get(sessionId)
+        if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        const rows = this.host.store.messages.loadMessages(sessionId, 200)
+        const text = lastResponse(rows)
+        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows) }
+      },
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
         const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)

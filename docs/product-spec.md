@@ -392,6 +392,8 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - Show a marker in the conversation view when compaction (summarisation) happens.
 - Show a marker when the tool starts a fresh conversation inside the session (Claude Code's `/clear`, #304), and empty
   the gauge until the tool reports the new conversation's size.
+- When a compaction reports how big the conversation came out (Claude Code's `post_tokens`, #1282), the gauge shows
+  that size as an estimate until the tool's next reading; with no earlier reading it stays empty.
 - Where the tool does not give exact numbers, state that it is an estimate (shown with ≈).
 - **What the tool tells its own user reaches the conversation** (#304): a hook's block reason, a configuration or
   deprecation warning, an MCP server that failed to start, a model the tool switched to by itself and why. One quiet line
