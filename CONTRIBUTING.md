@@ -392,8 +392,9 @@ test that cannot fail without the change, and why), leave that check out with th
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
 worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
-delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees link to your checkout's
-`node_modules`, and on Windows such a delete follows the links.
+delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees hold links to your checkout's
+`node_modules` (each workspace package's link points at the worktree's own copy, so `tsc` sees one
+declaration of each class), and a recursive delete may follow them.
 
 Then ask these against your change. Put anything you could not check in **Not exercised**.
 
