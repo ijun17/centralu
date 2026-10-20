@@ -185,7 +185,7 @@ export function createRpcHandler(
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
       const { sessionId, text, attachments } = RpcMethods['agents.send'].params.parse(p)
-      await mgr.send(sessionId, text, attachments)
+      await mgr.send(sessionId, text, attachments, undefined, true)
       return { ok: true as const }
     },
     'agents.respondApproval': async (p) => {

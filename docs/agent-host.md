@@ -756,6 +756,18 @@ the person's settings, falling back to explicit `default`) and project-trust set
 or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
 not widen it here. Dependency preparation above applies to both adapters.
 
+**The person's input is stamped as theirs.** The Claude Agent SDK's user message has an `origin`; an absent one is
+"unattributed" and fails closed at the CLI's strict `isHuman()` trust gates. `SessionManager.send` takes `fromPerson`,
+which only `agents.send` (the composer, slash commands, the person's Continue) sets.
+`SessionEvents.deliver` hands it to the handle as `send(text, { origin: { kind: 'human' } })`, and the Claude adapter
+writes `origin: { kind: 'human' }` on that stdin message. A message with a source (a caller's delivery, a report), an app's
+notice or view message, a builder request, a new session's first message (only the UI's handoff opening, which quotes an
+agent's note), a message with a Centralu line in front of it (`rootAppsNotice`) and every note through `sendTracked` carry
+none, as before. One known gap: the handoff request the UI writes for the predecessor goes through `agents.send` and is
+stamped, since the host cannot tell Centralu's text from the person's there. Measured on CLI
+2.1.296: the CLI accepts it, echoes it on the replayed user message, and answers the same with or without it, mid-turn
+wording and `/compact` included (`docs/plans/mailbox.md` §7.1).
+
 `agent_session` normally acts on a session whose `askedBy` is the caller, in its project (the `auto` exception is above).
 Deleting a child without a worktree also accepts `parentSessionId` as its ownership link. `send` during the caller's turn
 uses the adapter's ordinary message path when it declares `capabilities.midTurnInput` and provides `sendTracked`:
@@ -1526,7 +1538,7 @@ interface AgentAdapter {
 
 interface SessionHandle {
   readonly externalId: string
-  send(input: UserInput): void
+  send(input: UserInput, opts?: { origin?: InputOrigin }): void  // origin: only { kind: 'human' }, for the person's own typing
   sendTracked?(text: string, observer?: InputObserver): Promise<void> // host-only completion receipt (#592)
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void

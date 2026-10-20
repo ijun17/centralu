@@ -1084,13 +1084,15 @@ export class SessionManager {
      * screen uses it to draw "what the person said" and "what another session instructed" differently.
      */
     from?: { sessionId: string; name: string },
+    /** The person's own typing, as the screen's composer sends it: the tool is told it is the person's (`InputOrigin`) */
+    fromPerson = false,
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
     // Read before the message starts a turn of its own: a paused session already in a turn is in the one its work's ending started
     const state = this.meta.get(sessionId)?.state
     const inItsOwnTurn = state !== undefined && inTurn(state)
-    await this.deliver(sessionId, text, attachments, from, false)
+    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from)
     /*
      * Once it is delivered, so a message that did not reach the session takes nothing over (#1340). The mark ends
      * before this returns, ahead of any event of the person's turn; telling the caller is not waited for. Their message
