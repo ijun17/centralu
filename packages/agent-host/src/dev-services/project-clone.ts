@@ -1,3 +1,4 @@
+import { execFailure } from './exec-error.js'
 import { runGit } from './git-exec.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -56,11 +57,11 @@ export function cloneArgs(url: string, into: string, branch?: string): string[] 
 
 /** A failed clone, said for the person (and the model) in one sentence */
 export function cloneFailure(e: unknown, url: string, branch?: string): string {
-  const err = e as { code?: unknown; timedOut?: boolean; stderr?: unknown; message?: string }
+  const err = execFailure(e)
   if (err.code === 'ENOENT') return 'git is not installed on this machine, so nothing can be cloned.'
   // `runGit` says so; the tree it ended went with SIGKILL, so a signal alone does not tell a timeout
   if (err.timedOut) return `The clone took longer than ${CLONE_TIMEOUT_MS / 60_000} minutes and was stopped; nothing was kept.`
-  const stderr = typeof err.stderr === 'string' ? err.stderr : String(err.message ?? '')
+  const stderr = err.stderr ?? err.message ?? ''
   if (/terminal prompts disabled|could not read (Username|Password)|Authentication failed|Permission denied \(|Host key verification failed|HTTP Basic: Access denied|returned error: 40[13]/i.test(stderr)) {
     return `${url} needs a sign-in this machine does not have saved — sign in to it on that machine (or use an address it can reach), then try again.`
   }

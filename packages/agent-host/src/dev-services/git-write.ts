@@ -1,3 +1,4 @@
+import { execFailure } from './exec-error.js'
 import { isGitCancelled, runGit } from './git-exec.js'
 import { assertCanonicalGitPath, gitBranches, gitRevParse, gitStatusFiles, isRepo, literalPathspec, type GitTrust } from './git.js'
 
@@ -102,7 +103,7 @@ function failed(e: unknown): GitWriteResult {
  * committed with Bash and the person then clicks Commit in the panel.
  */
 function cleanGitError(e: unknown): string {
-  const err = e as { stderr?: string; stdout?: string; message?: string }
+  const err = execFailure(e)
   const text = err.stderr?.trim() || err.stdout?.trim() || err.message || 'Unknown error'
   return text.trim().split('\n').slice(0, 6).join('\n')
 }
