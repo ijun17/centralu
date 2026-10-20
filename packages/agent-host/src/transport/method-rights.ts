@@ -19,9 +19,9 @@ import type { RpcMethodName } from '@cc/protocol'
  *   bridge     a session's own tool channel; a Codex bridge has its own credential for it, and through
  *              it a limited caller could act as an `auto` session, whose tool cards are skipped
  *
- * `{ asks }` is for a method that asks only for some parameters (raising a preset, turning a switch
+ * `{ asks, when }` is for a method that asks only for some parameters (raising a preset, turning a switch
  * on); the function is given the parameters as sent, before they are parsed, so it reads them
- * defensively and asks when in doubt.
+ * defensively and asks when in doubt. `when` says it in words, for docs/generated/method-rights.md.
  *
  * The table is keyed by `RpcMethodName` with no default, as `ROUTES` is (`links/routes.ts`): a method
  * added to the protocol does not compile until someone decides what the limited credential does with
@@ -30,7 +30,7 @@ import type { RpcMethodName } from '@cc/protocol'
 export type Rights =
   | 'everyday'
   | 'asks'
-  | { readonly asks: (params: unknown) => boolean }
+  | { readonly asks: (params: unknown) => boolean; readonly when: string }
   | 'window'
   | 'link'
   | 'bridge'
@@ -82,7 +82,7 @@ const prefsWiden = (params: unknown): boolean => {
 
 export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   // Sessions
-  'agents.createSession': { asks: presetAbove },
+  'agents.createSession': { asks: presetAbove, when: "the preset is above `normal`, or it carries a hub's preset (`fromHub`)" },
   'agents.send': 'everyday',
   'agents.respondApproval': 'window',
   'agents.answerQuestion': 'window',
@@ -108,7 +108,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.resumeSession': 'everyday',
   'agents.forkConversation': 'everyday',
   'agents.switchTool': 'everyday',
-  'agents.updateSettings': { asks: presetRaised },
+  'agents.updateSettings': { asks: presetRaised, when: 'it sets a preset other than `safe`' },
   'agents.listExternalSessions': 'everyday',
   'agents.capabilities': 'everyday',
   'agents.detect': 'everyday',
@@ -239,7 +239,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'apps.sendError': 'everyday',
   'apps.askBuilder': 'everyday',
   'apps.check': 'everyday',
-  'apps.setShared': { asks: switchedOn('shared') },
+  'apps.setShared': { asks: switchedOn('shared'), when: 'it shares the app' },
   'apps.setSecret': 'window',
   'apps.importPrepare': 'window',
   'apps.importCommit': 'asks',
@@ -254,8 +254,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
 
   // Updates
   'updates.status': 'everyday',
-  'updates.setAuto': { asks: switchedOn('enabled') },
-  'updates.setAutoApply': { asks: switchedOn('enabled') },
+  'updates.setAuto': { asks: switchedOn('enabled'), when: 'it turns automatic updates on' },
+  'updates.setAutoApply': { asks: switchedOn('enabled'), when: 'it turns automatic applying on' },
   'updates.apply': 'asks',
   'updates.answerApply': 'window',
   /** The window's report on an apply it was handed (`update_apply_go` carries the ticket to every client) */
@@ -282,8 +282,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   /** Ends an update's wait for the sessions there (#1399): the update fails and nothing is switched, as Disconnect only narrows */
   'machines.cancelUpdate': 'everyday',
   /** Without `allowed` it only reads the switch */
-  'machines.hubAuto': { asks: (params) => 'allowed' in fields(params) && fields(params).allowed !== false },
-  'machines.setAsks': { asks: switchedOn('on') },
+  'machines.hubAuto': { asks: (params) => 'allowed' in fields(params) && fields(params).allowed !== false, when: 'it turns the switch on' },
+  'machines.setAsks': { asks: switchedOn('on'), when: 'it turns the switch on' },
   'machines.askConsents': 'everyday',
   'machines.withdrawAsk': 'everyday',
 
@@ -320,7 +320,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'grid.get': 'everyday',
   'grid.set': 'window',
   'prefs.get': 'everyday',
-  'prefs.set': { asks: prefsWiden },
+  'prefs.set': { asks: prefsWiden, when: 'it sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off' },
   'themes.list': 'everyday',
   'themes.save': 'everyday',
   'themes.import': 'everyday',

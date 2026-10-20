@@ -52,6 +52,7 @@
     "release:npm": "tsx scripts/release-npm.mts",
     "icon": "tsx scripts/render-icon.mts",
     "docs:schema": "tsx packages/agent-host/scripts/schema-doc.mts",
+    "docs:rights": "tsx packages/agent-host/scripts/method-rights-doc.mts",
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
     "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts",
     "measure:tools": "tsx packages/agent-host/scripts/measure-tools.mts",

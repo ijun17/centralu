@@ -1148,10 +1148,14 @@ protocol does not compile until someone classifies it, and a test compares its k
 | link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
 | bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
 
-A method whose answer depends on its parameters reads them as sent, before they are parsed, and asks when it cannot read
-them. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
+The full list, method by method, is [generated/method-rights.md](generated/method-rights.md), written from the table by
+`pnpm docs:rights` and checked by a test. A method whose answer depends on its parameters reads them as sent, before they
+are parsed, and asks when it cannot read them. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
 restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
-and everything the orchestrator's tools card in every preset is `asks` too. A refusal is `ok: false` with
+and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows
+(`sessions/*-flow.ts`) and fails when a window method they call after their card (in the same block) is everyday here,
+unless it is a read made again after Allow; a card raised only in some branches (restoring a session whose project was
+deleted) is not seen by it. A refusal is `ok: false` with
 `data: { refused: 'rights', rights }` and a line in the host's log naming the method; the socket stays open.
 
 **Who holds what, today.** Built so far: the credential and the classification (slice 1). Until the keeper hands out the
