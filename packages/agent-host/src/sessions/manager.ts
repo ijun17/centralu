@@ -1092,14 +1092,17 @@ export class SessionManager {
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
+    // Read before the message starts a turn of its own: a paused session already in a turn is in the one its work's ending started
+    const inItsOwnTurn = inTurn(this.meta.get(sessionId)?.state)
     await this.deliver(sessionId, text, attachments, from, false)
     /*
      * Once it is delivered, so a message that did not reach the session takes nothing over (#1340). The mark ends
      * before this returns, ahead of any event of the person's turn; telling the caller is not waited for. Their message
      * is what takes a session over from the caller that assigned it work, paused on its own background tasks; a caller's,
-     * another session's, an app's or Centralu's own words all reach `deliver` with a source and do not
+     * another session's, an app's or Centralu's own words all reach `deliver` with a source and do not. Not while the
+     * session is in a turn already: that is the one its work's ending started, and its end is the final report.
      */
-    if (!from) void this.reports.personTookOver(sessionId)
+    if (!from && !inItsOwnTurn) void this.reports.personTookOver(sessionId)
   }
 
   /**

@@ -238,11 +238,27 @@ describe('a child that waits on its own background work (#721)', () => {
       await w.until(() => reportsTo(caller, child).length === 1)
       await w.mgr.send(child, 'how is it going?')
       handleOf(child)!.answer('Still waiting for verify.')
+      await w.until(() => reportsTo(caller, child).length === 2)
       await settle()
       // Told of the takeover, not of a finished assignment
       expect(reportsTo(caller, child)).toHaveLength(2)
       expect(reportsTo(caller, child)[1]).toContain('The person continued in this session')
       expect(reportsTo(caller, child).some((t) => t.includes('The assigned work finished'))).toBe(false)
+    })
+
+    it('a note while the turn its work\'s ending started is running does not take it over: that turn\'s end is the final report', async () => {
+      const { caller, child } = await started()
+      pauseOnVerify(child)
+      await w.until(() => reportsTo(caller, child).length === 1)
+      const h = handleOf(child)!
+      h.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+      h.event({ type: 'state_change', sessionId: child, state: 'working' })
+      await w.mgr.send(child, 'how is it going?')
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
+      h.answer('PR #9 opened; verify passed.')
+      await w.until(() => reportsTo(caller, child).length === 2)
+      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+      expect(takeovers(caller, child)).toEqual([])
     })
 
     it('a report not paused is the caller\'s turn still running, which the person\'s message joins: it stays owed', async () => {
