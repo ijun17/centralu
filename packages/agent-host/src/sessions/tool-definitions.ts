@@ -153,7 +153,8 @@ export const ORCHESTRATOR_TOOLS = [
   /*
    * #1219: the linked machines, as the Machines screen manages them. Rare commands (RARE_COMMANDS). A change to a
    * machine or to this computer's reach waits for the person's card; reconnecting and Auto reconnect do not, except
-   * that starting Centralu where it is stopped does (#1143).
+   * that starting Centralu where it is stopped does (#1143), and so does undoing what the person did (#1341):
+   * reconnecting a machine they disconnected, and turning Auto reconnect back on.
    */
   {
     name: 'add_machine',
@@ -182,13 +183,14 @@ export const ORCHESTRATOR_TOOLS = [
   },
   {
     name: 'reconnect_machine',
-    description: 'Tries the link to a machine again now, or connects a disconnected one. No card, except to start Centralu on a machine where it is stopped.',
+    description:
+      'Tries the link to a machine again now. No card, except to start Centralu on a machine where it is stopped, and to connect a machine the person disconnected: the person approves a card.',
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
   },
   {
     name: 'set_machine_auto_reconnect',
     description:
-      "Turns a machine's Auto reconnect on or off. On: this computer connects when it starts and again after every drop. Off: it tries once at start, then only when the person presses Connect; nothing here connects it for you. No card.",
+      "Turns a machine's Auto reconnect on or off. On: this computer connects when it starts and again after every drop. Off: it tries once at start, then only when the person presses Connect; nothing here connects it for you. Turning it off needs no card; turning it back on does, since the person turned it off.",
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
   },
   {

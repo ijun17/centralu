@@ -42,6 +42,10 @@ export interface RoutedMachine {
    * its Auto reconnect is off and the attempt at the hub's start is over. Absent: a machine the hub keeps trying
    */
   readonly waitsForPerson?: boolean
+  /** An attempt to connect is under way (#1341): a call that needs the machine waits for it (`settled`) before it is answered */
+  readonly attemptUnderWay?: boolean
+  /** Resolves once no attempt is under way, or after a bound. Absent: nothing to wait for */
+  settled?(): Promise<void>
 }
 
 /**

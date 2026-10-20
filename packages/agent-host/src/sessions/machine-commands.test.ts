@@ -337,7 +337,7 @@ describe('remove_machine', () => {
 })
 
 describe('reconnect_machine and set_machine_auto_reconnect', () => {
-  it('act at once with no card, and say the machine as it is now', async () => {
+  it('act at once with no card for a machine that only dropped and for turning the switch off, and say the machine as it is now', async () => {
     const orc = await mgr.orchestrator()
     const re = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })
     expect(re.isError).toBeFalsy()
@@ -353,6 +353,50 @@ describe('reconnect_machine and set_machine_auto_reconnect', () => {
       ['reconnect', 'laptop', { start: false }],
       ['setAutoReconnect', 'laptop', false],
     ])
+  })
+})
+
+/*
+ * #1341: what the person did is not undone by an agent on its own. A machine they disconnected is reconnected, and Auto
+ * reconnect turned back on, only after their card; a machine that only dropped, and turning the switch off, need none
+ */
+describe('undoing what the person did', () => {
+  it('asks before it reconnects a machine the person disconnected, and connects nothing on Deny', async () => {
+    const orc = await mgr.orchestrator()
+    ops.patch({ status: 'disconnected', error: null })
+    const denied = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
+    expect(denied.question).toContain('Connect Laptop (me@laptop)? You disconnected it')
+    expect(denied.r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+    const allowed = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'allow')
+    expect(allowed.r.text).toContain('Reconnecting Laptop.')
+    // Opened without starting a host the link would not (#1143)
+    expect(ops.changes()).toEqual([['reconnect', 'laptop', { start: false }]])
+  })
+
+  it('asks before it turns Auto reconnect back on, and leaves it off on Deny; turning it off, or on where it is on, asks nothing', async () => {
+    const orc = await mgr.orchestrator()
+    ops.patch({ autoReconnect: false, connect: 'when_needed' })
+    const denied = await answered(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: true }, 'deny')
+    expect(denied.question).toContain('Turn Auto reconnect back on for Laptop (me@laptop)? You turned it off.')
+    expect(denied.r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+    const allowed = await answered(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: true }, 'allow')
+    expect(allowed.r.text).toContain('Laptop now reconnects by itself')
+    expect(ops.changes()).toEqual([['setAutoReconnect', 'laptop', true]])
+
+    // On already: nothing to undo. Off: the person's own choice, as the row's switch does
+    expect((await run(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: true })).isError).toBeFalsy()
+    expect((await run(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: false })).isError).toBeFalsy()
+    expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('reconnects a machine that only dropped with no card, whether or not its switch is off', async () => {
+    const orc = await mgr.orchestrator()
+    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out', autoReconnect: false, connect: 'when_needed' })
+    expect((await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })).isError).toBeFalsy()
+    expect(card(orc.id)).toBeUndefined()
+    expect(ops.changes()).toEqual([['reconnect', 'laptop', { start: false }]])
   })
 })
 

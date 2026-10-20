@@ -86,7 +86,9 @@ function targetError(target: string): string | null {
  * remove, reconnect, Auto reconnect, and whether it starts at boot. Each is the call the window's Machines screen
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
  * person's card, in every preset; reconnecting and Auto reconnect do not, as the row's buttons do not ask, except
- * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143). Every
+ * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143),
+ * and that undoing what the person did asks too (#1341): reconnecting a machine they disconnected, and turning Auto
+ * reconnect back on. Every
  * refusal that can be known first (no such machine, a target that is no ssh target or does not answer, a build that
  * cannot install) comes before any card.
  */
@@ -123,9 +125,32 @@ export class MachineFlow {
             if (refused) return { ok: false, error: refused }
             return done(`Starting Centralu on ${m.name}.`, ops.reconnect(m.id))
           }
+          /*
+           * Disconnected by the person (#1341): only `machines.disconnect` leaves a machine `disconnected`, so an agent undoing it
+           * asks first. A machine that only dropped on its own is reconnected with no card, as the row's button does
+           */
+          if (m.status === 'disconnected') {
+            const refused = await this.ask(
+              sessionId,
+              `Connect ${m.name} (${m.sshTarget})? You disconnected it, so nothing here connects it by itself. It connects over ssh with your keys ` +
+                'and stays connected until you disconnect it again.',
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+          }
           return done(`Reconnecting ${m.name}.`, ops.reconnect(m.id, { start: false }))
         }
         case 'auto_reconnect':
+          // Turning it back on undoes the person's choice (#1341): asked. Turning it off, or on where it already is, is not
+          if (req.on && !m.autoReconnect) {
+            const refused = await this.ask(
+              sessionId,
+              `Turn Auto reconnect back on for ${m.name} (${m.sshTarget})? You turned it off. With it on, this computer connects to it over ssh with your ` +
+                'keys when Centralu starts and again after every drop, without asking.',
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+          }
           return done(
             req.on
               ? `${m.name} now reconnects by itself, when Centralu starts and after every drop.`

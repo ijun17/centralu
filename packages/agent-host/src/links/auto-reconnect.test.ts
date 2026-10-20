@@ -71,6 +71,7 @@ const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLi
  */
 class ControlledTunnel implements Tunnel {
   opens = 0
+  closes = 0
   unreachable = false
   /** How long an opening takes, as an ssh to a slow machine */
   openMs = 0
@@ -89,7 +90,9 @@ class ControlledTunnel implements Tunnel {
   drop(): void {
     this.downListener?.('ssh exited')
   }
-  async close(): Promise<void> {}
+  async close(): Promise<void> {
+    this.closes++
+  }
 }
 
 type HubOptions = { autoReconnect?: boolean; store?: Store; tunnel?: (line: () => ConnectionLine) => Tunnel; deps?: Partial<LinkDeps> }
@@ -306,6 +309,32 @@ describe('a machine with Auto reconnect off (#1341)', () => {
     expect(hub.tunnel().opens).toBe(1)
   })
 
+  it('closes the ssh forward when its client drops, since nothing uses it before Connect', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
+    await eventually(() => hub.row().status === 'connected')
+    expect(hub.tunnel().closes).toBe(0)
+    await remote.server.close()
+    await eventually(() => hub.row().status === 'unreachable')
+    await eventually(() => hub.tunnel().closes >= 1)
+  })
+
+  it('turning it off does not cancel the retries of an install or update that is running; the switch takes effect after', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => hub.row().status === 'connected')
+    // What `operate` sets while an install or update runs
+    ;(hub.links.get('m1') as unknown as { busy: string }).busy = 'update'
+    hub.tunnel().unreachable = true
+    hub.tunnel().drop()
+    await eventually(() => hub.tunnel().opens >= 3)
+    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: false })
+    const opens = hub.tunnel().opens
+    hub.tunnel().unreachable = false
+    // The operation's retry still comes, and its check (the host's hello) is met
+    await eventually(() => hub.tunnel().opens > opens && hub.row().status === 'connected')
+  })
+
   it('turned off while a retry waits, the retry is cancelled and the row says it waits for Connect', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port), { deps: { retryMs: [200 * SLOW, 400 * SLOW] } })
@@ -350,6 +379,79 @@ describe('a machine with Auto reconnect off (#1341)', () => {
     // The person's Connect connects, as ever
     await hub.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.row().status === 'connected')
+  })
+})
+
+describe('a call that needs a machine that is connecting (#1341)', () => {
+  async function connecting(deps: Partial<LinkDeps> = {}) {
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    seedSession(remoteStore, 'p-app', 'w1', 'worker', 'ext-w1')
+    const remote = await remoteHost(remoteStore)
+    let tunnel: ControlledTunnel | undefined
+    const hub = await hubHost(() => lineFor(remote.port), {
+      autoReconnect: false,
+      deps,
+      tunnel: (line) => {
+        tunnel = new ControlledTunnel(line)
+        tunnel.openMs = 500 * SLOW
+        return tunnel
+      },
+    })
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    return { hub, reader, tunnel: () => tunnel! }
+  }
+
+  it('waits for the attempt and then goes through', async () => {
+    const { hub, reader } = await connecting()
+    expect(hub.row().status).toBe('connecting')
+    expect(await reader.read('m1.w1', 1)).toMatchObject({ ok: true })
+    expect(hub.row().status).toBe('connected')
+  })
+
+  it('waits only so long, then says it is not reachable right now; it does not say the person must connect it', async () => {
+    const { hub, reader } = await connecting({ attemptWaitMs: 50 })
+    const r = await reader.read('m1.w1', 1)
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('not reachable right now') })
+    expect((r as { error: string }).error).not.toContain('ask the person')
+    await eventually(() => hub.row().status === 'connected')
+  })
+
+  it('answers at once when nothing is trying', async () => {
+    const { hub, reader, tunnel } = await connecting()
+    await eventually(() => hub.row().status === 'connected')
+    tunnel().drop()
+    const at = Date.now()
+    expect(await reader.read('m1.w1', 1)).toMatchObject({ ok: false, error: expect.stringContaining('ask the person to connect it') })
+    expect(Date.now() - at).toBeLessThan(200 * SLOW)
+  })
+})
+
+describe('a child working on a machine whose Auto reconnect is off (#1341)', () => {
+  it('tells the caller when the link drops, instead of leaving it waiting silently', async () => {
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    const remote = await remoteHost(remoteStore)
+    const hubStore = new Store()
+    hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, autoReconnect: false })
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    await eventually(() => hub.row().status === 'connected')
+    // A task that keeps the child's turn open (it asks a question)
+    const call = hub.mgr.startAgent('h1', { task: 'question: proceed?', machine: 'Laptop' })
+    const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
+    await eventually(() => !!card())
+    await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+    expect(await call).toMatchObject({ ok: true })
+    const owed = () => (hub.mgr as unknown as { children: { linkedReports: Map<string, unknown> } }).children.linkedReports.size
+    await eventually(() => owed() === 1)
+
+    hub.tunnel().drop()
+    await eventually(() => owed() === 0)
+    const said = async () => (await hub.mgr.loadMessages('h1', 50)).map((m: any) => JSON.stringify(m.payload)).join(' ')
+    await eventually(async () => (await said()).includes('Auto reconnect is off'))
+    expect(await said()).toContain('ask the person to connect it')
   })
 })
 

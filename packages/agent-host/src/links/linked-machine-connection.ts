@@ -77,6 +77,8 @@ const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
 const KEEPS_TRYING = 'reconnecting'
 const WAITS_FOR_PERSON = 'press Connect to try again'
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
+/** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
+const ATTEMPT_WAIT_MS = 60_000
 /** Statuses of a link that is away between attempts: turning Auto reconnect on tries again now */
 const AWAY: ReadonlySet<MachineStatus> = new Set(['unreachable', 'not_running', 'refused', 'stopped'])
 
@@ -176,6 +178,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * either side (`check`). It refreshes the row and connects nothing
    */
   private readsOnly = false
+  /** Calls waiting for an attempt to connect to end (`settled`) */
+  private statusWaiters = new Set<() => void>()
 
   constructor(
     protected record: MachineRecord,
@@ -211,6 +215,33 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // versions_differ or updating waits for something Connect does not give
     if (this.status === 'connecting' || this.status === 'starting' || this.status === 'versions_differ' || this.status === 'updating') return false
     return this.parked || !this.autoReconnect
+  }
+
+  /**
+   * An attempt to connect is under way (#1341): the tunnel is opening, or the link is shaking hands with the host. A call
+   * that needs the machine waits for it (`settled`); with nothing trying it is answered at once
+   */
+  get attemptUnderWay(): boolean {
+    if (this.reachable || this.stopped) return false
+    return this.opening !== null || this.status === 'connecting' || this.status === 'starting'
+  }
+
+  /** Resolves once no attempt is under way, or after `waitMs` (a minute): connecting took 2 to 4 s on a LAN, a host started there adds its start */
+  settled(waitMs = this.deps.attemptWaitMs ?? ATTEMPT_WAIT_MS): Promise<void> {
+    if (!this.attemptUnderWay) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer)
+        this.statusWaiters.delete(waiter)
+        resolve()
+      }
+      const waiter = () => {
+        if (!this.attemptUnderWay) done()
+      }
+      const timer = setTimeout(done, waitMs)
+      timer.unref?.()
+      this.statusWaiters.add(waiter)
+    })
   }
 
   /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */
@@ -379,7 +410,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   setAutoReconnect(on: boolean): void {
     this.record = { ...this.record, autoReconnect: on }
-    if (!on && this.status !== 'versions_differ') clearTimeout(this.retryTimer)
+    // An operation's retries stand: the switch takes effect once it ends (cancelling them rolled an update back)
+    if (!on && this.status !== 'versions_differ' && !this.inOperation()) clearTimeout(this.retryTimer)
     // A swap's hold was waiting on the retry just cancelled: the row would say updating for good
     if (!on && this.status === 'updating' && !this.inOperation()) this.setStatus('unreachable', `The host on ${this.name} was being swapped; ${WAITS_FOR_PERSON}`)
     this.noteNextStep()
@@ -441,6 +473,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     clearTimeout(this.retryTimer)
     this.client?.close()
     this.client = null
+    for (const w of [...this.statusWaiters]) w()
     await this.tunnel.close()
   }
 
@@ -448,6 +481,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.held) return Promise.resolve()
     this.opening ??= this.doOpen().finally(() => {
       this.opening = null
+      for (const w of [...this.statusWaiters]) w()
     })
     return this.opening
   }
@@ -718,6 +752,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
             // Nothing dials again (#1341): the person's Connect opens a new client, and the lists are read again
             client.close()
             this.client = null
+            // Nothing will use the forward before the person's Connect, which opens it again
+            void this.tunnel.close().catch(() => {})
           }
           this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); ${this.nextStep()}`)
         },
@@ -736,6 +772,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
             return
           }
           this.gaveUp = client
+          if (!this.autoReconnect) void this.tunnel.close().catch(() => {})
           this.setStatus('unreachable', `${this.name}'s host did not answer on the link (${reason}); ${this.autoReconnect ? 'asking the machine again' : WAITS_FOR_PERSON}`)
           this.retryLater()
         },
@@ -909,6 +946,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (changed) {
       if (error) this.deps.log?.(`[links] ${this.name}: ${status}: ${error}`)
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      for (const w of [...this.statusWaiters]) w()
     }
   }
 }

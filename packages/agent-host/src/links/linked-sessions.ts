@@ -147,8 +147,16 @@ export function linkedSessions(
    */
   const away = (m: RoutedMachine): string =>
     m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${NOT_REACHABLE}; try again once its link is back`
+  /**
+   * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
+   * as it did when a need connected it. With nothing trying, the call is answered at once
+   */
+  const settle = async (m: RoutedMachine): Promise<void> => {
+    if (m.attemptUnderWay) await m.settled?.()
+  }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
+    await settle(m)
     if (!m.reachable) return { ok: false, error: away(m) }
     try {
       return { ok: true, ...(await run()) }
@@ -241,6 +249,8 @@ export function linkedSessions(
           away.push({ machine: m.name, machineId: m.id, why })
           return lastProjects(m).map((p) => ({ ...p, away: why }))
         }
+        // Not away while it is connecting: its projects stand as last listed, and the act that follows waits for the link
+        if (!m.reachable && m.attemptUnderWay) return lastProjects(m)
         if (!m.reachable) return mirrored(m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
         try {
           const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
@@ -565,6 +575,7 @@ export function linkedSessions(
     async lastWords(sessionId, maxChars) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      await settle(m)
       if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${NOT_REACHABLE}` }
       try {
         const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
@@ -610,6 +621,7 @@ export function linkedSessions(
     async read(sessionId, limit, opts) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
+      await settle(m)
       if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is not reachable right now; read it again once its link is back` }
       try {
         const answer = await m.call('host.readSession', {

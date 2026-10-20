@@ -49,7 +49,15 @@ function pausedReportLine(running: readonly BackgroundTask[], stop: string | und
  * The first line of a linked machine's paused report whose link dropped before the work ended (#723): the hub cannot see
  * that end, so the report goes out now
  */
-function linkLostReportLine(machine: string, paused: readonly BackgroundTask[], name: Naming = STORED): string {
+function linkLostReportLine(machine: string, paused: readonly BackgroundTask[] | undefined, name: Naming = STORED): string {
+  // A turn still running when the link dropped, on a machine nothing reconnects by itself (#1341)
+  if (!paused) {
+    return (
+      `[Centralu] The link to ${name.machine(machine)} dropped while the assigned work's turn was running, and its Auto reconnect is off, ` +
+      'so nothing here reconnects it and the end of the turn will not be reported until the person connects it. ' +
+      'The work may still be running there; ask the person to connect it, then read the session.\n'
+    )
+  }
   return (
     `[Centralu] The assigned work paused on its own background work (${name.tasks(paused)}), and the link to ${name.machine(machine)} dropped before that work ended, ` +
     'so its end will not be reported. It may still be running there; read the session once the link is back.\n'

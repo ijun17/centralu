@@ -2936,6 +2936,35 @@ describe('the machine commands on a real hub (#1219)', () => {
     expect(machineCard(hub, orc.id)).toBeUndefined()
   })
 
+  it('asks before it undoes what the person did: a machine they disconnected, and Auto reconnect turned back on (#1341)', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const orc = await hub.mgr.orchestrator()
+    await run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: false })
+    await hub.links.disconnect('m1')
+    expect(status(hub)).toBe('disconnected')
+
+    const denied = run(hub, orc.id, 'reconnect_machine', { machine: 'remote box' })
+    await eventually(() => !!machineCard(hub, orc.id))
+    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
+    expect((await denied).isError).toBe(true)
+    expect(status(hub)).toBe('disconnected')
+
+    const allowed = run(hub, orc.id, 'reconnect_machine', { machine: 'remote box' })
+    await eventually(() => !!machineCard(hub, orc.id))
+    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    expect((await allowed).isError).toBeFalsy()
+    await eventually(() => status(hub) === 'connected')
+
+    const on = run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: true })
+    await eventually(() => !!machineCard(hub, orc.id))
+    expect(hub.links.list()[0]!.autoReconnect).toBe(false)
+    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    expect((await on).isError).toBeFalsy()
+    expect(hub.links.list()[0]!.autoReconnect).toBe(true)
+  })
+
   it("removes a machine only after the card, and its projects leave the hub's list", async () => {
     const remote = await remoteHost()
     await remote.mgr.addProject(folder())
