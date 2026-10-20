@@ -3,7 +3,20 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PS_PREAMBLE, remoteScript, SshTunnel, STDIN_ACK, STDIN_END, STDIN_READY } from './tunnel.js'
+import {
+  powershellScript,
+  PS_PREAMBLE,
+  remoteScript,
+  SshTunnel,
+  SSH_CONNECT_ALLOWANCE_MS,
+  SSH_POWERSHELL_START_MS,
+  SSH_STDIN_ACK_MS,
+  SSH_STDIN_READY_MS,
+  STDIN_ACK,
+  STDIN_END,
+  STDIN_READER_MS,
+  STDIN_READY,
+} from './tunnel.js'
 import { fakeExe } from '../fake-exe.test-helpers.js'
 import { removeTree } from '../temp-dir.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
@@ -29,8 +42,8 @@ function decoded(command: string): string {
 
 type Framed = { command: string; stdin: string; expect?: readonly string[] }
 
-function framedCommand(ps: string): Framed {
-  const c = remoteScript({ shell: 'powershell' }, { sh: '', ps })
+function framedCommand(ps: string, readerMs?: number, startMs?: number): Framed {
+  const c = readerMs === undefined ? remoteScript({ shell: 'powershell' }, { sh: '', ps }) : powershellScript(ps, readerMs, startMs)
   if (typeof c === 'string') throw new Error('expected the script to go on stdin')
   return c
 }
@@ -70,7 +83,7 @@ describe('the framing of a script on stdin', () => {
  * and the input never closed: the reader must go on at the dot line, and a script over 64 KB must arrive whole.
  */
 describe.runIf(process.platform === 'win32')('on Windows PowerShell 5.1', () => {
-  function runPowerShell(command: string, input: string, o: { end: boolean }): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  function runPowerShell(command: string, input: string, o: { end: boolean; writeAfterMs?: number }): Promise<{ stdout: string; stderr: string; code: number | null }> {
     return new Promise((resolve, reject) => {
       const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command}"`], { windowsHide: true, windowsVerbatimArguments: true, stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = ''
@@ -83,8 +96,12 @@ describe.runIf(process.platform === 'win32')('on Windows PowerShell 5.1', () => 
         clearTimeout(guard)
         resolve({ stdout, stderr, code })
       })
-      if (o.end) child.stdin.end(input)
-      else child.stdin.write(input)
+      const send = () => {
+        if (o.end) child.stdin.end(input)
+        else child.stdin.write(input)
+      }
+      if (o.writeAfterMs === undefined) send()
+      else if (o.writeAfterMs >= 0) setTimeout(send, o.writeAfterMs)
       // The input stays open in the second case: the reader must not need its end
       const guard = setTimeout(() => child.kill(), 60_000 * SLOW)
     })
@@ -115,6 +132,49 @@ describe.runIf(process.platform === 'win32')('on Windows PowerShell 5.1', () => 
     expect(r.code).toBe(0)
   }, 90_000 * SLOW)
 
+  /*
+   * #1367 review. The hub writes the input only after PowerShell says it runs and waits `SSH_STDIN_ACK_MS` for the confirmation, and the
+   * reader has its own, shorter time (`STDIN_READER_MS`): one that has not reached the dot line by then exits with 4 and prints
+   * nothing more, so the step the hub sends again never meets a first reader that is still reading, and a failed step leaves
+   * no PowerShell (with its cmd.exe and conhost.exe) waiting behind.
+   */
+  it('ends on its own when the input never comes, with the input left open, saying it ran and nothing more', async () => {
+    const c = framedCommand(script(10 * KB), 1_500)
+    const r = await runPowerShell(c.command, c.stdin, { end: false, writeAfterMs: -1 })
+    expect(r.code).toBe(4)
+    expect(r.stdout).toContain(STDIN_READY)
+    expect(r.stdout).not.toContain(STDIN_ACK)
+    expect(r.stdout).not.toContain('done')
+    // PowerShell's own progress noise aside, it says nothing of an error
+    expect(r.stderr).not.toContain('The input ended')
+  }, 90_000 * SLOW)
+
+  it('runs nothing when it gets the whole input only after its time, whatever the hub did meanwhile', async () => {
+    const c = framedCommand(script(10 * KB), 1_500)
+    const r = await runPowerShell(c.command, c.stdin, { end: false, writeAfterMs: 4_000 })
+    expect(r.code).toBe(4)
+    expect(r.stdout).not.toContain(STDIN_ACK)
+    expect(r.stdout).not.toContain('got ')
+    expect(r.stdout).not.toContain('done')
+  }, 90_000 * SLOW)
+
+  it('reads nothing and runs nothing when its PowerShell took too long to start, though the input is already there', async () => {
+    // A start time of 1 ms is what a PowerShell that came up after the hub gave up looks like
+    const c = framedCommand(script(10 * KB), 20_000, 1)
+    const r = await runPowerShell(c.command, c.stdin, { end: false })
+    expect(r.code).toBe(4)
+    expect(r.stdout).toContain(STDIN_READY)
+    expect(r.stdout).not.toContain(STDIN_ACK)
+    expect(r.stdout).not.toContain('done')
+  }, 90_000 * SLOW)
+
+  it('still runs it when the input comes within its time', async () => {
+    const c = framedCommand(script(10 * KB), 20_000)
+    const r = await runPowerShell(c.command, c.stdin, { end: false, writeAfterMs: 1_000 })
+    expect(r.stdout).toContain('done')
+    expect(r.code).toBe(0)
+  }, 90_000 * SLOW)
+
   it('runs nothing when the input ends before its dot line, and says so', async () => {
     const c = framedCommand(script(10 * KB))
     const r = await runPowerShell(c.command, c.stdin.slice(0, 5 * KB), { end: true })
@@ -125,6 +185,17 @@ describe.runIf(process.platform === 'win32')('on Windows PowerShell 5.1', () => 
   }, 90_000 * SLOW)
 })
 
+describe('the times of a step whose script goes on stdin', () => {
+  it('has a reader that ends before the hub stops waiting for it, and a PowerShell wait that counts ssh connecting apart', () => {
+    // The hub's resend must find the first reader gone
+    expect(STDIN_READER_MS).toBeLessThan(SSH_STDIN_ACK_MS)
+    // ssh connecting (15 s per address, several in a row) is not charged to PowerShell starting
+    expect(SSH_STDIN_READY_MS).toBe(SSH_CONNECT_ALLOWANCE_MS + SSH_POWERSHELL_START_MS)
+    expect(SSH_CONNECT_ALLOWANCE_MS).toBeGreaterThanOrEqual(4 * 15_000)
+    expect(SSH_STDIN_READY_MS).toBeGreaterThan(60_000)
+  })
+})
+
 describe('a step whose input the remote does not confirm', () => {
   let dir: string
   beforeEach(() => {
@@ -133,10 +204,11 @@ describe('a step whose input the remote does not confirm', () => {
   afterEach(() => removeTree(dir))
 
   /**
-   * A stand-in ssh: reads its stdin, counts the run in a file, and prints for run N what `plan[N-1]` says: nothing (`none`),
-   * only that PowerShell runs (`ready`), or that and that it has the script, then the step's output (`both`)
+   * A stand-in ssh: counts its runs in a file, and for run N does what `plan[N-1]` says: nothing (`none`); say that PowerShell runs
+   * and stay (`ready`); say that and then that it ended on its own, as a reader whose time ran out (`exit`); or say that and that it
+   * has the script, then the step's output (`both`)
    */
-  function fakeSsh(plan: ('none' | 'ready' | 'both')[]) {
+  function fakeSsh(plan: ('none' | 'ready' | 'exit' | 'both')[]) {
     const counter = join(dir, 'runs.txt')
     const source = `
 const fs = require('node:fs')
@@ -144,9 +216,13 @@ fs.appendFileSync(${JSON.stringify(counter)}, 'x')
 const run = fs.readFileSync(${JSON.stringify(counter)}, 'utf8').length
 const what = ${JSON.stringify(plan)}[run - 1]
 process.stdin.resume()
-if (what === 'both') { process.stdout.write(${JSON.stringify(`${STDIN_READY}\n${STDIN_ACK}\n`)} + 'step output\\n'); setTimeout(() => process.exit(0), 100) }
-else if (what === 'ready') { process.stdout.write(${JSON.stringify(`${STDIN_READY}\n`)}); setTimeout(() => process.exit(0), 600000) }
-else setTimeout(() => process.exit(0), 600000)
+if (what === 'none') setTimeout(() => process.exit(0), 600000)
+else {
+  process.stdout.write(${JSON.stringify(`${STDIN_READY}\n`)})
+  if (what === 'both') { process.stdout.write(${JSON.stringify(`${STDIN_ACK}\n`)} + 'step output\\n'); setTimeout(() => process.exit(0), 100) }
+  else if (what === 'exit') setTimeout(() => process.exit(4), 100)
+  else setTimeout(() => process.exit(0), 600000)
+}
 `
     return { ssh: fakeExe(dir, 'ssh', source), runs: () => (existsSync(counter) ? readFileSync(counter, 'utf8').length : 0) }
   }
@@ -159,7 +235,7 @@ else setTimeout(() => process.exit(0), 600000)
     const { ssh, runs } = fakeSsh(['none', 'none'])
     const t = new SshTunnel({ target: 'ijun1', ssh, env: process.env, stdinReadyMs: 400 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
     const at = Date.now()
-    await expect(t.exec(framed())).rejects.toThrow(/ijun1 did not start this step's PowerShell within \d+ seconds .*so nothing ran/)
+    await expect(t.exec(framed())).rejects.toThrow(/ijun1 did not start this step's PowerShell within \d+ seconds/)
     expect(Date.now() - at).toBeLessThan(20_000 * SLOW)
     expect(runs()).toBe(1)
     await t.close()
@@ -180,6 +256,14 @@ else setTimeout(() => process.exit(0), 600000)
     const t = tunnel(ssh)
     const r = await t.exec(framed())
     expect(r.stdout.trim()).toBe('step output')
+    expect(runs()).toBe(2)
+    await t.close()
+  }, 60_000 * SLOW)
+
+  it('sends the step again when PowerShell ended on its own before it had the input, and fails the second time saying so', async () => {
+    const { ssh, runs } = fakeSsh(['exit', 'exit'])
+    const t = tunnel(ssh)
+    await expect(t.exec(framed())).rejects.toThrow(/ended before it had read this step's input.*, twice/)
     expect(runs()).toBe(2)
     await t.close()
   }, 60_000 * SLOW)

@@ -28,8 +28,11 @@ export class SshRunFailure extends Error {
   }
 }
 
-/** A line a run waits for (`SshRunOptions.expect`) */
-export type SshExpectedLine = { marker: string; withinMs: number; message: string }
+/**
+ * A line a run waits for (`SshRunOptions.expect`). `endedMessage`: what a run that ends before the line came says, for a line
+ * after the first (the first line missing at the end is the command's own failure: ssh could not reach, or found no PowerShell)
+ */
+export type SshExpectedLine = { marker: string; withinMs: number; message: string; endedMessage?: string }
 
 export type SshRunOptions = {
   /** The ssh program; default `ssh` on PATH */
@@ -139,6 +142,9 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
     child.once('error', (e) => fail('spawn', e.message))
     child.once('close', (code) => {
       if (settled) return
+      // Ended after the first line but before a later one: the remote stopped on its own before it got what it waited for
+      const missing = next > 0 ? expected[next] : undefined
+      if (missing?.endedMessage) return fail('expected', missing.endedMessage, next)
       settled = true
       clearTimeout(deadline)
       clearTimeout(expectDeadline)

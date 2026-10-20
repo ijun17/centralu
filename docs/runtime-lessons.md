@@ -1795,9 +1795,17 @@ end). Payload size is not the cause; the text readers are. Each hung step leaves
 behind on the remote (113 of them after one afternoon of tests, until new sessions failed with 0xC0000142).
 Rule: a script goes on stdin as base64 and a line with one dot; the reader prints `CENTRALU-STDIN-READY`, reads bytes until
 that line (a CRLF after the dot is taken too), prints `CENTRALU-STDIN-OK`, then runs the script; `exec` waits 60 s for the
-first line (a remote that does not start PowerShell is not one that lost its input: fail, no second try) and 30 s after it for
-the second, sends the step once more when only the second is missing (the script runs after it, so the step has not
-started), and then fails saying the remote never confirmed the input.
+first line (ssh's connecting has its own six-attempt allowance inside it; a remote that does not start PowerShell is not one
+that lost its input: fail, no second try; a reader whose process is more than 30 s old when it says it runs reads nothing and exits 4,
+so a PowerShell that came up after the hub gave up cannot run the step from the input waiting in its pipe) and 30 s after it for the second. The reader ends on its own 20 s after the first line,
+checking the time after every read and again before it confirms (exit 4, nothing more printed), so it is gone before the hub's 30 s
+are over; the hub then sends the step once more (the script runs only after the confirmation, so the step has not started), and
+fails saying the remote never confirmed the input when that fails too.
+The input is written **with the command, not after PowerShell says it runs** (measured with the final reader, 17,000 characters,
+ten at a time): written at once it arrived in 80 of 80 runs (and 80 of 80 at 100,000 characters); written when READY came back,
+10 and 7 of 80 and 11 of 40 never arrived within the reader's 20 s; written 100 ms after READY, 0 of 40 did. So a step cannot be
+kept from receiving its input by holding the input back; the reader's own deadline is what keeps a late first reader from running
+after the hub gave up.
 Guard: `host/links/stdin-frame.test.ts` (the reader on Windows PowerShell 5.1 with a 100 KB script and the input never
 closed, a cut input, the confirmation wait and the second try).
 Platforms: Windows and WSL remotes (a WSL step is read the same way by the PowerShell that starts it).

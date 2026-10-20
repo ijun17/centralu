@@ -3000,10 +3000,14 @@ A script too long for a Windows command line (step 2's, about 17,000 characters 
 then a line holding one dot (#1360). The PowerShell reads the bytes from `[Console]::OpenStandardInput()` up to that line,
 says `CENTRALU-STDIN-READY` when it starts and `CENTRALU-STDIN-OK` when it has the script, then runs it; it does not wait for the
 end of input, and it does not use `[Console]::In`, whose `ReadToEnd()` never returned in a share of the runs on Windows OpenSSH
-(docs/runtime-lessons.md RE18). `exec` waits for the first line for 60 s (`stdinReadyMs`: ssh connecting, login, PowerShell
-starting; a failure there says nothing ran and the step is not sent again) and for the second for 30 s after it (`stdinAckMs`).
-When PowerShell was up and the input did not arrive, the step has not started, so it is sent once more, and a second silence
-fails with "PowerShell on <machine> did not confirm within 30 seconds that it had read this step's input, so the step did not
+(docs/runtime-lessons.md RE18). `exec` waits for the first line for 2 minutes (`stdinReadyMs`: ssh's own connecting has its allowance of six attempts,
+`SSH_CONNECT_ALLOWANCE_MS`, on top of 30 s for PowerShell starting; a failure there is not retried) and for the second for 30 s
+after it (`stdinAckMs`). The reader gives itself 20 s from the first line (`STDIN_READER_MS`): past it, or when the input is cut,
+it exits with 4 and prints nothing more, also when the whole input comes late, so it is gone, or never ran the script, before the
+hub's 30 s are over, and a failed step leaves no PowerShell behind. A reader whose process is already older than 30 s when it says
+it runs (`SSH_POWERSHELL_START_MS`; a PowerShell that came up after the hub's wait, the input waiting in its pipe) reads nothing and
+exits with 4 too. When PowerShell was up and the input was not read, the step
+has not started, so it is sent once more, and a second failure says so with "PowerShell on <machine> did not confirm within 30 seconds that it had read this step's input, so the step did not
 start, twice". The step's own limit (30 minutes) is then only for a step that runs.
 
 The remote prints codes, the hub turns them into sentences (`node_hash`, `integrity`, `download`, `busy`, …); exit
