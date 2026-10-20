@@ -838,7 +838,7 @@ export class SessionManager {
         return { kind: 'busy', why: 'limited' }
       default: {
         const live = this.handles.has(id)
-        return { kind: 'ready', live, quiet: live && this.adapters.get(m.tool)?.quietInput === true }
+        return { kind: 'ready', live, quiet: live && this.adapters.get(m.tool)?.quietInput === true, auto: m.permissionPreset === 'auto' }
       }
     }
   }

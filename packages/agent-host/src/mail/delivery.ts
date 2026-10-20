@@ -2,7 +2,8 @@ import { errorMessage } from '@cc/protocol'
 import type { MailRecords, MessageRow, ReceiptRow } from '../dev-services/store/mail.js'
 import { PERSON, parseAddress } from './address.js'
 import { needsReceiver } from './rules.js'
-import type { MailService } from './service.js'
+import { holdsInbound } from './policy.js'
+import type { DrainOptions, MailService } from './service.js'
 
 /**
  * Waking is the mailbox's job (docs/plans/mailbox.md §5): a sender only posts, and `MailDelivery` hands each receiver its mail.
@@ -22,9 +23,10 @@ export type ReceiverState =
   | { kind: 'busy'; why: 'turn' | 'card' | 'limited' }
   /**
    * At rest: idle or in error (woken the same way). `live` is whether its process runs; asleep, it is
-   * resumed. `quiet`: it can take mail without a turn, which is a live process of a tool that takes quiet input (Claude)
+   * resumed. `quiet`: it can take mail without a turn, which is a live process of a tool that takes quiet input (Claude). `auto`: it
+   * runs without asking, so mail from another session or an app is held, not a reason to wake it (§7.7)
    */
-  | { kind: 'ready'; live: boolean; quiet: boolean }
+  | { kind: 'ready'; live: boolean; quiet: boolean; auto?: boolean }
 
 /**
  * `deliver` found the receiver no longer at rest after waking it: the person typed, or a card came up, while it resumed (§7.1). Nothing
@@ -393,15 +395,20 @@ export class MailDelivery {
     const now = this.now()
     const plan = this.records.transaction(() => {
       const skip = waiting ? this.skipUnlessPersonSince : state.live ? undefined : this.skipOld
-      const drained = this.service.drain(recipient, skip ? { skip } : {})
+      const drained = this.service.drain(recipient, { ...(skip ? { skip } : {}), ...this.guardsFor(recipient, state) })
+      if (drained.heldBack.length > 0) this.records.transaction(() => this.holdBack(recipient, drained.heldBack))
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
       // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9)
       if (drained.wake && !drained.immediate) {
         const gap = (this.lastWake.get(recipient) ?? -Infinity) + this.o.minWakeGapMs - now
         if (gap > 0) return { drained, go: false as const, waitMs: gap }
       }
-      // Quiet mail goes into a process that takes it; asleep, or in a tool that cannot, it waits for the next wake, which carries it
-      if (!drained.wake && !state.quiet) return { drained, go: false as const, waitMs: 0 }
+      // Quiet mail goes into a process that takes it; asleep, or in a tool that cannot, it waits for the next wake, which carries it.
+      // What was to be told of and held (a policy, a spent budget) is listed for the person now: no wake may come to carry it
+      if (!drained.wake && !state.quiet) {
+        this.holdBack(recipient, drained.quieted)
+        return { drained, go: false as const, waitMs: 0 }
+      }
       this.records.markAttempt(recipient, drained.messageIds, now)
       return { drained, go: true as const, waitMs: 0 }
     })
@@ -426,16 +433,39 @@ export class MailDelivery {
       this.failedTry(recipient, drained.messageIds, errorMessage(e))
       return
     }
-    // The tool took it (§7.6): delivered, and read for what went in whole
+    // The tool took it (§7.6): delivered, and read for what went in whole. What was told of without a turn for a reason is held for the person
     const deliveredAt = this.now()
     delivered.at = deliveredAt
-    this.records.transaction(() => this.records.markDelivered(recipient, drained.messageIds, drained.inline, deliveredAt))
+    this.records.transaction(() => {
+      this.records.markDelivered(recipient, drained.messageIds, drained.inline, deliveredAt)
+      for (const reason of new Set(drained.quieted.map((q) => q.reason))) {
+        this.records.setHeld(recipient, drained.quieted.filter((q) => q.reason === reason).map((q) => q.messageId), reason)
+      }
+    })
     if (!quiet) this.lastWake.set(recipient, this.now())
     // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
     if (waiting) {
       this.left.delete(recipient)
       this.crowd = this.crowd?.filter((r) => r !== recipient) ?? null
       if (this.crowd?.length === 0) this.crowd = null
+    }
+  }
+
+  /** What the receiver's guards say about its mail (§7.7, §7.9) */
+  private guardsFor(_recipient: string, state: { auto?: boolean }): Pick<DrainOptions, 'quiet' | 'holdBack'> {
+    return {
+      quiet: (message, receipt, thread) => {
+        // The person's words and Centralu's own are never held. Another session's or an app's, to a session that runs without asking,
+        // is told of and never a reason to wake it, until the person releases it
+        if (state.auto && receipt.held !== 'released' && holdsInbound(message, thread)) return 'policy'
+        return null
+      },
+    }
+  }
+
+  private holdBack(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
+    for (const reason of new Set(held.map((h) => h.reason))) {
+      this.records.setHeld(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
     }
   }
 

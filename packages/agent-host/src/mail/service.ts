@@ -162,6 +162,23 @@ export type ReadOptions = {
 }
 
 /** What a delivery to one receiver would send now (§7.5, §7.6) */
+/** Why mail is told of without a turn: an inbound policy holds it (§7.7), or the session's budget of mail-started turns is spent (§7.9) */
+export type QuietReason = 'policy' | 'budget'
+
+/** Why mail is left out of a delivery and kept for the person: a thread's turns ran away (§7.9) */
+export type HoldReason = 'loop'
+
+export type DrainOptions = {
+  /** Mail that is told of once more, delivered and still unread (§7.6.6) */
+  again?: boolean
+  /** Left out, and nothing is written about it */
+  skip?: (message: MessageRow, receipt: ReceiptRow) => boolean
+  /** Told of, but not a reason for a turn */
+  quiet?: (message: MessageRow, receipt: ReceiptRow, thread: ThreadRow) => QuietReason | null | undefined
+  /** Left out and held for the person */
+  holdBack?: (message: MessageRow, receipt: ReceiptRow, thread: ThreadRow) => HoldReason | null | undefined
+}
+
 export type DrainResult = {
   /** The wake frame; empty when there is nothing to say */
   text: string
@@ -179,6 +196,10 @@ export type DrainResult = {
   asks: boolean
   /** The line the conversation keeps of the delivery (§9.2): how many, in how many threads, from whom, in Centralu's words */
   line: string
+  /** Told of without a turn, and why: held for the person once delivered (Inbox: Release) */
+  quieted: { messageId: string; reason: QuietReason }[]
+  /** Left out of it and held for the person (Inbox: Resume) */
+  heldBack: { messageId: string; reason: HoldReason }[]
 }
 
 const POST_KEYS = new Set(['kind', 'body', 'urgent', 'needsOwner', 'wake', 'replyTo', 'dedupeKey'])
@@ -758,7 +779,7 @@ export class MailService {
    * (§7.6.5: an `assign` the CLI took just before a crash would start the same work twice). `pointed` are those the text only
    * tells of. With `again`, mail that was delivered but is still unread is pointed at once more (§7.6.6), never inline
    */
-  drain(recipient: string, opts: { again?: boolean; skip?: (message: MessageRow, receipt: ReceiptRow) => boolean } = {}): DrainResult {
+  drain(recipient: string, opts: DrainOptions = {}): DrainResult {
     this.party(recipient)
     const items: MailFrameItem[] = []
     let wake = false
@@ -766,16 +787,26 @@ export class MailService {
     let asks = false
     const relations = new Set<string>()
     const threads = new Set<string>()
+    const quieted: { messageId: string; reason: QuietReason }[] = []
+    const heldBack: { messageId: string; reason: HoldReason }[] = []
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
       if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
       if (this.policy.mayWrite(message.sender, recipient, thread) !== null || this.policy.cannotRead?.(recipient)) continue
       if (opts.skip?.(message, receipt)) continue
+      const holdBack = opts.holdBack?.(message, receipt, thread)
+      if (holdBack) {
+        heldBack.push({ messageId: message.id, reason: holdBack })
+        continue
+      }
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
       // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
       // (cut to fit, or read by nobody), and `again` points at it once more. Read on acceptance, a whole one is not pending at all
       const pointerOnly = down && receipt.deliveredAt !== null
-      if (wakes(sender ?? 'session', message)) wake = true
+      // Told of without a turn: an inbound policy that holds it (§7.7), or a budget that is spent (§7.9); never the person's words
+      const quietFor = sender === 'person' ? null : opts.quiet?.(message, receipt, thread)
+      if (quietFor) quieted.push({ messageId: message.id, reason: quietFor })
+      else if (wakes(sender ?? 'session', message)) wake = true
       if (message.urgent || sender === 'person') immediate = true
       if (message.kind === 'question') asks = true
       relations.add(relationWord(recipient, message.sender, thread))
@@ -795,7 +826,7 @@ export class MailService {
       })
     }
     const frame = buildMailFrame(items)
-    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations) }
+    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack }
   }
 
   /**

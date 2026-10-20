@@ -81,7 +81,7 @@ describe('a session at rest is woken by mail', () => {
     Object.assign(w.adapter.capabilities, { backgroundTasks: true })
     const worker = await create()
     expect(await w.mgr.sleepSession(worker.id)).toBe(true)
-    expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false })
+    expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false, auto: false })
     openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'wake up', assignee: mail.sessionAddress(worker.id) })
     await due(worker.id)
     expect(handleOf(worker.id).sent.some((t) => t.includes('> wake up'))).toBe(true)
@@ -132,9 +132,9 @@ describe('what a session is to the delivery', () => {
   it('working is a turn, a standing card a card, a turn’s end is ready for its next message, gone is gone, idle is ready with whether it is live and takes quiet input', async () => {
     const s = await create()
     const port = w.mgr.mailSessions()
-    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: false })
+    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: false, auto: false })
     ;(w.adapter as { quietInput?: boolean }).quietInput = true
-    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: true })
+    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: true, auto: false })
     handleOf(s.id).send('go')
     expect(port.receiver(s.id)).toEqual({ kind: 'busy', why: 'turn' })
     handleOf(s.id).emitApproval('r')
@@ -143,7 +143,7 @@ describe('what a session is to the delivery', () => {
     handleOf(s.id).finishTurn()
     // "Awaiting input": the turn is over
     expect(w.mgr.sessionInfo(s.id)?.state).toBe('waiting_input')
-    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: true })
+    expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: true, auto: false })
     expect(port.receiver('no-such-session')).toEqual({ kind: 'gone' })
   })
 

@@ -405,6 +405,21 @@ describe('what a host that died left half done (§7.6.5)', () => {
     expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: null, deliveredAt: expect.any(Number) })
   })
 
+  it('mail the person released, and the host died sending, is held like any other and not sent again by itself', async () => {
+    const w = world()
+    const { message } = assign(w)
+    w.store.mail.setHeld(S2, [message.id], 'budget')
+    w.mail.resendHeld(S2, [message.id])
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: 'released' })
+    diedMidDelivery(w, S2, [message.id])
+    w.clock.t += 60_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(5 * 60_000)
+    expect(w.delivered).toEqual([])
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: 'uncertain' })
+  })
+
   it('dismissing it leaves it undelivered for good, and not in the Inbox’s list', async () => {
     const w = world()
     const { message } = assign(w)
@@ -689,5 +704,84 @@ describe('a host that was off a long while (§7.9)', () => {
     release()
     await swept
     expect(new Set(w.delivered.map((d) => d.sessionId))).toEqual(new Set(ids))
+  })
+})
+
+describe('a session that runs without asking holds mail from the sessions and apps it has no work with (§7.7)', () => {
+  const S3 = sessionAddress(HOST, 's3')
+  const auto = (w: ReturnType<typeof world>, id: string, over: { live?: boolean } = {}) =>
+    w.states.set(id, { kind: 'ready', live: over.live ?? true, quiet: over.live ?? true, auto: true })
+
+  it('a member’s word is told of without a turn and held for the person; the owner’s still wakes it', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    auto(w, 's2')
+    const { thread } = assign(w)
+    w.mail.addMember(thread.id, S1, S3)
+    await w.advance(3_000)
+    w.delivered.length = 0
+
+    const note = w.mail.post(thread.id, S3, { kind: 'note', body: 'a word from the side' })
+    await w.advance(40_000)
+    const toS2 = w.delivered.filter((d) => d.sessionId === 's2')
+    expect(toS2).toHaveLength(1)
+    expect(toS2[0]!.input.quiet).toBe(true)
+    expect(w.store.mail.receiptsOf(note.message.id).find((r) => r.recipient === S2)).toMatchObject({ held: 'policy', deliveredAt: expect.any(Number) })
+    expect(w.store.mail.heldReceipts().map((r) => r.messageId)).toContain(note.message.id)
+
+    // The owner's word is not held
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'from the owner' })
+    await w.advance(40_000)
+    const last = w.delivered.filter((d) => d.sessionId === 's2').at(-1)!
+    expect(last.input.quiet).toBe(false)
+  })
+
+  it('released by the person it goes as the mail it is: it wakes the session, and is not held again', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    auto(w, 's2')
+    const { thread } = assign(w)
+    w.mail.addMember(thread.id, S1, S3)
+    await w.advance(3_000)
+    const note = w.mail.post(thread.id, S3, { kind: 'question', body: 'a question from the side' })
+    await w.advance(40_000)
+    w.delivered.length = 0
+
+    expect(w.mail.resendHeld(S2, [note.message.id])).toBe(1)
+    await w.advance(40_000)
+    expect(w.delivered).toHaveLength(1)
+    expect(w.delivered[0]!.input.quiet).toBe(false)
+    expect(w.store.mail.receiptsOf(note.message.id).find((r) => r.recipient === S2)).toMatchObject({ held: 'released', deliveredAt: expect.any(Number) })
+    expect(w.store.mail.heldReceipts()).toEqual([])
+  })
+
+  it('a session asleep is not woken by it, and under safe or normal nothing is held', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    auto(w, 's2', { live: false })
+    const { thread } = assign(w)
+    w.mail.addMember(thread.id, S1, S3)
+    await w.advance(3_000)
+    w.delivered.length = 0
+    // The assign already woke it once; now it is asleep again and a member writes
+    w.mail.post(thread.id, S3, { kind: 'note', body: 'a word' })
+    await w.advance(5 * 60_000)
+    expect(w.delivered.filter((d) => d.sessionId === 's2')).toEqual([])
+    // And it is listed for the person, with Release, though nothing was told of: no wake is coming to carry it
+    expect(w.store.mail.heldReceipts().map((r) => [r.recipient, r.held])).toEqual([[S2, 'policy']])
+
+    const normal = world()
+    normal.delivery.start()
+    const later = assign(normal)
+    normal.mail.addMember(later.thread.id, S1, S3)
+    await normal.advance(3_000)
+    normal.mail.post(later.thread.id, S3, { kind: 'note', body: 'a word' })
+    await normal.advance(40_000)
+    expect(normal.delivered.filter((d) => d.sessionId === 's2').at(-1)!.input.quiet).toBe(false)
+    expect(normal.store.mail.heldReceipts()).toEqual([])
+    normal.delivery.stop()
   })
 })

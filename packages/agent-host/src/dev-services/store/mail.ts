@@ -702,7 +702,7 @@ export class MailRecords {
   attemptedUnconfirmed(): ReceiptRow[] {
     return this.db
       .prepare<[], ReceiptSql>(
-        `SELECT * FROM mail_receipts WHERE attempt_at IS NOT NULL AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND held IS NULL`,
+        `SELECT * FROM mail_receipts WHERE attempt_at IS NOT NULL AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
       )
       .all()
       .map(toReceipt)
@@ -722,14 +722,18 @@ export class MailRecords {
       .run(dueAt, recipient, JSON.stringify(messageIds))
   }
 
-  /** The person's answer to held mail: sent now, or never (`dismissed`). Only mail held for a reason that needs them */
+  /**
+   * The person's answer to held mail: sent now, or never (`dismissed`). Only mail held for a reason that needs them. Sent now,
+   * mail that was held back from waking a session (`policy`, `budget`) goes as the mail it is and is not held again (`released`)
+   */
   releaseHeld(recipient: string, messageIds: readonly string[], to: null | 'released' | 'dismissed', dueAt: number): number {
     return this.db
       .prepare(
-        `UPDATE mail_receipts SET held = ?, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?
+        `UPDATE mail_receipts SET delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
+               held = CASE WHEN ? IS NULL AND held IN ('policy', 'budget') THEN 'released' ELSE ? END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?
           WHERE recipient = ? AND held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') AND message_id IN (SELECT value FROM json_each(?))`,
       )
-      .run(to, dueAt, recipient, JSON.stringify(messageIds)).changes
+      .run(to, to, dueAt, recipient, JSON.stringify(messageIds)).changes
   }
 
   /** Receipts the Inbox lists for a person to act on: held for a reason that needs them (§7.6, §7.7, §7.9) */
