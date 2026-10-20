@@ -45,7 +45,9 @@ export type MachinesSlice = {
    * (docs/plans/remote-hub.md §10.5). True when it was done; a refusal or failure is a toast in the
    * host's words (an update that did not take says which version runs there now)
    */
-  changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): Promise<boolean>
+  changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall', when?: 'idle' | 'now'): Promise<boolean>
+  /** Ends an update's wait for the sessions on a machine to finish (#1399); a refusal is a toast */
+  cancelMachineUpdate: (machineId: string) => Promise<void>
   /** Starts a machine's host at boot, or stops doing that (plan §10.4); false (with a toast) when it was refused */
   setMachineAutostart(machineId: string, on: boolean): Promise<boolean>
   /** Lets a machine's sessions ask this computer's projects, or stops it (#550); false (with a toast) when it was refused */

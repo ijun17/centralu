@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MACHINE_CHANGE, type MachineInfo, type MachineProbe, type ToolName } from '@cc/protocol'
+import { MACHINE_CHANGE, type HostActivity, type MachineInfo, type MachineProbe, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -61,6 +61,8 @@ function fakeOps() {
   let refusal: string | null = null
   /** Why the hub starts no host on the first machine just now (#1143), or null */
   let heldBack: string | null = null
+  /** What the machines report as running (#1399): nothing, until a test says so */
+  let activity: HostActivity | null = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
@@ -96,10 +98,11 @@ function fakeOps() {
       calls.push(['install', id])
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
-    update: async (id) => {
-      calls.push(['update', id])
+    update: async (id, opts) => {
+      calls.push(opts?.when ? ['update', id, opts.when] : ['update', id])
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
+    activity: async () => activity,
     autostart: async (id, on) => {
       calls.push(['autostart', id, on])
       return { machine: find(id), autostart: { on: on === true, how: 'task', linger: null } }
@@ -121,6 +124,9 @@ function fakeOps() {
     patch: (over: Partial<MachineInfo>) => void Object.assign(machines[0]!, over),
     holdBack: (why: string | null) => {
       heldBack = why
+    },
+    running: (a: Partial<HostActivity> | null) => {
+      activity = a && { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0, ...a }
     },
     /** The calls that changed something, leaving out the reads and the pre-checks */
     changes: () => calls.filter((c) => !['resolve', 'probe', 'installRefusal'].includes(c[0] as string)),
@@ -278,12 +284,42 @@ describe('install_machine', () => {
     expect(install.r.text).toContain('Installed Centralu 9.9.9-test.1 on Laptop.')
     const update = await answered(orc.id, 'install_machine', { machine: 'Laptop', action: 'update' }, 'allow')
     expect(update.question).toContain('stops the Centralu there')
-    expect(update.question).toContain('a turn in progress is lost')
+    expect(update.question).toContain('no turn is running there now, and if one starts the update waits for it')
     expect(update.r.text).toContain('Updated to Centralu 9.9.9-test.1 on Laptop.')
+    // Always when idle: the orchestrator never stops a turn (#1399)
     expect(ops.changes()).toEqual([
       ['install', 'laptop'],
-      ['update', 'laptop'],
+      ['update', 'laptop', 'idle'],
     ])
+  })
+
+  // #1399: an update of a machine with sessions in a turn never stops them on an orchestrator's say
+  it('names the turns running there on the update card, and what Allow means: update when idle, stopping nothing before', async () => {
+    ops.running({ working: 3, approvals: 1, terminals: 2 })
+    const orc = await mgr.orchestrator()
+    const update = await answered(orc.id, 'install_machine', { machine: 'Laptop', action: 'update' }, 'allow')
+    expect(update.question).toContain('when it is idle?')
+    expect(update.question).toContain('4 sessions are in a turn there')
+    expect(update.question).toContain('waits until they are done; it stops nothing before that')
+    expect(update.question).not.toContain('a turn in progress is lost')
+    expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
+  })
+
+  it('says one session is in a turn in the singular, and runs nothing on Deny', async () => {
+    ops.running({ background: 1 })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'deny')
+    expect(question).toContain('1 session is in a turn there')
+    expect(r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+  })
+
+  it('updates as before when the machine cannot say what runs there, and terminals alone are no turn', async () => {
+    ops.running(null)
+    const orc = await mgr.orchestrator()
+    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question).not.toContain('when it is idle?')
+    ops.running({ terminals: 3, commandRuns: 2 })
+    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question).not.toContain('when it is idle?')
   })
 
   it('runs nothing when the person denies it', async () => {

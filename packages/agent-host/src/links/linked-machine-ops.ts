@@ -1,4 +1,4 @@
-import { HostActivity, isNewerVersion, releaseOf } from '@cc/protocol'
+import { HostActivity, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
 import type { MachineAutostartResult, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult } from './install.js'
@@ -17,6 +17,9 @@ import { rpcError } from '../rpc-error.js'
  */
 
 const linkError = (message: string) => rpcError(message)
+
+/** How often an update that waits for the sessions there to finish reads what is running (#1399) */
+const ACTIVITY_POLL_MS = 15_000
 
 export class LinkedMachine extends LinkedMachineConnection {
   /** One install, update, rollback, uninstall or start-at-boot change at a time per machine (`begin`; the remote also holds `install.lock`) */
@@ -55,8 +58,12 @@ export class LinkedMachine extends LinkedMachineConnection {
     })
   }
 
-  /** `machines.update` (update.ts, plan §10.5): install beside, stop, switch, start, check, or put back */
-  async update(): Promise<MachineInstallResult> {
+  /**
+   * `machines.update` (update.ts, plan §10.5): install beside, wait until no turn runs there (`when: 'idle'`, the default, #1399),
+   * stop, switch, start, check, or put back. `when: 'now'`: no wait, the turns running are stopped and the answer says so.
+   * `signal`: ends the wait (an orchestrator's call that was cancelled)
+   */
+  async update(opts: { when?: 'idle' | 'now'; signal?: AbortSignal } = {}): Promise<MachineInstallResult> {
     const pick = await this.versionToInstall()
     // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
     // build put there from a commit (`<base>.local.N`, `pnpm remote-dev`, #1036) going back to its own release is no downgrade
@@ -66,6 +73,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     }
     return this.operate('update', pick.version, async (c, installer) => {
       if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
+      c.beforeStop = () => this.beforeStop(c, opts.when ?? 'idle', opts.signal)
       const r = await updateRemote(c, {
         version: pick.version,
         runtime: installer.runtime(),
@@ -76,6 +84,61 @@ export class LinkedMachine extends LinkedMachineConnection {
       const note = [pick.note, r.note].filter(Boolean).join(' ')
       return { ...this.installedNow(r), ...(note ? { note } : {}) }
     })
+  }
+
+  /** The update waits for the sessions there to finish; `cancelUpdate` and an orchestrator's cancelled call end the wait */
+  private idleWait: AbortController | null = null
+
+  /** `machines.cancelUpdate` (#1399): ends the wait for the sessions there; the update fails and nothing was switched */
+  cancelUpdate(): void {
+    this.idleWait?.abort(new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
+  }
+
+  /**
+   * Before the running host is stopped (#1399). `idle`: waits until no session there is in a turn, reading what is running
+   * every `ACTIVITY_POLL_MS` (the row says `wait_idle` meanwhile). A machine that cannot say what is running is not waited
+   * for when its link is up (a host from before `host.activity`), and is when the link is away (it may come back). `now`:
+   * stops at once, and the answer says how many turns that ended
+   */
+  private async beforeStop(c: HostControl, when: 'idle' | 'now', signal?: AbortSignal): Promise<string | null> {
+    if (when === 'now') {
+      const running = turnsRunning(await this.activity())
+      if (running === 0) return null
+      const note = `Updating stopped Centralu on ${this.name} with ${running} ${running === 1 ? 'session' : 'sessions'} in a turn; they resume on the new version, and a turn in progress was lost`
+      this.deps.log?.(`[links] ${this.name}: ${note}`)
+      return note
+    }
+    const wait = new AbortController()
+    this.idleWait = wait
+    const stop = () => wait.abort(signal?.reason ?? new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
+    if (signal?.aborted) stop()
+    signal?.addEventListener('abort', stop, { once: true })
+    try {
+      let said = false
+      for (;;) {
+        wait.signal.throwIfAborted()
+        const a = await this.activity()
+        const running = a ? turnsRunning(a) : this.reachable ? 0 : 1
+        if (running === 0) return null
+        if (!said) {
+          said = true
+          c.step('wait_idle')
+          this.deps.log?.(`[links] ${this.name}: the update waits for ${a ? `${running} ${running === 1 ? 'session' : 'sessions'} in a turn` : 'the link to come back'}`)
+        }
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(done, this.deps.activityPollMs ?? ACTIVITY_POLL_MS)
+          t.unref?.()
+          wait.signal.addEventListener('abort', done, { once: true })
+          function done() {
+            clearTimeout(t)
+            resolve()
+          }
+        })
+      }
+    } finally {
+      signal?.removeEventListener('abort', stop)
+      if (this.idleWait === wait) this.idleWait = null
+    }
   }
 
   /**

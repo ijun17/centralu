@@ -1,4 +1,4 @@
-import type { MachineInfo } from '@cc/protocol'
+import { errorMessage, type MachineInfo } from '@cc/protocol'
 import { isAway } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { omitKey } from './patch.js'
@@ -31,6 +31,7 @@ type MachineActions = Pick<
   | 'disconnectMachine'
   | 'setMachineAutoReconnect'
   | 'changeMachineInstall'
+  | 'cancelMachineUpdate'
   | 'setMachineAutostart'
   | 'setMachineAsks'
   | 'machineActivity'
@@ -109,16 +110,27 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     }
   },
 
-  async changeMachineInstall(machineId, kind) {
+  async changeMachineInstall(machineId, kind, when) {
     const port = get().platform!.machines
     try {
-      const r = await port[kind](machineId)
+      const r = kind === 'update' ? await port.update(machineId, when ? { when } : undefined) : await port[kind](machineId)
       set((s) => ({ machines: withAnswered(s.machines, r.machine) }))
       return true
     } catch (e) {
       const what = { install: 'Install', update: 'Update', rollback: 'Rollback', uninstall: 'Uninstall' }[kind]
       set({ toast: `${what} failed: ${(e as Error).message}` })
       return false
+    }
+  },
+
+  async cancelMachineUpdate(machineId) {
+    const machines = get().platform?.machines
+    if (!machines) return
+    try {
+      const m = await machines.cancelUpdate(machineId)
+      set((s) => ({ machines: withAnswered(s.machines, m) }))
+    } catch (e) {
+      set({ toast: `Could not cancel the update: ${errorMessage(e)}` })
     }
   },
 

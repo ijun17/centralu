@@ -359,6 +359,15 @@ export const HostActivity = z.object({
 })
 export type HostActivity = z.infer<typeof HostActivity>
 
+/**
+ * How many sessions of a host are in a turn or hold work that stopping it would end (#1399): working, waiting on an approval or
+ * a question, or running background work. Terminals and project commands are left out: they are kept open for hours, and an
+ * update that waited for them would wait for good. Null (the host cannot say) counts none
+ */
+export function turnsRunning(a: HostActivity | null | undefined): number {
+  return a ? a.working + a.approvals + a.questions + a.background : 0
+}
+
 /*
  * What a hub's orchestrator reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).
  * The machine answers with the orchestrator's own code, in its own terms (its ids, its project names), over the view

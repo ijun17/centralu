@@ -42,7 +42,13 @@ export interface MachinesPort {
    * the machine's `operation`. Update and rollback stop the host there, and with it its agents
    */
   install(machineId: string): Promise<MachineInstallResult>
-  update(machineId: string): Promise<MachineInstallResult>
+  /**
+   * `when` (#1399): `idle` (the default) installs beside and waits until no session there is in a turn before it stops the host,
+   * the row's operation saying `wait_idle` meanwhile; `now` stops it at once and the answer's `note` says what that ended
+   */
+  update(machineId: string, opts?: { when?: 'idle' | 'now' }): Promise<MachineInstallResult>
+  /** Ends an update's wait for the sessions there to finish; the update then fails saying so and nothing was switched (#1399) */
+  cancelUpdate(machineId: string): Promise<MachineInfo>
   rollback(machineId: string): Promise<MachineInstallResult>
   uninstall(machineId: string): Promise<MachineUninstallResult>
   /**

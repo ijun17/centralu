@@ -79,6 +79,8 @@ export type LinkDeps = {
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
+  /** For tests: how often an update that waits for the sessions there reads what is running (15 s when absent, #1399) */
+  activityPollMs?: number
   /** For tests: how long a call waits for an attempt to connect that is under way (60 s when absent, #1341) */
   attemptWaitMs?: number
   /** For tests: how long a link held at `versions_differ` waits before it looks at the versions again (60 s when absent) */

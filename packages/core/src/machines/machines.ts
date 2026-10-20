@@ -1,4 +1,4 @@
-import { releaseOf, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol'
+import { releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
@@ -237,11 +237,23 @@ export function updateStops(name: string, activity: HostActivity | null | undefi
   return `Updating stops Centralu on ${name} while it switches, and with it ${list}. ${after}`
 }
 
+/**
+ * What the "Update <machine>" prompt says when sessions there are in a turn (#1399): the update installs beside and waits for them,
+ * and stops nothing before they are done. Null when none is, or the machine cannot say (then `updateStops` words it)
+ */
+export function updateWaits(name: string, activity: HostActivity | null | undefined): string | null {
+  const n = turnsRunning(activity)
+  if (!activity || n === 0) return null
+  const them = n === 1 ? 'it is' : 'they are'
+  return `${count(n, 'session', 'sessions')} on ${name} ${n === 1 ? 'is' : 'are'} in a turn. Update installs beside Centralu there and waits until ${them} done; nothing is stopped before that. Then it stops Centralu there while it switches: its terminals and running commands end with it, and sessions resume on the new version.`
+}
+
 const STEP_TEXT: Record<string, string> = {
   preflight: 'checking the machine',
   registry: 'checking the packages',
   node: 'installing Node',
   centralu: 'installing Centralu',
+  wait_idle: 'waiting for its sessions to finish',
   stop: 'stopping Centralu there',
   switch: 'switching versions',
   start: 'starting Centralu there',

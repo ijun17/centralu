@@ -165,8 +165,15 @@ export class Links {
     return this.active(id).install()
   }
 
-  update(id: string): Promise<MachineInstallResult> {
-    return this.active(id).update()
+  update(id: string, opts: { when?: 'idle' | 'now'; signal?: AbortSignal } = {}): Promise<MachineInstallResult> {
+    return this.active(id).update(opts)
+  }
+
+  /** Ends an update's wait for the sessions there to finish (#1399) */
+  cancelUpdate(id: string): MachineInfo {
+    const m = this.need(id)
+    m.cancelUpdate()
+    return m.info()
   }
 
   rollback(id: string): Promise<MachineInstallResult> {

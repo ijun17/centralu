@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol'
-import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, logonNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
+import { asksRow, autostartRow, updateWaits, elevatedNote, hostStartNote, installNote, logonNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -63,6 +63,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const disconnect = useStore((s) => s.disconnectMachine)
   const remove = useStore((s) => s.removeMachine)
   const setToast = useStore((s) => s.setToast)
+  const cancelUpdate = useStore((s) => s.cancelMachineUpdate)
   const [confirming, setConfirming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const problem = machineProblem(m)
@@ -138,6 +139,14 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       {operation && (
         <p className="mt-1 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
           {operation}
+          {m.operation?.step === 'wait_idle' && (
+            <>
+              {' '}
+              <button type="button" className={linkButton} onClick={() => void cancelUpdate(m.id)} data-testid={`machine-update-cancel-${m.id}`}>
+                Cancel
+              </button>
+            </>
+          )}
         </p>
       )}
       {elevated && (
@@ -186,7 +195,7 @@ const linkButton = 'text-xs text-ink-faint hover:text-ink disabled:opacity-50'
  * own count of what is running, read when the question opens. Without a keeper on the remote its agents end; their
  * sessions resume on the version that starts.
  */
-function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; action: string; onCancel: () => void; onConfirm: () => void }) {
+function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; action: string; onCancel: () => void; onConfirm: (when?: 'idle' | 'now') => void }) {
   const machineActivity = useStore((s) => s.machineActivity)
   /*
    * Undefined while the machine is being asked. A failed question reads as an unknown answer (null), which the
@@ -194,17 +203,26 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
    */
   const asked = useLoad(() => machineActivity(m.id), [machineActivity, m.id])
   const activity: HostActivity | null | undefined = asked.error !== null ? null : asked.data
+  // An update with sessions in a turn there waits for them (#1399); stopping them is a second, plain choice
+  const waits = action === 'Update' && activity !== undefined ? updateWaits(m.name, activity) : null
   return (
-    <InlineConfirm
-      text={activity === undefined ? `Asking ${m.name} what is running…` : updateStops(m.name, activity).replace(/^Updating/, action)}
-      yesLabel={action}
-      busy={activity === undefined}
-      onYes={onConfirm}
-      onNo={onCancel}
-      testId={`machine-stop-confirm-${m.id}`}
-      yesTestId={`machine-stop-yes-${m.id}`}
-      textTestId={`machine-stop-text-${m.id}`}
-    />
+    <>
+      <InlineConfirm
+        text={activity === undefined ? `Asking ${m.name} what is running…` : (waits ?? updateStops(m.name, activity).replace(/^Updating/, action))}
+        yesLabel={waits ? 'Update when idle' : action}
+        busy={activity === undefined}
+        onYes={() => onConfirm(waits ? 'idle' : undefined)}
+        onNo={onCancel}
+        testId={`machine-stop-confirm-${m.id}`}
+        yesTestId={`machine-stop-yes-${m.id}`}
+        textTestId={`machine-stop-text-${m.id}`}
+      />
+      {waits && (
+        <button type="button" className={linkButton} onClick={() => onConfirm('now')} data-testid={`machine-stop-now-${m.id}`}>
+          Update now, stopping them
+        </button>
+      )}
+    </>
   )
 }
 
@@ -555,9 +573,9 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
           m={m}
           action="Update"
           onCancel={() => setConfirming(false)}
-          onConfirm={() => {
+          onConfirm={(when) => {
             setConfirming(false)
-            void change(m.id, 'update')
+            void change(m.id, 'update', when)
           }}
         />
       )}

@@ -1,4 +1,4 @@
-import { MACHINE_CHANGE, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
+import { MACHINE_CHANGE, turnsRunning, type HostActivity, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { trustedJsonText } from './tool-answers.js'
@@ -21,7 +21,10 @@ export type MachineOps = {
   startHeldBack(id: string): string | null
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
-  update(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  /** `when: 'idle'`: waits until no session there is in a turn before it stops the host (#1399); `signal` ends the wait */
+  update(id: string, opts?: { when?: 'idle' | 'now'; signal?: AbortSignal }): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  /** What would stop there if its host stopped now (`host.activity`); null when the machine cannot say */
+  activity(id: string): Promise<HostActivity | null>
   autostart(id: string, on?: boolean): Promise<{ machine: MachineInfo; autostart: { on: boolean; how: string | null; linger: boolean | null } }>
   /** Why an install or update would be refused before it starts, or null (`LinkedMachine.operationRefusal`) */
   installRefusal(id: string, kind: 'install' | 'update'): string | null
@@ -177,17 +180,26 @@ export class MachineFlow {
           const why = ops.installRefusal(m.id, req.action)
           if (why) return { ok: false, error: why }
           const version = m.versions?.hub.version ? `Centralu ${m.versions.hub.version}` : "this computer's Centralu"
+          /*
+           * An update never stops a turn that runs there on the orchestrator's say (#1399): with sessions in a turn the card says so
+           * and Allow means "update when idle" (the call waits, and ends if it is cancelled). Forcing it is the person's, from Settings
+           */
+          const running = req.action === 'update' ? turnsRunning(await ops.activity(m.id).catch(() => null)) : 0
           const refused = await this.ask(
             sessionId,
             req.action === 'install'
               ? `Install ${version} on ${m.name} (${m.sshTarget}, ${osOf(m)})? Over ssh it downloads Node and the npm packages there, checked against the ` +
                   "release's pins, beside what is installed. A Centralu running there keeps running until it next starts."
-              : `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version}? It installs beside the running one, stops the Centralu there (its agents end ` +
-                  'and resume on the new one; a turn in progress is lost), starts the new one, and puts the old one back if it does not answer in 30 s.',
+              : running > 0
+                ? `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version} when it is idle? ${running} ${running === 1 ? 'session is' : 'sessions are'} in a turn there, so the update ` +
+                  'installs beside the running Centralu and waits until they are done; it stops nothing before that, and this call waits too. Then it stops the Centralu there ' +
+                  '(its agents end and resume on the new one), starts the new one, and puts the old one back if it does not answer in 30 s.'
+                : `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version}? It installs beside the running one, stops the Centralu there (its agents end ` +
+                  'and resume on the new one; no turn is running there now, and if one starts the update waits for it), starts the new one, and puts the old one back if it does not answer in 30 s.',
             signal,
           )
           if (refused) return { ok: false, error: refused }
-          const r = req.action === 'install' ? await ops.install(m.id) : await ops.update(m.id)
+          const r = req.action === 'install' ? await ops.install(m.id) : await ops.update(m.id, { when: 'idle', signal })
           return done(`${req.action === 'install' ? 'Installed' : 'Updated to'} Centralu ${r.current.version} on ${m.name}.${r.note ? ` ${r.note}` : ''}`, r.machine)
         }
         case 'autostart': {

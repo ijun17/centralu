@@ -8,6 +8,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   ApprovalDetail,
+  turnsRunning,
+  type HostActivity,
   ProjectInfo,
   CENTRALU_APPLY,
   isUnknownCard,
@@ -754,5 +756,16 @@ describe('ProjectInfo.fromUserFolder (#1301)', () => {
   it('is absent from a host before it, which a window reads as an ordinary project, and may be true', () => {
     expect(ProjectInfo.parse(base).fromUserFolder).toBeUndefined()
     expect(ProjectInfo.parse({ ...base, fromUserFolder: true }).fromUserFolder).toBe(true)
+  })
+})
+
+// #1399: what an update waits for
+describe('turnsRunning', () => {
+  const act = (o: Partial<HostActivity>): HostActivity => ({ working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0, ...o })
+  it('counts sessions in a turn or holding work a stop would end, and not terminals or project commands', () => {
+    expect(turnsRunning(act({ working: 2, approvals: 1, questions: 1, background: 3 }))).toBe(7)
+    expect(turnsRunning(act({ terminals: 5, commandRuns: 2 }))).toBe(0)
+    expect(turnsRunning(null)).toBe(0)
+    expect(turnsRunning(undefined)).toBe(0)
   })
 })

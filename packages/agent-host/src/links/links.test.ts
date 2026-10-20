@@ -1289,11 +1289,12 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
   }
 
-  async function setup(o: { startsVersion: string }) {
+  async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean }) {
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
-    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
-    let running = await remoteHost(0, new Store(), { version: '0.0.1', activity: () => activity })
+    const activity: HostActivity = { working: o.busy === false ? 0 : 2, approvals: o.busy === false ? 0 : 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
+    const idle = () => Object.assign(activity, { working: 0, approvals: 0, questions: 0, background: 0 })
+    let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: () => activity }) })
     let line = lineFor(running.port, { version: '0.0.1' })
     const runs: string[] = []
     const old = { version: '0.0.1', node: NODE }
@@ -1347,17 +1348,17 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       { exec, startHost },
     )
     const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
-    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500 })
+    hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500, activityPollMs: 50 })
     const u = await ui(hub.port)
     // An older remote on one protocol connects (#689); the update is offered, not required
     await eventually(() => status(hub!) === 'connected')
-    return { hub, u, runs, activity, setStarts: (v: string) => (starts = v) }
+    return { hub, u, runs, activity, idle, setStarts: (v: string) => (starts = v) }
   }
 
   it('rolls back to the version before, which is older than this hub, and checks it by its connection line (measured 2026-10-11)', async () => {
     // A rolled-back host is older than the hub, so the link does not open to it (plan §4) and no hello
     // comes: on a real Windows PC every rollback timed out and put the newer version back
-    const { hub, u, setStarts } = await setup({ startsVersion: APP_VERSION })
+    const { hub, u, setStarts } = await setup({ startsVersion: APP_VERSION, busy: false })
     await u.call('machines.update', { machineId: 'm1' })
     await eventually(() => status(hub) === 'connected')
     setStarts('0.0.1')
@@ -1367,10 +1368,12 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
-    const { hub, u, runs, activity } = await setup({ startsVersion: APP_VERSION })
+    const { hub, u, runs, activity, idle } = await setup({ startsVersion: APP_VERSION })
     // The prompt's question, asked of the remote over a connection of its own while the link waits on versions
     expect(await u.call('machines.activity', { machineId: 'm1' })).toEqual({ activity })
     expect(hub.links.list()[0]!.install).toBeNull()
+    // Nothing is in a turn by the time the person updates (with turns running the update waits, below)
+    idle()
     const r = await u.call('machines.update', { machineId: 'm1' })
     expect(r).toMatchObject({ current: { version: APP_VERSION }, previous: { version: '0.0.1' }, machine: { install: { managed: true, current: { version: APP_VERSION } } } })
     // The row as it is after the operation, not mid-way: it said `updating` with the last step (#482)
@@ -1391,13 +1394,164 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   })
 
   it('puts the old version back when the host that answers is not the new one, and says so', async () => {
-    const { hub, u, runs } = await setup({ startsVersion: '0.0.9' })
+    const { hub, u, runs } = await setup({ startsVersion: '0.0.9', busy: false })
     await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(
       /Centralu .* did not start on box \(it did not answer within 30 s\); it runs Centralu 0\.0\.1 again\. The end of its host\.log: host: the store was written by a newer Centralu/,
     )
     expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
     // Back on the old version, the prompt is there again
     await eventually(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
+  })
+})
+
+/*
+ * #1399: the hub updated a linked machine while four turns ran there, and each ended with "Centralu quit or restarted". A remote has no
+ * keeper to hand agents over, so the update installs beside, waits until no session there is in a turn, and only then stops the host. The
+ * person can stop the wait (cancel) or choose to stop the turns (now), which the answer says.
+ */
+describe('machines.update waits for the sessions there to finish (#1399)', () => {
+  const NODE = '24.21.0'
+  const classifyUpdate = (cmd: string): string => {
+    if (cmd.includes('serve --stop')) return 'stop'
+    const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
+    const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+    if (script.includes('CENTRALU-PREFLIGHT')) return 'preflight'
+    if (script.includes('say node ok')) return 'node'
+    if (script.includes('host.log')) return 'tail'
+    const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
+    const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
+    return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
+  }
+
+  /** A hub with a remote whose sessions are in a turn (`activity`, changed by the test), recording what ran there */
+  async function waiting(o: { noActivity?: boolean } = {}) {
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
+    let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: () => activity }) })
+    let line = lineFor(running.port, { version: '0.0.1' })
+    const runs: string[] = []
+    const old = { version: '0.0.1', node: NODE }
+    const next = { version: APP_VERSION, node: NODE }
+    const done = (x: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(x)}\n`
+    const exec = async (cmd: string) => {
+      const kind = classifyUpdate(cmd)
+      runs.push(kind)
+      const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
+      switch (kind) {
+        case 'preflight':
+          return out('CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n')
+        case 'node':
+          return out('CENTRALU-INSTALL node ok\n')
+        case 'install_beside':
+          return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
+        case 'stop':
+          await running.close()
+          line = { ...line, hostRunning: false }
+          return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
+        case 'pointers':
+          return out(done({ current: next, previous: old }))
+        case 'prune':
+          return out(done({ current: next, previous: old, removed: [], left: [] }))
+        default:
+          return out('')
+      }
+    }
+    const startHost = async (): Promise<HostStart> => {
+      runs.push('start')
+      running = await remoteHost(0, new Store(), { version: APP_VERSION })
+      line = { ...lineFor(running.port, { version: APP_VERSION }), install: { managed: true, current: next, previous: old, node: NODE } }
+      return { how: 'detached', note: null }
+    }
+    const tunnel = Object.assign(new DirectTunnel(() => line), { exec, startHost })
+    const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
+    const hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500, activityPollMs: 40 })
+    const u = await ui(hub.port)
+    await eventually(() => status(hub) === 'connected')
+    const idle = () => Object.assign(activity, { working: 0, approvals: 0, questions: 0, background: 0 })
+    const stepsSeen = () =>
+      u
+        .events()
+        .filter((e) => e.type === 'machine_status' && e.machine.operation)
+        .map((e) => e.machine.operation.step as string)
+    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open') }
+  }
+
+  it('installs beside, then waits while sessions are in a turn, and stops the host only once none is', async () => {
+    const { hub, u, ran, idle, stepsSeen } = await waiting()
+    const call = u.call('machines.update', { machineId: 'm1' })
+    await eventually(() => stepsSeen().includes('wait_idle'))
+    // Long enough for several readings of what runs there: the host is still not stopped
+    await new Promise((r) => setTimeout(r, 400))
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
+    expect(hub.links.list()[0]!.operation?.step).toBe('wait_idle')
+    idle()
+    const r = await call
+    expect(r).toMatchObject({ current: { version: APP_VERSION } })
+    expect(r.note).toBeUndefined()
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+  })
+
+  it('waits when no `when` is sent, as an older window means: it never stopped turns on purpose', async () => {
+    const { u, ran, idle, stepsSeen } = await waiting()
+    const call = u.call('machines.update', { machineId: 'm1' })
+    await eventually(() => stepsSeen().includes('wait_idle'))
+    expect(ran()).not.toContain('stop')
+    idle()
+    await call
+    expect(ran()).toContain('stop')
+  })
+
+  it('updates at once when nothing is in a turn there, without a wait step', async () => {
+    const { u, ran, idle, stepsSeen } = await waiting()
+    idle()
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+    expect(stepsSeen()).not.toContain('wait_idle')
+  })
+
+  it('does not wait for terminals and running commands, which stay open for hours', async () => {
+    const { u, ran, idle, activity } = await waiting()
+    idle()
+    Object.assign(activity, { terminals: 3, commandRuns: 2 })
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+  })
+
+  it('can be cancelled while it waits: nothing is switched, the machine is not busy any more, and a later update goes through', async () => {
+    const { hub, u, ran, idle, stepsSeen } = await waiting()
+    const call = u.call('machines.update', { machineId: 'm1' })
+    const failed = expect(call).rejects.toThrow(/was cancelled while it waited for the sessions there to finish; nothing was switched/)
+    await eventually(() => stepsSeen().includes('wait_idle'))
+    await u.call('machines.cancelUpdate', { machineId: 'm1' })
+    await failed
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
+    expect(hub.links.list()[0]!.operation).toBeNull()
+    await eventually(() => status(hub) === 'connected')
+    idle()
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+  })
+
+  it('stops the turns at once when the person chose it, and says how many it ended', async () => {
+    const { u, ran, stepsSeen } = await waiting()
+    const r = await u.call('machines.update', { machineId: 'm1', when: 'now' })
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+    expect(stepsSeen()).not.toContain('wait_idle')
+    expect(r.note).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; they resume on the new version, and a turn in progress was lost/)
+  })
+
+  it('a forced update of a machine with nothing in a turn says nothing was stopped', async () => {
+    const { u, idle } = await waiting()
+    idle()
+    expect((await u.call('machines.update', { machineId: 'm1', when: 'now' })).note).toBeUndefined()
+  })
+
+  it('does not wait for a host that cannot say what runs (from before host.activity), as before', async () => {
+    const { u, ran, stepsSeen } = await waiting({ noActivity: true })
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+    expect(stepsSeen()).not.toContain('wait_idle')
   })
 })
 
