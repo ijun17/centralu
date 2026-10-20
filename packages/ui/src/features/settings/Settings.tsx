@@ -26,13 +26,14 @@ import {
   AppIcon,
   BackgroundIcon,
   BellIcon,
+  BranchIcon,
   ContrastIcon,
   CrownIcon,
   MonitorIcon,
   ShieldIcon,
   TrashIcon,
 } from '../../components/icons.jsx'
-import { SettingsCard, SettingsDisclosure, SettingsEmpty, SettingsGroup, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
+import { SettingsCard, SettingsEmpty, SettingsGroup, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 import { TrashSection } from './TrashSection.jsx'
 import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { SettingToggle } from './SettingToggle.jsx'
@@ -113,6 +114,12 @@ const CATEGORIES = [
    * a promise that had gone unkept until now.
    */
   { id: 'orchestrator', label: 'Orchestrator', Icon: CrownIcon },
+  /*
+   * How the agents any session starts behave: how many run per project, how deep they may start their own, which model
+   * each difficulty runs. Its own category (owner, 2026-10-20): these apply to every session, not to the orchestrator,
+   * and folded under the orchestrator they read as its settings.
+   */
+  { id: 'agents', label: 'Agents', Icon: BranchIcon },
   // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
   { id: 'apps', label: 'Apps', Icon: AppIcon },
   { id: 'notifications', label: 'Notifications', Icon: BellIcon },
@@ -256,6 +263,7 @@ export function Settings() {
           */}
           <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-6" data-testid="settings-pane">
             {category === 'orchestrator' && <OrchestratorSettings />}
+            {category === 'agents' && <AgentLimits />}
             {category === 'apps' && <AppsSettings />}
             {/* E-5 notification policy */}
             {category === 'notifications' && (
@@ -740,8 +748,6 @@ function OrchestratorSettings() {
 
       <OrchestratorSkills />
 
-      <AgentLimits />
-
       {asking && (
         <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
           <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4">
@@ -792,9 +798,8 @@ function OrchestratorSettings() {
 }
 
 /**
- * How the agents a session starts behave: how many may run per project, how deep they may start agents of their own,
- * and which model each difficulty runs (#867, #729). Folded under "Advanced" (owner, 2026-10-20): the defaults serve
- * nearly everyone, and the page should open on the one choice people come here for, the orchestrator's agent.
+ * Settings → Agents: how the agents a session starts behave, for every session (the orchestrator's included): how many
+ * may run per project, how deep they may start agents of their own, and which model each difficulty runs (#867, #729).
  *
  * "Let sessions look at other sessions" (#320) used to stand here too. It is always on now and the host holds it so,
  * so the switch is gone rather than shown fixed.
@@ -805,8 +810,11 @@ function AgentLimits() {
   const depth = useStore((s) => agentDepthOf(s.prefs))
   const setPrefs = useStore((s) => s.setPrefs)
   return (
-    <SettingsDisclosure title="Advanced" hint="Agent limits and models" testId="settings-orchestrator-advanced">
-      <SettingsGroup title="Agents a session starts">
+    <SettingsPage
+      title="Agents"
+      lead="How the agents a session starts behave, for every session, the orchestrator's included."
+    >
+      <SettingsGroup title="Limits">
         <SettingsRow
           label={<label htmlFor="settings-agent-ceiling">Running agents per project</label>}
           hint="Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited."
@@ -853,7 +861,7 @@ function AgentLimits() {
         />
       </SettingsGroup>
       <AgentModelsSection />
-    </SettingsDisclosure>
+    </SettingsPage>
   )
 }
 
