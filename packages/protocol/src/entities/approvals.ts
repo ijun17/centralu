@@ -247,7 +247,8 @@ const quoted = (v: unknown, max = 500): string => {
   // text is written as JSON, also one line
   return typeof v === 'string' ? JSON.stringify(cut(v)) : cut(JSON.stringify(v) ?? String(v))
 }
-const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !== null ? trimmed((v as Record<string, unknown>).name) : undefined)
+const isObject = (v: unknown): v is Record<PropertyKey, unknown> => typeof v === 'object' && v !== null
+const nameOf = (v: unknown): string | undefined => (isObject(v) ? trimmed(v.name) : undefined)
 
 /**
  * A card this build could not read, as the `other` card that says what it can of it (#844). In this order, so the person
@@ -256,7 +257,7 @@ const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !
  * question is often the asking agent's words, not Centralu's), and last a line on why it says so little.
  */
 function unknownApprovalCard(raw: unknown): ApprovalDetail {
-  const card = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const card: Record<PropertyKey, unknown> = isObject(raw) ? raw : {}
   const kind = trimmed(card.kind)?.slice(0, 60)
   const branch = kind ? ApprovalDetailKinds.options.find((o) => o.shape.kind.value === kind) : undefined
   const lines: string[] = []
@@ -266,7 +267,7 @@ function unknownApprovalCard(raw: unknown): ApprovalDetail {
     problems = (parsed.error?.issues ?? [])
       .slice(0, 3)
       .map((issue) => {
-        const value = issue.path.reduce<unknown>((at, key) => (typeof at === 'object' && at !== null ? (at as Record<PropertyKey, unknown>)[key as PropertyKey] : undefined), raw)
+        const value = issue.path.reduce<unknown>((at, key) => (isObject(at) ? at[key] : undefined), raw)
         return `${issue.path.join('.') || 'the card'}: ${value === undefined ? 'missing' : quoted(value, 60)}`
       })
       .join(', ')

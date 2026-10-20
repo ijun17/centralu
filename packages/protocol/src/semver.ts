@@ -102,5 +102,5 @@ export function releaseOf(v: string): string {
  * `centralu install` applies the same rule by itself, and pinned to it by `tooling/launcher-semver.test.ts`.
  */
 export function keepsInstalledCopy(target: string, copyVersion: string | null | undefined): boolean {
-  return isLocalBuildVersion(copyVersion) && isNewerVersion(copyVersion as string, target)
+  return typeof copyVersion === 'string' && isLocalBuildVersion(copyVersion) && isNewerVersion(copyVersion, target)
 }

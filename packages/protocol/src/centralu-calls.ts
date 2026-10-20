@@ -9,7 +9,8 @@ import type { ToolSummary } from './entities/sessions.js'
 /** A Claude tool name's server and tool (`mcp__<server>__<tool>`); null for a tool that is not an MCP server's */
 export function mcpNameParts(name: string): { server: string; tool: string } | null {
   const m = /^mcp__([^_]+(?:_(?!_)[^_]*)*)__(.+)$/.exec(name)
-  return m ? { server: m[1]!, tool: m[2]! } : null
+  const [, server, tool] = m ?? []
+  return server !== undefined && tool !== undefined ? { server, tool } : null
 }
 
 /**
@@ -40,7 +41,7 @@ export function centraluCallOf(s: Pick<ToolSummary, 'tool' | 'centralu'>): NonNu
 export function centraluCallLabel(c: NonNullable<ToolSummary['centralu']>, appName?: string): string {
   if (c.label) return c.label
   const words = c.tool.replace(/[_-]+/g, ' ').trim()
-  const tool = words ? words[0]!.toUpperCase() + words.slice(1) : c.tool
+  const tool = words ? words.charAt(0).toUpperCase() + words.slice(1) : c.tool
   return c.app ? `${appName ?? c.app}: ${words || c.tool}` : tool
 }
 

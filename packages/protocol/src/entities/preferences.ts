@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isRecord } from '../tolerant.js'
 import { AgentModels } from './tools.js'
 
 /**
@@ -38,7 +39,7 @@ export function nearestTextSize(value: number): number {
  */
 export function textSizeFromLegacyStep(step: unknown): number | null {
   if (typeof step !== 'number' || !Number.isFinite(step)) return null
-  return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, Math.round(step)))]!
+  return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, Math.round(step)))] ?? null
 }
 
 export type NotifyPolicy = {
@@ -87,12 +88,14 @@ export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
  * build does not know are dropped: the screen rewrites the snapshot whole on its next change, so a
  * newer build's extra switch falls back to its own default there.
  */
+const isNotifyPolicyKey = (key: string): key is keyof NotifyPolicy => key in DEFAULT_NOTIFY_POLICY
+
 export function readNotifyPolicy(raw: unknown): NotifyPolicy {
   const out = { ...DEFAULT_NOTIFY_POLICY }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
-  for (const key of Object.keys(out) as (keyof NotifyPolicy)[]) {
-    const v = (raw as Record<string, unknown>)[key]
-    if (typeof v === 'boolean') out[key] = v
+  if (!isRecord(raw)) return out
+  for (const key of Object.keys(out)) {
+    const v = raw[key]
+    if (typeof v === 'boolean' && isNotifyPolicyKey(key)) out[key] = v
   }
   return out
 }
@@ -270,17 +273,17 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
  */
 export function parseUiPreferences(raw: unknown): UiPreferences {
   const out: UiPreferences = { ...DEFAULT_UI_PREFERENCES }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
-  const record = raw as Record<string, unknown>
+  if (!isRecord(raw)) return out
+  const record = raw
   /*
    * **Field by field.** Parsing the record as a whole meant one bad field (a theme id an
    * older build wrote differently, say) threw away every other preference with it. Each field
    * falls back on its own.
    */
-  for (const key of Object.keys(UiPreferences.shape) as (keyof UiPreferences)[]) {
+  for (const [key, field] of Object.entries(UiPreferences.shape)) {
     if (!(key in record)) continue
-    const parsed = UiPreferences.shape[key].safeParse(record[key])
-    if (parsed.success) (out as Record<string, unknown>)[key] = parsed.data
+    const parsed = field.safeParse(record[key])
+    if (parsed.success) Object.assign(out, { [key]: parsed.data })
   }
   return out
 }

@@ -24,7 +24,7 @@ import { isNewerVersion } from './semver.js'
  */
 export function parseCliVersion(text: string): string | null {
   const m = /(?:^|[^\d.])(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(text)
-  return m ? m[1]! : null
+  return m?.[1] ?? null
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { StoredMessage } from './commands.js'
+import { isRecord } from './tolerant.js'
 import type { NormalizedEvent, SubagentStep } from './events.js'
 
 /**
@@ -44,7 +45,7 @@ export function continuesStreamRow(open: OpenStreamRow | undefined, e: Normalize
   const kind = streamRowKind(e)
   if (!open || !kind || open.kind !== kind) return false
   const messageId = e.type === 'message_delta' ? e.messageId : undefined
-  const openId = (open.payload as { messageId?: unknown } | null)?.messageId
+  const openId = isRecord(open.payload) ? open.payload.messageId : undefined
   return !(messageId && typeof openId === 'string' && openId !== messageId)
 }
 
