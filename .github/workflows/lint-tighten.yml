@@ -1,0 +1,69 @@
+# Lowers the type-aware lint's allowlists to what the files hold, once a week (#1339).
+#
+# A line above what its file holds, or for a file that is gone, is not a lint failure
+# (tooling/lint-allowlist.ts `lintFailed`): two changes that each fix one finding of a file
+# would otherwise fail together in a queue batch, and a change that only fixes things would have
+# to edit a list. No change can raise such a line again (tooling/type-aware-lint.test.ts compares
+# the lists with main's), so a stale line lends nothing; this job only keeps the lists true.
+# When `pnpm lint:tighten` changes a list, it opens a pull request with that change and nothing
+# else. A pull request a workflow opens with its own token runs no workflows itself, so whoever
+# queues it starts its CI (an empty commit, or `gh workflow run build.yml --ref <branch>`).
+name: lint tighten
+
+on:
+  schedule:
+    # Monday 20:41 UTC, off the hour (GitHub's high-load times), before drift.yml's run
+    - cron: '41 20 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: lint-tighten
+  cancel-in-progress: false
+
+jobs:
+  tighten:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Lowers the lines whatever else the lint finds: a finding on main is the queue's to answer,
+      # and is said in this step's log, not hidden by it
+      - name: Lower the lists
+        run: pnpm lint:tighten || echo "pnpm lint:tighten reported findings; the lists were lowered anyway"
+
+      - name: Open a pull request when a line went down
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- tooling/lint-allowlist; then
+            echo "Every line holds what its file holds; nothing to open."
+            exit 0
+          fi
+          branch="lint-tighten/$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add tooling/lint-allowlist
+          git commit -m 'chore(lint): lower the lint allowlists to what the files hold' -m 'Refs: #1339'
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title 'chore(lint): lower the lint allowlists to what the files hold' \
+            --body "$(printf '%s\n' \
+              '## Why' '' 'The weekly `pnpm lint:tighten` (.github/workflows/lint-tighten.yml, #1339): lines that listed more findings than their files hold, or files that are gone.' '' \
+              '## What changed' '' 'Only `tooling/lint-allowlist/*.txt`, lowered or removed; nothing raised or added.' '' \
+              '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Its CI does not start by itself (a workflow's own token): start it when queueing." '' \
+              '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the lint run above.' '' '## Closes' '' 'Refs #1339')"

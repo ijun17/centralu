@@ -6,9 +6,11 @@
  * per file in tooling/lint-allowlist/, and `pnpm lint` holds each file to its count (tooling/lint-allowlist.ts).
  *
  * What this adds, each a way around those counts that the #1343 review found open:
- *   - the lists against main's, line by line: a line may be new or higher only as a move (its rule's total did not
- *     grow), so a hand-written line or a regenerated list cannot list new findings; CI's verify job gives it main's
- *     history (and fails without it), elsewhere it says when it could not compare;
+ *   - the lists against main's, line by line: no line may be new or higher but a file's own lines under the new
+ *     path git sees it renamed to, so a hand-written line, a regenerated list or a count freed elsewhere cannot list
+ *     a new finding; CI's verify job gives it main's history (and fails without it), elsewhere it says when it could
+ *     not compare;
+ *   - the weekly job that lowers stale lines (a line above its file is not a lint failure, see `lintFailed`);
  *   - no `eslint-disable` of a type-aware rule, and no comment that turns one off, anywhere they run;
  *   - every `as T` in shipped code counted (ASSERTIONS), the safe widening ones included, which no rule reports;
  *   - ESLint's threads capped, since each builds the whole program.
@@ -18,15 +20,15 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { ALLOWLIST_DIR, LISTABLE_RULES, compareWithBase, eslintOptions, formatList, mainLists, packageOf, parseList, readAllowlist } from './lint-allowlist.js'
+import { ALLOWLIST_DIR, LISTABLE_RULES, compareWithBase, eslintOptions, formatList, mainLists, packageOf, parseList, readAllowlist, renamesSince } from './lint-allowlist.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * Rules this change turned on, whose findings it lists for the first time (`pnpm exec tsx tooling/lint.ts
- * --record-all`), each with why. Main's lists cannot hold them yet, so their totals are not held to main's in that
- * one change; the next change takes its rule out of here again.
+ * --record-all`), each with why. Main's lists cannot hold them yet, so their lines are not compared with main's in
+ * that one change; the next change takes its rule out of here again.
  */
 const TURNED_ON: Record<string, string> = {}
 
@@ -163,7 +165,7 @@ describe('type-aware lint (#1339)', () => {
   })
 
   it(
-    "lists no more of any rule than main's lists do: a new or higher line only as a move",
+    "lists nothing main's lists do not: no new or higher line but a renamed file's own",
     () => {
       const main = mainLists(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
       if (main.kind === 'before-lists') {
@@ -176,16 +178,26 @@ describe('type-aware lint (#1339)', () => {
         console.warn(`type-aware-lint.test.ts: not compared with main's lists (${main.why})`)
         return
       }
-      const { raised, grown } = compareWithBase(main.lists, readAllowlist(ROOT))
-    const growing = grown.filter((g) => !Object.keys(TURNED_ON).some((rule) => g.startsWith(`${rule}:`)))
+      const renames = renamesSince(ROOT, main.base)
+      expect(renames, `the renames since ${main.base}`).not.toBeNull()
+      const raised = compareWithBase(main.lists, readAllowlist(ROOT), renames ?? []).filter((line) => !Object.keys(TURNED_ON).some((rule) => line.includes(` ${rule} `)))
       expect(
-        growing,
-        `${ALLOWLIST_DIR}/ lists more than main for these rules. Fix the new findings instead; moved code keeps its count ` +
-          `(\`pnpm lint:tighten\`). New or higher lines:\n${raised.join('\n')}`,
+        raised,
+        `${ALLOWLIST_DIR}/ lists more than main's lists: fix the new findings instead. Only a file git sees renamed takes ` +
+          'its lines along (`pnpm lint:tighten`); code moved into another file is a new finding there.',
       ).toEqual([])
     },
     60_000 * SLOW,
   )
+
+  it('has a weekly job lower stale lines in a pull request of their own', () => {
+    // A line above its file is not a lint failure (lintFailed), so something has to lower it
+    const job = readFileSync(join(ROOT, '.github/workflows/lint-tighten.yml'), 'utf8')
+    expect(job).toMatch(/schedule:\s*\n(\s*#.*\n)*\s*- cron:/)
+    expect(job).toMatch(/run: pnpm lint:tighten/)
+    expect(job).toMatch(/git add tooling\/lint-allowlist\n/)
+    expect(job).toMatch(/gh pr create --base main/)
+  })
 
   it("is given main's history and made to compare in CI's verify job", () => {
     const job = verifyJob()

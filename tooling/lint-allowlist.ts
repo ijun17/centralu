@@ -1,16 +1,16 @@
 /**
  * The findings of the type-aware lint (#1339) that predate it, one list per package in tooling/lint-allowlist/.
  *
- * Each line says how many findings of one rule a file holds: `<file> <rule> <count>`, sorted. A file that holds
- * more fails `pnpm lint` with all of them shown, as does any finding in a file or rule no line names. One that
- * holds fewer fails too, until `pnpm lint:tighten` lowers its line: a count left above what its file holds would
- * let the next change add a finding there unseen (#1343 review). A list per package keeps two changes from editing
- * the same file unless they work on the same package.
+ * Each line says how many findings of one rule a file may hold: `<file> <rule> <count>`, sorted. A file that holds
+ * more fails `pnpm lint` with all of them shown, as does any finding in a file or rule no line names. A file that
+ * holds fewer, or a line whose file is gone, passes (`lintFailed` says why); `pnpm lint:tighten` and a weekly job
+ * lower such lines. A list per package keeps two changes from editing the same file unless they work on the same
+ * package.
  *
- * `pnpm lint:tighten` lowers the lines to what the files hold, and lists what moved: a finding over or outside the
- * lists takes what the same rule gave up elsewhere in that run (code moved to another file, a file renamed), never
- * more, and says so. tooling/type-aware-lint.test.ts holds every rule's total to main's lists (`mainLists`), so no
- * change can list more than main had, by hand or by command.
+ * A count moves only with a file git sees renamed (`tighten`, `alongRenames`); code moved into another file is a new
+ * finding there. tooling/type-aware-lint.test.ts compares the lists with main's (`mainLists`, `compareWithBase`):
+ * no line may be new or higher but a renamed file's own, so no change can list a new finding, by hand or by command,
+ * and a stale line cannot lend its count to anything.
  *
  * This module is the logic; tooling/lint.ts runs ESLint with it.
  */
@@ -211,68 +211,102 @@ function recount(result: ESLint.LintResult): void {
 
 const byKey = <T>([a]: [string, T], [b]: [string, T]) => (a < b ? -1 : a > b ? 1 : 0)
 
-export type Move = { file: string; rule: string; count: number }
+/** A file git sees renamed (`git diff -M`): the only way a count moves from one file to another */
+export type Rename = { from: string; to: string }
+
+/** The lists as they read after these renames: each old path's lines taken over by its new path */
+export function alongRenames(allow: Allowlist, renames: readonly Rename[]): Allowlist {
+  const out: Allowlist = new Map([...allow].map(([file, rules]) => [file, new Map(rules)]))
+  for (const { from, to } of renames) {
+    const moved = out.get(from)
+    if (!moved) continue
+    out.delete(from)
+    const into = out.get(to) ?? new Map<string, number>()
+    for (const [rule, n] of moved) into.set(rule, (into.get(rule) ?? 0) + n)
+    out.set(to, into)
+  }
+  return out
+}
+
+export type Move = { from: string; to: string; rule: string; count: number }
 
 /**
- * The lists after a run: each line lowered to what its file holds (away at zero, or when the file is gone), then
- * what moved listed (`moves`, which `pnpm lint:tighten` prints). A finding over or outside the lists, in a file this
- * run counted, takes what its rule gave up in this run, file by file in order until none is left; no rule ends with
- * more than it started with. A file this run did not count keeps its lines.
+ * The lists after a run: a renamed file's lines follow it to its new path (`moves`, which `pnpm lint:tighten`
+ * prints), then each line is lowered to what its file holds, or taken away at zero or when its file is gone. A file
+ * this run did not count keeps its lines. Nothing else is ever raised or added: code moved into another file is a new
+ * finding there, and a count freed in one file is not credit for another (#1343 review).
  */
-export function tighten(allow: Allowlist, found: Allowlist, counted: Set<string>, exists: (file: string) => boolean): { allow: Allowlist; moves: Move[] } {
-  const moves: Move[] = []
+export function tighten(
+  allow: Allowlist,
+  found: Allowlist,
+  counted: Set<string>,
+  exists: (file: string) => boolean,
+  renames: readonly Rename[] = [],
+): { allow: Allowlist; moves: Move[] } {
+  const moved = alongRenames(allow, renames)
   const out: Allowlist = new Map()
-  const freed = new Map<string, number>()
-  for (const [file, rules] of allow) {
-    const gone = !exists(file)
+  for (const [file, rules] of moved) {
+    if (!exists(file)) continue
     const kept = new Map<string, number>()
     for (const [rule, max] of rules) {
-      const n = gone ? 0 : counted.has(file) ? Math.min(max, found.get(file)?.get(rule) ?? 0) : max
-      if (n < max) freed.set(rule, (freed.get(rule) ?? 0) + max - n)
+      const n = counted.has(file) ? Math.min(max, found.get(file)?.get(rule) ?? 0) : max
       if (n > 0) kept.set(rule, n)
     }
     if (kept.size > 0) out.set(file, kept)
   }
-  for (const [file, rules] of [...found].sort(byKey)) {
-    if (!counted.has(file)) continue
-    for (const [rule, n] of [...rules].sort(byKey)) {
-      const listed = out.get(file)?.get(rule) ?? 0
-      const moved = Math.min(n - listed, freed.get(rule) ?? 0)
-      if (moved <= 0) continue
-      freed.set(rule, (freed.get(rule) ?? 0) - moved)
-      out.set(file, (out.get(file) ?? new Map<string, number>()).set(rule, listed + moved))
-      moves.push({ file, rule, count: moved })
+  const moves: Move[] = []
+  for (const { from, to } of renames) {
+    for (const [rule, was] of allow.get(from) ?? []) {
+      const count = Math.min(was, out.get(to)?.get(rule) ?? 0)
+      if (count > 0) moves.push({ from, to, rule, count })
     }
   }
   return { allow: out, moves }
 }
 
-/** Sums a list per rule */
-export function ruleTotals(allow: Allowlist): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const rules of allow.values()) for (const [rule, n] of rules) out.set(rule, (out.get(rule) ?? 0) + n)
-  return out
-}
-
 /**
- * How the lists compare with main's, line by line: the lines that are new or higher, and the rules whose total
- * grew. A new or higher line is a move when its rule's total did not grow (the count went down as much elsewhere);
- * a rule whose total grew is listing something new, which no change may do.
+ * The lines that list more than main's lists do, after main's are carried along this change's renames: any new or
+ * higher line that is not a renamed file's own lines under its new name. No change may list a new finding.
  */
-export function compareWithBase(base: Allowlist, current: Allowlist): { raised: string[]; grown: string[] } {
+export function compareWithBase(base: Allowlist, current: Allowlist, renames: readonly Rename[] = []): string[] {
+  const expected = alongRenames(base, renames)
   const raised: string[] = []
   for (const [file, rules] of [...current].sort(byKey)) {
     for (const [rule, n] of [...rules].sort(byKey)) {
-      const was = base.get(file)?.get(rule) ?? 0
+      const was = expected.get(file)?.get(rule) ?? 0
       if (n > was) raised.push(`${file} ${rule} ${n} (main: ${was})`)
     }
   }
-  const before = ruleTotals(base)
-  const grown = [...ruleTotals(current)]
-    .filter(([rule, n]) => n > (before.get(rule) ?? 0))
-    .sort(byKey)
-    .map(([rule, n]) => `${rule}: ${n}, main ${before.get(rule) ?? 0}`)
-  return { raised, grown }
+  return raised
+}
+
+const runGit = (root: string, ...args: string[]): string | null => {
+  try {
+    return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The commit this branch left main at: the merge base of HEAD and `ref`, or HEAD's first parent when HEAD is on main
+ * itself (a push to main, compared with what it landed on). null when this checkout cannot tell (no such history).
+ */
+export function baseCommit(root: string, ref: string): string | null {
+  const head = runGit(root, 'rev-parse', 'HEAD')?.trim()
+  const mergeBase = runGit(root, 'merge-base', 'HEAD', ref)?.trim()
+  if (!head || !mergeBase) return null
+  return mergeBase === head ? (runGit(root, 'rev-parse', '--verify', '--quiet', 'HEAD^1')?.trim() ?? null) : mergeBase
+}
+
+/** The files renamed since `base`, as git detects them in the working tree (`git diff -M`); null when git cannot tell */
+export function renamesSince(root: string, base: string): Rename[] | null {
+  const out = runGit(root, 'diff', '--name-status', '-M', '--diff-filter=R', base, '--')
+  if (out === null) return null
+  return out
+    .split('\n')
+    .map((line) => /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(line))
+    .flatMap((m) => (m?.[1] && m[2] ? [{ from: m[1], to: m[2] }] : []))
 }
 
 /** Where main's lists come from, or why there are none to compare with */
@@ -289,18 +323,9 @@ export type MainLists =
  * the lists' files only, so a clone without file contents (`filter: blob:none`) fetches just those.
  */
 export function mainLists(root: string, ref: string): MainLists {
-  const git = (...args: string[]): string | null => {
-    try {
-      return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    } catch {
-      return null
-    }
-  }
-  const head = git('rev-parse', 'HEAD')?.trim()
-  const mergeBase = git('merge-base', 'HEAD', ref)?.trim()
-  if (!head || !mergeBase) return { kind: 'no-base', why: `no merge base with ${ref} in this checkout` }
-  const base = mergeBase === head ? git('rev-parse', '--verify', '--quiet', 'HEAD^1')?.trim() : mergeBase
-  if (!base) return { kind: 'no-base', why: `HEAD is ${ref} and its parent is not in this checkout` }
+  const git = (...args: string[]) => runGit(root, ...args)
+  const base = baseCommit(root, ref)
+  if (!base) return { kind: 'no-base', why: `no merge base with ${ref} in this checkout (or HEAD is ${ref} and its parent is not here)` }
   const module = git('ls-tree', '--name-only', base, '--', 'tooling/lint-allowlist.ts')
   if (module === null) return { kind: 'unreadable', why: `could not read the tree of ${base}` }
   if (module.trim() === '') return { kind: 'before-lists', base }
@@ -321,15 +346,21 @@ export function lintHints(left: readonly Linter.LintMessage[]): string[] {
   if (typeAware.length === 0) return []
   return [
     'Type-aware findings (#1339). Fix new code; the lists hold only what predates the rules.',
-    '  Moved code or a renamed file: `pnpm lint:tighten` moves the count along with it (no rule may total more than on main).',
+    '  A renamed file: `pnpm lint:tighten` moves its lines to the new path. Code moved into another file is a new finding there.',
     ...(typeAware.some((m) => /type 'Error'/.test(m.message)) ? ["  `(e as Error).message`: errorMessage(e) from '@cc/protocol'."] : []),
     ...(typeAware.some((m) => m.ruleId === '@typescript-eslint/no-unnecessary-type-assertion') ? ['  An assertion a type made unnecessary: `pnpm exec eslint --fix <files>` takes it out.'] : []),
     '  Data from outside the process (JSON.parse, a file, a socket, a stream): a zod schema or a narrowing guard, never `as`.',
   ]
 }
 
-/** Whether a run failed: errors left, an eslint-disable of a type-aware rule, a line above its file (not tightened) */
-export function lintFailed(o: { errorsLeft: number; disabled: number; loose: number; recording: boolean; othersLeft: number }): boolean {
+/**
+ * Whether a run failed: errors left (a file over its line, or a finding no line names) or an eslint-disable of a
+ * type-aware rule. A line above what its file holds, or for a file that is gone, is not a failure: two changes that
+ * each fix one finding of a file would otherwise fail together in a queue batch, and a change that only fixes things
+ * would have to edit a list. `pnpm lint:tighten` and the weekly tighten job lower such lines, and no change can raise
+ * one again (tooling/type-aware-lint.test.ts).
+ */
+export function lintFailed(o: { errorsLeft: number; disabled: number; recording: boolean; othersLeft: number }): boolean {
   if (o.recording) return o.othersLeft > 0 || o.disabled > 0
-  return o.errorsLeft > 0 || o.disabled > 0 || o.loose > 0
+  return o.errorsLeft > 0 || o.disabled > 0
 }

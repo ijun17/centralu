@@ -17,6 +17,7 @@ import {
   lintHints,
   mainLists,
   otherErrors,
+  renamesSince,
   parseList,
   readAllowlist,
   tighten,
@@ -81,6 +82,17 @@ describe('the lists', () => {
 })
 
 describe('applying the lists', () => {
+  it('passes a file that holds fewer than its line: two changes that each fix one there must not fail together', () => {
+    // Each change tightened inbox.ts 3 to 2; merged, the file holds 1 and the line says 2 (#1343 review, LOW 3)
+    const results = [result('packages/a/src/inbox.ts', [message(BANG)])]
+    const { over, loose } = applyAllowlist(ROOT, results, list([['packages/a/src/inbox.ts', BANG, 2]]))
+    expect(over).toEqual([])
+    expect(loose).toHaveLength(1)
+    // What a run knows about it, the loose line included: it is not what fails a run
+    const run = { errorsLeft: results[0]?.errorCount ?? 0, disabled: 0, recording: false, othersLeft: 0, loose: loose.length }
+    expect(lintFailed(run)).toBe(false)
+  })
+
   it('says a line is above what its file holds only for a file whose findings are known', () => {
     const broken = { ...result('packages/a/src/x.ts', [{ ...message(null), fatal: true }]), fatalErrorCount: 1 }
     expect(applyAllowlist(ROOT, [broken], list([['packages/a/src/x.ts', UNSAFE, 3]])).loose).toEqual([])
@@ -119,8 +131,8 @@ describe('tightening the lists', () => {
     ['gone.ts', UNSAFE, 1],
     ['other.ts', UNSAFE, 4],
   ])
-  const found = list([['a.ts', UNSAFE, 2], ['b.ts', UNSAFE, 5], ['c.ts', BANG, 3], ['d.ts', '@typescript-eslint/no-floating-promises', 1]])
-  const { allow: tightened, moves } = tighten(allow, found, new Set(['a.ts', 'b.ts', 'c.ts', 'd.ts']), (file) => file !== 'gone.ts')
+  const found = list([['a.ts', UNSAFE, 2], ['b.ts', UNSAFE, 5], ['c.ts', BANG, 3]])
+  const { allow: tightened, moves } = tighten(allow, found, new Set(['a.ts', 'b.ts', 'c.ts']), (file) => file !== 'gone.ts')
 
   it('lowers a line to what its file holds, and drops it at zero', () => {
     expect(tightened.get('a.ts')).toEqual(new Map([[UNSAFE, 2]]))
@@ -131,25 +143,34 @@ describe('tightening the lists', () => {
     expect(tightened.get('other.ts')).toEqual(new Map([[UNSAFE, 4]]))
   })
 
-  it('moves what a rule gave up to where its findings went, never more, and never to another rule', () => {
-    // a.ts and gone.ts gave up two of UNSAFE: b.ts holds three more than its line, and takes those two
-    expect(tightened.get('b.ts')).toEqual(new Map([[UNSAFE, 4]]))
-    // a.ts gave up one of BANG: c.ts, unlisted, takes it
-    expect(tightened.get('c.ts')).toEqual(new Map([[BANG, 1]]))
-    // Nothing gave up a floating promise
-    expect(tightened.has('d.ts')).toBe(false)
-    const total = (l: Allowlist, rule: string) => [...l.values()].reduce((n, r) => n + (r.get(rule) ?? 0), 0)
-    for (const rule of [UNSAFE, BANG]) expect(total(tightened, rule)).toBeLessThanOrEqual(total(allow, rule))
-    // And says what it listed, so the change shows it
-    expect(moves).toEqual([
-      { file: 'b.ts', rule: UNSAFE, count: 2 },
-      { file: 'c.ts', rule: BANG, count: 1 },
-    ])
+  it('lends no count freed in one file to a finding in another (#1343 review)', () => {
+    // a.ts and gone.ts gave up UNSAFE and BANG: b.ts keeps its line, c.ts stays unlisted, nothing moved
+    expect(tightened.get('b.ts')).toEqual(new Map([[UNSAFE, 2]]))
+    expect(tightened.has('c.ts')).toBe(false)
+    expect(moves).toEqual([])
+    // The review's probe: a `!` fixed in core, a new one in ui
+    const probe = tighten(
+      list([['packages/core/src/machines/vscode.ts', BANG, 2]]),
+      list([['packages/core/src/machines/vscode.ts', BANG, 1], ['packages/ui/src/app/useLoad.ts', BANG, 1]]),
+      new Set(['packages/core/src/machines/vscode.ts', 'packages/ui/src/app/useLoad.ts']),
+      () => true,
+    )
+    expect(probe.allow).toEqual(list([['packages/core/src/machines/vscode.ts', BANG, 1]]))
   })
 
-  it('moves the lines of a renamed file to its new path', () => {
-    const renamed = tighten(list([['old.ts', UNSAFE, 2]]), list([['new.ts', UNSAFE, 2]]), new Set(['new.ts']), (file) => file === 'new.ts').allow
-    expect(renamed).toEqual(list([['new.ts', UNSAFE, 2]]))
+  it("moves a renamed file's lines to its new path, no more than it holds, and says so", () => {
+    const renamed = tighten(
+      list([['old.ts', UNSAFE, 2], ['old.ts', BANG, 3]]),
+      list([['new.ts', UNSAFE, 2], ['new.ts', BANG, 1]]),
+      new Set(['new.ts']),
+      (file) => file === 'new.ts',
+      [{ from: 'old.ts', to: 'new.ts' }],
+    )
+    expect(renamed.allow).toEqual(list([['new.ts', UNSAFE, 2], ['new.ts', BANG, 1]]))
+    expect(renamed.moves).toEqual([
+      { from: 'old.ts', to: 'new.ts', rule: UNSAFE, count: 2 },
+      { from: 'old.ts', to: 'new.ts', rule: BANG, count: 1 },
+    ])
   })
 
   it('counts only the files whose findings are known: not one that failed to parse, or one ESLint ignored', () => {
@@ -157,12 +178,12 @@ describe('tightening the lists', () => {
     const ignored = result('packages/a/src/ignored.ts', [{ ...message(null, 1), message: 'File ignored because of a matching ignore pattern.' }])
     const counted = countedFiles(ROOT, [broken, ignored, result('packages/a/src/fine.ts', [])])
     expect([...counted]).toEqual(['packages/a/src/fine.ts'])
-    // So a file that does not parse for now keeps its lines, and gives up nothing to move elsewhere
+    // So a file that does not parse for now keeps its lines
     const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), list([['packages/a/src/fine.ts', UNSAFE, 2]]), counted, () => true).allow
     expect(kept).toEqual(list([['packages/a/src/broken.ts', UNSAFE, 2]]))
   })
 
-  it('adds no line when nothing was given up', () => {
+  it('adds no line', () => {
     expect(tighten(new Map(), found, new Set(['a.ts', 'b.ts']), () => true).allow.size).toBe(0)
   })
 })
@@ -173,20 +194,25 @@ describe("the lists against main's", () => {
     ['b.ts', UNSAFE, 1],
   ])
 
-  it('let a line go down or away', () => {
-    expect(compareWithBase(main, list([['a.ts', UNSAFE, 1]]))).toEqual({ raised: [], grown: [] })
+  it('let a line go down or away, or stay above its file', () => {
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 1]]))).toEqual([])
+    expect(compareWithBase(main, main)).toEqual([])
   })
 
-  it('let a count move to another file when the rule does not total more', () => {
-    const moved = compareWithBase(main, list([['a.ts', UNSAFE, 1], ['b.ts', UNSAFE, 1], ['c.ts', UNSAFE, 1]]))
-    expect(moved).toEqual({ raised: [`c.ts ${UNSAFE} 1 (main: 0)`], grown: [] })
+  it('refuse a line listed by hand, by a regenerated list, or with a count freed elsewhere (#1343 review)', () => {
+    // A finding fixed in a.ts does not pay for one in c.ts, though the rule's total is the same
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 1], ['b.ts', UNSAFE, 1], ['c.ts', UNSAFE, 1]]))).toEqual([`c.ts ${UNSAFE} 1 (main: 0)`])
+    // Fixed and tightened on main, then listed by hand later
+    expect(compareWithBase(list([['a.ts', UNSAFE, 1]]), list([['a.ts', UNSAFE, 1], ['clock.ts', BANG, 1]]))).toEqual([`clock.ts ${BANG} 1 (main: 0)`])
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 3], ['b.ts', UNSAFE, 1]]))).toEqual([`a.ts ${UNSAFE} 3 (main: 2)`])
   })
 
-  it('refuse a line listed by hand or by a regenerated list, wherever it is (#1343 review)', () => {
-    // The review's case: one fixed and tightened on main, then a new finding listed by hand later
-    const later = compareWithBase(list([['a.ts', UNSAFE, 1]]), list([['a.ts', UNSAFE, 1], ['clock.ts', BANG, 1]]))
-    expect(later.grown).toEqual([`${BANG}: 1, main 0`])
-    expect(compareWithBase(main, list([['a.ts', UNSAFE, 3], ['b.ts', UNSAFE, 1]])).grown).toEqual([`${UNSAFE}: 4, main 3`])
+  it("let a renamed file's lines follow it, and only those, and not twice", () => {
+    const renames = [{ from: 'b.ts', to: 'c.ts' }]
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 2], ['c.ts', UNSAFE, 1]]), renames)).toEqual([])
+    expect(compareWithBase(main, list([['c.ts', UNSAFE, 2]]), renames)).toEqual([`c.ts ${UNSAFE} 2 (main: 1)`])
+    // A deleted (renamed-away) file's line left behind lends nothing: it is compared with nothing
+    expect(compareWithBase(main, list([['b.ts', UNSAFE, 1], ['c.ts', UNSAFE, 1]]), renames)).toEqual([`b.ts ${UNSAFE} 1 (main: 0)`])
   })
 })
 
@@ -257,6 +283,24 @@ describe("main's lists", () => {
     expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base: empty, lists: new Map() })
   }, 60_000 * SLOW)
 
+  it('tell the renames since the base, committed or only staged, and nothing else as one', () => {
+    const base = setUp()
+    write('packages/a/src/old.ts', 'export const a = 1\nexport const b = 2\nexport const c = 3\n')
+    write('packages/a/src/kept.ts', 'export const k = 1\n')
+    commit('two files')
+    const withFiles = git(repo, 'rev-parse', 'HEAD')
+    git(repo, 'mv', 'packages/a/src/old.ts', 'packages/a/src/new.ts')
+    commit('rename')
+    expect(renamesSince(repo, withFiles)).toEqual([{ from: 'packages/a/src/old.ts', to: 'packages/a/src/new.ts' }])
+    git(repo, 'mv', 'packages/a/src/kept.ts', 'packages/a/src/moved.ts')
+    expect(renamesSince(repo, withFiles)).toEqual([
+      { from: 'packages/a/src/kept.ts', to: 'packages/a/src/moved.ts' },
+      { from: 'packages/a/src/old.ts', to: 'packages/a/src/new.ts' },
+    ])
+    // A new file is not a rename
+    expect(renamesSince(repo, base)?.some((r) => r.to === 'packages/a/src/new.ts')).toBe(false)
+  }, 60_000 * SLOW)
+
   it('are not there to read in a shallow checkout without main', () => {
     setUp()
     const clone = mkdtempSync(join(tmpdir(), 'lint-main-clone-'))
@@ -270,12 +314,11 @@ describe("main's lists", () => {
 })
 
 describe('the lint run', () => {
-  it('fails on what is left, an eslint-disable, or a line not tightened; --record-all only on what it could not list', () => {
-    const run = { errorsLeft: 0, disabled: 0, loose: 0, recording: false, othersLeft: 0 }
+  it('fails on what is left or an eslint-disable; --record-all only on what it could not list', () => {
+    const run = { errorsLeft: 0, disabled: 0, recording: false, othersLeft: 0 }
     expect(lintFailed(run)).toBe(false)
     expect(lintFailed({ ...run, errorsLeft: 1 })).toBe(true)
     expect(lintFailed({ ...run, disabled: 1 })).toBe(true)
-    expect(lintFailed({ ...run, loose: 1 })).toBe(true)
     expect(lintFailed({ ...run, recording: true, errorsLeft: 0, othersLeft: 0 })).toBe(false)
     expect(lintFailed({ ...run, recording: true, othersLeft: 1 })).toBe(true)
   })

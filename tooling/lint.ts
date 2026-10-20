@@ -2,9 +2,10 @@
  * `pnpm lint`: ESLint over the repository, with the type-aware findings that predate those rules allowed at their
  * per-file counts (tooling/lint-allowlist.ts says how).
  *
- *   pnpm lint                  fails on a finding the lists do not hold, a line above what its file holds, and an
- *                              eslint-disable of a type-aware rule
- *   pnpm lint:tighten          the same, after lowering the lists to what the files hold and listing what moved
+ *   pnpm lint                  fails on a finding the lists do not hold and on an eslint-disable of a type-aware rule;
+ *                              a line above what its file holds, or for a file that is gone, is only reported
+ *   pnpm lint:tighten          the same, after moving a renamed file's lines to its new path (renames since the merge
+ *                              base with CC_LINT_BASE, origin/main by default) and lowering the lines to what the files hold
  *   pnpm lint <paths>          only these files or folders, from the repository's root (tighten then leaves
  *                              other files' lines alone, and those of a file that failed to parse)
  *   --record-all               lists every finding: only for the change that turns a rule on (see
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import {
   applyAllowlist,
   ALLOWLIST_DIR,
+  baseCommit,
   countedFiles,
   countFindings,
   disabledFindings,
@@ -28,6 +30,7 @@ import {
   otherErrors,
   packageOf,
   readAllowlist,
+  renamesSince,
   tighten,
   writeAllowlist,
 } from './lint-allowlist.js'
@@ -57,9 +60,12 @@ if (recording) {
   for (const r of results) r.messages = r.messages.filter((m) => !(m.severity === 2 && m.ruleId && LISTABLE_RULES.has(m.ruleId)))
 }
 if (flags.has('--tighten')) {
-  const { allow: tightened, moves } = tighten(allow, countFindings(ROOT, results), countedFiles(ROOT, results), (file) => existsSync(join(ROOT, file)))
+  const base = baseCommit(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
+  const renames = (base ? renamesSince(ROOT, base) : null) ?? []
+  if (!base) console.log('No merge base with main here: renamed files keep no lines (they are lowered like any other).')
+  const { allow: tightened, moves } = tighten(allow, countFindings(ROOT, results), countedFiles(ROOT, results), (file) => existsSync(join(ROOT, file)), renames)
   writeAllowlist(ROOT, tightened)
-  for (const m of moves) console.log(`Listed ${m.count} of ${m.rule} in ${m.file}, as many as the rule gave up elsewhere in this run (moved code).`)
+  for (const m of moves) console.log(`Moved ${m.count} of ${m.rule} from ${m.from} to ${m.to} (renamed).`)
 }
 
 const { over, loose } = recording ? { over: [], loose: [] } : applyAllowlist(ROOT, results, flags.has('--tighten') ? readAllowlist(ROOT) : allow)
@@ -71,8 +77,11 @@ for (const d of disabled) {
   console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. Type-aware rules are not turned off in place (#1339): check the value instead.`)
 }
 for (const o of over) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed (${ALLOWLIST_DIR}/${listFileOf(packageOf(o.file))}).`)
-for (const o of loose) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed: \`pnpm lint:tighten\` lowers the line.`)
+const stale = [...(flags.has('--tighten') ? readAllowlist(ROOT) : allow).keys()].filter((file) => !existsSync(join(ROOT, file)))
+if (!recording && (loose.length > 0 || stale.length > 0)) {
+  console.log(`${loose.length + stale.length} line(s) in ${ALLOWLIST_DIR}/ list more than their file holds, or a file that is gone; \`pnpm lint:tighten\` lowers them (not required).`)
+}
 if (recording && otherErrors(results) > 0) console.log(`${otherErrors(results)} other error(s) are not type-aware findings and were not recorded: fix them first.`)
 if (!recording) for (const line of lintHints(left)) console.log(line)
 
-process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, loose: loose.length, recording, othersLeft: otherErrors(results) }) ? 1 : 0
+process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, recording, othersLeft: otherErrors(results) }) ? 1 : 0

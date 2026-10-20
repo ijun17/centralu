@@ -439,7 +439,7 @@ packages/agent-host/src/main.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/main.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/main.ts @typescript-eslint/no-unsafe-type-assertion 7
 packages/agent-host/src/main.ts @typescript-eslint/restrict-template-expressions 3
-packages/agent-host/src/main.ts @typescript-eslint/unbound-method 9
+packages/agent-host/src/main.ts @typescript-eslint/unbound-method 7
 packages/agent-host/src/rpc.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/agent-observation.test.ts @typescript-eslint/no-floating-promises 3
 packages/agent-host/src/sessions/agent-session-actions.ts @typescript-eslint/no-non-null-assertion 5
@@ -517,7 +517,7 @@ packages/agent-host/src/sessions/orchestrator-slot.ts @typescript-eslint/no-non-
 packages/agent-host/src/sessions/orchestrator-tools.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/orchestrator-tools.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/preferences-commands.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
-packages/agent-host/src/sessions/preferences-flow.ts @typescript-eslint/no-non-null-assertion 1
+packages/agent-host/src/sessions/preferences-flow.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/preferences-flow.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/sessions/project-consent.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/project-creation.ts @typescript-eslint/no-unsafe-type-assertion 6
@@ -529,7 +529,7 @@ packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-non-null
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unnecessary-type-assertion 3
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unsafe-type-assertion 7
 packages/agent-host/src/sessions/report-marks.test.ts @typescript-eslint/no-floating-promises 1
-packages/agent-host/src/sessions/report-marks.test.ts @typescript-eslint/no-unnecessary-type-assertion 4
+packages/agent-host/src/sessions/report-marks.test.ts @typescript-eslint/no-unnecessary-type-assertion 5
 packages/agent-host/src/sessions/routed-cards.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/session-app-wiring.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-non-null-assertion 9
@@ -590,6 +590,7 @@ packages/agent-host/src/transport/server.ts @typescript-eslint/no-base-to-string
 packages/agent-host/src/transport/server.ts @typescript-eslint/no-misused-promises 1
 packages/agent-host/src/transport/server.ts @typescript-eslint/no-unsafe-argument 1
 packages/agent-host/src/transport/server.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/agent-host/src/update-switches.ts @typescript-eslint/unbound-method 1
 packages/agent-host/src/updates.test.ts @typescript-eslint/no-floating-promises 24
 packages/agent-host/src/updates.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/updates.ts @typescript-eslint/no-unsafe-type-assertion 3

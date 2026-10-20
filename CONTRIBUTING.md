@@ -280,14 +280,16 @@ or a catch, no assertion that narrows (`as T` from `unknown`, `x!`) in shipped c
 floating. Data from outside the process goes through a zod schema or a narrowing guard, and a caught
 value's text through `errorMessage(e)` from `@cc/protocol`, not `(e as Error).message`. The findings that
 were there when these rules came in are listed in `tooling/lint-allowlist/`, one list per package, a
-sorted line per file and rule with the number of findings it holds. A new finding in a listed file fails
-like anywhere else: fix it, do not list it. When you fix listed findings, run `pnpm lint:tighten`: a line
-above what its file holds fails `pnpm lint` too, since it would let the next change add one there unseen.
-Code that moves to another file, or a file you rename, takes its findings along the same way:
-`pnpm lint:tighten` lowers each line to what its file holds, gives what a rule gave up to where its
-findings went, never more, and prints each such move. `tooling/type-aware-lint.test.ts` compares the
-lists with main's at the merge base (a push to main with its parent): a line may be new or higher only as
-such a move, so no rule totals more than on main (CI's `verify` fetches main's history for it and fails
+sorted line per file and rule with the number of findings it may hold. A new finding fails, in a listed
+file as anywhere else: fix it, do not list it. A file holding fewer than its line passes, and so does a
+line for a file that is gone: a change that only fixes things need not touch a list, and two that fix one
+finding each in the same file do not fail together. `pnpm lint:tighten` lowers such lines (run it when you
+fix listed findings), and a weekly job (`.github/workflows/lint-tighten.yml`) opens a pull request with
+whatever is left. A count moves only with a file git sees renamed: rename a file and run
+`pnpm lint:tighten`, which moves its lines to the new path and says so. Code moved into another file is a
+new finding there, and a count freed in one file is not credit for another. `tooling/type-aware-lint.test.ts`
+compares the lists with main's at the merge base (a push to main with its parent) and refuses any line that
+is new or higher than main's but a renamed file's own (CI's `verify` fetches main's history for it and fails
 without it; elsewhere, without one, the test says it did not compare).
 The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
 that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
