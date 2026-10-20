@@ -9,8 +9,6 @@ export type ReportWork =
   | { paused: readonly BackgroundTask[]; stoppable: boolean }
   | { settled: readonly BackgroundTask[] }
   | { linkLost: string; paused: readonly BackgroundTask[] }
-  /** The link dropped while the turn ran, and the machine's Auto reconnect is off: nothing here reconnects it (#1341) */
-  | { linkLost: string; paused?: undefined; needsPerson: true }
   /** The machine was removed from Centralu: `paused`, the work its turn ended with; absent, a turn still running */
   | { machineRemoved: string; paused?: readonly BackgroundTask[] }
   /** Its turn ended while the host was handed over (#1186): whether that turn was the work given is not known */
@@ -267,23 +265,8 @@ export class LinkedReports {
     this.machineNames.set(m.id, name)
     if (m.status === 'connected') return
     const prefix = `${m.id}.`
-    /*
-     * Nothing reconnects it (#1341), judged by the link itself and not by the row: the row says `unreachable` the moment a
-     * drop starts, while the client still redials the same forward, an attempt is under way or an install or update holds
-     * the machine, and a child's wait must survive those. The link says it waits for the person when it gives up, and
-     * sends the status then
-     */
-    const stays = this.host.linkedReader?.machineWaitsForPerson(m.id) === true
     for (const [sessionId, wait] of [...this.host.children.linkedReports]) {
-      if (!sessionId.startsWith(prefix)) continue
-      if (!wait.paused) {
-        // A turn in progress keeps its wait while the link comes back by itself; here it would be waited on silently
-        if (stays) {
-          this.drop(sessionId)
-          void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { linkLost: name, needsPerson: true })
-        }
-        continue
-      }
+      if (!sessionId.startsWith(prefix) || !wait.paused) continue
       if (this.settling.has(sessionId)) {
         this.settle(sessionId, wait)
         continue

@@ -486,23 +486,45 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
     return { remote, hub, owed, said }
   }
 
-  it('tells the caller when the link drops and nothing will reconnect it, instead of leaving it waiting silently', async () => {
+  it('tells the caller when the link drops and nothing will reconnect it, once, and keeps its wait', async () => {
     const { hub, owed, said } = await busyChild()
     hub.tunnel().drop()
-    await eventually(() => owed() === 0)
     await eventually(async () => (await said()).includes('Auto reconnect is off'))
-    expect(await said()).toContain('ask the person to connect it')
+    const text = await said()
+    expect(text).toContain('ask the person to connect it')
+    // One notice for one drop, and the wait stands for the report the notice promises
+    expect(text.split('dropped while').length - 1).toBe(1)
+    expect(owed()).toBe(1)
+  })
+
+  it("reports the end of the child's turn once the person has connected the machine, as the notice says", async () => {
+    const { remote, hub, owed, said } = await busyChild()
+    hub.tunnel().drop()
+    await eventually(async () => (await said()).includes('Auto reconnect is off'))
+    await hub.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    const child = remote.mgr.listSessions().find((s: any) => s.pendingQuestions?.length) as any
+    remote.mgr.answerQuestion(child.id, child.pendingQuestions[0].requestId, [{ answers: ['Yes'] } as any])
+    await eventually(async () => (await said()).includes('answered: Yes'))
+    await eventually(() => owed() === 0)
+  })
+
+  it('says the person disconnected it, not that Auto reconnect is off, when the switch is on', async () => {
+    const { hub, said } = await busyChild()
+    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: true })
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    await eventually(async () => (await said()).includes('The person disconnected the machine'))
+    expect(await said()).not.toContain('Auto reconnect is off')
   })
 
   it('tells the caller once the quick redials have failed, not at the first sign of a drop', async () => {
     const { remote, hub, owed, said } = await busyChild()
     await remote.server.close()
     await eventually(() => hub.row().status === 'unreachable')
-    // Redialling: the wait stands, and nobody has been told
-    expect(owed()).toBe(1)
+    // Redialling: nobody has been told yet
     expect(await said()).not.toContain('Auto reconnect is off')
-    await eventually(() => owed() === 0)
     await eventually(async () => (await said()).includes('Auto reconnect is off'))
+    expect(owed()).toBe(1)
   })
 
   it('keeps the wait through a short drop that the quick redial recovers', async () => {

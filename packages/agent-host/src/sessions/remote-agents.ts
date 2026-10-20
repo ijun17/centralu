@@ -1061,8 +1061,16 @@ export class RemoteAgents {
    * (`LinkedReports.linkChanged`).
    */
   private linkChanged(machine: unknown): void {
-    const m = machine as { id?: unknown; name?: unknown; status?: unknown } | null
+    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown } | null
     if (!m || typeof m.id !== 'string' || m.status === 'connected') return
+    /*
+     * Nothing here reconnects it (#1341): the person disconnected it, or its Auto reconnect is off and the attempt that
+     * failed or the redials that gave up were the last. Judged by the link and not by the row, which says `unreachable` the
+     * moment a drop starts. With the switch off the caller is told once, when this is so, and not at the first sign of
+     * a drop that the quick redial, an attempt or an install or update may undo
+     */
+    const alone = this.host.linkedReader?.machineWaitsForPerson(m.id) === true
+    const mayRecover = m.autoReconnect === false && !alone && m.status !== 'versions_differ' && m.status !== 'updating'
     const name = typeof m.name === 'string' && m.name ? m.name : m.id
     for (const rec of this.records()) {
       if (rec.machineId !== m.id) continue
@@ -1078,8 +1086,14 @@ export class RemoteAgents {
       }
       const report = this.host.children.linkedReports.get(rec.sessionId)
       if (!report || report.orchestratorId !== rec.callerId || report.paused || this.toldDown.has(rec.sessionId)) continue
+      if (mayRecover) continue
       this.toldDown.add(rec.sessionId)
-      const rest = 'It cannot be followed until the link is back: ' +
+      const why = !alone
+        ? 'It cannot be followed until the link is back: '
+        : m.status === 'disconnected'
+          ? 'The person disconnected the machine, so nothing here reconnects it: ask the person to connect it. It cannot be followed until then: '
+          : "The machine's Auto reconnect is off, so nothing here reconnects it: ask the person to connect it. It cannot be followed until then: "
+      const rest = why +
         'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.'
       void this.host.tellSession(
         rec.callerId,
