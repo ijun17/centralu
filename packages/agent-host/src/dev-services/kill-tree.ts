@@ -335,8 +335,7 @@ export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProc
   const found: WinProcRow[] = []
   const queue: WinProcRow[] = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && r.created >= root.spawnedAt && r.created <= root.exitedAt)
   const seen = new Set<number>([root.pid])
-  while (queue.length > 0) {
-    const r = queue.shift()!
+  for (let r = queue.shift(); r !== undefined; r = queue.shift()) {
     if (seen.has(r.pid)) continue
     seen.add(r.pid)
     found.push(r)
