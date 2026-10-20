@@ -36,6 +36,8 @@ export type ConnectionLine = {
    * Absent from a remote that predates it
    */
   others?: RemoteCredential[]
+  /** The label this hub paired under at this link (#1405, `pairLabel`): another credential of it is not this hub's */
+  pairedAs?: string
   version: string
   protocolVersion: number
   dataDir: string
@@ -70,7 +72,7 @@ export type ConnectionLine = {
 }
 
 /** A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when */
-export type RemoteCredential = { id: string; label: string; created: number }
+export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean }
 
 /** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
 export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
@@ -183,17 +185,25 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
   throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
 }
 
-/** The `others` field (#1405), entry by entry: an entry of the wrong shape is left out */
+/** The `others` field (#1405), entry by entry (`credentialsOf`) */
 function othersOf(raw: unknown): { others?: RemoteCredential[] } {
-  if (!Array.isArray(raw)) return {}
-  const others = raw.flatMap((e: unknown) => {
+  const others = credentialsOf(raw)
+  return others ? { others } : {}
+}
+
+/**
+ * A machine's full credentials as its connection line or `host.credentials` lists them (#1405), entry by entry: an id
+ * `--revoke` takes, a label of one line with no format character, a date that is one; anything else is left out. At
+ * most 1,000 are read; the row shows 32 and counts the rest. Null for anything but a list
+ */
+export function credentialsOf(raw: unknown): RemoteCredential[] | null {
+  if (!Array.isArray(raw)) return null
+  return raw.slice(0, 1000).flatMap((e: unknown) => {
     const o = asObj(e)
-    // An id `--revoke` takes, a label of one line with no format character, a date that is one
     if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
     const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0
-    return [{ id: o.id, label: oneLineText(o.label, 64), created }]
+    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true }]
   })
-  return { others: others.slice(0, 32) }
 }
 
 /** The `stopped` field, field by field: any object there is a stop; its `by` and `at` only as the words they can be */
@@ -964,7 +974,9 @@ export class SshTunnel implements Tunnel {
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
-      return parseConnectionLine(r.stdout, remote)
+      const line = parseConnectionLine(r.stdout, remote)
+      // Under which label this hub's own credential was made: another of that label on the row is not this hub's
+      return pair && this.pairs && line.credential ? { ...line, pairedAs: oneLineText(pair, 80) } : line
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)

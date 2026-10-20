@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
   pairLabel,
+  credentialsOf,
   hubKeyOf,
   parseRevoke,
   revokeCommand,
@@ -206,6 +207,11 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     // Without blocking: a sync rmSync's retries hold the event loop while a just-stopped fake ssh lets go of the
     // folder, and on a loaded Windows machine that once held the worker for 128 s (#845)
     await removeTree(dir)
+  })
+
+  it('says under which label this hub paired, so the row can tell its own from one made under its name', async () => {
+    const ep = await tunnel({ FAKE_SSH_LINE: line({ credential: 'abcd1234' }) }).open()
+    expect(ep.line.pairedAs).toMatch(/^hub:[A-Za-z0-9._-]+$/)
   })
 
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
@@ -892,5 +898,19 @@ describe('serve --revoke over ssh (#1405)', () => {
     const label = line.others![0]!.label
     expect(label.includes(String.fromCharCode(0x202e)) || label.includes(String.fromCharCode(10))).toBe(false)
     expect(line.others![1]!.created).toBe(0)
+  })
+
+  it('reads whether a pairing replaced an earlier one of its label, keeps a label whole up to what --pair takes, and reads a long list whole', () => {
+    const listed = credentialsOf([
+      { id: 'abcd1234', label: 'window', created: 5, replaced: true },
+      { id: 'abcd1235', label: 'window', created: 5, replaced: 'yes' },
+      { id: 'abcd1236', label: 'hub:' + 'x'.repeat(76), created: 5 },
+    ])
+    expect(listed?.map((c) => c.replaced)).toEqual([true, false, false])
+    expect(listed?.[2]?.label).toHaveLength(80)
+    // The row shows 32 and counts the rest, so none is dropped here
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: i.toString(16).padStart(8, '0'), label: 'x', created: 1 }))
+    expect(credentialsOf(many)).toHaveLength(40)
+    expect(credentialsOf({ not: 'a list' })).toBeNull()
   })
 })

@@ -158,7 +158,7 @@ function parseServeState(raw) {
       if (typeof v.key !== 'string' || v.key.length < 32) return null
       // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
       // the next write leaves it out too, and the host refuses it meanwhile
-      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0 }))
+      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(e.replaced === true ? { replaced: true } : {}) }))
       const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
       return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
     }
@@ -263,8 +263,15 @@ export function pairServe(dataDir, label, platform = process.platform, now = Dat
   const { token, id } = mint()
   const state = changeServeState(dataDir, (s) => ({
     ...s,
-    // A hub's pairing removes the `legacy` one: whoever held it was a hub of before #1405, which pairs now
-    full: [...s.full.filter((e) => e.label !== label && !(label.startsWith('hub:') && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
+    /*
+     * A hub's pairing removes the `legacy` one: whoever held it was a hub of before #1405, which pairs now. One that
+     * takes the place of an earlier credential of its label is marked `replaced`, which a hub's machine row shows: a
+     * pairing under a label already there (a hub's own, `window`) is a change someone sees, not a silent swap
+     */
+    full: [
+      ...s.full.filter((e) => e.label !== label && !(label.startsWith('hub:') && e.label === LEGACY_LABEL)),
+      { id, label, verifier: verifierOf(token), created: now, ...(s.full.some((e) => e.label === label) ? { replaced: true } : {}) },
+    ],
   }), platform)
   return { token, id, state }
 }

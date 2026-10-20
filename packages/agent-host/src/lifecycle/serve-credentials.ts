@@ -29,7 +29,7 @@ export const CREDENTIAL_LABEL_RE = /^[A-Za-z0-9:._-]{1,80}$/
 const VERIFIER_RE = /^[0-9a-f]{64}$/
 
 /** Whether one entry of the file is a full credential this host takes (`CREDENTIAL_ID_RE`) */
-export function isListedEntry(f: Record<string, unknown>): f is { id: string; label: string; verifier: string } {
+export function isListedEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; verifier: string } {
   return (
     typeof f.id === 'string' && CREDENTIAL_ID_RE.test(f.id) &&
     typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&
@@ -71,6 +71,31 @@ export function readFullCredentials(path: string, read: (p: string) => string = 
   }
   // Held past the retries (a scanner on Windows): what it said last, rather than refusing every hub until it lets go
   return lastRead.get(path) ?? []
+}
+
+/** A full credential as a hub's machine row lists it (#1405): never its verifier */
+export type ListedCredential = { id: string; label: string; created: number; replaced: boolean }
+
+/**
+ * The full credentials `serve.json` names, as the launcher's `--connection` lists them (`others`), for `host.credentials`:
+ * a hub reads them through its link between links, so a pairing made while the link is up shows on its row too. Null
+ * when the file cannot be read now; the hub keeps what it read last.
+ */
+export function readListedCredentials(path: string, read: (p: string) => string = (p) => readFileSync(p, 'utf8')): ListedCredential[] | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(read(path))
+  } catch {
+    return null
+  }
+  const o = asObj(parsed)
+  if (o.v !== 2 || !Array.isArray(o.full)) return null
+  return o.full.flatMap((e: unknown) => {
+    const f = asObj(e)
+    if (!isListedEntry(f)) return []
+    const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
+    return [{ id: f.id, label: f.label, created, replaced: f.replaced === true }]
+  })
 }
 
 /** The last list read from each file, for a read that stays refused (`readFullCredentials`) */

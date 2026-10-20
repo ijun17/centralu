@@ -219,6 +219,11 @@ describe('the data folder and the state file', () => {
       ['hub:mac', again.id, verifierOf(again.token)],
       ['window', win.id, verifierOf(win.token)],
     ])
+    // And says so: a pairing that took the place of an earlier one of its label is marked, a first one is not
+    expect(state.full.map((e: { label: string; replaced?: boolean }) => [e.label, e.replaced === true])).toEqual([
+      ['hub:mac', true],
+      ['window', false],
+    ])
     expect(revokeServe(d, again.id)).toBe(true)
     expect(revokeServe(d, again.id)).toBe(false)
     expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
