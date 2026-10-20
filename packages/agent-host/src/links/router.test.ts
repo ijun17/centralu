@@ -842,7 +842,7 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     /*
      * #378 review: an app's run, and the delete of its session, happen on the machine its app runs on (`apps.runs` routes
      * there). Its record is that machine's: listed with its name, and read and deleted there, so the Runs panel's
-     * "in Settings → Trash" is true for a linked machine's app too.
+     * "in Settings → Archive" is true for a linked machine's app too.
      */
     it('lists a machine’s app-agent run records under its name, and reads and deletes them there', async () => {
       const { router, local, localAnswers, m1 } = rig()

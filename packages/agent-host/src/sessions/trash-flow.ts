@@ -86,7 +86,7 @@ type Trash = { sessions: TrashedSession[]; runs: TrashedRun[]; steps: TrashedSub
  * `trash.purgeRuns`) through the router, so a linked machine's session archive is reached the way the window reaches it.
  *
  * Deleting never takes what the card did not name. Both deletes read the session archive again after Allow: a session restored
- * meanwhile is not deleted, and one that arrived while the card stood stays, as the window's own Empty trash never
+ * meanwhile is not deleted, and one that arrived while the card stood stays, as the window's own Delete all archived sessions never
  * deletes what it did not list (`trash.empty` is not called, for that reason: it takes everything there is).
  */
 export class TrashFlow {

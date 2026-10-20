@@ -219,7 +219,7 @@ test('an archive that could not be read says so and offers a retry, instead of l
     }
   })
   await openArchive(page)
-  await expect(page.getByTestId('trash-load-error')).toContainText('Could not read the session archive: the host went away')
+  await expect(page.getByTestId('trash-load-error')).toContainText('Could not read the archive: the host went away')
   // The total does not say "Loading…" next to the failure
   await expect(page.getByTestId('trash-total')).not.toContainText('Loading')
 

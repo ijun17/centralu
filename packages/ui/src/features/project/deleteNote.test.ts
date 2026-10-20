@@ -35,8 +35,8 @@ describe('the Delete project dialog\'s sentence about the folder', () => {
     // Never a certainty
     expect(note).toContain('The host may move the folder to app-trash/')
     expect(note).not.toMatch(/the host moves/i)
-    // When: nothing in Centralu's trash that could bring the project back, nothing else at the folder
-    expect(note).toContain('when no session that could bring the project back is left in Centralu’s trash and no other project is at the folder')
+    // When: nothing in Centralu's session archive that could bring the project back, nothing else at the folder
+    expect(note).toContain('when no session that could bring the project back is left in Centralu’s session archive and no other project is at the folder')
     expect(note).toContain('data folder of the computer it is on')
     // And that nothing is lost, and what coming back is
     expect(note).toContain('Nothing is deleted')

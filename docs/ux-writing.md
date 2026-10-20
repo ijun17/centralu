@@ -58,7 +58,7 @@ A label ends in "…" (the single character, never "...") when pressing it opens
 more before anything happens.
 
 - Follows: "Customise…" and "Import…" (`settings/ThemeSection.tsx`), "New app…" and "Delete project…"
-  (`sidebar/menus/ProjectMenu.tsx`), "Delete session…" and "Hand off to a fresh session…"
+  (`sidebar/menus/ProjectMenu.tsx`), "Archive session…" and "Hand off to a fresh session…"
   (`sidebar/menus/SessionMenu.tsx`), "Other…" (`settings/OtherChoice.tsx`), "Delete for good…"
   (`settings/ArchiveSection.tsx`, then "Delete for good" on the confirmation itself).
 - The same character means "in progress" on a label that changes while it works: "Restarting the agent…"
@@ -119,15 +119,9 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
 - The product is "Centralu", used where the person needs to know who did something: "Stopped: Centralu
   quit or restarted" (`components/primitives.tsx`), "Keep agents running after Centralu quits"
   (`settings/Settings.tsx`).
-<<<<<<< ours
 - Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`)
   and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
-  `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
-=======
-- Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`,
-  `project/CreateProjectDialog.tsx`) and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
   `settings/ArchiveSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
->>>>>>> theirs
 
 ### 1.9 No internal words on screen unless the person needs them
 

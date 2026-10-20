@@ -28,7 +28,7 @@ export type KeptRunRow = {
 
 /**
  * The records of deleted app-agent sessions (#378): what a session an app stood up with `run_agent` did, kept in the
- * trash once the session itself is deleted. The person reads them in Settings → Trash and deletes them there; the run
+ * trash once the session itself is deleted. The person reads them in Settings → Archive and deletes them there; the run
  * log's retention prunes them with the rest (`AppRunRecords.pruneAppRuns`).
  *
  * A record holds the whole conversation (owner decision, 2026-10-06), copied from `messages` and its subagents' steps
