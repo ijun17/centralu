@@ -81,6 +81,7 @@ export class MachinesMock {
         autoReconnect: true,
         updateWaits: true,
         connect: 'at_start',
+        otherCredentials: null,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })
@@ -108,6 +109,9 @@ export class MachinesMock {
       this.machineRow(machineId, this.machinesList.find((m) => m.id === machineId)?.status === 'disconnected' ? { status: 'connected', error: null } : {}),
     /** The mock's link closes and opens at once (#1134): no ssh, no hold */
     disconnect: async (machineId: string) => this.machineRow(machineId, { status: 'disconnected', error: null }),
+    /** The credential leaves the row, as the hub's does once `serve --revoke` said so there (#1405) */
+    revokeCredential: async (machineId: string, credentialId: string) =>
+      this.machineRow(machineId, { otherCredentials: (this.machinesList.find((m) => m.id === machineId)?.otherCredentials ?? []).filter((c) => c.id !== credentialId) }),
     setAutoReconnect: async (machineId: string, autoReconnect: boolean) =>
       this.machineRow(machineId, { autoReconnect, connect: autoReconnect ? 'at_start' : 'when_needed' }),
     acceptVersions: async (machineId: string) => {

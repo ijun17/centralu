@@ -60,6 +60,7 @@ function machine(over: Partial<MachineInfo>): MachineInfo {
     elevated: null,
     autoReconnect: true,
     connect: 'at_start',
+    otherCredentials: null,
     ...over,
   } as MachineInfo
 }

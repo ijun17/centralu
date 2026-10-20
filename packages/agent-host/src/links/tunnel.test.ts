@@ -7,6 +7,8 @@ import { delimiter, dirname, join } from 'node:path'
 import {
   pairLabel,
   hubKeyOf,
+  parseRevoke,
+  revokeCommand,
   autostartCommand,
   connectionCommand,
   detachCommand,
@@ -864,5 +866,16 @@ describe('the proof field of the connection line', () => {
     const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
     expect(parseConnectionLine(JSON.stringify({ ...base, proof: true })).proof).toBe(true)
     for (const proof of [undefined, false, 'true', 1]) expect(parseConnectionLine(JSON.stringify({ ...base, proof })).proof).toBeUndefined()
+  })
+})
+
+describe('serve --revoke over ssh (#1405)', () => {
+  it('names one credential by its id, and reads whether there was one', () => {
+    expect(revokeCommand({ shell: 'posix', command: 'x' }, 'abcd1234')).toBe('x serve --revoke abcd1234')
+    expect(() => revokeCommand({ shell: 'posix' }, 'abcd; rm -rf ~')).toThrow(/8 hex characters/)
+    expect(parseRevoke(['motd', '{"v":1,"revoked":true,"id":"abcd1234"}', ''].join('\n'))).toBe(true)
+    expect(parseRevoke('{"v":1,"revoked":false,"id":"abcd1234"}')).toBe(false)
+    // An older serve refuses the option and prints no line
+    expect(parseRevoke('')).toBeNull()
   })
 })

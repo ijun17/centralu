@@ -273,6 +273,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'machines.remove': 'asks',
   'machines.reconnect': 'everyday',
   'machines.disconnect': 'everyday',
+  /** It only narrows: a credential there is withdrawn */
+  'machines.revokeCredential': 'everyday',
   'machines.setAutoReconnect': 'everyday',
   'machines.setConnect': 'everyday',
   'machines.need': 'everyday',

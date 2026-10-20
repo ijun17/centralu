@@ -1244,8 +1244,11 @@ A host started with `centralu serve` on another machine is reached by the app th
     A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
     `CC_HOST_TOKEN`.
   - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
-    can. It gets a full credential of its own, which the file names by its label; the hub's machine row will list such
-    credentials and offer to revoke them (#1405 slice 5b). It can also read the key, which gives it only the limited
+    can. It gets a full credential of its own, which the file names by its label. That is made loud rather than
+    prevented (owner, 2026-10-21): the hub's machine row in Settings → Machines lists every full credential the machine
+    holds besides the hub's own, by the label its asker gave (shown quoted, never checked) and its date, with Revoke,
+    which runs `serve --revoke` there (`machines.revokeCredential`; the hub's own is refused, since its next link would
+    only make it again). It can also read the key, which gives it only the limited
     credential. On Windows any process of this user can run `--window` and get the window's credential, until the
     launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on

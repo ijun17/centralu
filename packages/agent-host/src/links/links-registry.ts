@@ -131,6 +131,11 @@ export class Links {
     return m.info()
   }
 
+  /** One of the machine's other full credentials withdrawn there (#1405) */
+  revokeCredential(id: string, credentialId: string): Promise<MachineInfo> {
+    return this.active(id).revokeCredential(credentialId)
+  }
+
   /** Auto reconnect on or off for the machine's link (#1341), kept with the machine */
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo {
     const m = this.need(id)

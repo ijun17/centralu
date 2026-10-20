@@ -585,6 +585,26 @@ export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'remov
   return remoteCommand(spec, `serve --autostart ${action}`)
 }
 
+/** `centralu serve --revoke <id>` there (#1405): one full credential withdrawn. `id` is 8 hex characters, checked by the caller's schema */
+export function revokeCommand(spec: RemoteSpec, id: string): string {
+  if (!/^[0-9a-f]{8}$/.test(id)) throw new Error('A credential id is 8 hex characters')
+  return remoteCommand(spec, `serve --revoke ${id}`)
+}
+
+/** `--revoke`'s line: whether there was one to withdraw, or null when it printed none (an older serve refused the option) */
+export function parseRevoke(stdout: string): boolean | null {
+  for (const l of stdout.split('\n').map((x) => x.trim()).reverse()) {
+    try {
+      const v: unknown = JSON.parse(l)
+      const revoked = asObj(v).revoked
+      if (typeof revoked === 'boolean') return revoked
+    } catch {
+      // not the line
+    }
+  }
+  return null
+}
+
 /** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
 function remoteCommand(
   spec: RemoteSpec,
@@ -593,6 +613,7 @@ function remoteCommand(
     | 'serve --detach'
     | `serve --detach --from ${string}`
     | `serve --connection --pair ${string}`
+    | `serve --revoke ${string}`
     | 'serve --stop'
     | 'serve'
     | 'serve --autostart on'

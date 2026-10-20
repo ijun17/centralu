@@ -292,6 +292,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       autoReconnect: this.autoReconnect,
       updateWaits: true,
       connect: this.autoReconnect ? 'at_start' : 'when_needed',
+      // The machine's other full credentials, as its last connection line named them (#1405)
+      otherCredentials: this.endpoint?.line.others ?? null,
     }
   }
 

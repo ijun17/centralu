@@ -117,6 +117,8 @@ export type MachinesPort = {
   reconnect(id: string, opts?: { start?: boolean }): MachineInfo
   /** Closes the link until the person connects it again (#1134) */
   disconnect(id: string): Promise<MachineInfo>
+  /** One of the machine's other full credentials withdrawn there (#1405) */
+  revokeCredential(id: string, credentialId: string): Promise<MachineInfo>
   /** Auto reconnect on or off (#1341) */
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   /** `machines.need` of an older window (#1134): answers the row, does nothing else (#1341) */
@@ -942,6 +944,10 @@ export function createRpcHandler(
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
     'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.revokeCredential': async (p) => {
+      const { machineId, credentialId } = RpcMethods['machines.revokeCredential'].params.parse(p)
+      return requireMachines().revokeCredential(machineId, credentialId)
+    },
     'machines.setAutoReconnect': async (p) => {
       const { machineId, autoReconnect } = RpcMethods['machines.setAutoReconnect'].params.parse(p)
       return requireMachines().setAutoReconnect(machineId, autoReconnect)

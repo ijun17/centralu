@@ -242,6 +242,19 @@ export const MachineInfo = z.object({
    */
   updateWaits: z.boolean().optional(),
   /**
+   * The full credentials the machine holds besides this hub's own (#1405, its `centralu serve --connection`'s `others`):
+   * who each was made for (`label`, as the one who paired said it) and when. Never their values. Another hub that
+   * pairs with the machine, the machine's own window on Windows, and anything of that user that ran `--pair` itself
+   * show here; the row offers to withdraw each (`machines.revokeCredential`). Null while it is not known: not connected
+   * yet, or a Centralu there from before it. Additive
+   */
+  otherCredentials: z
+    .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number() }))
+    .max(32)
+    .nullable()
+    .catch(null)
+    .default(null),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */
