@@ -3,6 +3,7 @@ import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { RowMenu } from '../sidebar/menus/RowMenu.jsx'
 import { ActionRow } from '../sidebar/menus/ActionRow.jsx'
 import { MachineStatusMark } from './MachineStatusMark.jsx'
+import { connectAction } from '../settings/MachinesSection.jsx'
 
 /**
  * What the sidebar's machine badge opens (owner, 2026-10-20): the link's state where the badge is, and Connect beside
@@ -11,13 +12,11 @@ import { MachineStatusMark } from './MachineStatusMark.jsx'
  */
 export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; anchorEl: HTMLElement | null; onClose: () => void }) {
   const info = useStore((s) => s.machines[machine])
-  const reconnect = useStore((s) => s.reconnectMachine)
-  const disconnect = useStore((s) => s.disconnectMachine)
-  const openSettingsAt = useStore((s) => s.openSettingsAt)
   const name = info?.name ?? machine
   const status = info?.status ?? 'unreachable'
   const connected = status === 'connected'
   // An attempt under way: Connect would only start the same one again
+  const action = connectAction(status)
   const trying = status === 'connecting' || status === 'starting' || status === 'updating'
   const pick = (fn: () => void) => () => {
     fn()
@@ -50,16 +49,17 @@ export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; a
       </div>
       <div className="border-t border-line pt-1">
         {connected ? (
-          <ActionRow label="Disconnect" onClick={pick(() => void disconnect(machine))} testId={`machine-menu-disconnect-${machine}`} />
+          <ActionRow label="Disconnect" onClick={pick(() => void useStore.getState().disconnectMachine(machine))} testId={`machine-menu-disconnect-${machine}`} />
         ) : (
           <ActionRow
-            label={trying ? 'Connecting…' : 'Connect'}
-            onClick={pick(() => void reconnect(machine))}
+            label={trying ? 'Connecting…' : action.label}
+            title={trying ? undefined : action.title}
+            onClick={pick(() => void useStore.getState().reconnectMachine(machine))}
             disabled={trying}
             testId={`machine-menu-connect-${machine}`}
           />
         )}
-        <ActionRow label="Machine settings" onClick={pick(() => openSettingsAt('machines'))} testId={`machine-menu-settings-${machine}`} />
+        <ActionRow label="Machine settings" onClick={pick(() => useStore.getState().openSettingsAt('machines'))} testId={`machine-menu-settings-${machine}`} />
       </div>
     </RowMenu>
   )

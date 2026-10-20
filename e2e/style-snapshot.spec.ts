@@ -282,8 +282,8 @@ test('terminal with the 16 ANSI colours', async ({ page }) => {
 test('run dialog with a log', async ({ page }) => {
   await openDemo(page)
   await page.getByTestId('run-open').click()
+  await page.getByTestId('run-exec-0').click()
   await page.getByTestId('run-command-0').click()
-  await page.getByTestId('run-exec').click()
   await expect(page.getByTestId('run-running-0')).toBeVisible()
   await page.evaluate(() => {
     const mock = (window as never as { __mock: any }).__mock

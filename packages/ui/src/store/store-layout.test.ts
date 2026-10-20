@@ -764,12 +764,12 @@ describe('view restoration', () => {
 /*
  * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
  * through saves, so a save in the middle of it used to write the defaults of every field restored later back over
- * the snapshot. The folded-composer setting is restored last: the person turned it off, and after a restart
+ * the snapshot. The last setting restored (whether .gitignore's files show) is the one it showed: the person turned it off, and after a restart
  * it was on again (2026-09-30).
  */
 describe('restoring the workspace saves nothing until it is done', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
-  const lateFields = { foldComposer: false }
+  const lateFields = { showIgnored: false }
 
   it('settings turned off stay off across two launches, even the ones restored last', async () => {
     const mock = new MockPlatform()
@@ -785,14 +785,14 @@ describe('restoring the workspace saves nothing until it is done', () => {
     } as never
 
     // A launch starts from the defaults, which have it on
-    useStore.setState({ foldComposer: true })
+    useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
     // What the host keeps is what the next launch reads
     expect(mock.workspaceSnapshot).toMatchObject(lateFields)
 
-    useStore.setState({ foldComposer: true })
+    useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
@@ -827,16 +827,16 @@ describe('restoring the workspace saves nothing until it is done', () => {
       ...lateFields,
     } as never
 
-    useStore.setState({ foldComposer: true })
+    useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
     await tick()
 
     expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rail-r1', panelWidth: 333, sidebarWidth: 251, notifyPolicy: policy, ...lateFields })
     expect(useStore.getState()).not.toHaveProperty('railWidth')
 
-    useStore.getState().setFoldComposer(true)
+    useStore.getState().setShowIgnored(true)
     await tick()
-    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, sidebarWidth: 251, foldComposer: true })
+    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, sidebarWidth: 251, showIgnored: true })
     expect(mock.workspaceSnapshot).not.toHaveProperty('railWidth')
   })
 
@@ -847,16 +847,16 @@ describe('restoring the workspace saves nothing until it is done', () => {
    */
   it('an old snapshot that still carries the spin switches loads in full, and the next save drops them (#736)', async () => {
     const mock = new MockPlatform()
-    mock.workspaceSnapshot = { panelWidth: 333, spinGrid: false, spinSessionIcon: false, foldComposer: false } as never
+    mock.workspaceSnapshot = { panelWidth: 333, spinGrid: false, spinSessionIcon: false, showIgnored: false } as never
     await useStore.getState().attach(mock)
     await tick()
-    expect(useStore.getState()).toMatchObject({ panelWidth: 333, foldComposer: false })
+    expect(useStore.getState()).toMatchObject({ panelWidth: 333, showIgnored: false })
     expect(useStore.getState()).not.toHaveProperty('spinGrid')
     expect(useStore.getState()).not.toHaveProperty('spinSessionIcon')
 
-    useStore.getState().setFoldComposer(true)
+    useStore.getState().setShowIgnored(true)
     await tick()
-    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, foldComposer: true })
+    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, showIgnored: true })
     expect(mock.workspaceSnapshot).not.toHaveProperty('spinGrid')
     expect(mock.workspaceSnapshot).not.toHaveProperty('spinSessionIcon')
   })
@@ -867,9 +867,9 @@ describe('restoring the workspace saves nothing until it is done', () => {
     await useStore.getState().attach(mock)
     await tick()
 
-    useStore.getState().setFoldComposer(true)
+    useStore.getState().setShowIgnored(true)
     await tick()
-    expect(mock.workspaceSnapshot).toMatchObject({ foldComposer: true })
+    expect(mock.workspaceSnapshot).toMatchObject({ showIgnored: true })
   })
 })
 

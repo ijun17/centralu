@@ -312,7 +312,7 @@ export function linkedHostsUiTests(): void {
       const calls = watchCalls(page)
       await page.goto('/')
       await expect(page.getByTestId('project-hub-project')).toBeVisible()
-      // No machine yet: the list is as it always was, and Add project is the folder picker with nothing to choose
+      // No machine yet: the list is as it always was, and the add-a-folder button is the folder picker with nothing to choose
       await expect(page.getByTestId('add-project')).not.toHaveAttribute('aria-haspopup', 'menu')
 
       await test.step('add the machine in Settings → Machines', async () => {
@@ -335,6 +335,7 @@ export function linkedHostsUiTests(): void {
         mkdirSync(folder)
         await page.getByTestId('add-project').click()
         await page.getByTestId('add-project-on-remote-box').click()
+        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project · Remote box')
         await page.getByTestId('add-remote-project-path').fill(folder)
         await page.getByTestId('add-remote-project-confirm').click()
         await expect(page.getByTestId('project-machine-second-project')).toHaveText('Remote box')
@@ -492,7 +493,10 @@ export function linkedHostsUiTests(): void {
 
       await test.step('nothing waits for an answer: the machine\'s projects are listed, and its badge still leads back to the offer', async () => {
         await expect(page.getByTestId('project-remote-project')).toBeVisible()
+        // The badge opens the machine's menu; its Machine settings leads to Settings → Machines
         await page.getByTestId('project-machine-remote-project').click()
+        await expect(page.getByTestId('machine-menu-remote-box')).toBeVisible()
+        await page.getByTestId('machine-menu-settings-remote-box').click()
         await expect(page.getByTestId('settings-machines')).toBeVisible()
         await expect(page.getByTestId('machine-update-remote-remote-box')).toBeVisible()
         // "Connect anyway" is only for a link that is held, which one protocol never is

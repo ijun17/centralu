@@ -103,6 +103,7 @@ export function Sidebar() {
               else void pickHere()
             }}
             disabled={adding}
+            haspopup={machines.length > 0 ? 'menu' : undefined}
             testId="add-project"
             align="right"
           >

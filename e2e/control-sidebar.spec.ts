@@ -12,9 +12,11 @@ import { setup, newSession, injectApproval, emitEvent } from './fixtures/control
  *
  * It used to be at the far right of the top bar — the person clicked one side of the screen and
  * had to find the result on the other side. Relying on visual judgment alone lets them drift
- * apart again, so this pins it down with coordinates.
+ * apart again, so this pins it down with coordinates. Since 2026-10-19 the button is an icon beside the "Projects" name,
+ * over the list (not a framed button under it), so it is the list's own header: inside the sidebar, right above the
+ * first project, and named for what it does.
  */
-test('The Add project button sits inside the sidebar, below the project list', async ({ page }) => {
+test('The Add project button sits inside the sidebar, in the Projects row over the project list', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   const sidebar = (await page.getByTestId('sidebar').boundingBox())!
@@ -24,8 +26,13 @@ test('The Add project button sits inside the sidebar, below the project list', a
   // It is inside the sidebar (not the top bar)
   expect(add.x).toBeGreaterThanOrEqual(sidebar.x - 1)
   expect(add.x + add.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
-  // Right below where a new project is appended (the end of the list)
-  expect(add.y).toBeGreaterThanOrEqual(project.y + project.height - 1)
+  // In the row headed "Projects", which ends where the list begins
+  const head = (await page.getByTestId('sidebar-projects-head').boundingBox())!
+  await expect(page.getByTestId('sidebar-projects-head')).toContainText('Projects')
+  expect(add.y).toBeGreaterThanOrEqual(head.y - 1)
+  expect(add.y + add.height).toBeLessThanOrEqual(head.y + head.height + 1)
+  expect(add.y + add.height).toBeLessThanOrEqual(project.y + 1)
+  await expect(page.getByTestId('add-project')).toHaveAccessibleName('Add a folder as a project')
   // "New folder as a project" (#515) is gone (owner, 2026-10-21): a project comes from a folder or a new app
   await expect(page.getByTestId('create-project')).toHaveCount(0)
 })
@@ -46,8 +53,9 @@ test('New app stands on the Add project row, inside the sidebar at its default a
     expect(Math.abs(app.y + app.height / 2 - (add.y + add.height / 2)), `${width}px`).toBeLessThanOrEqual(1)
     expect(app.x, `${width}px`).toBeGreaterThan(add.x + add.width - 1)
     expect(app.x + app.width, `${width}px`).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1)
-    // Add project keeps room to be pressed
-    expect(add.width, `${width}px`).toBeGreaterThanOrEqual(24)
+    // Both icon buttons keep room to be pressed
+    expect(add.width, `${width}px`).toBeGreaterThanOrEqual(20)
+    expect(app.width, `${width}px`).toBeGreaterThanOrEqual(20)
   }
   await page.getByTestId('create-app').click()
   await expect(page.getByTestId('new-app-dialog')).toBeVisible()
@@ -360,11 +368,11 @@ test('An open project with no session and no app has no gap under its header', a
 })
 
 /**
- * A marker with a bare number and no unit prompts "what is this?" (it actually did). The
- * browser's default title takes 1-2 seconds to appear, which is as good as not being there in
- * that moment.
+ * A bare number with no unit prompts "what is this?" (it actually did), so the project's line carries none (owner,
+ * 2026-10-20): the count of uncommitted files is a row of the project's tooltip, with its unit. The browser's default
+ * title takes 1-2 seconds to appear, which is as good as not being there in that moment.
  */
-test('Hovering the project marker explains what it is', async ({ page }) => {
+test("Hovering the project's name says how many files are uncommitted, and the line carries no bare number", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -373,14 +381,13 @@ test('Hovering the project marker explains what it is', async ({ page }) => {
       { path: 'b.ts', staged: false, status: 'M' },
     ]
   })
-  // The change count comes from the project list — force it to re-read
-  await page.evaluate(() => (window as any).__store.getState().refreshProjects?.())
+  // A turn's end is what re-reads the project's count
+  await newSession(page, 'alpha', 'task')
+  await emitEvent(page, 0, { type: 'turn_complete' })
 
-  const mark = page.getByTestId('mark-changed-alpha')
-  if (await mark.count()) {
-    await mark.hover()
-    await expect(page.getByRole('tooltip')).toContainText('uncommitted')
-  }
+  await page.getByTestId('project-header-alpha').hover()
+  await expect(page.getByTestId('project-detail-changed-alpha')).toContainText('2 uncommitted files')
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveCount(0)
 })
 
 /** The sidebar order is decided by the person — drag to reorder, and it must survive a restart */

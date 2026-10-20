@@ -34,7 +34,7 @@ test('A pending npm release is shown as a wait and disables duplicate update act
   await expect(page.getByTestId('update-line')).toHaveText('Update')
   await expect(await tipOf(page, page.getByTestId('update-line'))).toHaveText('Waiting for npm to serve 9.9.9')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-  await page.getByTestId('settings-tab-updates').click()
+  await page.getByTestId('settings-tab-background').click()
   await expect(page.getByTestId('update-state')).toHaveText('Waiting for npm to serve 9.9.9')
   await expect(page.getByTestId('update-check-now')).toBeDisabled()
   await expect(page.getByTestId('update-apply')).toBeDisabled()
@@ -113,8 +113,8 @@ test('Applying automatically waits until nothing is running (#352)', async ({ pa
     m.registryVersion = '9.9.9'
   })
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-  await page.getByTestId('settings-tab-updates').click()
-  const box = page.getByTestId('update-auto-apply')
+  await page.getByTestId('settings-tab-background').click()
+  const box = page.getByTestId('update-auto')
   await expect(box).not.toBeChecked()
   await page.getByTestId('update-check-now').click()
   await expect(page.getByTestId('update-state')).toContainText('9.9.9 is available')
@@ -158,7 +158,7 @@ test('Applying automatically waits until nothing is running (#352)', async ({ pa
 test('Settings > Updates: check now and automatic checking (#43)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-  await page.getByTestId('settings-tab-updates').click()
+  await page.getByTestId('settings-tab-background').click()
 
   /*
    * States what is currently running first — without one side of the comparison visible, the
@@ -171,6 +171,11 @@ test('Settings > Updates: check now and automatic checking (#43)', async ({ page
    * all**, so this checks only the shape.
    */
   await expect(page.getByTestId('update-current')).toContainText(/Running \d+\.\d+\.\d+/)
+  // One switch since 2026-10-20 for checking and applying: it reads on only when both are. The host checks by default
+  // and applies nothing until the person turns it on
+  await expect(page.getByTestId('update-auto')).not.toBeChecked()
+  expect(await page.evaluate(() => (window as any).__store.getState().update.auto)).toBe(true)
+  await page.getByTestId('update-auto').check()
   await expect(page.getByTestId('update-auto')).toBeChecked()
 
   await page.evaluate(() => {
@@ -207,7 +212,7 @@ test('A locally replaced bundle offers Apply now without an npm install event (#
   await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText(`${local} is installed`)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-  await page.getByTestId('settings-tab-updates').click()
+  await page.getByTestId('settings-tab-background').click()
   await expect(page.getByTestId('update-state')).toContainText(`Installed ${local}`)
   await expect(page.getByTestId('update-apply')).toBeHidden()
   await page.getByTestId('update-apply-now-settings').click()
