@@ -259,7 +259,7 @@ describe('a host request (#1405)', () => {
       h.requests.ask('projects.delete', { projectId: 'p1' }, { client: null, session: 'named' }, signal),
       h.requests.ask('projects.delete', { projectId: 'p2' }, { client: null, session: 'unnamed' }, signal),
       h.requests.ask('projects.delete', { projectId: 'p3' }, { client: null, session: 'long' }, signal),
-      h.requests.ask('projects.delete', { projectId: 'p4' }, { client: null }, signal),
+      h.requests.ask('projects.delete', { projectId: 'm1.p4' }, { client: null }, signal),
     ]
     for (let i = 0; i < 200 && h.requests.list().length < 4; i++) await new Promise((r) => setTimeout(r, 5))
     const cards = h.requests.list()
