@@ -1092,7 +1092,14 @@ export class SessionManager {
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
-    return this.deliver(sessionId, text, attachments, from, false)
+    await this.deliver(sessionId, text, attachments, from, false)
+    /*
+     * Once it is delivered, so a message that did not reach the session takes nothing over (#1340). The mark ends
+     * before this returns, ahead of any event of the person's turn; telling the caller is not waited for. Their message
+     * is what takes a session over from the caller that assigned it work, paused on its own background tasks; a caller's,
+     * another session's, an app's or Centralu's own words all reach `deliver` with a source and do not
+     */
+    if (!from) void this.reports.personTookOver(sessionId)
   }
 
   /**
