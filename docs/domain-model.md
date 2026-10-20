@@ -385,6 +385,34 @@ Where it is stored:
 - `workspace`: the UI's snapshot, one row.
 - `commit_sessions`: commit attribution.
 
+### 2.5 The mailbox
+
+The one durable channel for work and talk between sessions, apps and the person, designed in
+[plans/mailbox.md](plans/mailbox.md) (#1347). **Slice 1 only: the tables and the model exist (store v61); nothing posts
+to them and nothing is delivered yet.**
+
+| Concept | Meaning |
+|---|---|
+| Thread | A conversation that is also a task: a subject, a state (`open`, `running`, `review`, `blocked`, `done`), an owner (who gave the work and gets its reports), an assignee, blockers, a next step and links. A `done` thread takes no more mail: a follow-up is a new thread that names it |
+| Participant | A party in a thread: its owner, its assignee, or a member. Only a participant may post (the person and Centralu apart) |
+| Message | One post: a sender, a kind (`assign`, `question`, `answer`, `report`, `notice`, `note`, `event`), a body (the sender's words) and `facts` (what Centralu knows about it). Only Centralu writes `facts` and `event`s |
+| Receipt | One recipient's progress with one message: due, attempted, delivered, read, handled. Undelivered mail is a query on receipts |
+| Address | A party's name in mail: `session:<hostId>/<sessionId>`, `app:<hostId>/<projectId>/<appId>`, `person`, and `centralu` (a sender only). Host ids are in every id and address from the start, so mail can cross a link later without rewriting any |
+| Turn record | Which thread started each turn of a session (`mail_turns`); written from slice 3 |
+
+Where it is stored:
+
+- `mail_threads`: threads, with their task fields, pin and the host that owns them.
+- `mail_participants`: who is in a thread and in which role.
+- `mail_blockers`: what stands in a thread's way.
+- `mail_messages`: the posts, with Centralu's `facts` and the key that keeps a change from being posted twice.
+- `mail_receipts`: each recipient's progress with each message.
+- `mail_turns`: the thread each turn of a session belonged to.
+
+An older build serving the same store during a swap never names these tables (step v61 only adds), and a session purged
+from the trash takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
+and 180 days, read notices after 14) is `MailService.sweep`, which the host runs once after it is ready ([plans/mailbox.md](plans/mailbox.md) §4.4).
+
 ## 3. Session state
 
 `packages/protocol/src/session-state.ts`, re-exported by `packages/core/src/session/state-machine.ts`. Every change of

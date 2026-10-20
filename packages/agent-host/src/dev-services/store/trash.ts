@@ -7,6 +7,7 @@ import { asObj, filled, isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 import { SESSION_SETTING_OF } from './settings.js'
 import { agentInstructionsKey } from './projects.js'
+import { HUB_SELF_KEY } from './store-keys.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -181,6 +182,20 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      /*
+       * The mail it was a party to (#1347): its receipts, its place in threads and its turns go with the session, as its
+       * marks do. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay, as the thread's history. A
+       * thread that named it as owner or assignee is moved on when it goes to the trash (mail/service.ts `partyGone`, which the
+       * manager must call by slice 2, before the `mail` tool can open a thread that names a session)
+       */
+      const host = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value
+      if (host) {
+        // This host's own address only: a session of another host with the same id is not this one (linked machines, slice 4)
+        const address = `session:${host}/${sessionId}`
+        this.db.prepare(`DELETE FROM mail_receipts WHERE recipient = ?`).run(address)
+        this.db.prepare(`DELETE FROM mail_participants WHERE address = ?`).run(address)
+      }
+      this.db.prepare(`DELETE FROM mail_turns WHERE session_id = ?`).run(sessionId)
       // Every setting kept for it (`<name>:<sessionId>`, `SESSION_SETTING_OF` in store/settings.ts)
       this.db.prepare(`DELETE FROM app_settings WHERE ${SESSION_SETTING_OF}`).run({ sessionId })
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)

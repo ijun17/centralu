@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 60,
+  "version": 61,
   "deferred": [
    3,
    11,
@@ -13,7 +13,7 @@
   ],
   "minReader": 0
  },
- "userVersion": 60,
+ "userVersion": 61,
  "master": [
   {
    "type": "index",
@@ -38,6 +38,36 @@
    "name": "idx_sessions_project",
    "tbl_name": "sessions",
    "sql": "CREATE INDEX idx_sessions_project ON sessions(project_id)"
+  },
+  {
+   "type": "index",
+   "name": "mail_messages_dedupe",
+   "tbl_name": "mail_messages",
+   "sql": "CREATE INDEX mail_messages_dedupe ON mail_messages(sender, dedupe_key) WHERE dedupe_key IS NOT NULL"
+  },
+  {
+   "type": "index",
+   "name": "mail_participants_address",
+   "tbl_name": "mail_participants",
+   "sql": "CREATE INDEX mail_participants_address ON mail_participants(address)"
+  },
+  {
+   "type": "index",
+   "name": "mail_receipts_pending",
+   "tbl_name": "mail_receipts",
+   "sql": "CREATE INDEX mail_receipts_pending ON mail_receipts(recipient, due_at) WHERE delivered_at IS NULL"
+  },
+  {
+   "type": "index",
+   "name": "mail_threads_state",
+   "tbl_name": "mail_threads",
+   "sql": "CREATE INDEX mail_threads_state ON mail_threads(state, updated_at)"
+  },
+  {
+   "type": "index",
+   "name": "mail_turns_open",
+   "tbl_name": "mail_turns",
+   "sql": "CREATE INDEX mail_turns_open ON mail_turns(thread_id) WHERE ended_at IS NULL"
   },
   {
    "type": "index",
@@ -139,6 +169,54 @@
    "type": "index",
    "name": "sqlite_autoindex_machine_headers_1",
    "tbl_name": "machine_headers",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_blockers_1",
+   "tbl_name": "mail_blockers",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_1",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_2",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_messages_3",
+   "tbl_name": "mail_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_participants_1",
+   "tbl_name": "mail_participants",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_receipts_1",
+   "tbl_name": "mail_receipts",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_threads_1",
+   "tbl_name": "mail_threads",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_mail_turns_1",
+   "tbl_name": "mail_turns",
    "sql": null
   },
   {
@@ -296,6 +374,42 @@
    "name": "machine_headers",
    "tbl_name": "machine_headers",
    "sql": "CREATE TABLE machine_headers (\n              machine_id TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,\n              kind       TEXT NOT NULL CHECK (kind IN ('session', 'project')),\n              item_id    TEXT NOT NULL,\n              info       TEXT NOT NULL,\n              position   INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (machine_id, kind, item_id)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_blockers",
+   "tbl_name": "mail_blockers",
+   "sql": "CREATE TABLE mail_blockers (\n              thread_id   TEXT NOT NULL,\n              n           INTEGER NOT NULL,\n              kind        TEXT NOT NULL,\n              ref         TEXT,\n              text        TEXT NOT NULL,\n              resolved_at INTEGER,\n              PRIMARY KEY (thread_id, n)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_messages",
+   "tbl_name": "mail_messages",
+   "sql": "CREATE TABLE mail_messages (\n              id          TEXT PRIMARY KEY,\n              thread_id   TEXT NOT NULL,\n              seq         INTEGER NOT NULL,\n              home_seq    INTEGER,\n              sender      TEXT NOT NULL,\n              kind        TEXT NOT NULL,\n              urgent      INTEGER NOT NULL DEFAULT 0,\n              needs_owner INTEGER NOT NULL DEFAULT 0,\n              wake        TEXT,\n              reply_to    TEXT,\n              body        TEXT NOT NULL,\n              facts       TEXT NOT NULL DEFAULT '{}',\n              dedupe_key  TEXT,\n              created_at  INTEGER NOT NULL,\n              UNIQUE (thread_id, seq),\n              UNIQUE (thread_id, sender, dedupe_key)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_participants",
+   "tbl_name": "mail_participants",
+   "sql": "CREATE TABLE mail_participants (\n              thread_id TEXT NOT NULL,\n              address   TEXT NOT NULL,\n              role      TEXT NOT NULL,\n              joined_at INTEGER NOT NULL,\n              left_at   INTEGER,\n              read_seq  INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (thread_id, address)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_receipts",
+   "tbl_name": "mail_receipts",
+   "sql": "CREATE TABLE mail_receipts (\n              message_id   TEXT NOT NULL,\n              recipient    TEXT NOT NULL,\n              due_at       INTEGER NOT NULL,\n              attempt_at   INTEGER,\n              delivered_at INTEGER,\n              read_at      INTEGER,\n              handled_at   INTEGER,\n              held         TEXT,\n              attempts     INTEGER NOT NULL DEFAULT 0,\n              last_error   TEXT,\n              PRIMARY KEY (message_id, recipient)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_threads",
+   "tbl_name": "mail_threads",
+   "sql": "CREATE TABLE mail_threads (\n              id          TEXT PRIMARY KEY,\n              home        TEXT NOT NULL,\n              project_id  TEXT,\n              subject     TEXT NOT NULL,\n              origin      TEXT NOT NULL,\n              depth       INTEGER NOT NULL DEFAULT 0,\n              parent_id   TEXT,\n              follows     TEXT,\n              state       TEXT NOT NULL,\n              outcome     TEXT,\n              owner       TEXT NOT NULL,\n              assignee    TEXT,\n              next_step   TEXT,\n              links       TEXT NOT NULL DEFAULT '{}',\n              rev         INTEGER NOT NULL DEFAULT 0,\n              pinned_at   INTEGER,\n              created_at  INTEGER NOT NULL,\n              updated_at  INTEGER NOT NULL,\n              state_since INTEGER NOT NULL,\n              done_at     INTEGER\n            )"
+  },
+  {
+   "type": "table",
+   "name": "mail_turns",
+   "tbl_name": "mail_turns",
+   "sql": "CREATE TABLE mail_turns (\n              session_id TEXT NOT NULL,\n              turn_seq   INTEGER NOT NULL,\n              thread_id  TEXT,\n              started_by TEXT NOT NULL,\n              started_at INTEGER NOT NULL,\n              ended_at   INTEGER,\n              outcome    TEXT,\n              PRIMARY KEY (session_id, turn_seq)\n            )"
   },
   {
    "type": "table",

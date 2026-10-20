@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 60, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 61, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -186,6 +186,81 @@ erDiagram
     TEXT item_id PK
     TEXT info
     INTEGER position
+  }
+  mail_blockers {
+    TEXT thread_id PK
+    INTEGER n PK
+    TEXT kind
+    TEXT ref
+    TEXT text
+    INTEGER resolved_at
+  }
+  mail_messages {
+    TEXT id PK
+    TEXT thread_id
+    INTEGER seq
+    INTEGER home_seq
+    TEXT sender
+    TEXT kind
+    INTEGER urgent
+    INTEGER needs_owner
+    TEXT wake
+    TEXT reply_to
+    TEXT body
+    TEXT facts
+    TEXT dedupe_key
+    INTEGER created_at
+  }
+  mail_participants {
+    TEXT thread_id PK
+    TEXT address PK
+    TEXT role
+    INTEGER joined_at
+    INTEGER left_at
+    INTEGER read_seq
+  }
+  mail_receipts {
+    TEXT message_id PK
+    TEXT recipient PK
+    INTEGER due_at
+    INTEGER attempt_at
+    INTEGER delivered_at
+    INTEGER read_at
+    INTEGER handled_at
+    TEXT held
+    INTEGER attempts
+    TEXT last_error
+  }
+  mail_threads {
+    TEXT id PK
+    TEXT home
+    TEXT project_id
+    TEXT subject
+    TEXT origin
+    INTEGER depth
+    TEXT parent_id
+    TEXT follows
+    TEXT state
+    TEXT outcome
+    TEXT owner
+    TEXT assignee
+    TEXT next_step
+    TEXT links
+    INTEGER rev
+    INTEGER pinned_at
+    INTEGER created_at
+    INTEGER updated_at
+    INTEGER state_since
+    INTEGER done_at
+  }
+  mail_turns {
+    TEXT session_id PK
+    INTEGER turn_seq PK
+    TEXT thread_id
+    TEXT started_by
+    INTEGER started_at
+    INTEGER ended_at
+    TEXT outcome
   }
   messages {
     TEXT session_id PK, FK
@@ -540,6 +615,131 @@ Added in v46.
 | `item_id` | TEXT | no |  | PK 3 | v46 |
 | `info` | TEXT | no |  |  | v46 |
 | `position` | INTEGER | no | `0` |  | v46 |
+
+### `mail_blockers`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `thread_id` | TEXT | no |  | PK 1 | v61 |
+| `n` | INTEGER | no |  | PK 2 | v61 |
+| `kind` | TEXT | no |  |  | v61 |
+| `ref` | TEXT | yes |  |  | v61 |
+| `text` | TEXT | no |  |  | v61 |
+| `resolved_at` | INTEGER | yes |  |  | v61 |
+
+### `mail_messages`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v61 |
+| `thread_id` | TEXT | no |  |  | v61 |
+| `seq` | INTEGER | no |  |  | v61 |
+| `home_seq` | INTEGER | yes |  |  | v61 |
+| `sender` | TEXT | no |  |  | v61 |
+| `kind` | TEXT | no |  |  | v61 |
+| `urgent` | INTEGER | no | `0` |  | v61 |
+| `needs_owner` | INTEGER | no | `0` |  | v61 |
+| `wake` | TEXT | yes |  |  | v61 |
+| `reply_to` | TEXT | yes |  |  | v61 |
+| `body` | TEXT | no |  |  | v61 |
+| `facts` | TEXT | no | `'{}'` |  | v61 |
+| `dedupe_key` | TEXT | yes |  |  | v61 |
+| `created_at` | INTEGER | no |  |  | v61 |
+
+Indexes:
+
+- `mail_messages_dedupe`: `sender`, `dedupe_key`
+
+### `mail_participants`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `thread_id` | TEXT | no |  | PK 1 | v61 |
+| `address` | TEXT | no |  | PK 2 | v61 |
+| `role` | TEXT | no |  |  | v61 |
+| `joined_at` | INTEGER | no |  |  | v61 |
+| `left_at` | INTEGER | yes |  |  | v61 |
+| `read_seq` | INTEGER | no | `0` |  | v61 |
+
+Indexes:
+
+- `mail_participants_address`: `address`
+
+### `mail_receipts`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `message_id` | TEXT | no |  | PK 1 | v61 |
+| `recipient` | TEXT | no |  | PK 2 | v61 |
+| `due_at` | INTEGER | no |  |  | v61 |
+| `attempt_at` | INTEGER | yes |  |  | v61 |
+| `delivered_at` | INTEGER | yes |  |  | v61 |
+| `read_at` | INTEGER | yes |  |  | v61 |
+| `handled_at` | INTEGER | yes |  |  | v61 |
+| `held` | TEXT | yes |  |  | v61 |
+| `attempts` | INTEGER | no | `0` |  | v61 |
+| `last_error` | TEXT | yes |  |  | v61 |
+
+Indexes:
+
+- `mail_receipts_pending`: `recipient`, `due_at`
+
+### `mail_threads`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v61 |
+| `home` | TEXT | no |  |  | v61 |
+| `project_id` | TEXT | yes |  |  | v61 |
+| `subject` | TEXT | no |  |  | v61 |
+| `origin` | TEXT | no |  |  | v61 |
+| `depth` | INTEGER | no | `0` |  | v61 |
+| `parent_id` | TEXT | yes |  |  | v61 |
+| `follows` | TEXT | yes |  |  | v61 |
+| `state` | TEXT | no |  |  | v61 |
+| `outcome` | TEXT | yes |  |  | v61 |
+| `owner` | TEXT | no |  |  | v61 |
+| `assignee` | TEXT | yes |  |  | v61 |
+| `next_step` | TEXT | yes |  |  | v61 |
+| `links` | TEXT | no | `'{}'` |  | v61 |
+| `rev` | INTEGER | no | `0` |  | v61 |
+| `pinned_at` | INTEGER | yes |  |  | v61 |
+| `created_at` | INTEGER | no |  |  | v61 |
+| `updated_at` | INTEGER | no |  |  | v61 |
+| `state_since` | INTEGER | no |  |  | v61 |
+| `done_at` | INTEGER | yes |  |  | v61 |
+
+Indexes:
+
+- `mail_threads_state`: `state`, `updated_at`
+
+### `mail_turns`
+
+Added in v61.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `session_id` | TEXT | no |  | PK 1 | v61 |
+| `turn_seq` | INTEGER | no |  | PK 2 | v61 |
+| `thread_id` | TEXT | yes |  |  | v61 |
+| `started_by` | TEXT | no |  |  | v61 |
+| `started_at` | INTEGER | no |  |  | v61 |
+| `ended_at` | INTEGER | yes |  |  | v61 |
+| `outcome` | TEXT | yes |  |  | v61 |
+
+Indexes:
+
+- `mail_turns_open`: `thread_id`
 
 ### `messages`
 
