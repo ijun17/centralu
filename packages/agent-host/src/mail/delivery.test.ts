@@ -24,9 +24,11 @@ function world() {
   const mail = new MailService(store.mail, { hostId: () => HOST, now: () => clock.t })
   const states = new Map<string, ReceiverState>()
   const delivered: { sessionId: string; input: MailInput }[] = []
+  const notes: { sessionId: string; text: string }[] = []
   const behaviour: { fail: Error | null; hold: Promise<void> | null } = { fail: null, hold: null }
   const sessions: MailSessions = {
     receiver: (id) => states.get(id) ?? { kind: 'ready', live: true, quiet: true },
+    note: (sessionId, text) => void notes.push({ sessionId, text }),
     deliver: async (sessionId, input) => {
       delivered.push({ sessionId, input })
       if (behaviour.hold) await behaviour.hold
@@ -59,7 +61,7 @@ function world() {
     clock.t = end
     await settle()
   }
-  return { store, mail, clock, states, delivered, behaviour, delivery, advance, timers }
+  return { store, mail, clock, states, delivered, notes, behaviour, delivery, advance, timers }
 }
 
 const settle = async () => {
@@ -368,5 +370,89 @@ describe('one delivery at a time per mailbox, and the sweep (§5)', () => {
     assign(w)
     await w.advance(120_000)
     expect(w.delivered).toEqual([])
+  })
+})
+
+describe('what a host that died left half done (§7.6.5)', () => {
+  /** The attempt was written and the tool's acceptance was not: what a host that dies in the middle leaves */
+  const diedMidDelivery = (w: ReturnType<typeof world>, recipient: string, messageIds: string[]) => {
+    w.store.mail.markAttempt(recipient, messageIds, w.clock.t)
+  }
+
+  it('an assign that may have been taken is not sent again by itself: it is held, said in the thread and to the receiver, and sent only when the person says', async () => {
+    const w = world()
+    const { message, thread } = assign(w)
+    diedMidDelivery(w, S2, [message.id])
+    w.clock.t += 60_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(5 * 60_000)
+
+    expect(w.delivered).toEqual([])
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: 'uncertain', attemptAt: null, deliveredAt: null })
+    expect(w.notes).toEqual([{ sessionId: 's2', text: expect.stringContaining('may not have arrived when Centralu restarted') }])
+    expect(w.notes[0]!.text).toContain('Resend and Dismiss')
+    const event = w.mail.read(thread.id, S1, { all: true, peek: true }).messages.at(-1)
+    expect(event).toMatchObject({ kind: 'event', facts: { change: 'delivery_uncertain', recipient: S2, messages: 1 } })
+
+    // The person says send it
+    expect(w.mail.resendHeld(S2, [message.id])).toBe(1)
+    await w.advance(2_000)
+    expect(w.delivered).toHaveLength(1)
+    expect(w.delivered[0]!.input.text).toContain('> land #12')
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: null, deliveredAt: expect.any(Number) })
+  })
+
+  it('dismissing it leaves it undelivered for good, and not in the Inbox’s list', async () => {
+    const w = world()
+    const { message } = assign(w)
+    diedMidDelivery(w, S2, [message.id])
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(w.store.mail.heldReceipts().map((r) => r.messageId)).toEqual([message.id])
+    expect(w.mail.dismissHeld(S2, [message.id])).toBe(1)
+    expect(w.store.mail.heldReceipts()).toEqual([])
+    await w.advance(10 * 60_000)
+    expect(w.delivered).toEqual([])
+  })
+
+  it('news that starts no work, and Centralu’s own words, go again by themselves, and the frame says they may be a repeat', async () => {
+    const w = world()
+    const { thread } = assign(w)
+    w.mail.addMember(thread.id, S1, APP)
+    w.mail.read(thread.id, S2)
+    const notice = w.mail.post(thread.id, APP, { kind: 'notice', body: 'progress', needsOwner: true })
+    const report = w.mail.postAsCentralu(thread.id, { kind: 'report', body: 'The assigned work finished', facts: { outcome: 'finished' }, to: [S1] })
+    diedMidDelivery(w, S1, [notice.message.id, report.message.id])
+    w.clock.t += 60_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(5_000)
+
+    expect(w.notes).toEqual([])
+    const toS1 = () => w.delivered.filter((d) => d.sessionId === 's1')
+    expect(toS1()).toHaveLength(1)
+    expect(toS1()[0]!.input.text).toContain('maybeRepeated="1"')
+    expect(w.store.mail.receiptsOf(notice.message.id).find((r) => r.recipient === S1)).toMatchObject({ held: null, lastError: null, deliveredAt: expect.any(Number) })
+    // A later frame does not say it again
+    w.mail.post(thread.id, S2, { kind: 'question', body: 'next?' })
+    await w.advance(40_000)
+    expect(toS1().at(-1)!.input.text).not.toContain('maybeRepeated')
+  })
+
+  it('a host that left nothing half done says nothing, and an inline assign that was taken whole is not touched', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    assign(w)
+    await w.advance(3_000)
+    expect(w.delivered).toHaveLength(1)
+    expect(w.notes).toEqual([])
+    w.delivery.stop()
+    const again = new MailDelivery(w.mail, w.store.mail, { receiver: () => ({ kind: 'ready', live: true, quiet: true }), deliver: async () => {}, note: () => {} })
+    again.start()
+    again.stop()
+    expect(w.store.mail.heldReceipts()).toEqual([])
   })
 })

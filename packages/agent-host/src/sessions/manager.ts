@@ -816,6 +816,9 @@ export class SessionManager {
       receiver: (id) => this.mailReceiver(id),
       deliver: (id, input, late) =>
         this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, late),
+      note: (id, text) => {
+        if (this.meta.has(id)) this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
+      },
     }
   }
 

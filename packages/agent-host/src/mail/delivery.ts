@@ -53,6 +53,8 @@ export type MailSessions = {
    * which it never ran, `late` is called with the error (after this has resolved)
    */
   deliver(sessionId: string, input: MailInput, late?: (error: Error) => void): Promise<void>
+  /** One line in the session's conversation, in Centralu's words (§7.6.5: a delivery that may not have arrived) */
+  note(sessionId: string, text: string): void
 }
 
 export type MailDeliveryOptions = {
@@ -108,6 +110,7 @@ export class MailDelivery {
   start(): void {
     if (this.running) return
     this.running = true
+    this.sayWhatWasLeftHalfDone()
     this.stopListening = this.service.onChange((c) => {
       for (const r of c.recipients) this.look(r)
     })
@@ -196,6 +199,21 @@ export class MailDelivery {
       this.records.failAttempt(recipient, ids, errorMessage(cause), this.now())
       this.records.setHeld(recipient, ids, 'failed')
     })
+  }
+
+  /** A delivery the previous host left half done is held or sent again (`reconcileInterrupted`), and the receiver is told when it is held */
+  private sayWhatWasLeftHalfDone(): void {
+    try {
+      for (const { recipient, held } of this.service.reconcileInterrupted()) {
+        const party = parseAddress(recipient)
+        if (held > 0 && party?.kind === 'session') {
+          const n = held === 1 ? 'A delivery' : `${held} deliveries`
+          this.sessions.note(party.sessionId, `✉ ${n} may not have arrived when Centralu restarted, and was not sent again: the Inbox has Resend and Dismiss`)
+        }
+      }
+    } catch (e) {
+      console.error(`[mail] could not look at what the last host left half done: ${errorMessage(e)}`)
+    }
   }
 
   /** Looks at a mailbox: now if its mail is due, else when it is */

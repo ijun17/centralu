@@ -708,10 +708,34 @@ export class MailRecords {
       .map(toReceipt)
   }
 
+  /** A delivery that may have gone and may not: held until the person says (§7.6.5) */
+  markUncertain(recipient: string, messageIds: readonly string[]): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET held = 'uncertain', attempt_at = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(recipient, JSON.stringify(messageIds))
+  }
+
+  /** A delivery that may have gone, of mail that starts no work: tried again, and its next frame says it may be a repeat (§7.6.5) */
+  markMaybeRepeated(recipient: string, messageIds: readonly string[], dueAt: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = 'maybe_repeated', due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(dueAt, recipient, JSON.stringify(messageIds))
+  }
+
+  /** The person's answer to held mail: sent now, or never (`dismissed`). Only mail held for a reason that needs them */
+  releaseHeld(recipient: string, messageIds: readonly string[], to: null | 'released' | 'dismissed', dueAt: number): number {
+    return this.db
+      .prepare(
+        `UPDATE mail_receipts SET held = ?, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?
+          WHERE recipient = ? AND held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') AND message_id IN (SELECT value FROM json_each(?))`,
+      )
+      .run(to, dueAt, recipient, JSON.stringify(messageIds)).changes
+  }
+
   /** Receipts the Inbox lists for a person to act on: held for a reason that needs them (§7.6, §7.7, §7.9) */
   heldReceipts(): ReceiptRow[] {
     return this.db
-      .prepare<[], ReceiptSql>(`SELECT * FROM mail_receipts WHERE held IS NOT NULL AND held != 'released' AND read_at IS NULL AND handled_at IS NULL ORDER BY due_at`)
+      .prepare<[], ReceiptSql>(`SELECT * FROM mail_receipts WHERE held IS NOT NULL AND held NOT IN ('released', 'dismissed') AND read_at IS NULL AND handled_at IS NULL ORDER BY due_at`)
       .all()
       .map(toReceipt)
   }

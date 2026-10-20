@@ -784,11 +784,68 @@ export class MailService {
         relation: relationWord(recipient, message.sender, thread),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
+        ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
         ...(down && !pointerOnly ? { inline: message.body } : {}),
       })
     }
     const frame = buildMailFrame(items)
     return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations) }
+  }
+
+  /**
+   * What a host that died left half done (§7.6.5): a delivery whose attempt was written and whose acceptance was not. The next
+   * host does not send it again on its own, because it cannot tell whether the tool took it, and an `assign` taken just before
+   * the host died would start the same work twice. So it is held `uncertain`, said in the thread (an `event` the sender reads)
+   * and, by the delivery, in the receiver's conversation, for the person to resend or dismiss. The exceptions go again by
+   * themselves, and their next frame says it may be a repeat: news that starts no work (a notice) and Centralu's own words,
+   * which only restate what the host knows
+   */
+  reconcileInterrupted(): { recipient: string; resent: number; held: number }[] {
+    const left = this.records.attemptedUnconfirmed()
+    if (left.length === 0) return []
+    return this.run(() => {
+      const now = this.now()
+      const byRecipient = new Map<string, MessageRow[]>()
+      for (const r of left) {
+        const m = this.records.message(r.messageId)
+        if (m) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), m])
+      }
+      const out: { recipient: string; resent: number; held: number }[] = []
+      for (const [recipient, messages] of byRecipient) {
+        const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
+        const unsure = messages.filter((m) => !again.includes(m))
+        if (again.length > 0) {
+          this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
+          this.changed(again[0]?.threadId ?? '', [recipient])
+        }
+        if (unsure.length > 0) {
+          this.records.markUncertain(recipient, unsure.map((m) => m.id))
+          for (const threadId of new Set(unsure.map((m) => m.threadId))) {
+            const n = unsure.filter((m) => m.threadId === threadId).length
+            this.insertEvent(threadId, 'A delivery may not have arrived when Centralu restarted. It was not sent again.', { change: 'delivery_uncertain', recipient, messages: n }, now)
+          }
+        }
+        out.push({ recipient, resent: again.length, held: unsure.length })
+      }
+      return out
+    })
+  }
+
+  /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */
+  resendHeld(recipient: string, messageIds: readonly string[]): number {
+    return this.run(() => {
+      const n = this.records.releaseHeld(recipient, messageIds, null, this.now())
+      for (const id of messageIds) {
+        const m = this.records.message(id)
+        if (m) this.changed(m.threadId, [recipient])
+      }
+      return n
+    })
+  }
+
+  /** The person says never: the mail is left undelivered, and not held against anyone (Inbox: Dismiss) */
+  dismissHeld(recipient: string, messageIds: readonly string[]): number {
+    return this.run(() => this.records.releaseHeld(recipient, messageIds, 'dismissed', this.now()))
   }
 
   // ── Retention ──
