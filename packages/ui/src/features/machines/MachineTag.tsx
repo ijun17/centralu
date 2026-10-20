@@ -1,8 +1,7 @@
-import { forwardRef, type CSSProperties } from 'react'
-import type { MachineStatus } from '@cc/protocol'
-import { MACHINE_STATUS_LABEL } from '@cc/core'
+import { forwardRef, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
+import { MachineMenu } from './MachineMenu.jsx'
 
 /**
  * Which machine a session runs on, where the sidebar's machine badge (MachineBadge, #734) is not in view: the inbox, a notice
@@ -33,7 +32,8 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
  * A linked machine's project or user-folder app in the sidebar's one list (#734), where a machine header used to say
  * which machine its rows were on. MachineTag's chip, so it reads as the same mark wherever a machine is named; the
  * border is the link: solid while connected, dashed while not (connecting, away, unreachable, …). It keeps what the
- * header offered: pressing it opens Settings → Machines, and its tooltip carries the link's last error.
+ * header offered, and more: pressing it opens a menu with the link's state, its last error and Connect (MachineMenu),
+ * and its tooltip carries the last error too.
  *
  * Capped at 96px and cut with an ellipsis past it, so a long machine name cannot take the line from the project's own
  * name; the whole name is in Settings → Machines. `placeholder` is the same chip, invisible and inert, holding the
@@ -57,22 +57,35 @@ export function MachineBadge({
   style?: CSSProperties
 }) {
   const info = useStore((s) => s.machines[machine])
-  const openSettingsAt = useStore((s) => s.openSettingsAt)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLButtonElement>(null)
   const name = info?.name ?? machine
-  const connected = info?.status === 'connected'
+  const status = info?.status ?? 'unknown'
+  const connected = status === 'connected'
   return (
-    <button
-      type="button"
-      className={`${BADGE} ${connected ? '' : 'border-dashed'} ${className}`}
-      style={style}
-      title={info?.error ?? `${name} — ${info?.sshTarget ?? ''}`}
-      data-testid={testId}
-      data-machine={machine}
-      data-status={info?.status ?? 'unknown'}
-      onClick={() => openSettingsAt('machines')}
-    >
-      {name}
-    </button>
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className={`${BADGE} ${connected ? '' : 'border-dashed'} ${className}`}
+        style={style}
+        title={connected ? `${name} — ${info?.sshTarget ?? ''}` : `${name} is not connected${info?.error ? ` — ${info.error}` : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid={testId}
+        data-machine={machine}
+        data-status={status}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {/*
+          Not connected is said on the badge itself (owner, 2026-10-20): the dashed border alone read as a style, not a
+          state. A slash through the name's ink would cost its legibility; a dot before it costs one character's width
+        */}
+        {!connected && <span className="mr-1 inline-block size-1 -translate-y-px rounded-full bg-current align-middle" aria-hidden />}
+        {name}
+      </button>
+      {open && <MachineMenu machine={machine} anchorEl={ref.current} onClose={() => setOpen(false)} />}
+    </>
   )
 }
 
@@ -90,25 +103,4 @@ export const MachineBadgePlaceholder = forwardRef<HTMLSpanElement, { machine: st
 export function SessionMachineTag({ sessionId, testId, className }: { sessionId: string; testId?: string; className?: string }) {
   const machine = useStore((s) => s.sessions[sessionId]?.machine ?? null)
   return <MachineTag machine={machine} testId={testId} className={className} />
-}
-
-/**
- * A link's state as one dot and a word. The dot is the only mark: brightness says how much the state asks of the
- * person (a version decision or a refusal is bright, away is faint, connected is quiet), the word says which.
- */
-export function MachineStatusMark({ status, testId }: { status: MachineStatus; testId?: string }) {
-  const tone =
-    status === 'versions_differ' || status === 'refused'
-      ? 'bg-ink-signal'
-      : status === 'connected'
-        ? 'bg-ink-muted'
-        : status === 'connecting' || status === 'starting' || status === 'updating'
-          ? 'bg-ink-muted animate-pulse'
-          : 'bg-ink-faint'
-  return (
-    <span className="flex shrink-0 items-center gap-1 text-2xs text-ink-faint" data-testid={testId} data-status={status}>
-      <span className={`size-1.5 rounded-full ${tone}`} aria-hidden />
-      <span className={status === 'versions_differ' || status === 'refused' ? 'text-ink' : ''}>{MACHINE_STATUS_LABEL[status]}</span>
-    </span>
-  )
 }

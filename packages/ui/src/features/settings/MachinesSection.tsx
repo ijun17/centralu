@@ -4,7 +4,7 @@ import { asksRow, autostartRow, updateWaits, elevatedNote, hostStartNote, instal
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Button } from '../../components/Button.jsx'
-import { MachineStatusMark } from '../machines/MachineTag.jsx'
+import { MachineStatusMark } from '../machines/MachineStatusMark.jsx'
 import { AwayNote } from '../machines/AwayNote.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 import { useLoad } from '../../app/useLoad.js'
