@@ -1382,7 +1382,7 @@ updating, removing and start at boot wait for a card in the orchestrator's slot 
 `about: "machine_change"`, the question whole in `raw`, so any window reads it; allow or deny, nothing remembered).
 Reconnecting and Auto reconnect act at once, as the row's buttons do, except that undoing what the person chose asks (#1341):
 `reconnect_machine` on a machine they disconnected or whose Auto reconnect is off, and `set_machine_auto_reconnect` turning the
-switch back on, wait for a card (`about: "machine_change"`); a machine away on its own with the switch on is reconnected with no card. Refused before any card: a machine not linked,
+switch back on, wait for a card (`about: "machine_change"`); a machine away on its own with the switch on is reconnected with no card, and one already connected is answered as connected (nothing is done). Refused before any card: a machine not linked,
 a target that is no ssh target or that `ssh -G` cannot read, a name already linked, and an install or update
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.

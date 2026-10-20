@@ -339,13 +339,14 @@ describe('remove_machine', () => {
 describe('reconnect_machine and set_machine_auto_reconnect', () => {
   it('act at once with no card for a machine that only dropped and for turning the switch off, and say the machine as it is now', async () => {
     const orc = await mgr.orchestrator()
+    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out' })
     const re = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })
     expect(re.isError).toBeFalsy()
     expect(re.text).toBe('Reconnecting Laptop.\nNow:\n- "Laptop" [laptop]: connecting; Windows, PowerShell; auto reconnect on')
     const mode = await run(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: false })
     expect(mode.text).toBe(
       'Laptop no longer reconnects by itself: after a drop only the person\'s Connect brings it back, and nothing here connects it.\n' +
-        'Now:\n- "Laptop" [laptop]: connected; Windows, PowerShell; auto reconnect off (only the person connects it again)',
+        'Now:\n- "Laptop" [laptop]: unreachable; Windows, PowerShell; auto reconnect off (only the person connects it again)',
     )
     expect(card(orc.id)).toBeUndefined()
     // Without a card the link is only opened: the orchestrator's reconnect is no Start (#1143)
@@ -402,6 +403,18 @@ describe('undoing what the person did', () => {
     const allowed = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'allow')
     expect(allowed.r.text).toContain('Reconnecting Laptop.')
     expect(ops.changes()).toEqual([['reconnect', 'laptop', { start: false }]])
+  })
+
+  it('answers that a machine is connected, with no card and nothing done, whatever its switch says', async () => {
+    const orc = await mgr.orchestrator()
+    for (const off of [false, true]) {
+      ops.patch({ status: 'connected', error: null, ...(off ? { autoReconnect: false, connect: 'when_needed' as const } : {}) })
+      const r = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })
+      expect(r.isError).toBeFalsy()
+      expect(r.text).toContain('Laptop is already connected; nothing was done.')
+      expect(card(orc.id)).toBeUndefined()
+    }
+    expect(ops.changes()).toEqual([])
   })
 
   it('reconnects a machine that is away on its own, its switch on, with no card', async () => {

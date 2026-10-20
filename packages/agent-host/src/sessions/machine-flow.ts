@@ -110,6 +110,8 @@ export class MachineFlow {
       if (typeof m === 'string') return { ok: false, error: m }
       switch (req.action) {
         case 'reconnect': {
+          // Already connected: there is nothing to reconnect, so nothing is asked and nothing is done (#1341)
+          if (m.status === 'connected') return done(`${m.name} is already connected; nothing was done.`, m)
           /*
            * Held back there (#1143): stopped by the person, or after the hosts this computer started kept stopping.
            * Starting one is the person's to allow, so it is asked whatever the row says just now (it reads the line again,
