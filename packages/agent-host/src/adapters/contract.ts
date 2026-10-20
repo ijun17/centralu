@@ -243,7 +243,15 @@ export interface SessionHandle {
   readonly externalId: string | null
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
-  send(text: string, opts?: { origin?: InputOrigin }): void
+  /** `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID) */
+  send(text: string, opts?: { origin?: InputOrigin; id?: string }): void
+  /**
+   * Which of the inputs given an `id` the turn that just ended took in (#1377), read while the event that ends it is
+   * handled. Absent: the tool takes every message into the turn it is running (Codex steers an active turn). Present:
+   * a message sent mid-turn may instead run as a turn of its own after (Claude folds one in only at a tool round);
+   * `null`: the tool cannot tell (an older CLI), and none is taken to have joined
+   */
+  turnInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
   sendTracked?(text: string, observer?: InputObserver): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */

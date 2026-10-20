@@ -308,6 +308,107 @@ describe('a child that waits on its own background work (#721)', () => {
       expect(wakes(caller, child).at(-1)).toContain('The person wrote in this session during this turn.')
     })
 
+    /*
+     * Claude folds a queued input into the running turn only at a tool round. A message sent while the final answer is
+     * written (no more tool calls) runs as a turn of its own after, and the result of each turn names the inputs it took
+     * (`SessionHandle.turnInputs`). The host decides from that, not from the order of the messages.
+     */
+    describe('a tool that folds a message in only at a tool round', () => {
+      /** The inputs the turn that ends took in, as the tool's result names them; set before the turn ends */
+      let taken: readonly string[] | null
+      function tracking(child: string) {
+        taken = []
+        handleOf(child)!.turnInputs = () => taken
+      }
+      const lastId = (child: string) => handleOf(child)!.ids.at(-1)!
+
+      it("the person's message not folded into the work's turn is their own turn after it: not the work's, and not noted on it", async () => {
+        const { caller, child } = await started()
+        tracking(child)
+        await w.mgr.send(child, 'and tell me a joke')
+        const id = lastId(child)
+        expect(id).toBeDefined()
+        // The work's turn ends without taking it in (the final answer was being written)
+        pauseOnVerify(child)
+        await w.until(() => reportsTo(caller, child).length === 1)
+        expect(reportsTo(caller, child)[0]).toContain('The assigned work paused')
+        expect(reportsTo(caller, child)[0]).not.toContain('The person wrote')
+        // The tool runs the held message as a turn of its own; it takes the message in
+        handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+        taken = [id]
+        handleOf(child)!.answer('A joke.')
+        await settle()
+        // Their turn is reported to nobody and the report stays open
+        expect(reportsTo(caller, child)).toHaveLength(1)
+        expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
+        // The work's end still reports, as the work's turn
+        taken = []
+        verifyEndsAndChildFinishes(child)
+        await w.until(() => reportsTo(caller, child).length === 2)
+        expect(reportsTo(caller, child)[1]).toContain('[Centralu] The assigned work finished.')
+        expect(reportsTo(caller, child)[1]).not.toContain('The person wrote')
+      })
+
+      it("the person's message folded into the work's turn is noted on it, and no turn of theirs follows", async () => {
+        const { caller, child } = await started()
+        tracking(child)
+        await w.mgr.send(child, 'also check the lint')
+        taken = [lastId(child)]
+        handleOf(child)!.answer('Done, lint included.')
+        await w.until(() => reportsTo(caller, child).length === 1)
+        expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
+        expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
+      })
+
+      it('a message among several: only the one the turn took in is noted, and the other starts their turn', async () => {
+        const { caller, child } = await started()
+        tracking(child)
+        await w.mgr.send(child, 'first')
+        const first = lastId(child)
+        await w.mgr.send(child, 'second')
+        taken = [first]
+        handleOf(child)!.answer('Done.')
+        await w.until(() => reportsTo(caller, child).length === 1)
+        expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
+        handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+        taken = [lastId(child)]
+        handleOf(child)!.answer('Second answered.')
+        await settle()
+        expect(reportsTo(caller, child)).toHaveLength(1)
+      })
+
+      it("a CLI that cannot name the inputs it took (older): the message is the next turn's, never noted on the work's", async () => {
+        const { caller, child } = await started()
+        handleOf(child)!.turnInputs = () => null
+        await w.mgr.send(child, 'and tell me a joke')
+        pauseOnVerify(child)
+        await w.until(() => reportsTo(caller, child).length === 1)
+        expect(reportsTo(caller, child)[0]).not.toContain('The person wrote')
+        handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+        handleOf(child)!.answer('A joke.')
+        await settle()
+        expect(reportsTo(caller, child)).toHaveLength(1)
+      })
+
+      it("a second message into their own turn that the tool runs after it: theirs too", async () => {
+        const { caller, child } = await started()
+        tracking(child)
+        pauseOnVerify(child)
+        await w.until(() => reportsTo(caller, child).length === 1)
+        await w.mgr.send(child, 'first question')
+        const first = lastId(child)
+        await w.mgr.send(child, 'second question')
+        taken = [first]
+        handleOf(child)!.answer('First answered.')
+        handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+        taken = [lastId(child)]
+        handleOf(child)!.answer('Second answered.')
+        await settle()
+        expect(reportsTo(caller, child)).toHaveLength(1)
+        expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
+      })
+    })
+
     it('"Just asking" is the default, also when the person writes into the work\'s turn: it stays the work\'s, with the note', async () => {
       const { caller, child } = await started()
       await w.mgr.send(child, 'quick question', undefined, undefined, true, 'ask')

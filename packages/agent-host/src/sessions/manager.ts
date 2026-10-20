@@ -748,6 +748,11 @@ export class SessionManager {
     return this.linkedHost.remoteAgentParent(...a)
   }
 
+  /** `LinkedHost.forwarding` (linked-host.ts), kept on the manager for its callers */
+  forwarding(...a: Parameters<LinkedHost['forwarding']>): ReturnType<LinkedHost['forwarding']> {
+    return this.linkedHost.forwarding(...a)
+  }
+
   /** `LinkedHost.observeLinked` (linked-host.ts), kept on the manager for its callers */
   observeLinked(...a: Parameters<LinkedHost['observeLinked']>): ReturnType<LinkedHost['observeLinked']> {
     return this.linkedHost.observeLinked(...a)
@@ -879,7 +884,7 @@ export class SessionManager {
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
             // Whose the turn was (#1377): the person's is reported to nobody
-            const turnBy = this.children.turnEnded(m.id)
+            const turnBy = this.children.turnEnded(m.id, null)
             if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
             else if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
           } else if (this.children.pausedReports.has(m.id)) {

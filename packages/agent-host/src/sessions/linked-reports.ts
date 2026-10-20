@@ -2,7 +2,7 @@ import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type No
 import type { LinkedSessions } from '../adapters/contract.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
-import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport } from './child-ownership.js'
+import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
@@ -46,9 +46,18 @@ export type LinkedReportsHost = {
   reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
 }
 
+/** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
+const ADD_NEXT_MS = 15_000
+
 /** What a report says of the person's part in a turn (#1377): nothing, unless they wrote into it or added to the task */
 function partOf(turn: { wrote?: true; added?: true }): { wrote?: true; added?: true } | undefined {
   return turn.wrote || turn.added ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}) } : undefined
+}
+
+/** Whose the turn was, as the machine's host said it on the event that ended it (#1377); undefined from a host that does not say */
+function saidTurn(raw: unknown): TurnStarter | undefined {
+  if (typeof raw !== 'object' || raw === null || !('by' in raw) || (raw.by !== 'person' && raw.by !== 'work')) return undefined
+  return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}) }
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -74,6 +83,8 @@ export type LinkedEvent = {
   from?: unknown
   /** The person's choice for a report the session owes (`user_message`, #1377) */
   intent?: unknown
+  /** Whose the turn was, on the event that ends it (#1377) */
+  turn?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown
@@ -169,7 +180,11 @@ export class LinkedReports {
       return
     }
     if (step?.step !== 'completed' && step?.step !== 'failed') return
-    const turn = wait.turn ?? { by: 'work' as const }
+    /*
+     * The machine's host says whose the turn was (from the inputs the tool took in), and that is what is read. A host that
+     * does not say (an older one) leaves the hub to its own reading of the messages and turn starts it saw
+     */
+    const turn = saidTurn(e.turn) ?? wait.turn ?? { by: 'work' as const }
     delete wait.turn
     wait.lastBy = turn.by
     // The person's own turn is reported to nobody and changes nothing of the report; paused work that ended meanwhile settles again
@@ -209,7 +224,9 @@ export class LinkedReports {
     const person = !e.from && !e.fromApp
     // A takeover the gate does not let through (not yet told whose the turn is) is only a message of the person's
     if (person && e.intent === 'takeover' && this.tookOver(sessionId, wait)) return true
-    const added = person && e.intent === 'task'
+    // The choice rides on the relayed message from a machine that echoes it; the hub also noted it as the call went out
+    const added = person && (e.intent === 'task' || (wait.addNext !== undefined && Date.now() - wait.addNext < ADD_NEXT_MS))
+    if (person) delete wait.addNext
     if (wait.busy) {
       const running = wait.turn ?? { by: 'work' as const }
       wait.turn = running
@@ -286,6 +303,28 @@ export class LinkedReports {
     this.drop(sessionId)
     void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { tookOver: true, paused }, known)
     return true
+  }
+
+  /**
+   * The person's choice for the message a call to a linked machine's session carries (#1377). The hub routes the call, so
+   * it knows the choice before the machine does and does not depend on the machine echoing it: an older host strips the
+   * field it does not know, and the choice would silently become "Just asking". Returns what to do when the call ends:
+   * "Take it over" closes the wait once the machine took the message, "Add to the task" is dropped if it did not.
+   */
+  choosing(sessionId: string, intent: unknown): ((delivered: boolean) => void) | undefined {
+    if (intent !== 'task' && intent !== 'takeover') return undefined
+    const wait = this.host.children.linkedReports.get(sessionId)
+    if (!wait) return undefined
+    if (intent === 'task') {
+      const at = Date.now()
+      wait.addNext = at
+      return (delivered) => {
+        if (!delivered && wait.addNext === at) delete wait.addNext
+      }
+    }
+    return (delivered) => {
+      if (delivered && this.host.children.linkedReports.get(sessionId) === wait) this.tookOver(sessionId, wait)
+    }
   }
 
   /** The paused work ended with no turn after it: the report goes out with how each task ended */

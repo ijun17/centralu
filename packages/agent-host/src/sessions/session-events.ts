@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
@@ -201,15 +202,19 @@ export class SessionEvents {
     const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
-    this.host.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
+    /*
+     * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
+     * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
+     */
+    const turnBy = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
+    const said = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
+    this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)
     this.closeIntoRest(e)
     // After the event that caused it, so a window reads the error first and the reason for it second (#698)
     const nowInterrupted = e.sessionId ? this.host.meta.get(e.sessionId)?.interruption ?? null : null
     if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
       this.host.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
     }
-    // Whose the turn was (#1377), read once as it ends; the person's own turn is reported to nobody
-    const turnBy = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId) : undefined
     // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
     const owed = endedTurn && !!e.sessionId && (this.host.children.awaitingReport.has(e.sessionId) || waited)
     /*
@@ -501,13 +506,16 @@ export class SessionEvents {
     const notice = this.host.apps.rootAppsNotice(sessionId)
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
-    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task')
+    const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
+    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
+    const inputId = joins ? randomUUID() : undefined
+    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' } })
-    else h.send(input)
+    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, ...(inputId ? { id: inputId } : {}) })
+    else h.send(input, inputId ? { id: inputId } : undefined)
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
   }

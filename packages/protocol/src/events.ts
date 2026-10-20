@@ -28,6 +28,17 @@ import { HostHandover } from './host-logon.js'
 const base = { sessionId: z.string() }
 
 /**
+ * Whose a turn was, said on the event that ends it (#1377): `person` when the person's own message started it, `work`
+ * otherwise (the caller's message, an app's, Centralu's, or the tool starting it when the work's background tasks end);
+ * `wrote`: the person wrote into a turn of the work and the tool took it in; `added`: they chose to add it to the task.
+ * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
+ * order of the messages. Absent from a host that does not say.
+ */
+export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional() })
+export type TurnWho = z.infer<typeof TurnWho>
+const endsTurn = { turn: TurnWho.optional() }
+
+/**
  * Events that do not belong to a session (`error`, `update_status`).
  *
  * `sessionId` is **kept, made optional, rather than removed.** Adding a branch that omits the
@@ -377,7 +388,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * reading only the last piece of text never yields the answer. Codex is not carried here,
    * since its last message is the JSON itself.
    */
-  z.object({ ...base, type: z.literal('turn_complete'), output: z.unknown().optional() }),
+  z.object({ ...base, ...endsTurn, type: z.literal('turn_complete'), output: z.unknown().optional() }),
   /**
    * Why the session's last turn did not run to its end changed (#698): set when a turn stops for a network failure, a
    * quit or an interrupt nobody here asked for, or when the tool has been reconnecting for too long; `null` once the
@@ -385,7 +396,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * to windows already open. Not recorded: the conversation already has the error, or the host's marker for a quit.
    */
   z.object({ ...base, type: z.literal('interruption'), interruption: Interruption.nullable() }),
-  z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
+  z.object({ ...base, ...endsTurn, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
   /**
    * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
    * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
@@ -424,6 +435,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   }),
   z.object({
     ...base,
+    ...endsTurn,
     type: z.literal('limit_reached'),
     /** ISO8601. The tool's reported expected reset time (FR-9) */
     resumeAt: z.string().optional(),
@@ -839,7 +851,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * session that ended in error left the screen's `lastSeq` one behind, and reopening it showed
    * an unread dot on a session that had already been viewed.
    */
-  z.object({ ...appScoped, ...persistedSeq, type: z.literal('error'), error: ProtocolError }),
+  z.object({ ...appScoped, ...persistedSeq, ...endsTurn, type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>
 

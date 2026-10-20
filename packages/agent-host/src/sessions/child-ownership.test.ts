@@ -290,13 +290,63 @@ describe('whose a turn is', () => {
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
     own.noteMessage('s', 'person', true, true)
-    expect(own.starterOf('s')).toEqual({ by: 'work', wrote: true })
+    // Decided at the turn's end: a tool that takes every message into the running turn (no list of what it took)
     own.noteMessage('s', 'person', true, true, true)
     expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true, added: true })
     own.noteMessage('s', 'person', false, true)
     own.turnStarted('s')
     own.noteMessage('s', 'person', true, true)
     expect(own.turnEnded('s')).toEqual({ by: 'person' })
+  })
+
+  // The tool names the inputs a turn took (Claude's result): a message it did not take is the next turn's
+  it("a message the turn did not take in is the next turn's, theirs; one it took in is noted on this", () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, true, false, 'in')
+    own.noteMessage('s', 'person', true, true, false, 'held')
+    expect(own.turnEnded('s', ['in'])).toEqual({ by: 'work', wrote: true })
+    own.turnStarted('s')
+    expect(own.turnEnded('s', ['held'])).toEqual({ by: 'person' })
+  })
+
+  it('a tool that cannot name them (null) takes none in; naming none (an empty list) takes none in either', () => {
+    for (const taken of [null, []] as const) {
+      own.noteMessage('s', 'work', false, true)
+      own.turnStarted('s')
+      own.noteMessage('s', 'person', true, true, false, 'm')
+      expect(own.turnEnded('s', taken)).toEqual({ by: 'work' })
+      own.turnStarted('s')
+      expect(own.turnEnded('s')).toEqual({ by: 'person' })
+    }
+  })
+
+  it("a person's message into their own turn that was not taken in is theirs after it too, and the caller's is the work's", () => {
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, true, false, 'again')
+    expect(own.turnEnded('s', [])).toEqual({ by: 'person' })
+    own.turnStarted('s')
+    expect(own.turnEnded('s', ['again'])).toEqual({ by: 'person' })
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'work', true, true, false, 'caller')
+    expect(own.turnEnded('s', [])).toEqual({ by: 'person' })
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+  })
+
+  it("messages not yet taken in are kept for the next host, with the turn's starter", () => {
+    own.markReport('s', 'caller')
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, true, false, 'held')
+    expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'work', pending: [{ id: 'held', by: 'person' }] })
+    const next = new ChildOwnership(store)
+    next.adoptReport('s', 'caller', null)
+    expect(next.turnEnded('s', [])).toEqual({ by: 'work' })
+    next.turnStarted('s')
+    expect(next.turnEnded('s', ['held'])).toEqual({ by: 'person' })
   })
 
   it("add to the task, at rest, makes the turn the work's, noted as their addition", () => {

@@ -745,6 +745,27 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(2)
     })
 
+    // #1377: an older machine strips `intent` from the call, so the hub applies the choice it saw go out
+    it("\"Take it over\" for a machine that strips the choice: the hub closes the wait itself once the machine took the message", async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+      await h.settle(1)
+
+      const done = h.mgr.forwarding('agents.send', { sessionId: 'm1.w1', text: 'mine now', intent: 'takeover' })
+      expect(done).toBeDefined()
+      // The machine records the message without the choice, as an older one does
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: 'mine now' })
+      done!(true)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] The person took this session over')
+      expect(h.mgr.forwarding('agents.send', { sessionId: 'm1.w1', text: 'x' })).toBeUndefined()
+    })
+
     it("the person writing into the work's turn there is reported with their part", async () => {
       const h = await hub()
       await h.send(true)

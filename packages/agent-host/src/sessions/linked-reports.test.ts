@@ -320,6 +320,127 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     expect(delivered[1]).toMatchObject({ ending: 'turn_complete', part: { added: true } })
   })
 
+  // The hub routes the call, so it knows the choice before the machine does: an older machine strips what it does not know
+  describe('the choice the hub sees go out with a message to the machine (#1377)', () => {
+    it('"Take it over" closes the wait once the machine took the message, whether or not the machine echoes the choice', async () => {
+      await paused()
+      const done = reports.choosing('m1.w1', 'takeover')!
+      expect(delivered).toHaveLength(1)
+      done(true)
+      await flush()
+      expect(delivered).toHaveLength(2)
+      expect(delivered[1]).toMatchObject({ work: { tookOver: true } })
+      expect(children.linkedReports.has('m1.w1')).toBe(false)
+      // The echo of a machine that does say it finds no wait: told once
+      reports.observe(person({ intent: 'takeover' }))
+      await flush()
+      expect(delivered).toHaveLength(2)
+    })
+
+    it('"Take it over" does nothing when the machine did not take the message', async () => {
+      await paused()
+      reports.choosing('m1.w1', 'takeover')!(false)
+      await flush()
+      expect(delivered).toHaveLength(1)
+      expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify'])
+    })
+
+    it("\"Add to the task\" makes the next message the work's, noted as their addition, from a machine that does not echo it", async () => {
+      await paused()
+      const done = reports.choosing('m1.w1', 'task')!
+      reports.observe(person({}, 'Also add a changelog line.'))
+      done(true)
+      reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+      turn('m1.w1')
+      await flush()
+      expect(delivered).toHaveLength(2)
+      expect(delivered[1]).toMatchObject({ ending: 'turn_complete', part: { added: true } })
+    })
+
+    it('"Add to the task" for a message the machine did not take, or never relayed, is not kept for the next one', async () => {
+      await paused()
+      reports.choosing('m1.w1', 'task')!(false)
+      reports.observe(person({}, 'a different message'))
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+      await flush()
+      // Theirs, not the work's: nothing is reported
+      expect(delivered).toHaveLength(1)
+    })
+
+    it('"Just asking", an unknown choice and a session that owes nothing ask nothing of the hub', async () => {
+      await paused()
+      expect(reports.choosing('m1.w1', 'ask')).toBeUndefined()
+      expect(reports.choosing('m1.w1', undefined)).toBeUndefined()
+      expect(reports.choosing('m1.w1', 'make-it-so')).toBeUndefined()
+      expect(reports.choosing('m1.other', 'takeover')).toBeUndefined()
+    })
+  })
+
+  // The machine's host says whose each turn was, from the inputs the tool took in: a message sent while the final answer
+  // was written runs as a turn of its own, and the order of the messages the hub sees cannot tell
+  describe('the machine says whose the turn was', () => {
+    const said = (turn: { by: 'person' | 'work'; wrote?: true; added?: true }, type = 'turn_complete'): LinkedEvent => ({ type, sessionId: 'm1.w1', turn })
+
+    it("a person's message the work's turn did not take in is their own turn after it: the work's report does not note it, and their turn is not reported", async () => {
+      ask('m1.w1')
+      reports.observe(tasks('m1.w1', [verify]))
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      // They write while the answer is being written: the hub sees the message in a running turn
+      reports.observe(person({ seq: 9 }, 'and tell me a joke'))
+      reports.observe(said({ by: 'work' }))
+      await flush()
+      expect(delivered).toHaveLength(1)
+      expect(delivered[0]).toMatchObject({ work: { paused: [{ id: 'bg-verify' }] } })
+      expect(delivered[0]?.part).toBeUndefined()
+      // The tool runs the held message as a turn of its own: the machine says it is theirs
+      reports.observe({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+      reports.observe(said({ by: 'person' }))
+      await flush()
+      expect(delivered).toHaveLength(1)
+      expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify'])
+      // The work's end still reports
+      reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+      reports.observe({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+      reports.observe(said({ by: 'work' }))
+      await flush()
+      expect(delivered).toHaveLength(2)
+      expect(delivered[1]?.part).toBeUndefined()
+    })
+
+    it("a message the turn took in is noted as the machine says, with no message seen by the hub", async () => {
+      ask('m1.w1')
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      reports.observe(said({ by: 'work', wrote: true }))
+      await flush()
+      expect(delivered).toHaveLength(1)
+      expect(delivered[0]).toMatchObject({ ending: 'turn_complete', part: { wrote: true } })
+    })
+
+    it('their addition to the task is noted as such, and a failed turn of theirs is reported to nobody', async () => {
+      ask('m1.w1')
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      reports.observe(said({ by: 'work', added: true }))
+      await flush()
+      expect(delivered[0]).toMatchObject({ part: { added: true } })
+      ask('m1.w1')
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      reports.observe({ ...said({ by: 'person' }, 'error'), error: { message: 'compact crashed' } })
+      await flush()
+      expect(delivered).toHaveLength(1)
+      expect(children.linkedReports.has('m1.w1')).toBe(true)
+    })
+
+    it("a host that does not say is read from the messages the hub saw, as before", async () => {
+      ask('m1.w1')
+      reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+      reports.observe(person({}, 'also lint'))
+      reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+      await flush()
+      expect(delivered[0]).toMatchObject({ part: { wrote: true } })
+    })
+  })
+
   it('"Take it over": closes the report and tells the orchestrator once; none of their later turns is reported', async () => {
     await paused()
     reports.observe(person({ intent: 'takeover' }))
