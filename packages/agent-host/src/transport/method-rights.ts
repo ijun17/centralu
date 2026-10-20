@@ -1,0 +1,333 @@
+import type { RpcMethodName } from '@cc/protocol'
+
+/**
+ * What a connection holding the **limited** credential may call (#1405).
+ *
+ * The full token is the window's: it calls everything, and the window shows its own confirmations
+ * first. Anything else of this user (an agent, a script an agent wrote, a tool, `pnpm dev:live`) is
+ * meant to hold the limited credential (`limited-token.ts`), and each method says what that one does:
+ *
+ *   everyday   runs: reading, creating and messaging sessions, renaming, what the OS user could do
+ *              by hand anyway (git, files, terminals, stopping a process)
+ *   asks       irreversible or trust-widening: deletes beyond what the trash brings back, moves out of
+ *              reach what the trash does not fully restore, widens what agents, apps or machines may do
+ *              without the person, or brings in code that later runs unasked. Refused for now; a later
+ *              slice turns the refusal into a card the person answers in the window
+ *   window     the person's own answers (a card, a question, an apply) and the window's own state,
+ *              written whole: refused, and never a card (a card that answers a card means nothing)
+ *   link       host-to-host calls of a hub linked to this host, which holds this host's full token
+ *   bridge     a session's own tool channel; a Codex bridge has its own credential for it, and through
+ *              it a limited caller could act as an `auto` session, whose tool cards are skipped
+ *
+ * `{ asks }` is for a method that asks only for some parameters (raising a preset, turning a switch
+ * on); the function is given the parameters as sent, before they are parsed, so it reads them
+ * defensively and asks when in doubt.
+ *
+ * The table is keyed by `RpcMethodName` with no default, as `ROUTES` is (`links/routes.ts`): a method
+ * added to the protocol does not compile until someone decides what the limited credential does with
+ * it. The classification and its rule are in docs/security-boundaries.md ("Who holds full power").
+ */
+export type Rights =
+  | 'everyday'
+  | 'asks'
+  | { readonly asks: (params: unknown) => boolean }
+  | 'window'
+  | 'link'
+  | 'bridge'
+
+/** The parameters as an object to read fields from; anything else reads as having none */
+function fields(params: unknown): Record<string, unknown> {
+  return params !== null && typeof params === 'object' && !Array.isArray(params) ? (params as Record<string, unknown>) : {}
+}
+
+/** A preset above `normal` (`auto` never asks), or one that cannot be read, asks */
+const presetAbove = (params: unknown): boolean => {
+  const p = fields(params).permissionPreset
+  return p !== undefined && p !== 'safe' && p !== 'normal'
+}
+
+/**
+ * Setting a session's preset to anything but `safe` may raise it (`safe` → `normal`, or to `auto`),
+ * and the parameters alone do not say what it was before: ask unless it only narrows to `safe`
+ */
+const presetRaised = (params: unknown): boolean => {
+  const p = fields(params).permissionPreset
+  return p !== undefined && p !== 'safe'
+}
+
+/** A switch turned on, or a value that is not plainly `false` */
+const switchedOn = (key: string) => (params: unknown): boolean => fields(params)[key] !== false
+
+/**
+ * The preferences that widen what agents may do, or hide the person's own notice of a card
+ * (as the orchestrator's `set_preferences` cards them): a ceiling or depth set at all (raising or
+ * removing it), the hub-auto switch turned on, approval notifications or their sound turned off
+ */
+const prefsWiden = (params: unknown): boolean => {
+  const patch = fields(fields(params).patch)
+  if ('agentCeiling' in patch || 'agentDepth' in patch) return true
+  if ('hubAuto' in patch && patch.hubAuto !== false) return true
+  const notify = fields(patch.notifyPolicy)
+  return notify.approval === false || notify.sound === false
+}
+
+export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
+  // Sessions
+  'agents.createSession': { asks: presetAbove },
+  'agents.send': 'everyday',
+  'agents.respondApproval': 'window',
+  'agents.answerQuestion': 'window',
+  'agents.interrupt': 'everyday',
+  'agents.stopBackgroundTask': 'everyday',
+  'agents.clearBackgroundTasks': 'everyday',
+  /** Moving to the trash drops owed reports, delegations, grants and waiting cards (owner, #1371) */
+  'agents.deleteSession': 'asks',
+  'agents.deleteAgentChild': 'asks',
+  'agents.mcpProposals': 'everyday',
+  'agents.resolveMcpProposal': 'window',
+  'agents.skillProposals': 'everyday',
+  'agents.resolveSkillProposal': 'window',
+  'agents.orchestratorSkills': 'everyday',
+  'agents.deleteOrchestratorSkill': 'asks',
+  'agents.exportHandoffRecord': 'everyday',
+  'agents.exportHandoffNote': 'everyday',
+  'agents.worktreeStatus': 'everyday',
+  'agents.restartSession': 'everyday',
+  'agents.resumeSession': 'everyday',
+  'agents.forkConversation': 'everyday',
+  'agents.switchTool': 'everyday',
+  'agents.updateSettings': { asks: presetRaised },
+  'agents.listExternalSessions': 'everyday',
+  'agents.capabilities': 'everyday',
+  'agents.detect': 'everyday',
+  'agents.versions': 'everyday',
+  'agents.setAutoApplyVersions': 'everyday',
+  'agents.applyVersions': 'everyday',
+  'agents.sleepPolicy': 'everyday',
+  'agents.setSleepPolicy': 'everyday',
+  'agents.commands': 'everyday',
+  'agents.models': 'everyday',
+  'agents.usage': 'everyday',
+  'agents.account': 'everyday',
+  'messages.image': 'everyday',
+  'messages.search': 'everyday',
+  'messages.load': 'everyday',
+  'messages.subagent': 'everyday',
+  'messages.subagentTrashed': 'everyday',
+  'sessions.reorder': 'everyday',
+  'sessions.list': 'everyday',
+  'sessions.rename': 'everyday',
+  'sessions.markRead': 'everyday',
+
+  // The trash: reading and restoring run; deleting for good asks
+  'trash.list': 'everyday',
+  'trash.readRun': 'everyday',
+  'trash.purgeRuns': 'asks',
+  'trash.read': 'everyday',
+  'trash.restore': 'everyday',
+  'trash.purge': 'asks',
+  'subagents.usage': 'everyday',
+  'subagents.trash': 'everyday',
+  'trash.restoreSubagentSteps': 'everyday',
+  'trash.purgeSubagentSteps': 'asks',
+  'trash.empty': 'asks',
+
+  // The orchestrator
+  'orchestrator.get': 'everyday',
+  'orchestrator.peek': 'everyday',
+  'orchestrator.configure': 'everyday',
+  'orchestrator.tools': 'bridge',
+  'orchestrator.tool': 'bridge',
+
+  // Git and files in a project: what the OS user does with git and a shell anyway
+  'git.status': 'everyday',
+  'git.diff': 'everyday',
+  'git.log': 'everyday',
+  'git.commitDetail': 'everyday',
+  'git.branches': 'everyday',
+  'git.ignoredEntries': 'everyday',
+  'git.checkout': 'everyday',
+  'git.stage': 'everyday',
+  'git.commit': 'everyday',
+  'git.push': 'everyday',
+  'git.cancel': 'everyday',
+  'attachments.save': 'everyday',
+  'fs.listDir': 'everyday',
+  'fs.watch': 'everyday',
+  'fs.readFile': 'everyday',
+  'fs.move': 'everyday',
+  'fs.importFile': 'everyday',
+  'fs.resolve': 'everyday',
+  'files.search': 'everyday',
+
+  // Projects
+  'projects.add': 'asks',
+  'projects.inspect': 'everyday',
+  'projects.create': 'asks',
+  'projects.createPreview': 'everyday',
+  'projects.delete': 'asks',
+  'projects.deleteOutlook': 'everyday',
+  /** Both ways, as `set_project_trust`: taking trust away drops the project's own deny rules and hooks */
+  'projects.setTrusted': 'asks',
+  'projects.reorder': 'everyday',
+  'projects.setCommands': 'asks',
+  'worktrees.createManager': 'everyday',
+  'worktrees.setTrunk': 'everyday',
+  'projects.setWorktreeSetup': 'asks',
+  'projects.setAgentInstructions': 'asks',
+  'projects.list': 'everyday',
+  'projects.gitStatus': 'everyday',
+  'projects.origin': 'everyday',
+
+  // Terminals, commands and processes
+  'processes.strays': 'everyday',
+  'processes.stop': 'everyday',
+  'terminal.list': 'everyday',
+  'terminal.create': 'everyday',
+  'terminal.close': 'everyday',
+  'terminal.input': 'everyday',
+  'terminal.resize': 'everyday',
+  'terminal.restart': 'everyday',
+  'commands.run': 'everyday',
+  'commands.stop': 'everyday',
+  'commands.state': 'everyday',
+  'commands.log': 'everyday',
+  'commands.resize': 'everyday',
+
+  // App views: drawing and clicking an app's screen means a window
+  'apps.viewFrame': 'window',
+  'apps.viewDocument': 'window',
+  'apps.openView': 'window',
+  'apps.closeView': 'window',
+  'apps.recoverView': 'window',
+  'apps.holdViews': 'window',
+  'apps.inlineReopen': 'window',
+  'apps.inlineViews': 'everyday',
+  'apps.viewMessage': 'window',
+  'apps.readResource': 'window',
+  'apps.invoke': 'window',
+
+  // Apps
+  'apps.list': 'everyday',
+  'apps.runs': 'everyday',
+  'apps.restart': 'everyday',
+  'apps.remove': 'asks',
+  'apps.create': 'everyday',
+  'apps.builder': 'everyday',
+  'apps.errors': 'everyday',
+  'apps.reach': 'everyday',
+  'apps.questions': 'everyday',
+  'apps.answerQuestion': 'window',
+  'projectConsents.list': 'everyday',
+  'projectConsents.revoke': 'everyday',
+  'apps.permissions': 'everyday',
+  'apps.forgetPermission': 'everyday',
+  'apps.usage': 'everyday',
+  'apps.createBuilder': 'everyday',
+  'apps.sendError': 'everyday',
+  'apps.askBuilder': 'everyday',
+  'apps.check': 'everyday',
+  'apps.setShared': { asks: switchedOn('shared') },
+  'apps.setSecret': 'window',
+  'apps.importPrepare': 'window',
+  'apps.importCommit': 'asks',
+  'apps.importCancel': 'window',
+  'apps.review': 'everyday',
+  'apps.enable': 'asks',
+  'apps.versions': 'everyday',
+  /** A snapshot comes back, and the one it replaces is kept */
+  'apps.restoreVersion': 'everyday',
+  'apps.sessionTools': 'bridge',
+  'apps.sessionCall': 'bridge',
+
+  // Updates
+  'updates.status': 'everyday',
+  'updates.setAuto': { asks: switchedOn('enabled') },
+  'updates.setAutoApply': { asks: switchedOn('enabled') },
+  'updates.apply': 'asks',
+  'updates.answerApply': 'window',
+  'updates.reportApply': 'everyday',
+
+  // Linked machines
+  'machines.list': 'everyday',
+  'machines.add': 'asks',
+  'machines.sshHosts': 'everyday',
+  'machines.probe': 'everyday',
+  'machines.remove': 'asks',
+  'machines.reconnect': 'everyday',
+  'machines.disconnect': 'everyday',
+  'machines.setAutoReconnect': 'everyday',
+  'machines.setConnect': 'everyday',
+  'machines.need': 'everyday',
+  'machines.acceptVersions': 'asks',
+  'machines.install': 'asks',
+  'machines.update': 'asks',
+  'machines.rollback': 'asks',
+  'machines.uninstall': 'asks',
+  'machines.autostart': 'asks',
+  'machines.activity': 'everyday',
+  /** Without `allowed` it only reads the switch */
+  'machines.hubAuto': { asks: (params) => 'allowed' in fields(params) && fields(params).allowed !== false },
+  'machines.setAsks': { asks: switchedOn('on') },
+  'machines.askConsents': 'everyday',
+  'machines.withdrawAsk': 'everyday',
+
+  // Host to host: a hub linked to this host
+  'host.activity': 'everyday',
+  'host.sessions': 'link',
+  'host.readSession': 'link',
+  'host.recall': 'link',
+  'host.hubAuto': 'link',
+  'host.setHubAuto': 'link',
+  'host.lastAnswer': 'link',
+  'host.send': 'link',
+  /** What `kill` does anyway; `centralu serve --stop` asks for it */
+  'host.stop': 'everyday',
+  'host.handover': 'link',
+  'host.hubOffer': 'link',
+
+  // The window's own state, preferences, themes and approval rules
+  'workspace.save': 'window',
+  'approvals.deleteRule': 'everyday',
+  'workspace.load': 'everyday',
+  'grid.get': 'everyday',
+  'grid.set': 'window',
+  'prefs.get': 'everyday',
+  'prefs.set': { asks: prefsWiden },
+  'themes.list': 'everyday',
+  'themes.save': 'everyday',
+  'themes.import': 'everyday',
+  'themes.resolve': 'everyday',
+  'approvals.rules': 'everyday',
+}
+
+/** What a limited call of `method` with `params` comes to: run it, or which class refuses it */
+export function limitedRight(method: string, params: unknown): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'unknown' {
+  const rights = Object.prototype.hasOwnProperty.call(METHOD_RIGHTS, method) ? METHOD_RIGHTS[method as RpcMethodName] : undefined
+  if (rights === undefined) return 'unknown'
+  if (typeof rights === 'object') return rights.asks(params) ? 'asks' : 'everyday'
+  return rights
+}
+
+/**
+ * Why a connection holding the limited credential may not make this call, or null if it may: the class
+ * that refuses it and a sentence to show. Until the card exists (#1405 slice 3), an `asks` call is
+ * refused like the rest, saying the person can do it in the window.
+ */
+export function limitedRefusal(method: string, params: unknown): { rights: Exclude<ReturnType<typeof limitedRight>, 'everyday'>; message: string } | null {
+  const rights = limitedRight(method, params)
+  switch (rights) {
+    case 'everyday':
+      return null
+    case 'asks':
+      return { rights, message: `${method} cannot be undone or widens what runs without asking, so it needs the person in the Centralu window` }
+    case 'window':
+      return { rights, message: `${method} is the person's own answer or the window's own state, so only the Centralu window can call it` }
+    case 'link':
+      return { rights, message: `${method} is for a computer linked to this one, not for the limited credential` }
+    case 'bridge':
+      return { rights, message: `${method} is a session's own tool channel, not for the limited credential` }
+    case 'unknown':
+      return { rights, message: `Unknown method ${method}` }
+  }
+}

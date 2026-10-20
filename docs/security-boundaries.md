@@ -1095,7 +1095,8 @@ a frame may be up to 100 MiB (the library's default, set explicitly); a bigger o
 (1009). The token is compared in constant time. An authenticated socket's hello is
 answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
 (#382, "The front door" below); that socket receives no events and may call only its own session's
-bridge RPCs.
+bridge RPCs. It may also carry the limited credential, which calls only the everyday methods ("Who holds full power",
+below).
 
 `pnpm dev:live` (#739) is the one script that puts a real token into a browser page. It reads the running app's
 front door port and token from the keeper's `status` and gives them to the Vite it starts, as `VITE_HOST_URL`
@@ -1109,6 +1110,54 @@ a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`
 `--host` other than `127.0.0.1`, no tunnel). The token is the front door's, which the keeper makes once per
 keeper lifetime and keeps across host swaps and keeper handoffs (`front_door.rs`); it changes only when the
 keeper restarts, that is, when the app is fully quit and opened again, and the script is run again then.
+
+## Who holds full power (#1405)
+
+On 2026-10-21 the orchestrator misread "empty the trash" (the person meant the Windows Recycle Bin), read the front
+door's token from the keeper's `status`, and called `trash.purge` through a script it wrote: the hub relayed it to a
+linked machine, and 108 trashed sessions were deleted with no question. The window asks first; the orchestrator's own
+`delete_trashed` / `empty_trash` raise a card; the raw path asked nothing.
+
+**What this defends against:** a process of the person's own user that is not the person's click in a window (an
+agent, a script it wrote, a tool or MCP server, an app server, a `pnpm dev:live` page) getting full host power from a
+documented interface and using it without the confirmation the window shows. **The honest limit:** such a process runs
+as the same user. It can delete `store.db`, edit it with `sqlite3`, remove the data folder, attach a debugger where the
+OS allows it, start the app's own executable, or ssh to a linked machine with the person's key. None of that is closed.
+What is removed is the path where full, unconfirmed power is one request away; it is not a wall between processes of one
+user, and where it cannot prevent it prefers to be loud.
+
+**Two rights at hello** (`transport/server.ts`): the token, which a window and a hub linked to this host hold, calls
+everything; the **limited credential** (`ccl1:<mac>`, an HMAC of a label of its own keyed by the token,
+`transport/limited-token.ts`) calls the everyday methods only. It is derived, not stored, as the bridge's is: the next
+host after a swap accepts it with nothing handed over, and holding it gives nothing toward the token. A socket holding it
+is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the orchestrator's tooling no
+longer needs it), but none of its `res` frames answers the host's own calls, which are a hub's.
+
+**Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
+linked machine's session is refused on the hub and never relayed; the machine does not judge again, since it cannot tell
+a relayed call's origin.
+
+**What it may call** (`transport/method-rights.ts`, keyed by every RPC method with no default, so a method added to the
+protocol does not compile until someone classifies it, and a test compares its keys with the protocol's):
+
+| Class | With the limited credential | Which methods |
+|---|---|---|
+| everyday | runs | reading, creating and messaging sessions (a preset of `normal` or below), renaming, sleep policy, the trash's list, read and restore, git, files, terminals, commands, stopping a process, app upkeep that keeps what it replaces. What the user could do by hand anyway is not held back |
+| asks | refused for now; a card the person answers in the window replaces the refusal (#1405 slice 3) | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating, rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update or turning automatic updates on; a session created or set above `safe`/`normal` (any preset change but to `safe`, since the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
+| window | refused, never a card | the person's own answers (approval cards, questions, an update's apply, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
+| link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
+| bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
+
+A method whose answer depends on its parameters reads them as sent, before they are parsed, and asks when it cannot read
+them. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
+restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
+and everything the orchestrator's tools card in every preset is `asks` too. A refusal is `ok: false` with
+`data: { refused: 'rights', rights }` and a line in the host's log naming the method; the socket stays open.
+
+**Who holds what, today.** Built so far: the credential and the classification (slice 1). Until the keeper hands out the
+limited credential instead of the token (#1405 slice 4), its `status` and `attach` still give the token to any process
+of this user ("The keeper's control socket" below), so nothing yet makes a script use the limited one; a script that
+does gets only what the table says. The serve host's `serve.json` (below) still holds its token until slice 5.
 
 ## The remote host (`centralu serve`, #82)
 

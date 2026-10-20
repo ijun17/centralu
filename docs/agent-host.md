@@ -1636,6 +1636,11 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
+The same methods are classified once more for a caller that is neither the window nor the orchestrator (#1405): a
+script or tool holding the limited credential runs the everyday ones and is refused the rest
+(`transport/method-rights.ts`; the classes and the rule in [security-boundaries.md](security-boundaries.md), "Who holds
+full power"). Everything this table cards in every preset is `asks` there.
+
 The linked machines came first (#1238), then the preferences and the session archive (#1309) and the notification switches (#1313).
 The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
 then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
