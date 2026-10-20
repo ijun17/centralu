@@ -893,4 +893,19 @@ describe('serve --revoke over ssh (#1405)', () => {
     // An older serve refuses the option and prints no line
     expect(parseRevoke('')).toBeNull()
   })
+
+  it("cleans what a remote names before it reaches a row: an id --revoke takes, one line of label, a real date", () => {
+    const base = { v: 1, port: 1, protocolVersion: 1, takes: ['pair'] }
+    // A bidi override and a line break in the label: written as escapes here, as they come over the wire
+    const tricky = 'evil' + String.fromCharCode(0x202e) + '"label"' + String.fromCharCode(10) + 'next'
+    const line = parseConnectionLine(JSON.stringify({ ...base, others: [
+      { id: 'abcd1234', label: tricky, created: 5 },
+      { id: 'not-hex!', label: 'x', created: 1 },
+      { id: 'ffff0000', label: 'y', created: 1e300 },
+    ] }))
+    expect(line.others?.map((c) => c.id)).toEqual(['abcd1234', 'ffff0000'])
+    const label = line.others![0]!.label
+    expect(label.includes(String.fromCharCode(0x202e)) || label.includes(String.fromCharCode(10))).toBe(false)
+    expect(line.others![1]!.created).toBe(0)
+  })
 })

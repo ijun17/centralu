@@ -425,8 +425,8 @@ export class LinkedMachine extends LinkedMachineConnection {
     if (r.code === 255) throw linkError(`ssh could not reach ${this.record.sshTarget}: ${lastLine(r.stderr) || 'no answer'}`)
     const said = parseRevoke(r.stdout)
     if (said === null) throw linkError(`${this.name} did not say whether it withdrew the credential${lastLine(r.stderr) ? `: ${lastLine(r.stderr)}` : ''}`)
-    // Gone there (now, or before): gone from the row too, until the next connection line says again
-    if (this.endpoint?.line.others) this.endpoint.line.others = this.endpoint.line.others.filter((c) => c.id !== credentialId)
+    // Gone there (now, or before): gone from the row too, also from a line a reconnect read before the revoke landed
+    this.revokedHere.add(credentialId)
     this.deps.log?.(`[links] ${this.name}: ${said ? 'withdrew' : 'found no'} full credential ${credentialId}`)
     this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     return this.info()

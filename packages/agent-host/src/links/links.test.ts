@@ -3698,7 +3698,8 @@ describe('machines.revokeCredential (#1405)', () => {
       held = held.filter((h) => h !== id)
       return { code: revoked ? 0 : 1, stderr: '', stdout: `${JSON.stringify({ v: 1, revoked, id })}\n` }
     }
-    const others = () => held.map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5 }))
+    // Every line names both, as a line read before a revoke lands would: the row must not take it back
+    const others = () => ['aaaa1111', 'bbbb2222'].map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5 }))
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { credential: 'cccc3333', others: others() })), { exec })
     const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
     await eventually(() => status(hub) === 'connected')
@@ -3721,6 +3722,29 @@ describe('machines.revokeCredential (#1405)', () => {
     await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.otherCredentials?.length === 1))
     // The link was never dropped for it
     expect(status(hub)).toBe('connected')
+  })
+
+  it('keeps a withdrawn credential off the row even when a line read before the revoke still names it', async () => {
+    const { hub, u } = await setup()
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'aaaa1111' })
+    // The machine's link drops and comes back: its new line may have been read before the revoke landed
+    await u.call('machines.disconnect', { machineId: 'm1' })
+    // Not while disconnected: an earlier link's list is not the present one
+    expect(hub.links.list()[0]!.otherCredentials).toBeNull()
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['bbbb2222'])
+  })
+
+  it("withdraws over the machine's own ssh without opening its link, and says when there was none to withdraw", async () => {
+    const { hub, u, runs } = await setup()
+    await u.call('machines.disconnect', { machineId: 'm1' })
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    // The person's Disconnect stands
+    expect(status(hub)).toBe('disconnected')
+    // Asked again, there is none: answered, not an error
+    await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    expect(runs).toEqual(['revoke bbbb2222', 'revoke bbbb2222'])
   })
 
   it("refuses to withdraw this computer's own credential, which the next link would make again, and asks nothing", async () => {

@@ -1492,8 +1492,9 @@ A host started with `centralu serve` on another machine is reached by the app th
     can. It gets a full credential of its own, which the file names by its label. That is made loud rather than
     prevented (owner, 2026-10-21): the hub's machine row in Settings → Machines lists every full credential the machine
     holds besides the hub's own, by the label its asker gave (shown quoted, never checked) and its date, with Revoke,
-    which runs `serve --revoke` there (`machines.revokeCredential`; the hub's own is refused, since its next link would
-    only make it again). It can also read the key. That
+    which runs `serve --revoke` there over the machine's ssh without opening its link (`machines.revokeCredential`; the
+    hub's own is refused, since its next link would only make it again). The list is the one the machine named when the
+    link opened, shown while connected, its labels cleaned to one line: a pairing there later shows at the next link. It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
     that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
