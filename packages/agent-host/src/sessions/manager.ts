@@ -1093,7 +1093,8 @@ export class SessionManager {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
     // Read before the message starts a turn of its own: a paused session already in a turn is in the one its work's ending started
-    const inItsOwnTurn = inTurn(this.meta.get(sessionId)?.state)
+    const state = this.meta.get(sessionId)?.state
+    const inItsOwnTurn = state !== undefined && inTurn(state)
     await this.deliver(sessionId, text, attachments, from, false)
     /*
      * Once it is delivered, so a message that did not reach the session takes nothing over (#1340). The mark ends
