@@ -32,6 +32,8 @@ describe('the wake frame (§7.3)', () => {
     expect(text).toContain(`thread="${T1}" kind="report" from="centralu" sender="Centralu" about="${S2}" outcome="finished"`)
     expect(text).toContain(`thread="${T2}" kind="question" from="${S2}" sender="the session you gave this work to"`)
     expect(text).toContain('Read it with mail(action="read"')
+    // A session that began before the tool existed has none, and says so rather than guess
+    expect(text).toContain('if you have no mail tool, tell the person')
     expect(text.startsWith('<system-reminder>')).toBe(true)
     expect(text.endsWith('</system-reminder>')).toBe(true)
   })

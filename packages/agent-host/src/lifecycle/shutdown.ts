@@ -32,6 +32,8 @@ export type HostParts = {
   agentVersions: { stop(): void }
   /** Putting idle sessions to sleep (#568, sessions/sleep.ts) */
   sleeper: { stop(): void }
+  /** The mailbox's delivery (#1347): a host that is leaving tells no one anything, the next one delivers */
+  mailDelivery: { stop(): void }
   stopActivity: () => void
   /** The git calls still running (`stopGitChildren`, dev-services/git-exec.ts) */
   git: { stopAll(): Promise<void> }
@@ -80,6 +82,8 @@ export function stopPlan(mode: LeaveMode, handOver: boolean, p: HostParts): Step
     { name: 'the agent CLI check', run: () => p.agentVersions.stop() },
     // Before the sessions are let go of: a sweep now would end a process the next host is meant to take over (#568)
     { name: 'putting idle sessions to sleep', run: () => p.sleeper.stop() },
+    // Before the sessions are let go of too: a delivery now would wake a session the next host is meant to take over (§4.2)
+    { name: 'the mailbox’s delivery', run: () => p.mailDelivery.stop() },
     { name: 'the activity report', run: () => p.stopActivity() },
   )
   /*

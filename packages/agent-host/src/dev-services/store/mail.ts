@@ -123,6 +123,8 @@ export type ReceiptRow = {
 /** A receipt with the message it is for and the thread that message is in: what a delivery re-reads at drain time (§7.5) */
 export type PendingMail = { receipt: ReceiptRow; message: MessageRow; thread: ThreadRow }
 
+export type InboxRow = { thread: ThreadRow; unread: number }
+
 export type TurnRow = { sessionId: string; turnSeq: number; threadId: string | null; startedBy: string; startedAt: number; endedAt: number | null; outcome: string | null }
 
 /** The member of `list` that `value` is, or `fallback` for a word this build does not know */
@@ -182,6 +184,20 @@ type MessageSql = {
   facts: string
   dedupe_key: string | null
   created_at: number
+}
+
+type TurnSql = {
+  session_id: string
+  turn_seq: number
+  thread_id: string | null
+  started_by: string
+  started_at: number
+  ended_at: number | null
+  outcome: string | null
+}
+
+function toTurn(r: TurnSql): TurnRow {
+  return { sessionId: r.session_id, turnSeq: r.turn_seq, threadId: r.thread_id, startedBy: r.started_by, startedAt: r.started_at, endedAt: r.ended_at, outcome: r.outcome }
 }
 
 type ReceiptSql = {
@@ -325,6 +341,22 @@ export class MailRecords {
       })
   }
 
+  /** The parties that own or are assigned a thread that is not done: whom the sweep asks whether they are still here */
+  partiesOfOpenThreads(): string[] {
+    return this.db
+      .prepare<[], { address: string }>(
+        `SELECT owner AS address FROM mail_threads WHERE state != 'done'
+         UNION SELECT assignee FROM mail_threads WHERE state != 'done' AND assignee IS NOT NULL`,
+      )
+      .all()
+      .map((r) => r.address)
+  }
+
+  /** Whether there is a thread at all: a host that never made mail has nothing to move when a session goes */
+  hasThreads(): boolean {
+    return !!this.db.prepare<[], { one: number }>(`SELECT 1 AS one FROM mail_threads LIMIT 1`).get()
+  }
+
   thread(id: string): ThreadRow | undefined {
     const row = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE id = ?`).get(id)
     return row && toThread(row)
@@ -335,6 +367,25 @@ export class MailRecords {
     const column = role === 'owner' ? 'owner' : 'assignee'
     const rows = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE ${column} = ? ORDER BY created_at, id`).all(address)
     return rows.map(toThread).filter((t) => !states || states.includes(t.state))
+  }
+
+  /**
+   * What a party's mailbox holds (§9.3, §10.1): the threads it is in that are not done, and the done ones it has mail unread
+   * in, with how much it has not read. Unread first, then the latest change. A mail held back for the person (a loop, a spent
+   * budget) is unread too: that is what the Inbox lists
+   */
+  inboxOf(address: string, limit = 50): InboxRow[] {
+    const rows = this.db
+      .prepare<[string, string, number], ThreadSql & { unread: number }>(
+        `SELECT t.*, (SELECT COUNT(*) FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+                       WHERE m.thread_id = t.id AND r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL
+                         AND (r.held IS NULL OR r.held <> 'dismissed')) AS unread
+           FROM mail_threads t JOIN mail_participants p ON p.thread_id = t.id AND p.address = ? AND p.left_at IS NULL
+          WHERE t.state <> 'done' OR unread > 0
+          ORDER BY (unread > 0) DESC, t.updated_at DESC LIMIT ?`,
+      )
+      .all(address, address, limit)
+    return rows.map((r) => ({ thread: toThread(r), unread: r.unread }))
   }
 
   /** The threads that name `id` in `follows` (§3.3: "shown both ways") */
@@ -504,6 +555,30 @@ export class MailRecords {
     return { ...m, seq, homeSeq: seq }
   }
 
+  /** How many messages `sender` posted since the id `floor` (see `messageIdFloor`): the rate a sender is held to, counted in the store (§7.9) */
+  postsSince(sender: string, host: string, floor: string): number {
+    const row = this.db
+      .prepare<[string, string, string], { n: number }>(`SELECT COUNT(*) AS n FROM mail_messages WHERE id >= ? AND id < ? AND sender = ?`)
+      .get(floor, `${host}.m_~`, sender)
+    return row?.n ?? 0
+  }
+
+  /** The latest message `sender` posted in the thread */
+  lastBy(threadId: string, sender: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? ORDER BY seq DESC LIMIT 1`)
+      .get(threadId, sender)
+    return row && toMessage(row)
+  }
+
+  /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
+  lastMessageOf(threadId: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND kind <> 'event' ORDER BY seq DESC LIMIT 1`)
+      .get(threadId)
+    return row && toMessage(row)
+  }
+
   message(id: string): MessageRow | undefined {
     const row = this.db.prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE id = ?`).get(id)
     return row && toMessage(row)
@@ -526,6 +601,28 @@ export class MailRecords {
   }
 
   /** A thread's messages after `seq`, oldest first */
+  /** The last `n` messages of a thread, or the last `n` before `before` (a `seq`), oldest first: what the Inbox shows of a long thread */
+  messagesTail(threadId: string, n: number, before?: number): MessageRow[] {
+    return this.db
+      .prepare<[string, number, number], MessageSql>(
+        `SELECT * FROM (SELECT * FROM mail_messages WHERE thread_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?) ORDER BY seq`,
+      )
+      .all(threadId, before ?? Number.MAX_SAFE_INTEGER, n)
+      .map(toMessage)
+  }
+
+  /** Whether the thread has a message before `seq` */
+  hasMessagesBefore(threadId: string, seq: number): boolean {
+    return !!this.db.prepare<[string, number], { one: number }>(`SELECT 1 AS one FROM mail_messages WHERE thread_id = ? AND seq < ? LIMIT 1`).get(threadId, seq)
+  }
+
+  /** Everything of the thread `recipient` has not read is read: the person opened its end, and the earlier part is theirs to ask for */
+  markThreadRead(recipient: string, threadId: string, now: number): number {
+    return this.db
+      .prepare(`UPDATE mail_receipts SET read_at = ? WHERE recipient = ? AND read_at IS NULL AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ?)`)
+      .run(now, recipient, threadId).changes
+  }
+
   messagesAfter(threadId: string, seq: number, limit = 500): MessageRow[] {
     return this.db
       .prepare<[string, number, number], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND seq > ? ORDER BY seq LIMIT ?`)
@@ -590,6 +687,144 @@ export class MailRecords {
       .run(now, now, recipient, onlyRead ? 1 : 0, threadId, upToSeq).changes
   }
 
+  /** The mailboxes that have mail waiting (not read, handled, delivered or held): who the delivery sweep looks at */
+  recipientsWithMail(): string[] {
+    return this.db
+      .prepare<[], { recipient: string }>(
+        `SELECT DISTINCT recipient FROM mail_receipts
+          WHERE delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
+      )
+      .all()
+      .map((r) => r.recipient)
+  }
+
+  /**
+   * When the first of `recipient`'s waiting mail that is not due yet becomes due, or null for none: when to look at its
+   * mailbox next. Mail already due is not counted: it was looked at, and may be waiting for its receiver, not for the clock
+   */
+  nextDue(recipient: string, after: number): number | null {
+    const row = this.db
+      .prepare<[string, number], { due: number | null }>(
+        `SELECT MIN(due_at) AS due FROM mail_receipts
+          WHERE recipient = ? AND due_at > ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
+      )
+      .get(recipient, after)
+    return row?.due ?? null
+  }
+
+  /** Whether any of `recipient`'s waiting mail is due by `now` */
+  hasDue(recipient: string, now: number): boolean {
+    return !!this.db
+      .prepare<[string, number], { one: number }>(
+        `SELECT 1 AS one FROM mail_receipts
+          WHERE recipient = ? AND due_at <= ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released') LIMIT 1`,
+      )
+      .get(recipient, now)
+  }
+
+  /** Written, and committed, before a delivery is tried (§7.6.1): a host that dies after it and before `markDelivered` leaves a delivery that may have gone */
+  markAttempt(recipient: string, messageIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = ?, attempts = attempts + 1 WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, recipient, JSON.stringify(messageIds))
+  }
+
+  /** The tool took them (§7.6.2–4): delivered, and read for those whose words went in whole. A failed attempt's error is forgotten */
+  markDelivered(recipient: string, messageIds: readonly string[], readIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET delivered_at = ?, last_error = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, recipient, JSON.stringify(messageIds))
+    this.markRead(recipient, readIds, now)
+  }
+
+  /** How many times the most-tried of these has been attempted: when to give up and hold for the person */
+  attemptsOf(recipient: string, messageIds: readonly string[]): number {
+    const row = this.db
+      .prepare<[string, string], { n: number | null }>(`SELECT MAX(attempts) AS n FROM mail_receipts WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .get(recipient, JSON.stringify(messageIds))
+    return row?.n ?? 0
+  }
+
+  /**
+   * A delivery the tool failed after all (late, once it was counted as taken): the receipts that delivery marked delivered at
+   * `deliveredAt` are unread and undelivered again, unless handled or held for the person since. Mail delivered again by a later
+   * wake has another time and is left alone. Returns the ids put back
+   */
+  undeliver(recipient: string, messageIds: readonly string[], deliveredAt: number): string[] {
+    const ids = JSON.stringify(messageIds)
+    const where = `recipient = ? AND delivered_at = ? AND handled_at IS NULL AND (held IS NULL OR held = 'released') AND message_id IN (SELECT value FROM json_each(?))`
+    const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_receipts WHERE ${where}`).all(recipient, deliveredAt, ids).map((r) => r.message_id)
+    this.db.prepare(`UPDATE mail_receipts SET delivered_at = NULL, read_at = NULL WHERE ${where}`).run(recipient, deliveredAt, ids)
+    return put
+  }
+
+  /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox. Not "uncertain": nothing went */
+  failAttempt(recipient: string, messageIds: readonly string[], error: string, retryAt: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = ?, due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(error, retryAt, recipient, JSON.stringify(messageIds))
+  }
+
+  /** A try that was not made after all (the receiver left rest while it was being woken): the attempt is taken back, and it counts for nothing */
+  undoAttempt(recipient: string, messageIds: readonly string[]): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, attempts = MAX(attempts - 1, 0) WHERE recipient = ? AND delivered_at IS NULL AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(recipient, JSON.stringify(messageIds))
+  }
+
+  /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
+  setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET held = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(held, recipient, JSON.stringify(messageIds))
+  }
+
+  /** Deliveries that were tried and not known to have gone: what a host that starts finds a previous one left (§7.6.5) */
+  attemptedUnconfirmed(): ReceiptRow[] {
+    return this.db
+      .prepare<[], ReceiptSql>(
+        `SELECT * FROM mail_receipts WHERE attempt_at IS NOT NULL AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
+      )
+      .all()
+      .map(toReceipt)
+  }
+
+  /** A delivery that may have gone and may not: held until the person says (§7.6.5) */
+  markUncertain(recipient: string, messageIds: readonly string[]): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET held = 'uncertain', attempt_at = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(recipient, JSON.stringify(messageIds))
+  }
+
+  /** A delivery that may have gone, of mail that starts no work: tried again, and its next frame says it may be a repeat (§7.6.5) */
+  markMaybeRepeated(recipient: string, messageIds: readonly string[], dueAt: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = 'maybe_repeated', due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(dueAt, recipient, JSON.stringify(messageIds))
+  }
+
+  /**
+   * The person's answer to held mail: sent now, or never (`dismissed`). Only mail held for a reason that needs them. Sent now,
+   * mail that was held back from waking a session (`policy`, `budget`) goes as the mail it is and is not held again (`released`)
+   */
+  releaseHeld(recipient: string, messageIds: readonly string[], to: null | 'released' | 'dismissed', dueAt: number): number {
+    return this.db
+      .prepare(
+        `UPDATE mail_receipts SET delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
+               held = CASE WHEN ? IS NULL AND held IN ('policy', 'budget') THEN 'released' ELSE ? END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?
+          WHERE recipient = ? AND held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') AND message_id IN (SELECT value FROM json_each(?))`,
+      )
+      .run(to, to, dueAt, recipient, JSON.stringify(messageIds)).changes
+  }
+
+  /** Receipts the Inbox lists for a person to act on: held for a reason that needs them (§7.6, §7.7, §7.9) */
+  heldReceipts(): ReceiptRow[] {
+    return this.db
+      .prepare<[], ReceiptSql>(`SELECT * FROM mail_receipts WHERE held IS NOT NULL AND held NOT IN ('released', 'dismissed') AND read_at IS NULL AND handled_at IS NULL ORDER BY due_at`)
+      .all()
+      .map(toReceipt)
+  }
+
   /**
    * What `recipient` has not read or handled, with its message and thread, oldest first: the rows a delivery re-reads at
    * drain time to build the frame from what is true then (§7.5). Not those already delivered (unless `again`, for a wake
@@ -599,7 +834,7 @@ export class MailRecords {
     const rows = this.db
       .prepare<[string, number, number], ReceiptSql>(
         `SELECT r.* FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-          WHERE r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL AND r.held IS NULL AND r.due_at <= ?
+          WHERE r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND r.due_at <= ?
             AND (r.delivered_at IS NULL OR ? = 1)
           ORDER BY m.created_at, m.thread_id, m.seq`,
       )
@@ -624,6 +859,33 @@ export class MailRecords {
     this.db
       .prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, started_by, started_at) VALUES (?, ?, ?, ?, ?)`)
       .run(t.sessionId, t.turnSeq, t.threadId, t.startedBy, t.startedAt)
+  }
+
+  /** The turns recorded for the session, oldest first */
+  turnsOf(sessionId: string): TurnRow[] {
+    return this.db
+      .prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`)
+      .all(sessionId)
+      .map(toTurn)
+  }
+
+  /** The number the session's next turn is recorded under */
+  nextTurnSeq(sessionId: string): number {
+    const row = this.db.prepare<[string], { n: number }>(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`).get(sessionId)
+    return row?.n ?? 1
+  }
+
+  /** How many turns mail started in the thread since `since` (the loop guard, §7.9) */
+  mailTurnsSince(threadId: string, since: number): number {
+    const row = this.db
+      .prepare<[string, number], { n: number }>(`SELECT COUNT(*) AS n FROM mail_turns WHERE thread_id = ? AND started_by = 'mail' AND started_at >= ? AND COALESCE(outcome, '') <> 'canceled'`)
+      .get(threadId, since)
+    return row?.n ?? 0
+  }
+
+  /** Closes the turns still open, as ones a previous host left (they can never end) */
+  closeOpenTurns(now: number, outcome: string): void {
+    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE ended_at IS NULL`).run(now, outcome)
   }
 
   endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {

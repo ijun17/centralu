@@ -28,6 +28,7 @@ import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
 import type { AgentAdapter } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
+import type { MailPerson } from './mail/person.js'
 import type { InlineViews } from './inline-views.js'
 import type {
   GridPanel,
@@ -101,6 +102,8 @@ export type RpcServices = {
    * one on the connection it came in on. Without it an offer is taken and forgotten, as a host that cannot call back
    */
   hubs?: { offer(client: number, o: HubOffer): void }
+  /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
+  mail?: MailPerson
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -144,7 +147,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -179,6 +182,10 @@ export function createRpcHandler(
   const requireMachines = (): MachinesPort => {
     if (!machines) throw rpcError('Linked machines are unavailable on this host')
     return machines
+  }
+  const requireMail = (): MailPerson => {
+    if (!mail) throw rpcError('The mailbox is unavailable on this host')
+    return mail
   }
   const requireUpdates = (): UpdateService => {
     if (!updates) throw rpcError('Update checks are unavailable')
@@ -368,6 +375,39 @@ export function createRpcHandler(
     'messages.search': async (p) => {
       const { query, limit } = RpcMethods['messages.search'].params.parse(p)
       return mgr.searchMessages(query, limit)
+    },
+    'mail.list': async () => requireMail().list(),
+    'mail.thread': async (p) => {
+      const { threadId, after, all, tail, before } = RpcMethods['mail.thread'].params.parse(p)
+      return requireMail().thread(threadId, { after, all, tail, before })
+    },
+    'mail.reply': async (p) => {
+      const { threadId, text, kind } = RpcMethods['mail.reply'].params.parse(p)
+      return requireMail().reply(threadId, text, kind)
+    },
+    'mail.close': async (p) => {
+      const { threadId, outcome } = RpcMethods['mail.close'].params.parse(p)
+      return requireMail().close(threadId, outcome)
+    },
+    'mail.reassign': async (p) => {
+      const { threadId, sessionId, text } = RpcMethods['mail.reassign'].params.parse(p)
+      return requireMail().reassign(threadId, sessionId, text)
+    },
+    'mail.unblock': async (p) => {
+      const { threadId, n } = RpcMethods['mail.unblock'].params.parse(p)
+      return requireMail().unblock(threadId, n)
+    },
+    'mail.held': async (p) => {
+      const { action, recipient, messageIds } = RpcMethods['mail.held'].params.parse(p)
+      return requireMail().held(action, recipient, messageIds)
+    },
+    'mail.resume': async (p) => {
+      requireMail().resume(RpcMethods['mail.resume'].params.parse(p))
+      return { ok: true as const }
+    },
+    'mail.wake': async (p) => {
+      requireMail().wake(RpcMethods['mail.wake'].params.parse(p).wake)
+      return { ok: true as const }
     },
     'approvals.deleteRule': async (p) => {
       mgr.deleteApprovalRule(RpcMethods['approvals.deleteRule'].params.parse(p).id)

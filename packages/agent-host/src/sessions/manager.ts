@@ -3,6 +3,8 @@ import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recover
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { withHubMark } from './hub-preset.js'
+import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import type { MailToolArgs } from '../mail/tool.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -60,6 +62,7 @@ import {
   DATA_DIR,
   withoutToolRecord,
   alwaysAllowKey,
+  errorMessage,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -77,6 +80,15 @@ export type AgentProcessHost = {
  * A tool process a previous host left running for this session, to be re-attached at startup. `version` is the CLI
  * version it was started from, when its tag says (#297): an adopted process does not announce it again.
  */
+/** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
+export type MailHooks = {
+  sessionGone(sessionId: string): void
+  sessionChanged(sessionId: string): void
+  sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
+  /** The `mail` tool of a session */
+  tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
+}
+
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
@@ -799,6 +811,51 @@ export class SessionManager {
       // The CLI version belongs to the process (#297): without one there is no version to compare
       return { ...s, live, agentVersion: live ? (s.agentVersion ?? null) : null }
     })
+  }
+
+  /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
+  private mailHooks: MailHooks | null = null
+
+  useMail(hooks: MailHooks): void {
+    this.mailHooks = hooks
+  }
+
+  /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */
+  mailSessions(): MailSessions {
+    return {
+      receiver: (id) => this.mailReceiver(id),
+      deliver: (id, input, late) =>
+        this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, late),
+      note: (id, text) => {
+        if (this.meta.has(id)) this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
+      },
+    }
+  }
+
+  /** Whether a session can be told of mail now, and how (`ReceiverState`, mail/delivery.ts) */
+  private mailReceiver(id: string): ReceiverState {
+    const m = this.meta.get(id)
+    if (!m) return { kind: 'gone' }
+    // A host that is leaving tells nobody anything: the next one delivers (§4.2)
+    if (this.handingOver || this.disposing) return { kind: 'busy', why: 'turn' }
+    // A card is standing: mail is never taken as its answer (§7.1). `waiting_input` is not one: it is the state a turn ends in
+    // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
+    if (m.pendingApproval || m.pendingQuestions.length > 0 || m.state === 'waiting_approval') return { kind: 'busy', why: 'card' }
+    switch (m.state) {
+      case 'working':
+        return { kind: 'busy', why: 'turn' }
+      case 'limited':
+        return { kind: 'busy', why: 'limited' }
+      default: {
+        const live = this.handles.has(id)
+        return { kind: 'ready', live, quiet: live && this.adapters.get(m.tool)?.quietInput === true, auto: m.permissionPreset === 'auto' }
+      }
+    }
+  }
+
+  /** A session that is here (not in the trash), as the mailbox's relations read it (#1347); undefined for one that is gone */
+  sessionInfo(id: string): SessionInfo | undefined {
+    return this.meta.get(id)
   }
 
   /** Active sessions running in the same directory (the basis for FR-2's concurrent-session warning) */
@@ -1783,6 +1840,7 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
+      mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
       listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
         return self.agentRuns
@@ -1877,6 +1935,28 @@ export class SessionManager {
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
+      mailPoke: (id) => {
+        try {
+          self.mailHooks?.sessionChanged(id)
+        } catch (e) {
+          console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
+        }
+      },
+      mailEvent: (e, ended) => {
+        try {
+          self.mailHooks?.sessionEvent?.(e, ended)
+        } catch (err) {
+          console.error(`[mail] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
+        }
+      },
+      mailGone: (id) => {
+        try {
+          self.mailHooks?.sessionGone(id)
+        } catch (e) {
+          // The trash move has happened and is not undone by the mailbox: the delivery sweep moves the work on at its next run
+          console.error(`[mail] ${id.slice(0, 8)}: the work it held could not be moved on (${errorMessage(e)}); the next sweep does it`)
+        }
+      },
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),

@@ -742,6 +742,39 @@ export const AGENT_TOOLS = [
 export const AGENT_BUDGET_CHARS = 1400
 
 /**
+ * The mailbox (#1347, docs/plans/mailbox.md §9.3): one tool with an action, like agent_session. An ordinary session has it from
+ * its start, because the tool list a session starts with is its prompt prefix and does not change under it. Deferred on Claude,
+ * behind tool search: the wake that delivers mail names the exact call (`mail(action="read", thread="…")`), so the model finds it
+ * from there, and a session that opens a thread itself says so in words the instructions do not need. Codex loads every tool.
+ * Every field but `action` is optional and unexplained: the answers say what a call lacks, and each word rides in every request.
+ */
+export const MAIL_TOOLS = [
+  {
+    name: 'mail',
+    description: "Centralu's mailbox: work and messages with other sessions, apps and the person.",
+    schema: z.object({
+      action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close']),
+      thread: z.string().optional(),
+      to: z.string().optional(),
+      kind: z.string().optional(),
+      subject: z.string().optional(),
+      text: z.string().optional(),
+      state: z.string().optional(),
+      outcome: z.string().optional(),
+      next: z.string().optional(),
+      blocker: z.string().optional(),
+      unblock: z.number().int().optional(),
+      urgent: z.boolean().optional(),
+      follows: z.array(z.string()).optional(),
+    }),
+    deferred: true,
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+/** The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md */
+export const MAIL_BUDGET_CHARS = 800
+
+/**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
  * ordinary session has it, and is counted against its own ceiling below (READER_TOOLS keeps #320's).
  *
@@ -866,7 +899,7 @@ export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   orchestrator: 9_500,
   scoped: 2_400,
   builder: 1_500,
-  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
+  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS,
 }
 
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
@@ -991,6 +1024,7 @@ export const TOOL_ARGS = {
   // ifBusy is a bare string in the definition (#677: the busy answer names its values); the runner takes these two
   ask_project: DELEGATE_TOOLS[0].schema.extend({ ifBusy: z.enum(['note', 'queue'] as const satisfies readonly IfBusy[]).optional() }),
   ...schemasOf(APP_ACCESS_TOOLS),
+  ...schemasOf(MAIL_TOOLS),
   ...schemasOf(COMMAND_TOOLS),
   // Codex's exec may hand a command's arguments over as JSON text rather than an object: centralu_run reads either
   centralu_run: COMMAND_TOOLS[2].schema.extend({ args: z.union([z.record(z.string(), z.unknown()), z.string()]).optional() }),

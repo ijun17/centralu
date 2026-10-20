@@ -18,7 +18,7 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
  * may run which (tool-seats.ts), the texts the answers are built from (tool-answers.ts), and here the runner both
  * paths call. Every name stays importable from here, as before the split.
  */
-export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
+export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
 export type { AppAccessToolName, CommandToolName, OrchestratorToolName } from './tool-definitions.js'
 export { callForm, codexToolInstructionsFor, commandsFor, currentRareTier, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, orchestratorToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, rareTierFrom, setRareTier, setReaderInstructions, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
@@ -50,7 +50,7 @@ function issuesText(error: z.ZodError): string {
  * reader's, start_agent's pair and the app-access three a reader's and the orchestrator's (#853, #1205), which reaches
  * them as commands in the `commands` tier (a direct call then is refused, naming centralu_run)
  */
-const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
+const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail'])
 
 /**
  * Runs one tool and turns the result into **text for the model to read**.
@@ -111,6 +111,9 @@ function runParsed<N extends keyof OrchestratorToolArgs>(name: N, args: Orchestr
 }
 
 const HANDLERS: ToolHandlers = {
+  mail(args, { tools }) {
+    return tools.mail ? tools.mail(args) : { text: 'The mailbox is not available in this session.', isError: true }
+  },
   async update_centralu({ action }, { tools, caller, signal }) {
     const r = tools.updateCentralu ? await tools.updateCentralu(action, signal) : { ok: false, error: 'Update checks are unavailable' }
     if (action === 'apply') {

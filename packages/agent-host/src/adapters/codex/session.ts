@@ -1,5 +1,5 @@
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
-import type { InputObserver } from '../contract.js'
+import type { InputObserver, InputOrigin } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
@@ -433,7 +433,8 @@ export class CodexSession implements SessionHandle {
     }
   }
 
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
+  // The origin is Claude's: Codex has no such stamp
+  sendTracked(text: string, observer?: InputObserver, _opts?: { origin?: InputOrigin }): Promise<void> {
     const receipt = this.inputReceipts.create(observer)
     this.sendInput(text, receipt)
     return receipt.done

@@ -14,6 +14,13 @@ export const ProtocolErrorCode = z.enum([
   'session_not_found',
   'rate_limited',
   'version_mismatch',
+  /*
+   * The host understood the call and said no, for a reason it can name: mail's refusals (#1347, docs/plans/mailbox.md §9).
+   * Not a failure and not worth a retry: `retryable` is false, and `data.reason` is a word the caller can act on
+   * (`thread_done`, `not_participant`, `policy`, ...). A window or a tool shows `message` as it is. An older window reads the
+   * frame as one it cannot validate and ends the call as `internal`, with the message (docs/protocol.md §5)
+   */
+  'refused',
   'internal',
 ])
 export type ProtocolErrorCode = z.infer<typeof ProtocolErrorCode>

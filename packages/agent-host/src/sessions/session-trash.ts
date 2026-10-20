@@ -53,6 +53,10 @@ export type SessionTrashHost = {
   forgetCardRest: (sessionId: string) => void
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
+  /** The mail it held: the work it was given or gave moves on (#1347, `MailService.sessionGone`). Never throws */
+  mailGone: (sessionId: string) => void
+  /** The session is back: the mail that waited for it may go (#1347). Never throws */
+  mailPoke: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -385,6 +389,8 @@ export class SessionTrash {
     // Tears down this session's inline app views (M4 B-1) — releases whatever app it was holding onto. A
     // restored conversation reopens them from its history
     this.host.appsHub?.sessionGone(sessionId)
+    // The work it held in the mailbox moves on (§3.3): a thread it was assigned is open again, one it owned is the person's
+    this.host.mailGone(sessionId)
     this.host.emit({ type: 'session_deleted', sessionId })
     return true
   }
@@ -537,6 +543,8 @@ export class SessionTrash {
       this.host.meta.set(sessionId, withHubMark(this.host.store.settings, fixed))
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
+      // Its receipts and memberships were kept in the trash (§4.1), and its mail goes now; the work it held has moved on and is not given back
+      this.host.mailPoke(sessionId)
       if (recovered) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })
       return { session, project: registered }
     })

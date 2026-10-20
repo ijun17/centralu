@@ -73,6 +73,14 @@ function encodeTime(time: number): string {
   return out
 }
 
+/**
+ * The least message id a host could have minted at `ms`: ids sort by the time they were made, so "the messages of the last
+ * minute" is a range of the primary key, not a scan of every message. Only the prefix of a host's own ids is meaningful
+ */
+export function messageIdFloor(host: string, ms: number): string {
+  return `${host}.m_${encodeTime(ms)}${'0'.repeat(16)}`
+}
+
 export const threadIdOf = (host: string, ulid: string): string => `${host}.t_${ulid}`
 export const messageIdOf = (host: string, ulid: string): string => `${host}.m_${ulid}`
 

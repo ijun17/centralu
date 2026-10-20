@@ -88,6 +88,8 @@ export function resetStore() {
     wakeError: {},
     wakeLocked: {},
     notices: [],
+    mail: null,
+    mailThread: null,
     toast: null,
     approvalsInFlight: {},
     commandRuns: {},

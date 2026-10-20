@@ -894,3 +894,21 @@ need."), once, in the turn's input only: never stored or shown (`SessionAppWirin
 
 Not measured live: whether the orchestrator, asked about a project's app by its name, reaches for the `find_apps`
 command before answering without it, on Claude and on Codex; the instructions' line is the one prompt for it.
+
+## 13. The mailbox's tool (#1347, slice 2)
+
+`mail` is one tool with an action (`inbox`, `read`, `handled`, `send`, `reply`, `update`, `close`; docs/plans/mailbox.md
+§9.3), an ordinary session's alone: the directing seats are not parties of the mailbox. Its definition is 776 characters
+(`MAIL_BUDGET_CHARS` 800), and the reader seat's resident ceiling rises by that: 5,200 → 5,300 on Codex, which loads every
+tool. On Claude it is **deferred** behind tool search, so its every request carries only the name in the tool-search list
+(no change to the 2,560 resident). It is in the profile from the session's start, because the tool list a session starts
+with is its prompt prefix and may not change under it; a session that began before this build gets it at its next spawn.
+
+Every field but `action` is optional and has no description: each word rides in every Codex request, and the answers say
+what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
+call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds
+it through tool search by "mail".
+
+Not measured live: whether a Claude session that has to send a message by itself (with no wake to name the call) finds the
+deferred tool by searching, and the first-call argument errors on each CLI. The numbers above are counted from the
+definitions (`orchestrator-tools.test.ts` holds them to the ceilings).

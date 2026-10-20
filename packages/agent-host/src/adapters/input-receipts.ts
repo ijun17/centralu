@@ -5,7 +5,7 @@ export type InputReceipt = { id: ReturnType<typeof randomUUID>; done: Promise<vo
 
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
 export class InputReceipts {
-  private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver }>()
+  private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver; accepted?: true }>()
   private ended = new Set<string>()
 
   create(observer?: InputObserver): InputReceipt {
@@ -22,10 +22,20 @@ export class InputReceipts {
   get size(): number { return this.pending.size }
   get ids(): string[] { return [...this.pending.keys()] }
 
+  /** The tool took the input (once): the observer is told before the turn is recorded */
+  accept(id: string): void {
+    const p = this.pending.get(id)
+    if (!p || p.accepted) return
+    p.accepted = true
+    p.observer?.accepted?.()
+  }
+
   /** Codex's turn/start response can arrive after that turn's completion notification. */
   bind(receipt: InputReceipt, turn: string): void {
     const p = this.pending.get(receipt.id)
     if (!p) return
+    // `turn/start` answered with the turn: the input is taken
+    this.accept(receipt.id)
     p.turn = turn
     if (this.ended.has(turn)) this.finish(receipt.id)
   }
@@ -54,6 +64,7 @@ export class InputReceipts {
     if (!p) return
     this.pending.delete(id)
     if (!this.pending.size) this.ended.clear()
+    if (!p.accepted) p.observer?.accepted?.()
     p.receipt.completed = true
     p.observer?.complete()
     p.resolve()

@@ -432,7 +432,19 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `find_apps` | yes | — | — | yes | — |
 | `attach_app` | yes | — | — | yes | — |
 | `detach_app` | yes | — | — | yes | — |
+| `mail` | — | — | — | yes | — |
 <!-- tool-matrix:end -->
+
+**The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
+whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Who may write to
+whom is `mail/relations.ts` (§9.1): a session to the sessions it started, the one that started it and the person; the orchestrator
+to any session; the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (the orchestrator, a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
+session that runs `auto` holds, without waking, what another session or an app that is only in a thread sends it (§7.7), and the person
+releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
+quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
+word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the orchestrator's window-call list, and
+the `mail` tool is the ordinary session's alone (matrix above). The delivery stamps its input as Centralu's channel, and sends it
+as the CLI's own input, never as a message of the person's.
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's live children to it. Its

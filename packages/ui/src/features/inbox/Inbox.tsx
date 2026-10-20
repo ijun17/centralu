@@ -18,6 +18,8 @@ import {
 } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
+import { MailSection } from './MailSection.jsx'
+import { MailThread } from './MailThread.jsx'
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
@@ -39,6 +41,10 @@ export function Inbox() {
   const send = useStore((s) => s.send)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
+  // The person's mailbox (#1347): its list sits under the sessions that wait, and a thread takes the panel while it is open
+  const mailThread = useStore((s) => s.mailThread)
+  const closeMailThread = useStore((s) => s.closeMailThread)
+  const hasMail = useStore((s) => !!s.mail && (s.mail.threads.length > 0 || s.mail.held.length > 0 || s.mail.waiting > 0))
   const [rawCursor, setCursor] = useState(0)
   // Done removes a row, so the cursor can end up past the end: keep it on the last row
   const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
@@ -47,6 +53,11 @@ export function Inbox() {
   useFocusReturn(open, panelRef)
   // No row answers an approval while the list is still moving (#543): the order is part of what moves it
   const settled = useRowsSettled(items.map((it) => it.id).join('|'))
+
+  // The list is what it opens on: a thread left open when it closed is not waiting there the next time
+  useEffect(() => {
+    if (!open) closeMailThread()
+  }, [open, closeMailThread])
 
   useEffect(() => {
     if (!open) return
@@ -66,6 +77,14 @@ export function Inbox() {
         onButton: buttonTarget(e.target),
       })
       if (!action) return
+      // A thread is open: Esc goes back to the list, and the sessions' keys wait for it
+      if (mailThread) {
+        if (action === 'close') {
+          closeMailThread()
+          e.preventDefault()
+        }
+        return
+      }
       const item = items[cursor]
       if (action === 'down') setCursor((c) => Math.min(c + 1, items.length - 1))
       else if (action === 'up') setCursor((c) => Math.max(c - 1, 0))
@@ -94,7 +113,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, openWaiting, toggle, markRead])
+  }, [open, items, cursor, openWaiting, toggle, markRead, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -130,23 +149,34 @@ export function Inbox() {
           The conversation's shapes (owner, 2026-10-18): a 14px card, its rows rounded inside a 4px inset, the row the
           keys are on filled (no edge bar), the row's actions as capsules.
         */}
-        <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
-          <h2 className="text-sm font-medium text-ink">Waiting</h2>
-          <span className="readout text-xs text-ink-faint">{items.length}</span>
-          <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> Move
-            <Kbd>↵</Kbd> Open
-            <Kbd>D</Kbd> Done
-            <Kbd>esc</Kbd> Close
-          </span>
-        </header>
+        {!mailThread && (
+          <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
+            <h2 className="text-sm font-medium text-ink">Waiting</h2>
+            <span className="readout text-xs text-ink-faint">{items.length}</span>
+            <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd> Move
+              <Kbd>↵</Kbd> Open
+              <Kbd>D</Kbd> Done
+              <Kbd>esc</Kbd> Close
+            </span>
+          </header>
+        )}
 
-        {items.length === 0 ? (
+        {mailThread ? (
+          <MailThread
+            onOpenSession={(id) => {
+              openWaiting(id, { preferGrid: true })
+              toggle(false)
+            }}
+          />
+        ) : items.length === 0 ? (
+          hasMail ? null : (
           <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
             Nothing waiting
             <span className="mt-1 block text-xs text-ink-faint">Finished agents collect here</span>
           </p>
+          )
         ) : (
           <ul className="flex max-h-[calc(56vh/var(--text-zoom))] flex-col gap-0.5 overflow-y-auto p-1">
             {items.map((it, i) => (
@@ -232,6 +262,7 @@ export function Inbox() {
             ))}
           </ul>
         )}
+        {!mailThread && <MailSection />}
       </div>
     </>
   )

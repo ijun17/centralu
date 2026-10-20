@@ -89,6 +89,7 @@ type NormalizedEvent =
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 자식을 넘겨받은 세션으로 옮겼다(원래 세션이 없어지면 정리된 자식도, #738). 사이드바는 그 아래에 둔다. #1038: 허브가 연결된 기계의 자식을 띄운 자기 세션을 알릴 때도(그 세션이 없어지면 null)
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352)는 기본값 false
+  | { type: 'mail_changed';     threadId, toPerson? }          // #1347: 메일함의 스레드가 바뀌었다. Inbox가 다시 읽는다. 앱 전체 이벤트이며 연결된 기계에서 오면 넘기지 않는다
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다
@@ -221,6 +222,7 @@ type ApprovalDetail =
 | 백그라운드 작업 | `agents.stopBackgroundTask, agents.clearBackgroundTasks` | #290: 어댑터가 `stoppable`로 표시한 작업 하나를 멈춘다(그 끝은 `background_tasks`로 온다). 끝난 것을 목록에서 걷는다 |
 | 에이전트 CLI 버전 | `agents.versions, agents.setAutoApplyVersions, agents.applyVersions` | #297: 설치된 CLI(`force: false`는 30초 안의 읽기로 답한다 — 창이 포커스를 얻을 때), "새로 설치된 에이전트 CLI로 idle 세션 옮기기"(기본 켜짐), 오래된 CLI를 돌리는 idle 세션을 모두 다시 띄우고 `{ restarted, busy }`로 답한다. 세션이 돌리는 버전은 `SessionInfo.agentVersion`이며 프로세스가 없으면 null이다. 모두 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 아무것도 보이지 않는다([agent-host.ko.md](agent-host.ko.md) §4.6) |
 | 잠드는 유휴 세션 | `agents.sleepPolicy, agents.setSleepPolicy` | #568: "Put idle sessions to sleep after" `{ afterMinutes }`, 기본 15, null은 끄기. 호스트가 재운 세션은 `session_live`(`live: false, reason: 'asleep'`)를 보내고, 모든 재개는 `live: true`를 보낸다. 덧붙임이다: 오래된 호스트에 붙은 창은 답을 받지 못하고 설정을 숨긴다([agent-host.ko.md](agent-host.ko.md) §4.6.1) |
+| 메일함 | `mail.list, mail.thread, mail.reply, mail.close, mail.reassign, mail.unblock, mail.held, mail.resume, mail.wake` | #1347 ([plans/mailbox.md](plans/mailbox.md) §10.1): 메일함의 사람 쪽. `mail.list`는 `{ threads, held, waiting }`을 답한다(사람이 들어 있는 스레드, 안 읽은 것 먼저. 사람이 처리해야 해서 붙들린 메일과 그 까닭. "깨우기 / 두기"를 기다리는 잠든 세션). `mail.thread { threadId, after?, all? }`는 스레드 하나를 사람이 마지막으로 읽은 곳부터 최대 100통 주고 사람이 읽은 것으로 표시한다(`more`는 뒤에 더 있다는 뜻). `mail.reply`, `mail.close`, `mail.reassign { threadId, sessionId, text }`, `mail.unblock`은 사람의 행동이고, 사람의 말은 호출이 적은 필드가 아니라 호스트가 아는 요청자로 사람의 말이 된다. `mail.held { action: 'release' \| 'dismiss', recipient, messageIds }`는 붙든 메일을 지금 보내거나 그만둔다. `mail.resume { sessionId } \| { threadId }`는 세션의 예산이나 스레드의 턴 수로 건 멈춤을 푼다(§7.9). `mail.wake { wake }`는 잠든 세션 무리에 답한다. 규칙이 거절하면 오류 `refused`와 `data.reason`이다(§5). 허브 자신의 메일함이며 넘기지 않는다. 추가만: 옛 호스트는 "Unknown method"를 답하고 창은 메일을 보여주지 않는다 |
 | trash | `trash.list, trash.read, trash.restore, trash.purge, trash.empty, trash.readRun, trash.purgeRuns` | 세션 보관함의 메서드이자 거기서 나오는 길 (FR-22): 목록, 읽기, 되돌리기, 영영 지우기, 보관한 세션 모두 지우기. 보관함은 #1404 전까지 휴지통이라 불렀고, 프로토콜은 늘기만 하므로 메서드 이름은 `trash.`로 남는다. 사람만 쓴다 — 에이전트의 도구와 앱의 능력은 닿지 않는다. `trash.list`는 지운 앱 에이전트 세션의 기록(`runs`, #378)도 싣고, 그 기록은 그 앱이 돈 기계에서(`machine`, 보관함의 세션처럼) `trash.readRun`으로 읽고 `trash.purgeRuns`로 지운다. `trash.empty`는 기록을 창에 맡긴다 |
 | subagent steps | `subagents.usage, subagents.trash, trash.restoreSubagentSteps, trash.purgeSubagentSteps, messages.subagentTrashed` | #418: 살아 있는 세션마다 서브에이전트 단계가 차지하는 것(`{ sessions: SubagentStepsHeld[] }`: 실행, 단계, 바이트, 큰 것부터); 세션은 두고 한 세션의 단계를 세션 보관함으로 옮기기(옮긴 `{ steps, bytes }`를 답한다); 되돌리기, 영구 삭제. 보관함에서는 `trash.list`의 `subagentSteps`(`TrashedSubagentSteps[]`)이고, 바이트는 합계에 든다. `trash.empty`는 실행 기록(#378)처럼 건드리지 않는다: 창이 보여 준 항목마다 `trash.purgeSubagentSteps { sessionId, upTo }`로 지우고, `upTo`는 창이 보여 준 `deletedAt`이라 창이 보관함을 읽은 뒤에 옮겨진 단계는 남는다. `messages.subagentTrashed { sessionId, parentCallId }`는 띄운 카드 하나의 단계 중 몇 개가 보관함에 있는지 `{ steps }`로 답해서, 카드가 단계가 어디로 갔는지 말한다. 보관함의 나머지처럼 사람만 쓴다. 덧붙임: 옛 호스트의 창은 답을 받지 못하고 아무것도 보이지 않는다 |
 | messages | `messages.load, messages.subagent, messages.search, messages.image` | 기록 한 페이지; 띄운 카드 하나의 서브에이전트 걸음, 사람이 펼칠 때 읽는다 (#222); 오간 말의 검색; 답장이 적은 로컬 이미지(`![a](/path/shot.png)`). 창은 파일 경로를 직접 읽을 수 없어 세션의 호스트가 읽는다: `{ sessionId, path }`, `path`는 답장에 적힌 그대로. 답은 `{ ok: true, mime, data, file? }` 또는 `{ ok: false, reason, message, file? }`. `reason`은 `not_mentioned`(이 세션의 어느 답장에도 없다. 아무것도 건드리지 않는다), `not_found`, `not_an_image`(바이트로 판단: PNG, JPEG, GIF, WebP만), `too_large`(`IMAGE_PREVIEW_MAX_BYTES`, 10 MB), `unreadable`. `file`은 호스트 기기에서 해석한 경로로, 파일 관리자에서 보여 줄 때 쓴다. 거절은 오류가 아니라 답이다. 추가만 한 것이라 이전 호스트는 "Unknown method"로 답하고, 창은 그것을 이미지 자리에 보인다([security-boundaries.md](security-boundaries.md), "Images a reply names") |
@@ -361,7 +363,7 @@ v48은 예전 워크트리 매니저의 세션들에 `parent_session_id`를 이 
 ```ts
 type ProtocolError = {
   code: 'adapter_crashed' | 'conversation_locked' | 'tool_not_installed' | 'not_logged_in'
-      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'internal'
+      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'refused' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean
   data?: unknown           // extra information per code (rate_limited → resumeAt etc.)
@@ -369,6 +371,7 @@ type ProtocolError = {
 ```
 
 - code는 닫힌 집합이다. UI는 code로 분기하고 message는 표시만 한다. 문자열 매칭 분기는 금지다.
+- **`refused`**(#1347): 호스트가 호출을 알아듣고 이름 붙일 수 있는 이유로 거절한 경우다(메일함에서 스레드가 끝났거나, 보낸 쪽이 스레드 안에 없거나, 정책이 막을 때). `retryable`은 늘 false이고, `data.reason`은 짧은 단어(`thread_done`, `not_participant`, `policy` 등)다. 장애가 아니므로 화면은 오류 보고가 아닌 거절로 보여 준다. 이 단어를 닫힌 집합에 갖지 않은 옛 창은 프레임을 검증하지 못해 같은 메시지를 단 `internal`로 호출을 끝내므로 문장은 사람에게 닿고, `data`만 잃는다.
 - 어댑터의 raw 에러(SDK 예외, 프로세스 종료 코드)는 호스트 내부에서 이 형태로 변환된다.
 
 ## 6. 링크된 기기 ([#82](https://github.com/ijun17/centralu/issues/82), [plans/remote-hub.md](plans/remote-hub.md))

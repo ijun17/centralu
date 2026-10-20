@@ -192,7 +192,7 @@ describe('which kind a sender may post (§3.2)', () => {
     expect(records.messagesAfter(thread.id, 0).filter((m) => m.dedupeKey === 'merged:12')).toHaveLength(1)
     expect(records.receiptsOf(first.message.id).map((r) => r.recipient).sort()).toEqual([S1, S2].sort())
     // Another key is another message
-    expect(mail.post(thread.id, APP, { kind: 'notice', body: 'merged', dedupeKey: 'merged:13' }).duplicate).toBe(false)
+    expect(mail.post(thread.id, APP, { kind: 'notice', body: 'merged again', dedupeKey: 'merged:13' }).duplicate).toBe(false)
     expect(refusedFor(() => mail.post(thread.id, APP, { kind: 'notice', body: 'x', dedupeKey: '' }))).toBe('bad_value')
   })
 
@@ -205,14 +205,18 @@ describe('which kind a sender may post (§3.2)', () => {
     expect(refusedFor(() => mail.post(b.thread.id, S1, { kind: 'answer', body: 'this', replyTo: q.message.id }))).toBe('bad_value')
   })
 
-  it('a post the policy refuses for one of its recipients is not stored for any of them', () => {
+  it('a post the policy refuses for one of its recipients goes to the others; refused whole only when none is left; opening a thread with such a member is refused', () => {
     const refusing: MailPolicy = { mayWrite: (_from, to) => (to === S3 ? 'not for S3' : null) }
     const { mail, store } = setup(refusing)
     const { thread } = openBy(mail, assignInput())
     // S3 is put in the thread behind the policy's back, as a relation that has since been withdrawn
     store.mail.putParticipant(thread.id, S3, 'member', NOW)
-    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'x' }))).toBe('policy')
-    expect(store.mail.messagesAfter(thread.id, 0)).toHaveLength(1)
+    const note = mail.post(thread.id, S1, { kind: 'note', body: 'x' })
+    expect(store.mail.receiptsOf(note.message.id).map((r) => r.recipient)).toEqual([S2])
+    // Nobody left to take it: S2 leaves, and S1's next word has no one
+    store.mail.leaveParticipant(thread.id, S2, NOW)
+    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'y' }))).toBe('policy')
+    expect(store.mail.messagesAfter(thread.id, 0)).toHaveLength(2)
     expect(refusedFor(() => openBy(mail, assignInput({ members: [S3], subject: 'again' })))).toBe('policy')
     expect(store.mail.threadsOfParty(S1, 'owner')).toHaveLength(1)
   })
@@ -616,10 +620,14 @@ describe('reading a long thread', () => {
   })
 
   it('a party that joined late, or sent most of the thread, gets to the end of it however many messages come before', () => {
-    const { mail, records } = setup()
+    const { mail, records, clock } = setup()
     const { thread } = openBy(mail, assignInput())
     mail.addMember(thread.id, S1, APP)
-    for (let i = 0; i < 620; i++) mail.post(thread.id, APP, { kind: 'notice', body: `progress ${i}` })
+    // An app posts 10 a minute at most, so these come over an hour
+    for (let i = 0; i < 620; i++) {
+      clock.t += 7_000
+      mail.post(thread.id, APP, { kind: 'notice', body: `progress ${i}` })
+    }
     mail.addMember(thread.id, S1, S3)
     const question = mail.post(thread.id, S1, { kind: 'question', body: 'the last word' })
 
@@ -867,6 +875,26 @@ describe('a retry after the thread closed (L3), and an opening posted twice (L4)
   })
 })
 
+describe('the key that opened a thread and the keys of its posts (R2)', () => {
+  it('a post that reuses the key its thread was opened under is a post, not a duplicate of the opening', () => {
+    const { mail, records } = setup()
+    const opened = openBy(mail, assignInput({ dedupeKey: 'queue:12' }))
+    const post = mail.post(opened.thread.id, S1, { kind: 'note', body: 'a second word', dedupeKey: 'queue:12' })
+    expect(post.duplicate).toBe(false)
+    expect(post.message.id).not.toBe(opened.message.id)
+    expect(records.messagesAfter(opened.thread.id, 0)).toHaveLength(2)
+    // Each is still once: the same post again is the duplicate, and the same opening again is the same thread
+    expect(mail.post(opened.thread.id, S1, { kind: 'note', body: 'a second word', dedupeKey: 'queue:12' })).toMatchObject({ duplicate: true, message: { id: post.message.id } })
+    expect(openBy(mail, assignInput({ dedupeKey: 'queue:12' })).thread.id).toBe(opened.thread.id)
+  })
+
+  it('a post’s key may not start with the word the opening’s is kept under', () => {
+    const { mail } = setup()
+    const { thread } = openBy(mail, assignInput())
+    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'x', dedupeKey: 'open:queue:12' }))).toBe('bad_value')
+  })
+})
+
 describe('a reassignment and the person’s own place in a thread', () => {
   it('giving the thread to the assignee it has keeps running; in review it runs again; to another it is open', () => {
     const { mail, records } = setup()
@@ -930,5 +958,86 @@ describe('adding a member', () => {
     expect(records.participants(thread.id).find((p) => p.address === S2)?.leftAt).not.toBeNull()
     mail.addMember(thread.id, S1, S2)
     expect(records.participants(thread.id).find((p) => p.address === S2)).toMatchObject({ leftAt: null, role: 'member' })
+  })
+})
+
+describe('how fast a sender may post (§7.9)', () => {
+  it('a session posts 30 a minute and an app 10, counted in the store; the 31st and the 11th are refused with rate_limited, and the minute passes', () => {
+    const { mail, clock } = setup()
+    const { thread } = openBy(mail, assignInput())
+    for (let i = 0; i < 29; i++) mail.post(thread.id, S2, { kind: 'note', body: `n${i}` })
+    // The opening was S1's, so S2 has posted 29
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'n29' }).duplicate).toBe(false)
+    expect(refusedFor(() => mail.post(thread.id, S2, { kind: 'note', body: 'n30' }))).toBe('rate_limited')
+    // Another sender is not held by it
+    expect(mail.post(thread.id, S1, { kind: 'note', body: 'mine' }).duplicate).toBe(false)
+    clock.t += 61_000
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'n30' }).duplicate).toBe(false)
+  })
+
+  it('counts the posts of this host’s own ids, not the same sender’s messages that carry another host’s', () => {
+    const { mail, records } = setup()
+    const { thread } = openBy(mail, assignInput())
+    for (let i = 0; i < 40; i++) {
+      records.insertMessage({ id: `hub-bbbbbbbb.m_${String(i).padStart(26, '0')}`, threadId: thread.id, sender: S2, kind: 'note', urgent: false, needsOwner: false, wake: null, replyTo: null, body: `elsewhere ${i}`, facts: {}, dedupeKey: null, createdAt: NOW })
+    }
+    // Its own 29 count, the other host's 40 do not: the 30th is allowed and the 31st is not
+    for (let i = 0; i < 29; i++) mail.post(thread.id, S2, { kind: 'note', body: `own ${i}` })
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'own 29' }).duplicate).toBe(false)
+    expect(refusedFor(() => mail.post(thread.id, S2, { kind: 'note', body: 'own 30' }))).toBe('rate_limited')
+  })
+
+  it('opening again under the same key at the limit gives the thread it opened, not a refusal', () => {
+    const { mail } = setup()
+    const first = openBy(mail, assignInput({ dedupeKey: 'job:1' }))
+    for (let i = 0; i < 29; i++) openBy(mail, assignInput({ subject: `s${i}`, body: `b${i}` }))
+    expect(refusedFor(() => openBy(mail, assignInput({ subject: 'one more', body: 'more' })))).toBe('rate_limited')
+    expect(openBy(mail, assignInput({ dedupeKey: 'job:1' }))).toMatchObject({ duplicate: true, thread: { id: first.thread.id } })
+  })
+
+  it('an app is held to 10 a minute, the person and Centralu to none, and opening and assigning count as posts', () => {
+    const { mail } = setup()
+    const { thread } = openBy(mail, assignInput({ by: PERSON }))
+    mail.addMember(thread.id, PERSON, APP)
+    for (let i = 0; i < 10; i++) mail.post(thread.id, APP, { kind: 'notice', body: `n${i}` })
+    expect(refusedFor(() => mail.post(thread.id, APP, { kind: 'notice', body: 'n10' }))).toBe('rate_limited')
+    for (let i = 0; i < 40; i++) expect(mail.post(thread.id, PERSON, { kind: 'note', body: `p${i}` }).duplicate).toBe(false)
+    for (let i = 0; i < 40; i++) expect(mail.postAsCentralu(thread.id, { kind: 'notice', body: `c${i}` }).duplicate).toBe(false)
+
+    // A session that opens thirty threads cannot open a thirty-first, nor assign in one
+    const t = setup()
+    for (let i = 0; i < 30; i++) openBy(t.mail, assignInput({ subject: `s${i}`, body: `b${i}` }))
+    expect(refusedFor(() => openBy(t.mail, assignInput({ subject: 'more', body: 'more' })))).toBe('rate_limited')
+  })
+})
+
+describe('the same words again (§7.9)', () => {
+  it('from a session or an app in the same thread within 10 minutes is not posted again, and the sender is told which one it was', () => {
+    const { mail, clock, records } = setup()
+    const { thread } = openBy(mail, assignInput())
+    const first = mail.post(thread.id, S2, { kind: 'note', body: 'still going' })
+    const again = mail.post(thread.id, S2, { kind: 'note', body: 'still going' })
+    expect(again).toMatchObject({ duplicate: true, repeated: true, message: { id: first.message.id } })
+    expect(records.messagesAfter(thread.id, 0).filter((m) => m.body === 'still going')).toHaveLength(1)
+
+    // The same words in another thread are a post there: the repeat is one sender's words to one thread
+    const elsewhere = openBy(mail, assignInput({ subject: 'elsewhere', body: 'other work' }))
+    expect(mail.post(elsewhere.thread.id, S2, { kind: 'note', body: 'still going' }).duplicate).toBe(false)
+    // Another kind, other words, or after the window is a post
+    expect(mail.post(thread.id, S2, { kind: 'question', body: 'still going' }).duplicate).toBe(false)
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'still going!' }).duplicate).toBe(false)
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'still going' }).duplicate).toBe(false)
+    clock.t += 10 * 60_000 + 1
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'still going' }).duplicate).toBe(false)
+  })
+
+  it('is no rule for the person, who may say the same thing twice', () => {
+    const { mail } = setup()
+    const { thread } = openBy(mail, assignInput({ by: PERSON }))
+    mail.post(thread.id, PERSON, { kind: 'note', body: 'again' })
+    expect(mail.post(thread.id, PERSON, { kind: 'note', body: 'again' }).duplicate).toBe(false)
+    // While a session saying it twice is told it is a repeat
+    mail.post(thread.id, S2, { kind: 'note', body: 'again' })
+    expect(mail.post(thread.id, S2, { kind: 'note', body: 'again' })).toMatchObject({ duplicate: true, repeated: true })
   })
 })

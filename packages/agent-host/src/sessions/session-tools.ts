@@ -1,4 +1,5 @@
 import type { SessionInfo } from '@cc/protocol'
+import type { MailToolArgs } from '../mail/tool.js'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AskProjectFlow } from './ask-project-flow.js'
@@ -21,6 +22,8 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   agentSession: DelegationFlow['agentSession']
   listAgents: DelegationFlow['listAgents']
   requireAppAccess: SessionAppWiring['requireAppAccess']
+  /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
+  mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
 }
 
 /**
@@ -135,6 +138,8 @@ export class SessionTools {
       findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
       attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+      // The mailbox (#1347): the ordinary session's alone, whose seat the tool is defined for
+      mail: (args) => this.host.mailTool(sessionId, args),
     }
   }
 }

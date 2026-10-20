@@ -208,6 +208,8 @@ describe('restoring a session', () => {
       worktrees: { worktreeCleanup: new Map() },
       meta,
       emit: () => {},
+      // A session that comes back may take the mail that waited for it (#1347)
+      mailPoke: () => {},
       store: {
         projects: { listProjects: () => [] },
         trash: { trashedSession: () => ({ session: base, record: { projectId: null } }), restoreSession: async () => base },

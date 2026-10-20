@@ -5,6 +5,7 @@ import type { GitPort } from './git.js'
 import type { ApprovalRulesPort, SearchPort, TrashPort } from './history.js'
 import type { BackgroundPort, ProcessPort, RelaunchPort, UpdatePort } from './lifecycle.js'
 import type { MachinesPort } from './machines.js'
+import type { MailPort } from './mail.js'
 import type { PreferencesPort, ThemesPort, WorkspacePort } from './preferences.js'
 import type { ProjectConsentsPort, ProjectPort } from './projects.js'
 import type { PlatformCapabilities, SystemPort } from './system.js'
@@ -35,6 +36,7 @@ export * from './terminal.js'
 export * from './apps.js'
 export * from './lifecycle.js'
 export * from './machines.js'
+export * from './mail.js'
 
 export interface Platform {
   agents: AgentPort
@@ -55,6 +57,8 @@ export interface Platform {
   commands: CommandRunPort
   processes: ProcessPort
   machines: MachinesPort
+  /** The person's side of the mailbox (#1347); a host before it answers "Unknown method" */
+  mail: MailPort
   /** Present only where the host outlives the window (desktop, through the keeper — #280) */
   background?: BackgroundPort
   /** Present only in the desktop app with the keeper: relaunching into an installed update (#352) */

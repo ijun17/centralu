@@ -1,4 +1,4 @@
-import { oneLineText } from '@cc/protocol'
+import { errorMessage, oneLineText } from '@cc/protocol'
 import { asObj, isObj } from '../json-value.js'
 import {
   BLOCKER_KINDS,
@@ -14,15 +14,16 @@ import {
   type MessageRow,
   type ParticipantRole,
   type ParticipantRow,
+  type ReceiptRow,
   type ThreadOrigin,
   type ThreadOutcome,
   type ThreadPatch,
   type ThreadRow,
   type ThreadState,
 } from '../dev-services/store/mail.js'
-import { CENTRALU, PERSON, parseAddress, type Party } from './address.js'
+import { CENTRALU, PERSON, parseAddress, sessionAddress, type Party } from './address.js'
 import { buildMailFrame, type MailFrameItem } from './frame.js'
-import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
+import { UlidMaker, messageIdFloor, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
   MAX_BLOCKERS,
   NEXT_MAX,
@@ -32,7 +33,12 @@ import {
   flowsDown,
   mayEditTask,
   mayPostKind,
+  pickWorkThread,
+  postsPerMinute,
+  REPEAT_WINDOW_MS,
+  wakes,
   refuse,
+  refusalReason,
   reopensReview,
   settableStates,
   stateAfterUnblocked,
@@ -54,6 +60,11 @@ import {
 export type MailPolicy = {
   /** A reason in words when `from` may not write to `to` in this thread (null for a thread being opened), else null */
   mayWrite(from: string, to: string, thread: ThreadRow | null): string | null
+  /**
+   * A reason in words when `to` cannot read mail at all, whoever writes: a session whose seat has no `mail` tool (the wake names a call
+   * it cannot make, §9.3). Asked before anything else about the receiver, also for a reply in a thread it is in
+   */
+  cannotRead?(to: string): string | null
 }
 
 export type MailServiceOptions = {
@@ -125,7 +136,16 @@ export type CentraluPost = {
   to?: string[]
 }
 
-export type PostResult = { message: MessageRow; thread: ThreadRow; duplicate: boolean }
+/** A thread changed (and who has new mail in it): what the delivery engine and the windows hear */
+export type MailChange = { threadId: string; recipients: string[] }
+
+export type PostResult = {
+  message: MessageRow
+  thread: ThreadRow
+  duplicate: boolean
+  /** The same words, kind and sender in this thread within 10 minutes: not posted again, and this is the first one (§7.9) */
+  repeated?: boolean
+}
 
 export type OpenResult = PostResult & {
   /** The participants of the threads this one follows, who may be added to it (§3.3, "offered as its own") */
@@ -139,7 +159,14 @@ export type ReadMessage = Omit<MessageRow, 'facts'> & {
   receipts?: { recipient: string; delivered: boolean; read: boolean; handled: boolean }[]
 }
 
-export type ThreadView = { thread: ThreadRow; participants: ParticipantRow[]; blockers: BlockerRow[]; messages: ReadMessage[] }
+export type ThreadView = {
+  thread: ThreadRow
+  participants: ParticipantRow[]
+  blockers: BlockerRow[]
+  messages: ReadMessage[]
+  /** There are messages before the first one returned (`tail`) */
+  older?: boolean
+}
 
 export type ReadOptions = {
   /** From the start, not from where the reader last read */
@@ -148,9 +175,34 @@ export type ReadOptions = {
   after?: number
   /** Do not mark what is returned read (the board and the Inbox list; a peek) */
   peek?: boolean
+  /** At most this many messages: the reader is moved on only as far as it got */
+  limit?: number
+  /**
+   * The last this many messages of the thread (or of those before `before`), and, unless they are an earlier page, the whole thread is
+   * read: what the Inbox shows of a long thread is its end, where the question waiting for the person is
+   */
+  tail?: number
+  before?: number
 }
 
 /** What a delivery to one receiver would send now (§7.5, §7.6) */
+/** Why mail is told of without a turn: an inbound policy holds it (§7.7), or the session's budget of mail-started turns is spent (§7.9) */
+export type QuietReason = 'policy' | 'budget'
+
+/** Why mail is left out of a delivery and kept for the person: a thread's turns ran away (§7.9) */
+export type HoldReason = 'loop'
+
+export type DrainOptions = {
+  /** Mail that is told of once more, delivered and still unread (§7.6.6) */
+  again?: boolean
+  /** Left out, and nothing is written about it */
+  skip?: (message: MessageRow, receipt: ReceiptRow) => boolean
+  /** Told of, but not a reason for a turn */
+  quiet?: (message: MessageRow, receipt: ReceiptRow, thread: ThreadRow) => QuietReason | null | undefined
+  /** Left out and held for the person */
+  holdBack?: (message: MessageRow, receipt: ReceiptRow, thread: ThreadRow) => HoldReason | null | undefined
+}
+
 export type DrainResult = {
   /** The wake frame; empty when there is nothing to say */
   text: string
@@ -160,6 +212,22 @@ export type DrainResult = {
   inline: string[]
   /** Those the text only points at: delivered, still unread */
   pointed: string[]
+  /** Whether anything in it wakes the receiver (§9.5). If not, it goes in without a turn (Claude: `shouldQuery: false`), or waits for one */
+  wake: boolean
+  /** Whether anything in it is urgent or the person's: it does not wait out the 30 s between wakes (§7.9) */
+  immediate: boolean
+  /** Whether anything in it is a question: it goes before the rest when many sessions are woken at once (§7.9) */
+  asks: boolean
+  /** The line the conversation keeps of the delivery (§9.2): how many, in how many threads, from whom, in Centralu's words */
+  line: string
+  /** Told of without a turn, and why: held for the person once delivered (Inbox: Release) */
+  quieted: { messageId: string; reason: QuietReason }[]
+  /** Left out of it and held for the person (Inbox: Resume) */
+  heldBack: { messageId: string; reason: HoldReason }[]
+  /** The threads the delivery is from, in the order of their first message */
+  threads: string[]
+  /** The one thread of the receiver's own work a turn this delivery starts belongs to (§6), or null when it carries none or starts no turn */
+  workThread: string | null
 }
 
 const POST_KEYS = new Set(['kind', 'body', 'urgent', 'needsOwner', 'wake', 'replyTo', 'dedupeKey'])
@@ -178,6 +246,9 @@ export class MailService {
   private readonly now: () => number
   private readonly policy: MailPolicy
   private cachedHost: string | undefined
+  private readonly listeners = new Set<(change: MailChange) => void>()
+  /** What changed in the transaction under way: told to the listeners once it has committed, and dropped if it did not */
+  private queued: MailChange[] = []
 
   constructor(
     private readonly records: MailRecords,
@@ -192,6 +263,86 @@ export class MailService {
   get host(): string {
     this.cachedHost ??= this.opts.hostId()
     return this.cachedHost
+  }
+
+  /** A session's address on this host */
+  sessionAddress(sessionId: string): string {
+    return sessionAddress(this.host, sessionId)
+  }
+
+  /**
+   * A session left the host's list (it went to the trash, or was deleted): the work it held moves on (§3.3). A host that never
+   * made mail has nothing to move and does not even ask for its id
+   */
+  sessionGone(sessionId: string): ThreadRow[] {
+    if (!this.records.hasThreads()) return []
+    return this.partyGone(this.sessionAddress(sessionId))
+  }
+
+  /**
+   * Hears every change to a thread once it has committed: a post (and who it is for), a state change, a member. The delivery
+   * engine wakes its receivers from it (§5). A listener that throws is said on stderr and does not undo the change
+   */
+  onChange(listener: (change: MailChange) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** The transaction of every change, and then what it queued for the listeners */
+  private run<T>(fn: () => T): T {
+    this.queued = []
+    let result: T
+    try {
+      result = this.records.transaction(fn)
+    } catch (e) {
+      this.queued = []
+      throw e
+    }
+    const merged = new Map<string, Set<string>>()
+    for (const c of this.queued) {
+      const set = merged.get(c.threadId) ?? new Set<string>()
+      for (const r of c.recipients) set.add(r)
+      merged.set(c.threadId, set)
+    }
+    this.queued = []
+    for (const [threadId, recipients] of merged) {
+      for (const listener of this.listeners) {
+        try {
+          listener({ threadId, recipients: [...recipients] })
+        } catch (e) {
+          console.error(`[mail] a listener failed: ${errorMessage(e)}`)
+        }
+      }
+    }
+    return result
+  }
+
+  /**
+   * The person has something to act on that no post made: mail held for them (a failed delivery, a pause, a policy), one thing dismissed,
+   * or the question about sleeping sessions (`threadId` ''). The state is written already; the listeners (the Inbox's news) are told now
+   */
+  announce(threadId: string): void {
+    for (const listener of this.listeners) {
+      try {
+        listener({ threadId, recipients: [PERSON] })
+      } catch (e) {
+        console.error(`[mail] a listener failed: ${errorMessage(e)}`)
+      }
+    }
+  }
+
+  /** `announce` for the threads these messages are in */
+  announceMessages(messageIds: readonly string[]): void {
+    const threads = new Set<string>()
+    for (const id of messageIds) {
+      const m = this.records.message(id)
+      if (m) threads.add(m.threadId)
+    }
+    for (const threadId of threads) this.announce(threadId)
+  }
+
+  private changed(threadId: string, recipients: readonly string[] = []): void {
+    this.queued.push({ threadId, recipients: [...recipients] })
   }
 
   // ── Opening and posting ──
@@ -249,13 +400,14 @@ export class MailService {
     const origin = input.origin ?? (by.kind === 'person' ? 'person' : by.kind === 'app' ? 'app' : 'mail')
     if (!THREAD_ORIGINS.includes(origin)) throw refuse('bad_value', `unknown origin ${String(origin)}`)
 
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
-      // Opened again under the same key by the same caller: the thread that exists, not a second one
+      // Opened again under the same key by the same caller: the thread that exists, not a second one (also at the limit: a retry is no new post)
       if (input.dedupeKey !== undefined) {
         const first = this.duplicateOpening(caller, input.dedupeKey)
         if (first) return { message: first, thread: this.mustThread(first.threadId), duplicate: true, offered: [] }
       }
+      this.checkRate(by.kind, caller, now)
       for (const follow of input.follows ?? []) {
         const f = this.records.thread(follow)
         if (!f) throw refuse('bad_follows', `thread ${follow} is not here to follow up`)
@@ -290,7 +442,8 @@ export class MailService {
       // The person who opens a thread for someone else is in it; Centralu never is
       if (by.kind === 'person' && !addresses.includes(caller)) this.records.putParticipant(id, PERSON, 'member', now)
 
-      const message = this.insertPost(id, caller, input.kind, body, {}, input, now, undefined)
+      // Stored under its own namespace, so a post in this thread that reuses the key that opened it is a post, not a duplicate
+      const message = this.insertPost(id, caller, input.kind, body, {}, { ...input, dedupeKey: input.dedupeKey === undefined ? undefined : OPENING + input.dedupeKey }, now, undefined)
       const offered = unique((input.follows ?? []).flatMap((f) => this.records.participants(f).filter((p) => p.leftAt === null).map((p) => p.address))).filter(
         (a) => a !== caller,
       )
@@ -301,7 +454,7 @@ export class MailService {
   /** A post from a sender into a thread. The sender writes the words; Centralu writes the facts, so `facts` is refused */
   post(threadId: string, caller: string, input: PostInput): PostResult {
     rejectUnknown(input, POST_KEYS, 'post')
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       const sender = this.party(caller)
@@ -312,16 +465,37 @@ export class MailService {
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
       this.assertWritable(thread)
+      this.checkRate(sender.kind, caller, now)
       const wrong = mayPostKind(sender.kind, standing, input.kind)
       if (wrong) throw refuse('kind_not_allowed', wrong)
       this.checkFlags(sender.kind, input)
       const body = this.checkBody(sender.kind, input.body, false)
       if (input.replyTo !== undefined) this.checkReplyTo(thread.id, input.replyTo)
+      // The same words again from a session or an app: not posted again, and the sender is told (§7.9)
+      if (sender.kind === 'session' || sender.kind === 'app') {
+        const last = this.records.lastBy(thread.id, caller)
+        if (last && last.kind === input.kind && last.body === input.body && now - last.createdAt <= REPEAT_WINDOW_MS) {
+          return { message: last, thread, duplicate: true, repeated: true }
+        }
+      }
 
-      for (const to of this.recipients(thread.id, caller)) this.mayWriteOrRefuse(caller, to, thread)
+      // A participant that is gone, or whose seat cannot read mail, gets no receipt: the others are written to all the same. Refused
+      // only when there is no one left to take it, so the sender learns why
+      const reachable: string[] = []
+      let refusal: Error | undefined
+      for (const to of this.recipients(thread.id, caller)) {
+        try {
+          this.mayWriteOrRefuse(caller, to, thread)
+          reachable.push(to)
+        } catch (e) {
+          if (!(e instanceof Error) || refusalReason(e) === undefined) throw e
+          refusal ??= e
+        }
+      }
+      if (refusal !== undefined && reachable.length === 0) throw refusal
       // The person writes into any thread, and from then on is in it (the Inbox's reply box, §10.1); a role they have stays
       if (sender.kind === 'person') this.records.putParticipantIfAbsent(thread.id, PERSON, 'member', now)
-      const message = this.insertPost(thread.id, caller, input.kind, body, {}, input, now, input.replyTo)
+      const message = this.insertPost(thread.id, caller, input.kind, body, {}, input, now, input.replyTo, reachable)
       let after = thread
       if (thread.state === 'review' && reopensReview(standing, input.kind)) {
         after = this.moveState(thread, { state: 'running' }, now, { change: 'state', from: 'review', to: 'running', by: caller }, 'The owner sent more: the thread is running again.')
@@ -332,7 +506,7 @@ export class MailService {
 
   /** What only Centralu does: write `facts`, post an `event`, and add an event to a thread that is done (§3.3) */
   postAsCentralu(threadId: string, input: CentraluPost): PostResult {
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       if (!(MESSAGE_KINDS as readonly string[]).includes(input.kind)) throw refuse('kind_not_allowed', `unknown kind ${String(input.kind)}`)
@@ -356,7 +530,7 @@ export class MailService {
   /** The owner (or the person, or Centralu) gives the thread to someone: a reassignment (§3.2, "opens a thread or reassigns one") */
   assign(threadId: string, caller: string, input: AssignInput): PostResult {
     rejectUnknown(input, ASSIGN_KEYS, 'assign')
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       const by = this.party(caller)
@@ -368,6 +542,7 @@ export class MailService {
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
       this.assertWritable(thread)
+      this.checkRate(by.kind, caller, now)
       if (input.assignee === thread.owner) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
       const body = this.checkBody(by.kind, input.body, false)
       this.mayWriteOrRefuse(caller, input.assignee, thread)
@@ -399,7 +574,7 @@ export class MailService {
 
   /** Adds a participant: someone the adder may write to anyway (§9.1) */
   addMember(threadId: string, by: string, address: string): ThreadRow {
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       this.party(by)
@@ -432,7 +607,8 @@ export class MailService {
     if (!standing) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
     const position = this.records.readPosition(thread.id, reader)
     const after = opts.after ?? (opts.all ? 0 : position)
-    const messages = this.records.messagesAfter(thread.id, after)
+    const tailed = opts.tail !== undefined
+    const messages = tailed ? this.records.messagesTail(thread.id, opts.tail ?? 0, opts.before) : this.records.messagesAfter(thread.id, after, opts.limit)
     const view: ReadMessage[] = messages.map((m) => {
       const { facts, ...rest } = m
       const out: ReadMessage = party.kind === 'app' ? rest : { ...rest, facts }
@@ -447,6 +623,21 @@ export class MailService {
       return out
     })
     const last = messages.at(-1)?.seq
+    if (tailed) {
+      // The end of the thread was opened (not an earlier page): it is read to its end, and the earlier part stays there to be asked for
+      if (!opts.peek && opts.before === undefined && last !== undefined && party.kind !== 'centralu') {
+        this.records.markThreadRead(reader, thread.id, this.now())
+        this.records.setReadPosition(thread.id, reader, Math.max(position, last))
+      }
+      const first = messages[0]?.seq
+      return {
+        thread,
+        participants: this.records.participants(thread.id),
+        blockers: this.records.blockers(thread.id),
+        messages: view,
+        older: first !== undefined && this.records.hasMessagesBefore(thread.id, first),
+      }
+    }
     if (!opts.peek && last !== undefined && party.kind !== 'centralu') {
       // Only what was returned is read, and the place moves only when it joins on to where the reader was: reading from
       // further on (an app's `after`) leaves a gap, and the gap stays unread
@@ -464,6 +655,13 @@ export class MailService {
     return this.records.markHandled(thread.id, reader, upTo ?? Number.MAX_SAFE_INTEGER, this.now())
   }
 
+  /** Whether `address` may change the task of the thread (its owner, its assignee, the person): asked before anything is posted for a change that would be refused */
+  mayEditTask(threadId: string, address: string): boolean {
+    const thread = this.mustThread(threadId)
+    const standing = this.standing(thread, address)
+    return standing !== null && mayEditTask(standing)
+  }
+
   /** The threads that follow this one, and the ones it follows: a follow-up is shown both ways (§3.3) */
   followUps(threadId: string): ThreadRow[] {
     return this.records.threadsFollowing(threadId)
@@ -477,7 +675,7 @@ export class MailService {
       if (key === 'assignee') throw refuse('field_not_allowed', 'the assignee changes with assign')
       if (!PATCH_KEYS.has(key)) throw refuse('field_not_allowed', `${key} is not a task field`)
     }
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       this.party(by)
@@ -524,6 +722,7 @@ export class MailService {
 
       if (Object.keys(fields).length === 0) return thread
       const after = this.records.updateThread(thread.id, fields, now, true)
+      this.changed(thread.id)
       if (stateEvent) this.insertEvent(thread.id, stateEvent.text, stateEvent.facts, now)
       if (closedAs) {
         // Closing is an answer to what the party was sent: its receipts in the thread are handled (§9.3)
@@ -538,7 +737,7 @@ export class MailService {
   /** Adds a blocker; the thread is blocked while one stands (§3.3). At most 5 stand at once */
   addBlocker(threadId: string, by: string, input: BlockerInput): BlockerRow {
     rejectUnknown(input, BLOCKER_KEYS, 'blocker')
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       this.party(by)
@@ -589,7 +788,7 @@ export class MailService {
 
   /** Resolves a blocker. The last one resolving restores the state the thread had before it was blocked (§3.3) */
   resolveBlocker(threadId: string, by: string, n: number): ThreadRow {
-    return this.records.transaction(() => {
+    return this.run(() => {
       const thread = this.mustThread(threadId)
       this.party(by)
       const standing = this.standing(thread, by)
@@ -602,7 +801,7 @@ export class MailService {
 
   /** The person keeps a thread past retention, or lets it go again (§4.4) */
   pin(threadId: string, by: string, pinned: boolean): ThreadRow {
-    return this.records.transaction(() => {
+    return this.run(() => {
       const thread = this.mustThread(threadId)
       if (this.party(by).kind !== 'person') throw refuse('not_allowed', 'only the person pins a thread')
       return this.records.updateThread(thread.id, { pinnedAt: pinned ? this.now() : null }, this.now(), false)
@@ -616,7 +815,7 @@ export class MailService {
    */
   partyGone(address: string): ThreadRow[] {
     this.party(address)
-    return this.records.transaction(() => {
+    return this.run(() => {
       const now = this.now()
       const moved: ThreadRow[] = []
       for (const t of this.records.threadsOfParty(address, 'assignee', ['open', 'running', 'review', 'blocked'])) {
@@ -665,15 +864,77 @@ export class MailService {
    * (§7.6.5: an `assign` the CLI took just before a crash would start the same work twice). `pointed` are those the text only
    * tells of. With `again`, mail that was delivered but is still unread is pointed at once more (§7.6.6), never inline
    */
-  drain(recipient: string, opts: { again?: boolean } = {}): DrainResult {
+  drain(recipient: string, opts: DrainOptions = {}): DrainResult {
     this.party(recipient)
-    const items: MailFrameItem[] = []
+    type Candidate = {
+      receipt: ReceiptRow
+      message: MessageRow
+      thread: ThreadRow
+      sender: SenderClass | undefined
+      down: boolean
+      pointerOnly: boolean
+      quietFor: QuietReason | null | undefined
+    }
+    const candidates: Candidate[] = []
+    const heldBack: { messageId: string; reason: HoldReason }[] = []
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
-      if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
-      if (this.policy.mayWrite(message.sender, recipient, thread) !== null) continue
+      // A thread that is done takes no more mail, but what was posted before it closed is still owed: the closing report is how the owner
+      // hears (§3.3). Anything else a done thread has waiting (an assign it will never run) is dropped
+      if (thread.state === 'unknown' || (thread.state === 'done' && message.kind !== 'report') || message.kind === 'event' || message.sender === recipient) continue
+      if (this.policy.mayWrite(message.sender, recipient, thread) !== null || this.policy.cannotRead?.(recipient)) continue
+      if (opts.skip?.(message, receipt)) continue
+      const holdBack = opts.holdBack?.(message, receipt, thread)
+      if (holdBack) {
+        heldBack.push({ messageId: message.id, reason: holdBack })
+        continue
+      }
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
-      if (down && receipt.deliveredAt !== null) continue
+      candidates.push({
+        receipt,
+        message,
+        thread,
+        sender,
+        down,
+        // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
+        // (cut to fit, or read by nobody), and `again` points at it once more. Read on acceptance, a whole one is not pending at all
+        pointerOnly: down && receipt.deliveredAt !== null,
+        // Told of without a turn: an inbound policy that holds it (§7.7), or a budget that is spent (§7.9); never the person's words
+        quietFor: sender === 'person' ? null : opts.quiet?.(message, receipt, thread),
+      })
+    }
+
+    /*
+     * One turn, one thread (§5, §6): a delivery that starts a turn carries at most one thread that is the receiver's work (it is
+     * the assignee or a member there, and that thread's owner gets the turn's report), the person's words first, then a question waiting, else
+     * the oldest due; the others wait for the next turn. Mail of threads the receiver owns (reports and news about work it gave) all rides together. A delivery that starts no
+     * turn (all of it told of, or news that does not wake) is not bound by this
+     */
+    const wakesIt = (c: Candidate) => !c.quietFor && wakes(c.sender ?? 'session', c.message)
+    const isWork = (c: Candidate) => c.thread.owner !== recipient
+    // Which one: the person's words, urgent mail and what has waited past its hold, then a question, else the oldest due (§5)
+    const work = candidates.filter((c) => wakesIt(c) && isWork(c))
+    const workThread = pickWorkThread(
+      work.map((c) => ({ threadId: c.thread.id, decides: c.message.urgent || c.sender === 'person', question: c.message.kind === 'question', dueAt: c.receipt.dueAt })),
+      this.now(),
+    )
+    const turnStarts = candidates.some(wakesIt)
+    const kept = turnStarts ? candidates.filter((c) => !isWork(c) || c.thread.id === workThread) : candidates
+
+    const items: MailFrameItem[] = []
+    let wake = false
+    let immediate = false
+    let asks = false
+    const relations = new Set<string>()
+    const threads = new Set<string>()
+    const quieted: { messageId: string; reason: QuietReason }[] = []
+    for (const { receipt, message, thread, sender, down, pointerOnly, quietFor } of kept) {
+      if (quietFor) quieted.push({ messageId: message.id, reason: quietFor })
+      else if (wakes(sender ?? 'session', message)) wake = true
+      if (message.urgent || sender === 'person') immediate = true
+      if (message.kind === 'question') asks = true
+      relations.add(relationWord(recipient, message.sender, thread))
+      threads.add(thread.id)
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
       items.push({
@@ -684,11 +945,73 @@ export class MailService {
         relation: relationWord(recipient, message.sender, thread),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
-        ...(down ? { inline: message.body } : {}),
+        ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
+        ...(down && !pointerOnly ? { inline: message.body } : {}),
       })
     }
     const frame = buildMailFrame(items)
-    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)) }
+    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack, threads: [...threads], workThread: turnStarts ? workThread : null }
+  }
+
+  /**
+   * What a host that died left half done (§7.6.5): a delivery whose attempt was written and whose acceptance was not. The next
+   * host does not send it again on its own, because it cannot tell whether the tool took it, and an `assign` taken just before
+   * the host died would start the same work twice. So it is held `uncertain`, said in the thread (an `event` the sender reads)
+   * and, by the delivery, in the receiver's conversation, for the person to resend or dismiss. The exceptions go again by
+   * themselves, and their next frame says it may be a repeat: news that starts no work (a notice) and Centralu's own words,
+   * which only restate what the host knows
+   */
+  reconcileInterrupted(): { recipient: string; resent: number; held: number }[] {
+    const left = this.records.attemptedUnconfirmed()
+    if (left.length === 0) return []
+    const out = this.run(() => {
+      const now = this.now()
+      const byRecipient = new Map<string, MessageRow[]>()
+      for (const r of left) {
+        const m = this.records.message(r.messageId)
+        if (m) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), m])
+      }
+      const result: { recipient: string; resent: number; held: number }[] = []
+      for (const [recipient, messages] of byRecipient) {
+        const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
+        const unsure = messages.filter((m) => !again.includes(m))
+        if (again.length > 0) {
+          this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
+          this.changed(again[0]?.threadId ?? '', [recipient])
+        }
+        if (unsure.length > 0) {
+          this.records.markUncertain(recipient, unsure.map((m) => m.id))
+          for (const threadId of new Set(unsure.map((m) => m.threadId))) {
+            const n = unsure.filter((m) => m.threadId === threadId).length
+            this.insertEvent(threadId, 'A delivery may not have arrived when Centralu restarted. It was not sent again.', { change: 'delivery_uncertain', recipient, messages: n }, now)
+          }
+        }
+        result.push({ recipient, resent: again.length, held: unsure.length })
+      }
+      return result
+    })
+    // What is held `uncertain` waits for the person's Resend or Dismiss: the Inbox is told
+    this.announceMessages(left.map((r) => r.messageId))
+    return out
+  }
+
+  /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */
+  resendHeld(recipient: string, messageIds: readonly string[]): number {
+    return this.run(() => {
+      const n = this.records.releaseHeld(recipient, messageIds, null, this.now())
+      for (const id of messageIds) {
+        const m = this.records.message(id)
+        if (m) this.changed(m.threadId, [recipient])
+      }
+      return n
+    })
+  }
+
+  /** The person says never: the mail is left undelivered, and not held against anyone (Inbox: Dismiss) */
+  dismissHeld(recipient: string, messageIds: readonly string[]): number {
+    const n = this.run(() => this.records.releaseHeld(recipient, messageIds, 'dismissed', this.now()))
+    this.announceMessages(messageIds)
+    return n
   }
 
   // ── Retention ──
@@ -704,7 +1027,7 @@ export class MailService {
     // host id is read only when there is something to tell apart, so an idle sweep writes nothing
     const missing = this.records.blockersOnMissingThreads()
     for (const b of missing.length === 0 ? [] : missing.filter((x) => parseMailId(x.ref ?? '')?.host === this.host)) {
-      this.records.transaction(() => {
+      this.run(() => {
         const thread = this.records.thread(b.threadId)
         if (thread && thread.state !== 'done' && thread.state !== 'unknown') {
           this.resolveInner(thread, b.n, CENTRALU)
@@ -779,6 +1102,7 @@ export class MailService {
 
   /** An `event`: Centralu's, with no receipt, read with the thread (§3.2) */
   private insertEvent(threadId: string, text: string, facts: MailFacts, now: number): MessageRow {
+    this.changed(threadId)
     return this.records.insertMessage({
       id: messageIdOf(this.host, this.ulids.next(now)),
       threadId,
@@ -824,6 +1148,7 @@ export class MailService {
     })
     if (kind !== 'event') {
       const recipients = to ?? this.recipients(threadId, sender)
+      this.changed(threadId, recipients)
       for (const r of unique(recipients)) {
         if (r === sender) continue
         this.records.insertReceipt(message.id, r, dueAt(now, urgent, sender === PERSON))
@@ -846,12 +1171,13 @@ export class MailService {
   private duplicate(threadId: string, sender: string, key: string | undefined): MessageRow | undefined {
     if (key === undefined) return undefined
     checkDedupeKey(key)
+    if (key.startsWith(OPENING)) throw refuse('bad_value', `a dedupe key does not start with ${OPENING}: it is the opening's`)
     return this.records.messageByDedupeKey(threadId, sender, key)
   }
 
   private duplicateOpening(sender: string, key: string): MessageRow | undefined {
     checkDedupeKey(key)
-    return this.records.openingMessageByDedupeKey(sender, key)
+    return this.records.openingMessageByDedupeKey(sender, OPENING + key)
   }
 
   private checkReplyTo(threadId: string, replyTo: string): void {
@@ -876,7 +1202,18 @@ export class MailService {
     return body
   }
 
+  /** A session posts at most 30 a minute and an app 10, counted in the store so that a restart does not reset it (§7.9) */
+  private checkRate(sender: SenderClass, caller: string, now: number): void {
+    const limit = postsPerMinute(sender)
+    if (limit === Infinity) return
+    if (this.records.postsSince(caller, this.host, messageIdFloor(this.host, now - 60_000)) >= limit) {
+      throw refuse('rate_limited', `at most ${limit} posts a minute from ${sender === 'app' ? 'an app' : 'a session'}: wait a minute`)
+    }
+  }
+
   private mayWriteOrRefuse(from: string, to: string, thread: ThreadRow | null): void {
+    const cannot = this.policy.cannotRead?.(to) ?? null
+    if (cannot !== null) throw refuse('no_mailbox', cannot, { to })
     const why = this.policy.mayWrite(from, to, thread)
     if (why !== null) throw refuse('policy', why, { from, to })
   }
@@ -928,6 +1265,9 @@ function checkDedupeKey(key: string): void {
   if (!key || key.length > MAX_DEDUPE_KEY) throw refuse('bad_value', `a dedupe key is 1 to ${MAX_DEDUPE_KEY} characters`)
 }
 
+/** The key a thread was opened under is stored with this in front, and a post's key may not start with it */
+const OPENING = 'open:'
+
 function unique<T>(list: readonly (T | undefined)[]): T[] {
   return [...new Set(list.filter((x): x is T => x !== undefined))]
 }
@@ -961,8 +1301,14 @@ function aboutOf(facts: MailFacts): string | undefined {
   return typeof session === 'string' && parseAddress(session) ? session : undefined
 }
 
+/** The compact line of a delivery (§9.2): drawn from Centralu's record, never a bubble of anyone's, and with no name another party wrote */
+function deliveryLine(messages: number, threads: number, relations: ReadonlySet<string>): string {
+  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+  return `✉ ${n(messages, 'message', 'messages')} in ${n(threads, 'thread', 'threads')}, from ${[...relations].join(', ')}`
+}
+
 /** Centralu's word for how the sender stands to the receiver in this thread (§7.3). Never a name another party wrote */
-function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
+export function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
   const party = parseAddress(sender)
   if (party?.kind === 'centralu') return 'Centralu'
   if (party?.kind === 'person') return 'the person'

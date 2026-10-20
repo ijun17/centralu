@@ -70,6 +70,7 @@ import { navigationActions, navigating } from './navigation.js'
 import { orchestratorActions } from './orchestrator.js'
 import { machineActions } from './machines.js'
 import { updateActions } from './updates.js'
+import { mailActions } from './mail.js'
 export { appliedVersionsText } from './updates.js'
 import { historyActions } from './history.js'
 import { connectionActions, goodThemes, restoringWorkspace } from './connection.js'
@@ -294,6 +295,8 @@ export const useStore = create<AppState>((rawSet, get) => {
     importDialog: null as { source: string; fromLink: boolean; at: number } | null,
     update: null,
     agentVersions: null,
+    mail: null,
+    mailThread: null,
     sleepPolicy: null,
     machines: {} as Record<string, MachineInfo>,
     machineAgentVersions: {} as Record<string, AgentVersions>,
@@ -412,6 +415,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     ...appActions(set, get),
     ...updateActions(set, get),
     ...machineActions(set, get),
+    ...mailActions(set, get),
     ...orchestratorActions(set, get),
     ...navigationActions(set, get),
     ...layoutActions(set, get),

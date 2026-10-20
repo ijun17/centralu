@@ -527,6 +527,21 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('projectConsents.revoke', { fromProjectId, toProjectId, kind })
       },
     },
+    mail: {
+      list: () => rpc.call('mail.list', {}),
+      thread: (threadId, opts) => rpc.call('mail.thread', { threadId, ...opts }),
+      reply: (threadId, text, kind) => rpc.call('mail.reply', { threadId, text, ...(kind ? { kind } : {}) }),
+      close: (threadId, outcome) => rpc.call('mail.close', { threadId, ...(outcome ? { outcome } : {}) }),
+      reassign: (threadId, sessionId, text) => rpc.call('mail.reassign', { threadId, sessionId, text }),
+      unblock: (threadId, n) => rpc.call('mail.unblock', { threadId, n }),
+      held: (action, recipient, messageIds) => rpc.call('mail.held', { action, recipient, messageIds }),
+      resume: async (target) => {
+        await rpc.call('mail.resume', target)
+      },
+      wake: async (wake) => {
+        await rpc.call('mail.wake', { wake })
+      },
+    },
     trash: {
       list: () => rpc.call('trash.list', {}),
       read: (sessionId, limit, beforeSeq) => rpc.call('trash.read', { sessionId, limit, beforeSeq }),

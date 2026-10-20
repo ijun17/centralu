@@ -29,17 +29,19 @@ const REFUSALS = [
   'blockers_stand',
   'no_blocker',
   'bad_follows',
+  'no_mailbox',
+  'rate_limited',
   'bad_value',
   'policy',
 ] as const
 export type MailRefusal = (typeof REFUSALS)[number]
 
 /**
- * A refusal is an error with a `data.reason` word. The protocol has no code for "your request was not allowed" and a new
- * code is a protocol change of its own, so the code is `internal` and the door sends the message and the reason as data
+ * A refusal is an error with the protocol's `refused` code and a `data.reason` word the caller can act on: the host understood
+ * the call and said no, which is not a fault and not worth a retry
  */
 export function refuse(reason: MailRefusal, message: string, more: Record<string, unknown> = {}): RpcError {
-  return rpcError(message, 'internal', { data: { reason, ...more } })
+  return rpcError(message, 'refused', { retryable: false, data: { reason, ...more } })
 }
 
 /** The words of a refusal: `err.data.reason`, or undefined for an error that is not one */
@@ -52,6 +54,14 @@ export function refusalReason(err: unknown): MailRefusal | undefined {
 export function bodyLimit(sender: SenderClass): number {
   return sender === 'app' ? 4_000 : 16_000
 }
+
+/** A sender's posts a minute (§7.9): 30 from a session, 10 from an app. The person and Centralu are not limited */
+export function postsPerMinute(sender: SenderClass): number {
+  return sender === 'session' ? 30 : sender === 'app' ? 10 : Infinity
+}
+
+/** The same words from the same sender in the same thread within this long are one post (§7.9) */
+export const REPEAT_WINDOW_MS = 10 * 60_000
 
 export const SUBJECT_MAX = 200
 export const NEXT_MAX = 300
@@ -111,7 +121,84 @@ export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean
   return senderIsOwnerSession && recipientIsAssignee && (kind === 'assign' || kind === 'note' || kind === 'answer')
 }
 
+/**
+ * Whether a message wakes a receiver at rest (§3.2, §9.5). Mail from a session, the person or Centralu does; an app's notice does
+ * not unless the app marked it `needsOwner` (or asked for it), and an app can ask for no wake at all. An `event` is never mail
+ */
+export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' | 'no' | null; needsOwner: boolean }): boolean {
+  if (m.kind === 'event') return false
+  if (sender !== 'app') return true
+  if (m.wake === 'no') return false
+  if (m.kind === 'notice') return m.needsOwner || m.wake === 'yes'
+  return true
+}
+
+/**
+ * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, work given or
+ * asked in its own threads (an assign, a question, an answer), a report its owner is waiting on, and an app's `needsOwner` post. The rest waits for
+ * the session's next turn
+ */
+export function needsReceiver(sender: SenderClass, m: { kind: MessageKind; needsOwner: boolean }): boolean {
+  // The person's words are never the kind that can wait out a stop: they decide
+  if (sender === 'person') return true
+  switch (m.kind) {
+    case 'assign':
+    case 'question':
+    case 'answer':
+      return true
+    case 'report':
+      return true
+    case 'notice':
+      return sender === 'app' && m.needsOwner
+    default:
+      return false
+  }
+}
+
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
+/** How long a thread's mail may wait behind other threads' before it comes first (§5, §7.10): a question 5 minutes, anything else 15 */
+export const HOLD_QUESTION_MS = 5 * 60_000
+export const HOLD_OTHER_MS = 15 * 60_000
+
+/** One due message in a thread of the receiver's work, as far as choosing the thread goes */
+export type WorkCandidate = {
+  threadId: string
+  /** The person's words, or urgent mail: they decide (§7.1) */
+  decides: boolean
+  question: boolean
+  /** When the message fell due */
+  dueAt: number
+}
+
+/**
+ * The one thread of the receiver's work that a wake carries (§5, §6), from the due mail of its work threads, oldest first. Three
+ * classes, the lowest first, the oldest thread first within a class:
+ *
+ * 1. a thread with the person's words or urgent mail, or one passed over for longer than the most its mail may wait (`HOLD_*`);
+ * 2. a thread with a question;
+ * 3. the rest.
+ *
+ * So a stream of newer questions cannot starve older work: past its hold a thread moves up to the first class.
+ */
+export function pickWorkThread(candidates: readonly WorkCandidate[], now: number): string | null {
+  const classOf = new Map<string, 1 | 2 | 3>()
+  for (const c of candidates) {
+    const hold = c.question ? HOLD_QUESTION_MS : HOLD_OTHER_MS
+    const k = c.decides || now - c.dueAt > hold ? 1 : c.question ? 2 : 3
+    const was = classOf.get(c.threadId)
+    if (was === undefined || k < was) classOf.set(c.threadId, k)
+  }
+  let best: string | null = null
+  let bestClass = 4
+  for (const [threadId, k] of classOf) {
+    if (k < bestClass) {
+      best = threadId
+      bestClass = k
+    }
+  }
+  return best
+}
+
 export const DEBOUNCE_MS = 2_000
 
 export function dueAt(now: number, urgent: boolean, fromPerson: boolean): number {
