@@ -43,6 +43,7 @@ beforeEach(() => {
     describe: (id: string) => mirror.get(id) ?? null,
     lastWords: async (id: string) => ({ ok: true as const, text: `last words of ${id}`, length: 0, seq: null }),
     machineLinked: (id: string) => linked.has(id),
+    machineWaitsForPerson: () => false,
     backgroundTasks: (id: string) => listing(id),
   } as unknown as LinkedSessions
   const host: LinkedReportsHost = {

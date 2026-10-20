@@ -477,6 +477,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       describe: () => (linked ? { name: 'Worker', project: 'api on Box' } : null),
       lastWords: async () => ({ ok: true as const, text: 'all done', length: 0, seq: null }),
       machineLinked: (id: string) => linked && id === 'm1',
+      machineWaitsForPerson: () => false,
       backgroundTasks: (id: string) => (id === 'm1' ? listed() : Promise.resolve(null)),
     } as unknown as LinkedSessions
     mgr.useLinkedReader(links)

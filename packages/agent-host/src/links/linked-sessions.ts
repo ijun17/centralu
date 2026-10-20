@@ -469,6 +469,10 @@ export function linkedSessions(
       return !!machineById(machineId)
     },
 
+    machineWaitsForPerson(machineId) {
+      return machineById(machineId)?.waitsForPerson === true
+    },
+
     async backgroundTasks(machineId) {
       const m = machineById(machineId)
       if (!m || !m.reachable) return null

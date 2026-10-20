@@ -210,7 +210,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * answered as such at once. Not while an attempt is under way, or an operation holds it
    */
   get waitsForPerson(): boolean {
-    if (this.reachable || this.opening || this.held) return false
+    if (this.reachable || this.opening || this.inOperation()) return false
     // Connecting is an attempt under way (the handshake and its few redials outlast `opening`); a link held at
     // versions_differ or updating waits for something Connect does not give
     if (this.status === 'connecting' || this.status === 'starting' || this.status === 'versions_differ' || this.status === 'updating') return false
@@ -491,6 +491,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.opening ??= this.doOpen().finally(() => {
       this.opening = null
       for (const w of [...this.statusWaiters]) w()
+      // An attempt that failed set its status while it was still under way: the machine waits for the person only from here,
+      // and whoever reads `waitsForPerson` on a status event (the reports of a working child) is told again
+      if (this.waitsForPerson) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     })
     return this.opening
   }

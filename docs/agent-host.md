@@ -3001,7 +3001,11 @@ at once: `start_agent` with the machine, `ask_project` on one of its projects, `
 one of its sessions say "is not connected, and nothing here connects it by itself; ask the person to connect it (Settings,
 Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/orchestrator.ts`), and its projects are listed as
 away with that reason. A machine with the switch on that is away between attempts is still "not reachable right now;
-try again once its link is back". What a child there reported meanwhile is read once the link is up again.
+try again once its link is back". What a child there reported meanwhile is read once the link is up again. A parent waiting on a child whose turn is running is
+told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask
+the person to connect it), judged by the link itself (`waitsForPerson`, sent with the `machine_status` of the moment it gives up) and not by
+the row, which says `unreachable` while the client still redials, an attempt is under way or an install or update holds the machine: the
+wait stands through those.
 
 Its sessions keep running there meanwhile; on the next connect the window re-reads that machine (`machine_resync`) and
 with it what they said. The row's Disconnect closes any link without unlinking the machine and tries none until Connect or

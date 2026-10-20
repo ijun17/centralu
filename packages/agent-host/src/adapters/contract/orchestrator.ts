@@ -212,6 +212,11 @@ export type LinkedSessions = {
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */
   machineLinked(machineId: string): boolean
   /**
+   * Whether the machine is not connected and nothing here will connect it until the person does (#1341): not while its
+   * client redials, an attempt is under way or an install or update holds it. False for a machine not linked
+   */
+  machineWaitsForPerson(machineId: string): boolean
+  /**
    * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
    * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up
    */

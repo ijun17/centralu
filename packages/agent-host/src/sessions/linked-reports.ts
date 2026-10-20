@@ -4,9 +4,6 @@ import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport } from './child-ownership.js'
 
-/** Statuses of a machine nothing tries to connect again when its Auto reconnect is off (#1341) */
-const LEFT_TO_THE_PERSON: ReadonlySet<string> = new Set(['unreachable', 'not_running', 'refused', 'stopped', 'disconnected'])
-
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
   | { paused: readonly BackgroundTask[]; stoppable: boolean }
@@ -270,8 +267,13 @@ export class LinkedReports {
     this.machineNames.set(m.id, name)
     if (m.status === 'connected') return
     const prefix = `${m.id}.`
-    // Nothing reconnects it (#1341): Auto reconnect is off and the attempt that failed or the link that dropped was the last
-    const stays = (m as { autoReconnect?: unknown }).autoReconnect === false && LEFT_TO_THE_PERSON.has(m.status as string)
+    /*
+     * Nothing reconnects it (#1341), judged by the link itself and not by the row: the row says `unreachable` the moment a
+     * drop starts, while the client still redials the same forward, an attempt is under way or an install or update holds
+     * the machine, and a child's wait must survive those. The link says it waits for the person when it gives up, and
+     * sends the status then
+     */
+    const stays = this.host.linkedReader?.machineWaitsForPerson(m.id) === true
     for (const [sessionId, wait] of [...this.host.children.linkedReports]) {
       if (!sessionId.startsWith(prefix)) continue
       if (!wait.paused) {
