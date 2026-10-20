@@ -4,6 +4,8 @@
  * join it automatically. Session and app ids carry their kind to avoid collisions.
  * Legacy order/hidden fields remain readable by the previous build during an update.
  */
+import { isRecord } from '@cc/protocol'
+
 export type ProjectArrangement = {
   /** Explicit ordered membership. Absent only in snapshots from the previous build. */
   panels?: string[]
@@ -62,7 +64,7 @@ export function withOrder(
   // Retain selected available ids omitted by an edit too; a reorder is not a removal.
   const ordered = [...new Set([...order, ...previous])].filter((id) => here.has(id))
   let at = 0
-  const panels = previous.map((id) => here.has(id) ? ordered[at++]! : id)
+  const panels = previous.map((id) => (here.has(id) ? (ordered[at++] ?? id) : id))
   panels.push(...ordered.slice(at))
   return writeArrangement(present, saved, panels)
 }
@@ -83,12 +85,12 @@ export function withPanel(
 
 /** Workspace snapshots are untyped JSON; a malformed list must not break restoration. */
 export function sanitizeArrangements(raw: unknown): Record<string, ProjectArrangement> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  if (!isRecord(raw)) return {}
   const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   const out: Record<string, ProjectArrangement> = {}
-  for (const [projectId, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const v = value as { panels?: unknown; order?: unknown; hidden?: unknown }
+  for (const [projectId, value] of Object.entries(raw)) {
+    if (!isRecord(value)) continue
+    const v = value
     out[projectId] = {
       order: strings(v.order), hidden: strings(v.hidden),
       ...(Object.hasOwn(v, 'panels') ? { panels: strings(v.panels) } : {}),

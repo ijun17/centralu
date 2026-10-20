@@ -349,7 +349,7 @@ describe('read position', () => {
 describe('file conflict detection (FR-2 data loss)', () => {
   it('detects two sessions touching the same file', () => {
     const a = applyEvent(initialSession({ tool: 'claude', id: 'a', projectId: 'p1', name: 'a' }), ev({ type: 'files_touched', paths: ['src/x.ts', 'src/a.ts'] }), NOW)
-    const b = applyEvent(initialSession({ tool: 'claude', id: 'b', projectId: 'p1', name: 'b' }), { ...ev({ type: 'files_touched', paths: ['src/x.ts'] }), sessionId: 'b' } as NormalizedEvent, NOW)
+    const b = applyEvent(initialSession({ tool: 'claude', id: 'b', projectId: 'p1', name: 'b' }), { ...ev({ type: 'files_touched', paths: ['src/x.ts'] }), sessionId: 'b' }, NOW)
     expect(detectFileConflicts([a, b])).toEqual([{ path: 'src/x.ts', sessionIds: ['a', 'b'] }])
   })
 

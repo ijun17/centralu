@@ -57,10 +57,10 @@ export function remoteIdeUrl(
   let segments: string[]
   let drive: string | null = null
   if (machine.shell === 'powershell') {
-    const m = WINDOWS_DRIVE.exec(root)
-    if (!m) return { ok: false, reason: `VS Code's Remote-SSH opens a folder on a drive; ${root} is not one` }
-    drive = `${m[1]!.toUpperCase()}:`
-    segments = m[2]!.split(/[\\/]/)
+    const [, letter, rest] = WINDOWS_DRIVE.exec(root) ?? []
+    if (letter === undefined || rest === undefined) return { ok: false, reason: `VS Code's Remote-SSH opens a folder on a drive; ${root} is not one` }
+    drive = `${letter.toUpperCase()}:`
+    segments = rest.split(/[\\/]/)
   } else {
     if (!root.startsWith('/')) return { ok: false, reason: `${root} is not an absolute path on ${machine.name}` }
     // A posix machine's own separator is the wire's, and the link's
