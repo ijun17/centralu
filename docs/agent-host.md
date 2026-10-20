@@ -1772,17 +1772,17 @@ added there reaches a new session and a wake alike (`sessions/launch-options.tes
 Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
 spawn or the keeper; a fresh keeper replacement therefore receives the same options.
 
-`withoutCrossSessionMessaging` wraps the existing options and takes the session's preset
-in the Claude adapter. Under `auto` (#603) it leaves peer messaging, discovery and the
-environment gate alone; the CLI's own configuration still applies. Under `safe`/`normal`, it merges inline SDK flag settings
+`withoutCrossSessionMessaging` wraps the existing options in the Claude adapter, under every preset: `auto` too
+(the mailbox plan's slice 0, §9.6; this narrows #603 for this one control). It merges inline SDK flag settings
 with `crossSessionInbound: 'refuse'`, appends discovery denies `ListAgents` and `ListPeers`,
-and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last.
+and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last, without `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`.
+The Claude launch fingerprint (`launchSettingsFingerprint`) is version 3 for `auto`, so a kept `auto` process started before the controls is restarted once by the #589 path.
 The adapter previously selected settings files only through `settingSources`; inline `settings`
 are a separate layer and do not replace that selection, permission options, MCP servers or
 resume IDs. `SendMessage` is deliberately left available for this query's own subagents.
 
 The environment gate disables peer discovery, cross-session sends and inbox binding in the
-inspected CLI versions 2.1.263–2.1.289. It is undocumented and version-sensitive, so the
+inspected CLI versions 2.1.263–2.1.299. It is undocumented, version-sensitive and undoable by the `env` of the person's user settings, so the
 documented refusal and discovery denies stay as additional controls. They do not alone block
 every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
 already-running process and cannot apply new startup controls; restart processes created by
@@ -1855,7 +1855,8 @@ A configured bypass still bypasses the callback; neither an absent mode nor an e
 committed project file selects bypass. Normal's launch fingerprint is now v2: after a keeper handoff,
 the host refresh restarts retained v1 processes, immediately when idle or after the current turn finishes
 (#589). The resumed process receives the explicit mode. Safe's derived flags did not change, so its
-fingerprint stays at v1; auto's existing v2 is unchanged.
+fingerprint stays at v1. Auto's is v3 since the cross-session controls reached it (the mailbox plan's slice 0): a kept `auto`
+process from before them is restarted the same way, once.
 
 Released betas since beta.1 sent no `--permission-mode` under `normal`. With the person's Claude Code
 CLI >= 2.1.285 and a third-party provider or telemetry off, headless sessions start in auto mode when

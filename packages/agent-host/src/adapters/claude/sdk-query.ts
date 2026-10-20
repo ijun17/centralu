@@ -61,7 +61,6 @@ export type ClaudeQueryInputs = {
 
 /** The options a session's `query()` starts with */
 export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
-  const preset = opts.permissionPreset
   return withoutCrossSessionMessaging({
     cwd: opts.cwd,
     model: opts.model,
@@ -168,5 +167,5 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
      */
     canUseTool,
-  }, preset)
+  })
 }
