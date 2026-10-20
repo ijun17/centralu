@@ -25,10 +25,13 @@ const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
 const ACTIVITY_UNREAD_RETRIES = 2
 
+/** Why a signal was aborted, as an Error */
+const reasonOf = (signal: AbortSignal): Error => (signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+
 /** Waits `ms`, or until `signal` aborts (and then throws its reason) */
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason)
+    if (signal.aborted) return reject(reasonOf(signal))
     const t = setTimeout(() => {
       signal.removeEventListener('abort', onAbort)
       resolve()
@@ -36,7 +39,7 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
     t.unref?.()
     function onAbort() {
       clearTimeout(t)
-      reject(signal.reason)
+      reject(reasonOf(signal))
     }
     signal.addEventListener('abort', onAbort, { once: true })
   })
