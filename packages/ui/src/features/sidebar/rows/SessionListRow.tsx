@@ -9,11 +9,11 @@ import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
 import { GroupToggle } from './GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from './groupFold.js'
+import { HandedOffPointer } from './HandedOffPointer.jsx'
 import { SessionRow, approvalLine } from './SessionRow.jsx'
 import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
 import { ToolMark } from '../marks/ToolMark.jsx'
-import { MachineTag } from '../../machines/MachineTag.jsx'
 import { PresetTag } from '../../session/PresetTag.jsx'
 import type { TreeRow } from '../tree.js'
 
@@ -53,8 +53,6 @@ export function SessionListRow({
   const focusSession = useStore((s) => s.focusSession)
   const renameSession = useStore((s) => s.rename)
   const setGroupsFolded = useStore((s) => s.setGroupsFolded)
-  // A child started on another machine than its project's (#1038) says where it runs; rows of the project's own machine do not
-  const projectMachine = useStore((st) => st.projects[projectId]?.machine ?? null)
   const unread = isUnread(s)
   const focused = focusedSessionId === s.id
   const groupKey = childrenGroupKey(s.id)
@@ -64,7 +62,13 @@ export function SessionListRow({
       projectId={projectId}
       nested={inApp ? depth + 1 : nested}
       level={Math.min((inApp ? 2 : 1) + depth, MAX_LEVEL) as keyof typeof INDENT}
-      below={approvalLine(s, renaming, () => focusSession(s.id))}
+      below={
+        <>
+          {approvalLine(s, renaming, () => focusSession(s.id))}
+          {/* What it handed to another machine stands in that machine's project (#1416); this points there */}
+          {renaming !== s.id && <HandedOffPointer parentId={s.id} />}
+        </>
+      }
       /*
        * A child row cannot be dragged — position is membership (#69). Letting a row
        * drawn indented under a parent be moved by hand would make the new position read
@@ -133,7 +137,6 @@ export function SessionListRow({
             */}
             <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
-            {s.machine && s.machine !== projectMachine && <MachineTag machine={s.machine} testId={`session-machine-${s.id}`} />}
             {/* Started from a linked computer (#1273): its preset, which an auto caller carries there */}
             <PresetTag preset={s.permissionPreset} startedFromHub={s.startedFromHub} testId={`session-preset-${s.id}`} />
             {childrenFolded && (

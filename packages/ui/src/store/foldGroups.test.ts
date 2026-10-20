@@ -39,11 +39,11 @@ describe('foldGroupsHiding (#666)', () => {
     expect(foldGroupsHiding(strayKid, all(loose, strayKid), keyOf, listed)).toEqual([appGroupKey('p/slider')])
   })
 
-  // #1038: a child started on another machine is a session of that machine's project, but the sidebar draws it under its parent
-  it('names the parent’s group for a child that stands in the parent’s project but belongs to another machine’s', () => {
+  // #1416: a child started on another machine stands in that machine's project, not under its parent, so no group hides it
+  it('names no group for a child started on another machine: it stands in its own machine’s project', () => {
     const parent = s('parent')
     const kid = s('m1.kid', { projectId: 'm1.q', machine: 'm1', askedBy: 'parent' })
-    expect(foldGroupsHiding(kid, all(parent, kid), keyOf, listed)).toEqual([childrenGroupKey('parent')])
+    expect(foldGroupsHiding(kid, all(parent, kid), keyOf, listed)).toEqual([])
   })
 
   // The tree draws a fork under its asker when the session it was copied from is gone (`treeParentOf`); the reveal followed forkedFrom

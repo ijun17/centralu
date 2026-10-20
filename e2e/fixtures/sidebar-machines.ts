@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { setup as setupProjects } from './control.js'
+import { newSession, setup as setupProjects } from './control.js'
 
 /**
  * The sidebar's one list across machines (#734): a linked machine's projects stand among this computer's, in one order
@@ -300,6 +300,110 @@ export function sidebarMachinesTests(): void {
       expect(size.cut).toBe(true)
       await page.mouse.move(900, 450)
       expect(await page.getByTestId('project-header-api').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false)
+    })
+  })
+
+  test.describe("a linked machine's child stands in that machine's project (#1416)", () => {
+    /**
+     * Alpha (this computer) with a session that started two agents on Box, as `start_agent(machine: 'box')` does: the
+     * hub lists them as sessions of Box's project `cc`, with `askedBy` naming the session here. Beta is given enough
+     * sessions that `cc`, below it, is off screen. Sessions are emitted with fixed ids: the mock keeps them in memory.
+     */
+    async function seed(page: Page): Promise<{ parent: string; ccId: string }> {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/cc')
+      const parent = await newSession(page, 'alpha')
+      const idOf = (name: string) =>
+        page.evaluate(
+          (n) => (Object.values((window as unknown as MockWindow).__store.getState().projects) as { id: string; name: string }[]).find((p) => p.name === n)!.id,
+          name,
+        )
+      const ccId = await idOf('cc')
+      const betaId = await idOf('beta')
+      await page.evaluate(
+        ([parentId, cc, beta]) => {
+          const m = (window as unknown as MockWindow).__mock
+          const base = [...m.sessions.values()][0]
+          const emit = (id: string, name: string, extra: Record<string, unknown>) =>
+            m.emit({ type: 'session_created', sessionId: id, session: { ...base, id, name, worktree: null, parentSessionId: null, askedBy: null, appId: null, ...extra } })
+          for (let i = 0; i < 30; i++) emit(`filler-${i}`, `filler ${i}`, { projectId: beta })
+          emit('box.child-1', 'build the parser', { projectId: cc, machine: 'box', askedBy: parentId })
+          emit('box.child-2', 'write the tests', { projectId: cc, machine: 'box', askedBy: parentId })
+        },
+        [parent, ccId, betaId] as const,
+      )
+      await expect(page.getByTestId('session-row-box.child-1')).toBeAttached()
+      return { parent, ccId }
+    }
+
+    test("the child is a top-level row of Box's project with its Asked by mark, not a row under its parent", async ({ page }) => {
+      const { parent } = await seed(page)
+      const cc = page.getByTestId('project-cc')
+      await expect(cc.getByTestId('session-row-box.child-1')).toBeAttached()
+      await expect(cc.getByTestId('session-row-box.child-2')).toBeAttached()
+      // The project that holds the parent has neither, and the children stand at the project's own level
+      await expect(page.getByTestId('project-alpha').getByTestId('session-row-box.child-1')).toHaveCount(0)
+      await expect(page.getByTestId('project-alpha').getByTestId('session-row-box.child-2')).toHaveCount(0)
+      await expect(page.getByTestId('project-alpha').getByTestId(`children-fold-${parent}`)).toHaveCount(0)
+      const item = cc.locator('li', { has: page.getByTestId('session-row-box.child-1') })
+      await expect(item).toHaveAttribute('data-level', '1')
+      await expect(item).not.toHaveAttribute('data-nested')
+      // No machine tag on the row: the project's badge says where it is
+      await expect(page.getByTestId('session-machine-box.child-1')).toHaveCount(0)
+
+      // Opening it says who asked, with the way back
+      await page.getByTestId('session-row-box.child-1').click()
+      await expect(page.getByTestId('asked-by-badge')).toContainText('Asked by alpha')
+      await expect(page.getByTestId('project-cc')).toHaveAttribute('data-selected', 'true')
+      await page.getByTestId('asked-by-badge').click()
+      await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
+    })
+
+    test('the parent points to them as "2 on Box"; pressing it opens their project and scrolls to them, picking none', async ({ page }) => {
+      const { parent, ccId } = await seed(page)
+      const pointer = page.getByTestId(`handed-off-${parent}-box`)
+      await expect(pointer).toContainText('2 on Box')
+      await expect(page.getByTestId('project-alpha').getByTestId(`handed-off-${parent}`)).toBeVisible()
+      await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveCount(0)
+
+      await test.step('Box’s project is folded and off screen: the pointer opens it and brings the child into view', async () => {
+        await page.evaluate((id) => (window as unknown as MockWindow).__store.getState().toggleProjectFold(id), ccId)
+        await expect(page.getByTestId('project-cc')).toHaveAttribute('data-folded', 'true')
+        await expect(page.getByTestId('session-row-box.child-1')).toHaveCount(0)
+        const picked = await page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId as string)
+        await pointer.click()
+        await expect(page.getByTestId('project-cc')).not.toHaveAttribute('data-folded')
+        await expect(page.getByTestId('session-row-box.child-1')).toBeInViewport()
+        // It only showed them: nothing was picked
+        expect(await page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId as string)).toBe(picked)
+      })
+    })
+
+    test('the pointer lights when a child waits or has errored, and says so, so a stopped child is seen from its parent', async ({ page }) => {
+      const { parent } = await seed(page)
+      const pointer = page.getByTestId(`handed-off-${parent}-box`)
+      for (const state of ['error', 'waiting_approval'] as const) {
+        await page.evaluate((st) => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: st }), state)
+        await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveAttribute('data-attention', 'alert')
+        await expect(pointer).toHaveAttribute('aria-label', '2 sessions started on Box, one needs you')
+      }
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: 'working' }))
+      await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveCount(0)
+    })
+
+    test('a child of the same project on the same machine still hangs under its parent, with no pointer of its own', async ({ page }) => {
+      const { parent } = await seed(page)
+      await page.evaluate((pid) => {
+        const m = (window as unknown as MockWindow).__mock
+        const base = [...m.sessions.values()][0]
+        m.emit({ type: 'session_created', sessionId: 'local-kid', session: { ...base, id: 'local-kid', name: 'local kid', worktree: null, parentSessionId: null, askedBy: pid, appId: null } })
+      }, parent)
+      await expect(page.getByTestId('project-alpha').getByTestId('session-row-local-kid')).toBeVisible()
+      await expect(page.getByTestId('project-alpha').locator('li', { has: page.getByTestId('session-row-local-kid') })).toHaveAttribute('data-level', '2')
+      // Still the one pointer, for the two on Box, and none for the child here
+      await expect(page.getByTestId(`handed-off-${parent}-box`)).toContainText('2 on Box')
+      await expect(page.getByTestId(`handed-off-${parent}`).locator('button')).toHaveCount(1)
     })
   })
 }

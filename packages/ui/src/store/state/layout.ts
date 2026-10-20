@@ -116,6 +116,12 @@ export type LayoutSlice = {
    * judge (another machine's, which may just be unlinked for now) stays. See `deadFoldKeys`.
    */
   pruneFoldedGroups(): void
+  /**
+   * Opens whatever hides these sessions' rows in the sidebar, without picking one (#1416): each one's project and the
+   * groups its row stands in (`foldGroupsHiding`). The parent's pointer to what it handed to another machine uses it
+   * before it scrolls to them.
+   */
+  revealSessions(ids: readonly string[]): void
   /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   saveWorkspace(): void

@@ -3,7 +3,6 @@ import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, is
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
-import { sidebarProjectOf } from './sidebarTree.js'
 
 /**
  * All derived state is computed here (docs/state-management.md §3) — never stored.
@@ -97,17 +96,6 @@ export function useSessionsOf(projectId: string): SessionSummary[] {
   const sessions = useStore((s) => s.sessions)
   return useMemo(
     () => Object.values(sessions).filter((x) => x.projectId === projectId),
-    [sessions, projectId],
-  )
-}
-
-export { sidebarProjectOf }
-
-/** The sessions whose rows stand under a project in the sidebar (`sidebarProjectOf`), in the host's order */
-export function useSidebarSessionsOf(projectId: string): SessionSummary[] {
-  const sessions = useStore((s) => s.sessions)
-  return useMemo(
-    () => Object.values(sessions).filter((x) => sidebarProjectOf(x, sessions) === projectId),
     [sessions, projectId],
   )
 }

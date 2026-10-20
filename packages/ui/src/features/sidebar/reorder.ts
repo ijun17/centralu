@@ -55,29 +55,6 @@ export function moveTo(ids: readonly string[], dragged: string, target: string, 
 }
 
 /**
- * The order a project's session list takes when `dragged` is dropped on `target`, as the ids the host is sent.
- *
- * The list on screen can hold sessions that are not the project's own: a child started on another machine stands under
- * its parent (#1038) and has the other machine's project. The host reorders only the project's own sessions, and a
- * linked machine refuses an id of a session on another computer, so the whole drop used to fail ("Could not save
- * order") in a project on a linked machine. Those rows are left out of what is sent.
- */
-export function projectOrderAfterDrop(
-  sessions: readonly { id: string; projectId: string | null }[],
-  projectId: string,
-  dragged: string,
-  target: string,
-  before: boolean,
-): string[] {
-  return moveTo(
-    sessions.filter((x) => x.projectId === projectId).map((x) => x.id),
-    dragged,
-    target,
-    before,
-  )
-}
-
-/**
  * If the cursor is in the top half of the element, drop it before that element.
  *
  * Placing the boundary at the middle gives "above this row" / "below this row" a half each, so

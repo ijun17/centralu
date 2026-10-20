@@ -1,7 +1,6 @@
 import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
-import { sidebarProjectOf } from '../sidebarTree.js'
 import { trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { omitKey } from '../patch.js'
 
@@ -96,10 +95,8 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
      * left by the person) and clicking a grid panel (the session is already visible in its panel, and
      * if typing into a panel unfolded its project every time, folding would be pointless).
      */
-    // The row stands under the project the sidebar puts it in (`sidebarProjectOf`): a child started on another machine
-    // stands under its parent's project, not under its own, so that is the fold to open (#1038)
     const picked = id ? get().sessions[id] : undefined
-    const rowProject = picked ? sidebarProjectOf(picked, get().sessions) : null
+    const rowProject = picked?.projectId ?? null
     const reveal =
       opts?.reveal !== false && !!rowProject && get().foldedProjects.includes(rowProject)
     // The same for the group the row stands in (#666): the children of its parent, the sessions of its app
