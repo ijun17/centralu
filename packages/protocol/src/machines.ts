@@ -24,7 +24,7 @@ export type MachineId = z.infer<typeof MachineId>
  *                    Auto reconnect is on (`MachineInfo.autoReconnect`), and waits for the person's Connect when it is off
  *   away             the machine does not answer at all (#1398): ssh's connect timed out, there is no route, or the name
  *                    does not resolve. Asleep, off or off the network, not an error; `error` keeps ssh's own line for the
- *                    details, `lastConnectedAt` says when it was last seen, and `nextAttemptAt` when the hub tries
+ *                    details, `lastConnectedAt` says when the link was last up, and `nextAttemptAt` when the hub tries
  *                    again. The status stays `away` between attempts that fail the same way. An older window reads it as
  *                    unreachable
  *   not_running      the machine answers, but no `centralu serve` is running there, and the hub

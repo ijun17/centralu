@@ -21,6 +21,7 @@ export function storeRegistry(store: Store): MachineRegistry {
     setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
     setAsks: (id, on) => store.machines.setLinkedMachineAsks(id, on),
     setAutoReconnect: (id, on) => store.machines.setLinkedMachineAutoReconnect(id, on),
+    setLastConnected: (id, at) => store.machines.setLinkedMachineSeen(id, at),
   }
 }
 

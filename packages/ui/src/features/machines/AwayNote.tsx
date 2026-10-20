@@ -2,8 +2,8 @@ import { awayNote } from '@cc/core'
 import type { MachineInfo } from '@cc/protocol'
 import { useLabelNow } from '../../app/useLabelNow.js'
 
-/** Moves on every minute: "39 min ago" and "in 3 min" are read in minutes */
-const next = () => 60_000
+/** Moves on twice a minute: "39m ago" and "in 3 min" are read in minutes, and the next attempt's time changes at each attempt */
+const next = () => 30_000
 
 /**
  * What the row of a machine that is `away` says under its headline (#1398): when it was last connected, when the host tries

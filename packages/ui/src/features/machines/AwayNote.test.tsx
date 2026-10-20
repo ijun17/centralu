@@ -8,7 +8,7 @@ const base = { status: 'away' as const, error: 'ssh could not reach jungi: ssh: 
 describe('the note of a machine that is away', () => {
   it('says when it was last connected and when the next attempt is due, and keeps the ssh line as details', () => {
     const html = renderToStaticMarkup(<AwayNote m={{ ...base, lastConnectedAt: Date.now() - 39 * 60_000, nextAttemptAt: Date.now() + 2.5 * 60_000 }} testId="away" />)
-    expect(html).toContain('Last connected 39 min ago')
+    expect(html).toContain('Last connected 39m ago')
     expect(html).toMatch(/trying again in [23] min/)
     expect(html).toContain('Operation timed out')
     expect(html).toContain('font-mono')

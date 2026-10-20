@@ -649,9 +649,82 @@ describe('a machine that does not answer (#1398)', () => {
     hub.tunnel().drop()
     expect(hub.row().status).toBe('unreachable')
     await eventually(() => hub.row().status === 'away')
-    expect(hub.row().lastConnectedAt).toBe(connectedAt)
+    // When the machine was last up, not when it said hello: it stayed up until the link dropped
+    expect(hub.row().lastConnectedAt as number).toBeGreaterThanOrEqual(connectedAt as number)
+    expect(hub.row().lastConnectedAt as number).toBeLessThanOrEqual(Date.now())
   })
 
+  it('still says when it was last connected after this host restarted while the machine slept', async () => {
+    const remote = await remoteHost()
+    const store = new Store()
+    const first = await hubHost(() => lineFor(remote.port), { store })
+    await eventually(() => first.row().status === 'connected')
+    first.tunnel().unreachable = true
+    first.tunnel().drop()
+    await eventually(() => first.row().status === 'away')
+    const seen = first.row().lastConnectedAt
+    expect(seen).toEqual(expect.any(Number))
+    await first.links.stop()
+
+    // This host starts again; the laptop is still asleep
+    const second = await hubHost(() => lineFor(remote.port), {
+      store,
+      tunnel: (line) => {
+        const t = new ControlledTunnel(line)
+        t.unreachable = true
+        return t
+      },
+    })
+    await eventually(() => second.row().status === 'away')
+    expect(second.row().lastConnectedAt).toBe(seen)
+  })
+
+  it('says a machine that was never connected was never connected', async () => {
+    const { hub } = await down(NO_ANSWER[0]!)
+    await eventually(() => hub.row().status === 'away')
+    expect(hub.row().lastConnectedAt).toBeNull()
+  })
+
+  it('shows a Connect pressed during an attempt as connecting when it joins an attempt that is under way, not as nothing', async () => {
+    // Each attempt takes a while (a connect that times out), and the backoff is short: some attempt is under way
+    const { hub, tunnel, statuses } = await down(NO_ANSWER[0]!, { retryMs: [20 * SLOW, 20 * SLOW] })
+    await eventually(() => hub.row().status === 'away')
+    tunnel().openMs = 600 * SLOW
+    const opens = tunnel().opens
+    // A quiet retry is now opening: the row still says away
+    await eventually(() => tunnel().opens > opens)
+    expect(hub.row().status).toBe('away')
+    const before = statuses().length
+    await hub.call('machines.reconnect', { machineId: 'm1' })
+    expect(statuses().slice(before)).toContain('connecting')
+  })
+
+  it('tries at once when Auto reconnect is turned on while it is away', async () => {
+    const { hub, tunnel } = await down(NO_ANSWER[0]!, {}, false)
+    await eventually(() => hub.row().status === 'away')
+    const opens = tunnel().opens
+    tunnel().unreachable = false
+    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: true })
+    await eventually(() => hub.row().status === 'connected')
+    expect(tunnel().opens).toBeGreaterThan(opens)
+  })
+
+  it('does not keep the time of an attempt it will not make: Disconnect, then Connect', async () => {
+    const { hub, tunnel } = await down(NO_ANSWER[0]!, { retryMs: [60_000, 60_000] })
+    await eventually(() => hub.row().status === 'away' && hub.row().nextAttemptAt !== null)
+    // Some time passes, so that the time told before the Disconnect is plainly older than the one told after
+    await pause(1_500)
+    await hub.call('machines.disconnect', { machineId: 'm1' })
+    tunnel().unreachable = true
+    const from = hub.events.length
+    const pressed = Date.now()
+    await hub.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'away')
+    // What the windows are told after Connect: a time from the attempts before the Disconnect is not the next one's
+    const told = hub.events.slice(from).flatMap((e: any) => (e.type === 'machine_status' && e.machine.status === 'away' ? [e.machine.nextAttemptAt as number | null] : []))
+    expect(told.length).toBeGreaterThan(0)
+    for (const at of told) expect(at === null || at > pressed + 59_000).toBe(true)
+  })
   it('stays away between attempts that fail alike, without flipping to connecting', async () => {
     const { hub, tunnel, statuses } = await down(NO_ANSWER[0]!)
     await eventually(() => tunnel().opens >= 5)

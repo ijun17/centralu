@@ -19,7 +19,7 @@ function awayTunnel(at: number[]): Tunnel {
   return {
     open: async () => {
       at.push(Date.now())
-      throw new Error('ssh: connect to host box port 22: Operation timed out')
+      throw new Error('ssh could not reach box: ssh: connect to host box port 22: Operation timed out')
     },
     onDown: () => {},
     close: async () => {},

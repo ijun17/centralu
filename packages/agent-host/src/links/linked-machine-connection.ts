@@ -193,6 +193,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   ) {
     this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
     for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
+    // When it was last up, kept across restarts (#1398)
+    this.lastConnectedAt = record.lastConnectedAt ?? null
     tunnel.onDown((reason) => this.transportDown(reason))
   }
 
@@ -410,7 +412,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.startAsked = false
     this.parked = true
     this.stopped = true
-    clearTimeout(this.retryTimer)
+    this.clearRetry()
     this.client?.close()
     this.client = null
     if (why) this.deps.log?.(`[links] ${this.name}: ${why}`)
@@ -426,10 +428,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   setAutoReconnect(on: boolean): void {
     this.record = { ...this.record, autoReconnect: on }
     // An operation's retries stand: the switch takes effect once it ends (cancelling them rolled an update back)
-    if (!on && this.status !== 'versions_differ' && !this.inOperation()) {
-      clearTimeout(this.retryTimer)
-      this.nextAttemptAt = null
-    }
+    if (!on && this.status !== 'versions_differ' && !this.inOperation()) this.clearRetry()
     // A swap's hold was waiting on the retry just cancelled: the row would say updating for good
     if (!on && this.status === 'updating' && !this.inOperation()) this.setStatus('unreachable', `The host on ${this.name} was being swapped; ${WAITS_FOR_PERSON}`)
     this.noteNextStep()
@@ -456,8 +455,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /** Opens again now, forgetting the backoff (`machines.reconnect`, or the person accepted the versions) */
   reconnect(): void {
-    clearTimeout(this.retryTimer)
-    this.nextAttemptAt = null
+    this.clearRetry()
     this.attempt = 0
     /*
      * An opening already under way answers this one (`open`). Its retry, if it set one, was just cleared: once it ends
@@ -465,6 +463,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
      */
     const under = this.opening
     if (under) {
+      // The person's Connect joins the attempt under way, and says so: a quiet retry shows nothing of its own (#1398)
+      if (this.status === 'away') this.setStatus('connecting', null)
       const set = this.retriesSet
       void under.finally(() => {
         // It set a retry of its own after this (a start that failed, a refusal): that backoff stands
@@ -491,7 +491,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   async stop(): Promise<void> {
     this.stopped = true
-    clearTimeout(this.retryTimer)
+    this.clearRetry()
     this.client?.close()
     this.client = null
     for (const w of [...this.statusWaiters]) w()
@@ -883,7 +883,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.switched = null
     this.switchTried = false
     this.switchFailure = null
-    this.lastConnectedAt = Date.now()
+    this.seen()
     this.setStatus('connected', null)
     // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect
     void this.offerAsks(client)
@@ -956,6 +956,18 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
    * reads the line and connects nothing (`readsOnly`)
    */
+  /** The link is up, or was just: remembers when, and keeps it for the next start of this host */
+  private seen(): void {
+    this.lastConnectedAt = Date.now()
+    this.deps.registry.setLastConnected?.(this.id, this.lastConnectedAt)
+  }
+
+  /** Cancels the retry that waits, and the time it was due */
+  protected clearRetry(): void {
+    clearTimeout(this.retryTimer)
+    this.nextAttemptAt = null
+  }
+
   protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
     if (this.stopped || this.held) return
     if (mode === 'backoff' && !this.autoReconnect && !this.inOperation()) return
@@ -966,7 +978,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.nextAttemptAt = Date.now() + delay
     this.retryTimer = setTimeout(() => {
       this.readsOnly = mode === 'reads' && !this.autoReconnect
-      this.quietRetry = mode === 'backoff'
+      // Not when an attempt is under way: the flag would wait for the person's next Connect
+      this.quietRetry = mode === 'backoff' && !this.opening
       this.nextAttemptAt = null
       void this.open()
     }, delay)
@@ -976,6 +989,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   protected setStatus(status: MachineStatus, error: string | null): void {
+    // The link was up until now (#1398): that is when the machine was last seen, not when it said hello
+    if (this.status === 'connected' && status !== 'connected') this.seen()
     const changed = status !== this.status || error !== this.error
     this.status = status
     this.error = error

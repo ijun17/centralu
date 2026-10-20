@@ -171,7 +171,8 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       )}
       {problem && m.status !== 'versions_differ' && (
         <div className="mt-1.5 text-xs leading-body" data-testid={`machine-problem-${m.id}`}>
-          <p className="text-ink">{problem.title}</p>
+          {/* A machine that is away is in a state, not in error: the title is in the ink of a note */}
+          <p className={m.status === 'away' ? 'text-ink-muted' : 'text-ink'}>{problem.title}</p>
           {problem.fix && <p className="mt-0.5 text-ink-muted">{withCode(problem.fix)}</p>}
           <AwayNote m={m} testId={`machine-away-${m.id}`} />
         </div>

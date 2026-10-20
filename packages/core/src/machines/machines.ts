@@ -28,7 +28,7 @@ export function isAway(row: Placed | undefined, machines: Readonly<Record<string
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   connected: 'connected',
   connecting: 'connecting',
-  unreachable: 'unreachable',
+  unreachable: 'away',
   away: 'away',
   not_running: 'not running',
   versions_differ: 'version mismatch',
@@ -58,7 +58,8 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
   // Does not answer at all (#1398): asleep, off or off the network. A state, so no error line; ssh's own line is the details
-  if (m.status === 'away') return { title: `${m.name} is not reachable: asleep, off or off the network`, fix: tries(m) }
+  // The row adds when it was last connected and when it tries again (`awayNote`), so Centralu trying is not said twice
+  if (m.status === 'away') return { title: `${m.name} is not reachable: asleep, off or off the network`, fix: m.autoReconnect === false ? tries(m) : null }
   // Stopped there, by the person or after its hosts kept stopping (#1143): the host says which, and Start starts one
   if (m.status === 'stopped') return { title: e || `Centralu is stopped on ${m.name}`, fix: 'Press Start to start it there' }
   if (m.status === 'not_running') {
@@ -113,12 +114,15 @@ function tries(m: Partial<Pick<MachineInfo, 'autoReconnect'>>): string {
  * as details by the row
  */
 export function awayNote(m: Pick<MachineInfo, 'lastConnectedAt' | 'nextAttemptAt'>, now: number): { lastConnected: string | null; next: string | null } {
+  // As the app words every age (`formatAgo`, ui/app/labelClock.ts)
   const ago = (ms: number) => {
     const min = Math.max(0, Math.floor(ms / 60_000))
     if (min < 1) return 'just now'
-    if (min < 60) return `${min} min ago`
+    if (min < 60) return `${min}m ago`
     const hours = Math.floor(min / 60)
-    return hours < 48 ? `${hours} h ago` : `${Math.floor(hours / 24)} days ago`
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return days < 30 ? `${days}d ago` : `${Math.floor(days / 30)}mo ago`
   }
   const inMin = (ms: number) => {
     const min = Math.ceil(ms / 60_000)
