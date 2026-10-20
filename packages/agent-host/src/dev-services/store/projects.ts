@@ -35,10 +35,10 @@ export class ProjectRecords {
    */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })>(
         `SELECT id, path, name, default_tool as defaultTool, trusted FROM projects ORDER BY sidebar_order, created_at`,
       )
-      .all() as (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })[]
+      .all()
     // SQLite has no boolean — passing 0/1 straight through would still satisfy `if (p.trusted)` on screen, but fail schema validation
     return rows.map((r) => ({ ...r, trusted: r.trusted === 1 }))
   }
@@ -51,14 +51,13 @@ export class ProjectRecords {
    * you have to fill in again.
    */
   projectCommands(projectId: string): SavedCommand[] {
-    const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
-      { commands: string } | undefined
+    const row = this.db.prepare<unknown[], { commands: string }>(`SELECT commands FROM projects WHERE id = ?`).get(projectId)
     // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
     return readJsonList(row?.commands, z.unknown()).flatMap((c): SavedCommand[] => {
       if (typeof c === 'string') return [{ command: c }]
-      if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
-        const label = (c as { label?: unknown }).label
-        return [{ command: (c as { command: string }).command, ...(typeof label === 'string' && label ? { label } : {}) }]
+      if (isObj(c) && typeof c.command === 'string') {
+        const label = c.label
+        return [{ command: c.command, ...(typeof label === 'string' && label ? { label } : {}) }]
       }
       return []
     })
@@ -74,8 +73,7 @@ export class ProjectRecords {
    * The same rule as projectCommands: read whole, written whole.
    */
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
-    const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_setup: string | null } | undefined
+    const row = this.db.prepare<unknown[], { worktree_setup: string | null }>(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId)
     const parsed = asObj(parseJson(row?.worktree_setup))
     const command = typeof parsed.command === 'string' ? parsed.command : ''
     const copyFiles = Array.isArray(parsed.copyFiles)
@@ -97,8 +95,7 @@ export class ProjectRecords {
    * store during a swap leaves it alone. Goes with the project (`TrashStore.deleteProject`).
    */
   agentInstructions(projectId: string): string {
-    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(agentInstructionsKey(projectId)) as
-      { value: string } | undefined
+    const row = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(agentInstructionsKey(projectId))
     return row?.value ?? ''
   }
 
@@ -118,8 +115,7 @@ export class ProjectRecords {
    * archived) in two places would let the two places disagree.
    */
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
-    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_manager: string | null } | undefined
+    const row = this.db.prepare<unknown[], { worktree_manager: string | null }>(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId)
     const parsed = asObj(parseJson(row?.worktree_manager))
     if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
     return {
@@ -133,8 +129,7 @@ export class ProjectRecords {
    * slot's session, since the trunk is the project's and no longer a manager's. Empty or unreadable: none.
    */
   worktreeTrunk(projectId: string): string | null {
-    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_manager: string | null } | undefined
+    const row = this.db.prepare<unknown[], { worktree_manager: string | null }>(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId)
     const parsed = asObj(parseJson(row?.worktree_manager))
     return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
   }
@@ -173,8 +168,7 @@ export class ProjectRecords {
    * the project list — and with it the sidebar — down with it.
    */
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
-    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
-      { default_models: string | null } | undefined
+    const row = this.db.prepare<unknown[], { default_models: string | null }>(`SELECT default_models FROM projects WHERE id = ?`).get(projectId)
     const out: Record<string, ToolDefaults> = {}
     for (const [tool, v] of Object.entries(asObj(parseJson(row?.default_models)))) {
       if (!v || typeof v !== 'object') continue
@@ -194,8 +188,7 @@ export class ProjectRecords {
    * is replaced, and named on stderr with what it held.
    */
   setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
-    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
-      { default_models: string | null } | undefined
+    const row = this.db.prepare<unknown[], { default_models: string | null }>(`SELECT default_models FROM projects WHERE id = ?`).get(projectId)
     const raw = row?.default_models ?? null
     const stored = parseJson(raw)
     if (raw !== null && !isObj(stored)) {
@@ -215,8 +208,8 @@ export class ProjectRecords {
    */
   projectRoots(): { id: string; path: string; trusted: boolean }[] {
     const rows = this.db
-      .prepare(`SELECT id, path, trusted FROM projects ORDER BY sidebar_order, created_at`)
-      .all() as { id: string; path: string; trusted: number }[]
+      .prepare<unknown[], { id: string; path: string; trusted: number }>(`SELECT id, path, trusted FROM projects ORDER BY sidebar_order, created_at`)
+      .all()
     return rows.map((r) => ({ id: r.id, path: r.path, trusted: r.trusted === 1 }))
   }
 
@@ -226,7 +219,7 @@ export class ProjectRecords {
   }
 
   findProjectByPath(path: string): { id: string } | undefined {
-    return this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(path) as { id: string } | undefined
+    return this.db.prepare<unknown[], { id: string }>(`SELECT id FROM projects WHERE path = ?`).get(path)
   }
 
   /**

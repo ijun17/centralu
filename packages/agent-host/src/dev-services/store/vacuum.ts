@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3'
+import { errorMessage } from '@cc/protocol'
+import { pragmaNumber } from './rows.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 
 /**
@@ -37,15 +39,15 @@ export class OwedVacuum {
    * from starting nor make every start try again. Only a host stopped during the vacuum leaves the record behind.
    */
   runOwedVacuum(why?: string): VacuumDone | null {
-    const pageSize = this.db.pragma('page_size', { simple: true }) as number
-    const size = () => (this.db.pragma('page_count', { simple: true }) as number) * pageSize
+    const pageSize = pragmaNumber(this.db, 'page_size')
+    const size = () => pragmaNumber(this.db, 'page_count') * pageSize
     const before = size()
     const t0 = Date.now()
     try {
       this.db.exec('VACUUM')
     } catch (err) {
-      const free = (this.db.pragma('freelist_count', { simple: true }) as number) * pageSize
-      console.error(`[store] could not vacuum; ${mb(free)} stay free in the file: ${(err as Error).message}`)
+      const free = pragmaNumber(this.db, 'freelist_count') * pageSize
+      console.error(`[store] could not vacuum; ${mb(free)} stay free in the file: ${errorMessage(err)}`)
       return null
     } finally {
       writeStoreKey(this.db, VACUUM_OWED_KEY, null)

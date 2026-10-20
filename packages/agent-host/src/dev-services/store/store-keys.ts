@@ -22,7 +22,7 @@ export const HUB_SELF_KEY = 'hub.selfId'
 export function readStoreKey(db: Database.Database, key: string): string | null {
   const table = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get()
   if (!table) return null
-  const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as { value: string } | undefined
+  const row = db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)
   return row?.value ?? null
 }
 

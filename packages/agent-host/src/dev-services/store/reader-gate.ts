@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { type MigrationStep } from './migrations/context.js'
+import { pragmaNumber } from './rows.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 
 /**
@@ -71,7 +72,7 @@ export abstract class ReaderGate {
    */
   get latestKnownVersion(): number {
     const steps = this.migrationSteps()
-    return steps[steps.length - 1]!.to
+    return steps.at(-1)?.to ?? 0
   }
 
   /** The lowest schema version that can still read this store (#292) */
@@ -97,7 +98,7 @@ export abstract class ReaderGate {
     const floor = this.storedMinReader()
     if (floor !== null) return floor > known ? new StoreTooNewError(floor, known, dbPath) : null
     const stored = this.unreadableMinReader()
-    const userVersion = this.db.pragma('user_version', { simple: true }) as number
+    const userVersion = pragmaNumber(this.db, 'user_version')
     if (stored === null || userVersion <= known) return null
     return new StoreTooNewError(userVersion, known, dbPath, unreadableFloorMessage(stored, userVersion, known, dbPath))
   }
