@@ -5,6 +5,7 @@ import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { codexItemOk, fileChangesOf, itemInput, itemSummary, resultSummary } from './items.js'
 import { noticeWords } from './notices.js'
+import { paramsOf } from './params.js'
 import { tokenUsageEvents } from './token-readings.js'
 
 /**
@@ -79,8 +80,7 @@ export const messageIdOf = (id: unknown): { messageId?: string } => (typeof id =
  * (protocol.md §4).
  */
 export function normalizeNotification(sessionId: string, n: Notification): NormalizedEvent[] {
-  const p = asObj(n.params)
-
+  // Each case reads its params by the generated type of its method (params.ts, #1339)
   switch (n.method) {
     /*
      * Each chunk names its agentMessage item (generated/v2/AgentMessageDeltaNotification.ts: `itemId`), and the
@@ -91,8 +91,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * had no summary text. The row read "It is still running; I'm polling it now.It is still running; I'm
      * polling it again."
      */
-    case 'item/agentMessage/delta':
-      return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(p.text), ...messageIdOf(p.itemId) }]
+    case 'item/agentMessage/delta': {
+      const p = paramsOf(n, 'item/agentMessage/delta')
+      return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(asObj(n.params).text), ...messageIdOf(p.itemId) }]
+    }
 
     /*
      * Reasoning summary (measured for #58). This stream only arrives if model_reasoning_summary
@@ -104,14 +106,17 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * twice (the same rule as agentMessage).
      */
     case 'item/reasoning/summaryTextDelta': {
+      const p = paramsOf(n, 'item/reasoning/summaryTextDelta')
       const text = str(p.delta)
       return text ? [{ type: 'reasoning_delta', sessionId, text }] : []
     }
-    case 'item/reasoning/summaryPartAdded':
+    case 'item/reasoning/summaryPartAdded': {
+      const p = paramsOf(n, 'item/reasoning/summaryPartAdded')
       // A paragraph boundary. There must be nothing before the first paragraph
       return typeof p.summaryIndex === 'number' && p.summaryIndex > 0
         ? [{ type: 'reasoning_delta', sessionId, text: '\n\n' }]
         : []
+    }
 
     /*
      * Plan progress (measured for #58). The measured shape:
@@ -122,9 +127,11 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * (measured: this turn's items were only userMessage, reasoning, agentMessage and
      * commandExecution).
      */
-    case 'turn/plan/updated':
+    case 'turn/plan/updated': {
+      const p = paramsOf(n, 'turn/plan/updated')
       // The same steps Claude's TodoWrite gives (adapters/plan.ts)
       return Array.isArray(p.plan) && p.plan.length > 0 ? [planUpdate(sessionId, p.plan, 'step')] : []
+    }
 
     /*
      * Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}.
@@ -133,12 +140,13 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * the assumption that summing the deltas equals the full output does not hold.)
      */
     case 'item/commandExecution/outputDelta': {
+      const p = paramsOf(n, 'item/commandExecution/outputDelta')
       const text = str(p.delta)
       return text ? [{ type: 'tool_output_delta', sessionId, callId: str(p.itemId), text }] : []
     }
 
     case 'item/started': {
-      const item = asObj(p.item)
+      const item = asObj(paramsOf(n, 'item/started').item)
       const type = str(item.type)
       if (type === 'userMessage' || type === 'reasoning' || type === 'agentMessage') return []
       /*
@@ -162,7 +170,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     case 'item/completed': {
-      const item = asObj(p.item)
+      const item = asObj(paramsOf(n, 'item/completed').item)
       const type = str(item.type)
       if (type === 'agentMessage') {
         // A fallback for when the streamed deltas were missed (empty when deltas already arrived, to avoid duplicating)
@@ -245,7 +253,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * (`INTERRUPTED_BY_TOOL`).
      */
     case 'turn/completed': {
-      const turn = asObj(p.turn)
+      const turn = asObj(paramsOf(n, 'turn/completed').turn)
       const failure = asObj(turn.error)
       if (str(turn.status) === 'interrupted' && !failure.message) return [{ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' }]
       if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
@@ -267,7 +275,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'state_change', sessionId, state: 'working' }]
 
     case 'thread/tokenUsage/updated':
-      return tokenUsageEvents(sessionId, p)
+      return tokenUsageEvents(sessionId, paramsOf(n, 'thread/tokenUsage/updated'))
 
     /*
      * A usage update is **not the same as hitting a limit.**
@@ -283,7 +291,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * reads it separately through `agents.usage`.
      */
     case 'account/rateLimits/updated': {
-      const snapshot = asObj(p.rateLimits)
+      const snapshot = asObj(paramsOf(n, 'account/rateLimits/updated').rateLimits)
       const reached = str(snapshot.rateLimitReachedType) !== '' || snapshot.spendControlReached === true
       if (!reached) return []
 
@@ -302,7 +310,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
 
     case 'thread/name/updated':
       // This is a name the tool made up on its own -> auto:true. A name the person set is not overwritten by this (issue #5)
-      return [{ type: 'session_title', sessionId, title: str(p.name), auto: true }]
+      // Read as before; `name` is not in ThreadNameUpdatedNotification (the next commit reads `threadName`)
+      return [{ type: 'session_title', sessionId, title: str(asObj(n.params).name), auto: true }]
 
     // Deprecated (0.160.0's binding) and not sent in any measured run — kept for a CLI that still does (#303)
     case 'thread/compacted':
@@ -316,7 +325,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * basis for the badge.
      */
     case 'thread/goal/updated':
-      return [{ type: 'goal', sessionId, goal: goalFromCodex(asObj(p.goal)) }]
+      return [{ type: 'goal', sessionId, goal: goalFromCodex(asObj(paramsOf(n, 'thread/goal/updated').goal)) }]
 
     case 'thread/goal/cleared':
       return [{ type: 'goal', sessionId, goal: null }]
@@ -333,17 +342,18 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * (`noticeWords`, #342).
      */
     case 'warning': {
-      const text = str(p.message).trim()
+      const text = str(paramsOf(n, 'warning').message).trim()
       return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true, ...noticeWords('warning', text) }] : []
     }
     case 'configWarning':
     case 'deprecationNotice': {
+      const p = n.method === 'configWarning' ? paramsOf(n, 'configWarning') : paramsOf(n, 'deprecationNotice')
       const text = [str(p.summary).trim(), str(p.details).trim()].filter(Boolean).join('\n')
       return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true, ...noticeWords(n.method, text) }] : []
     }
     // The auto-review guardian's warning about an action (generated/v2/GuardianWarningNotification.ts); not exercised
     case 'guardianWarning': {
-      const text = str(p.message).trim()
+      const text = str(paramsOf(n, 'guardianWarning').message).trim()
       return text ? [{ type: 'notice', sessionId, level: 'warning', text, ...noticeWords('guardianWarning', text) }] : []
     }
 
@@ -354,6 +364,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * conversation and leaves the model the person picked alone.
      */
     case 'model/rerouted': {
+      const p = paramsOf(n, 'model/rerouted')
       const to = str(p.toModel)
       if (!to) return []
       const reason = str(p.reason) === 'highRiskCyberActivity' ? 'it was flagged as high-risk cyber activity' : str(p.reason)
@@ -369,6 +380,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * simply had no such tools. The adapter keeps one line per server until it starts again (index.ts).
      */
     case 'mcpServer/startupStatus/updated': {
+      const p = paramsOf(n, 'mcpServer/startupStatus/updated')
       if (str(p.status) !== 'failed') return []
       const name = str(p.name) || 'an MCP server'
       const reauth = str(p.failureReason) === 'reauthenticationRequired' ? ' (it needs you to sign in again)' : ''
@@ -399,7 +411,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * and sent the last two only.
      */
     case 'error': {
-      const message = str(asObj(p.error).message) || str(p.message) || 'Unknown error'
+      const p = paramsOf(n, 'error')
+      // A top-level `message` is not in ErrorNotification: read as before, for a CLI that sends one
+      const message = str(asObj(p.error).message) || str(asObj(n.params).message) || 'Unknown error'
       if (p.willRetry === true) {
         const why = str(asObj(p.error).additionalDetails)
         console.error(`[codex] ${sessionId.slice(0, 8)} retrying after: ${message}${why ? ` (${why})` : ''}`)
