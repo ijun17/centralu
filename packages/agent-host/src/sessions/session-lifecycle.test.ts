@@ -143,6 +143,23 @@ describe('a process that goes while its session is idle (#1397)', () => {
     expect(s.interruption ?? null).toBeNull()
   })
 
+  it('resumes the conversation on the next message: a new process is started for the same thread', async () => {
+    const id = await newSession()
+    const gone = claude.last
+    gone.externalId = 'thread-1'
+    gone.emit({ type: 'turn_complete', sessionId: id })
+    gone.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(mgr.isLive(id)).toBe(false)
+    const started = claude.created.length
+    await rpc('agents.send', { sessionId: id, text: 'carry on' })
+    await until(() => claude.created.length === started + 1)
+    expect(claude.last).not.toBe(gone)
+    expect(claude.last.sessionId).toBe(id)
+    expect(mgr.isLive(id)).toBe(true)
+    await until(() => claude.last.sent.some((t) => t.includes('carry on')))
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
   it('does not retire the handle for a set-aside process saying it, or when the session is live again', async () => {
     const id = await newSession()
     const old = claude.last
