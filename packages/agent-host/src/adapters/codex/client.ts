@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { z } from 'zod'
 import { codexLaunch } from './native.js'
 import { toolCommand } from '../../tool-launch.js'
 import type { AgentProcess } from '../contract.js'
@@ -36,6 +37,19 @@ export type CodexClientHandlers = {
    */
   onExit: (code: number | null, expected: boolean) => void
 }
+
+/**
+ * A JSON-RPC message as the app-server writes it: a response (`id` with `result` or `error`), a request to us (`id`
+ * and `method`), or a notification (`method`). What the params and results hold is read where they are used. An id
+ * may be null in a JSON-RPC error answer to a request it could not read; such an answer belongs to no request here.
+ */
+const RPC_FRAME = z.looseObject({
+  id: z.union([z.string(), z.number(), z.null()]).optional(),
+  method: z.string().optional(),
+  params: z.unknown().optional(),
+  result: z.unknown().optional(),
+  error: z.unknown().optional(),
+})
 
 export class CodexClient {
   private proc: AgentProcess
@@ -139,9 +153,9 @@ export class CodexClient {
 
   private onLine(line: string): void {
     if (!line.trim()) return
-    let msg: Record<string, unknown>
+    let raw: unknown
     try {
-      msg = JSON.parse(line) as Record<string, unknown>
+      raw = JSON.parse(line)
     } catch {
       /*
        * **If a line starts with `{` but is not JSON, that is not someone else's stray text — it
@@ -170,8 +184,18 @@ export class CodexClient {
       console.error('[codex] non-JSON output:', line.slice(0, 200))
       return
     }
-
-    const id = msg.id as string | number | undefined
+    /*
+     * The app-server is another process, and another version than this build was written against (#1339): what it
+     * writes is checked as a JSON-RPC message before it is read. A JSON value that is not one (a line of `null`
+     * threw on reading its id, inside the stream loop) is passed by, and said once per line in host.log.
+     */
+    const frame = RPC_FRAME.safeParse(raw)
+    if (!frame.success) {
+      console.error('[codex] a frame that is not a JSON-RPC message:', line.slice(0, 200))
+      return
+    }
+    const msg = frame.data
+    const id = msg.id ?? undefined
     // A response (to a request we sent)
     if (id !== undefined && msg.method === undefined) {
       if (msg.error) this.pending.reject(id, new Error(JSON.stringify(msg.error)))
