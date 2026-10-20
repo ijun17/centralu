@@ -307,8 +307,9 @@ What holds, and what does not, said plainly (CLI 2.1.263 to 2.1.299 read and mea
   reopens the channel, and a managed `env` can turn the gate back on. That is the organisation's decision and Centralu
   does not override it. A managed file was not tried (it would affect every Claude on the machine).
 - **Below that, the person's own settings do not reopen it.** A project settings file that asks for `accept` loses to
-  the inline layer (probe case `auto-accept-file`), and so does the person's user setting `crossSessionInbound: accept`
-  and the CLI's `/config` switch: flag settings beat user settings. The person's own interactive Claude cannot reach a
+  the inline layer (probe case `auto-accept-file`). By the CLI's resolution order (read in its binaries, not measured)
+  so do the person's user setting `crossSessionInbound: accept` and the CLI's `/config` switch: flag settings beat user
+  settings. The person's own interactive Claude cannot reach a
   Centralu session either (probe case `in-from-raw`: the receiver has no inbox to reach).
 - **A process an older host started keeps the flags it was started with**, so a kept `auto` session from before this
   change has its inbox open. Its launch fingerprint is version 3 now (`launchSettingsFingerprint`), so the host that
@@ -318,7 +319,7 @@ What holds, and what does not, said plainly (CLI 2.1.263 to 2.1.299 read and mea
 Limits: the environment gate is version-sensitive, undocumented, and undoable by user settings as said. The documented
 inbound refusal and the discovery denies do not alone prove outbound isolation when a peer address is already known and
 `SendMessage` stays enabled; the probe measures the outbound side too (`out-to-raw`: a controlled sender is told
-"Cross-session messaging is not available in this session", also through its own subagent). Re-run
+"Cross-session messaging is not available in this session"). Re-run
 `packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades: it addresses the receiver by the name it
 registered (the CLI never routes a session UUID), runs the controlled cases, the mixed ones, and two uncontrolled
 controls that show it can see a leak. Unit tests check constructed options; the live probe supplies bounded runtime
