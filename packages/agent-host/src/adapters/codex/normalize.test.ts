@@ -355,8 +355,10 @@ describe('state and gauges', () => {
         sessionId: S,
         error: {
           code: 'internal',
-          message: "The 'opus[1m]' model is not supported\ninvalid_request_error",
-          retryable: true,
+          // A model the provider refuses is its own failure (#1369): retrying cannot help, picking another can
+          message: "Codex refused the model opus[1m]: The 'opus[1m]' model is not supported",
+          retryable: false,
+          data: { reason: 'model_rejected', model: 'opus[1m]' },
         },
       },
     ])
