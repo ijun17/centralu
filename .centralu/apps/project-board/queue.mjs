@@ -497,23 +497,25 @@ export function supersededSuites(runs, checks = []) {
 }
 
 /**
- * The check suites of a duplicate run whose every job that did not pass also passed in its twin (#1346): two runs of
- * the same workflow on one head (created in the same second for one push), where the job that failed in one (a flake,
- * as rerun) passed in the other, whatever their ids, creation times or attempts. The older/cancelled rule above does
- * not see it: the failing run can be the newer one, and its twin's job passed on a later attempt. Only completed runs,
- * and only a suite whose failures all have a passing twin: a job that failed in both, or failed only there with no
- * twin, keeps the head waiting.
+ * The check suites of a run whose every job that did not pass **succeeded** in a twin (#1346): another completed run
+ * of the same workflow on the same head, whatever their ids, creation times or attempts (the case seen: two runs
+ * created in the same second, the newer one failing a job on a flake that the other passed on a rerun). The
+ * older/cancelled rule above does not see it: the failing run can be the newer one. A skipped job is no twin (a draft
+ * run or a quick run skips jobs a full run fails), nor is a job still running or a commit status. Only a suite whose
+ * failures all have a twin that succeeded: a job that failed in both, or failed only there, keeps the head waiting.
  */
 export function twinPassedSuites(runs, checks = []) {
   const key = (r) => r.workflow_id ?? r.path ?? r.name ?? 'ci'
   const workflowOf = new Map((runs ?? []).filter((r) => r.check_suite_id != null && r.status === 'completed').map((r) => [r.check_suite_id, key(r)]))
   const passed = (c) => c.kind !== 'status' && c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)
+  // What a twin must show: the job ran and succeeded (a skip is not a pass)
+  const succeeded = (c) => c.kind !== 'status' && c.status === 'completed' && c.conclusion === 'success'
   const out = new Set()
   for (const [suite, workflow] of workflowOf) {
     const mine = checks.filter((c) => c.kind !== 'status' && c.suiteId === suite)
     const bad = mine.filter((c) => !passed(c))
     if (!bad.length) continue
-    const twinPassed = (c) => checks.some((t) => t.suiteId !== suite && workflowOf.get(t.suiteId) === workflow && t.name === c.name && passed(t))
+    const twinPassed = (c) => checks.some((t) => t.suiteId !== suite && workflowOf.get(t.suiteId) === workflow && t.name === c.name && succeeded(t))
     if (bad.every(twinPassed)) out.add(suite)
   }
   return out

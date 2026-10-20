@@ -196,6 +196,10 @@ describe('what the merge queue decides for one poll', () => {
     expect(onlySupersededFailures(both, [wf(39288594599, 'failure', 61), runs[1]])).toBe(false)
     // A twin of another workflow is no twin
     expect(twinPassedSuites([{ ...runs[0], workflow_id: 8 }, runs[1]], checks).size).toBe(0)
+    // A skipped job is no twin: a quick or draft run skips the jobs a full run of the same workflow fails
+    const skipped = checks.map((c) => (c.suiteId === 61 && c.name === 'windows tests (vitest 1/2)' ? { ...c, conclusion: 'skipped' } : c))
+    expect(twinPassedSuites(runs, skipped).size).toBe(0)
+    expect(onlySupersededFailures(skipped, runs)).toBe(false)
   })
 
   it('merges a green UNSTABLE head when only a cancelled duplicate or an older run of the CI workflow did not pass (#1015)', () => {
