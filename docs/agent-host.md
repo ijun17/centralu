@@ -585,7 +585,12 @@ below retained for `safe` and `normal`:
    The machine's link dropping while the report is paused sends it at once, saying the link dropped before the work
    ended and to read the session once it is back (the hub would not see the end), or as settled when the work had
    already ended and only the settle wait was running. A dropped link forgets that machine's task lists until it is
-   back. A turn in progress keeps its wait across a drop, as before. A machine removed from Centralu reports every wait
+   back. A turn in progress keeps its wait across a drop, as before. The person writing to a session whose report is paused
+   there ends it, as #1340 does here (#1342): the person's message goes straight to the machine, so the hub reads the
+   machine's relayed `user_message`, and one with no source (not the hub's instruction, another session or an app) on a
+   paused wait that is not in a turn drops the wait and tells the orchestrator once, with the same line ("The person
+   continued in this session themselves; …"), without the machine's words. A child `start_agent` started has its own
+   rule for the person's turns (`RemoteAgents`, which reads the event first), and the report gate is asked before. A machine removed from Centralu reports every wait
    on it, paused or mid-turn ("…was removed from Centralu before …, so its end will not be reported"), named as the hub
    last knew the session. A session deleted there drops its report. Linked reports live in the hub's memory: a hub swap
    drops them, as before.

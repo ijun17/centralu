@@ -693,6 +693,35 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(2)
     })
 
+    // #1342: the person's message goes straight to the machine; the hub sees the machine's record of it
+    it("the person writing to the session there ends the paused report: told once, and their failed turn is not 'the assigned work failed'", async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+      await h.settle(1)
+      expect(h.reports()[0]).toContain('The assigned work paused')
+
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact' })
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] The person continued in this session themselves; its later turns are theirs, and none of them will be reported to you.')
+      expect(h.reports()[1]).toContain('no final report follows')
+      // What the orchestrator's model reads is Centralu's words with the id, never the task's own description
+      await eventually(() => h.messages().length === 2)
+      expect(h.messages()[1]).toContain('The person continued in this session themselves')
+      expect(h.messages()[1]).not.toContain('pnpm verify')
+
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+      h.mgr.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+    })
+
     it('knows work started before it was asked, and a timer the tool holds does not hold the report', async () => {
       const h = await hub()
       const loop = { id: 'schedule-wakeup-1', kind: 'other', description: 'Wakes itself at 12:00 (/loop)', status: 'running', stoppable: false, timer: true }

@@ -13,6 +13,8 @@ export type ReportWork =
   | { machineRemoved: string; paused?: readonly BackgroundTask[] }
   /** Its turn ended while the host was handed over (#1186): whether that turn was the work given is not known */
   | { swapped: true }
+  /** The person wrote to the session on its machine while the report was paused (#1342): its later turns are theirs */
+  | { tookOver: true; paused: readonly BackgroundTask[] }
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so
@@ -64,6 +66,8 @@ export type LinkedEvent = {
   machineId?: unknown
   text?: unknown
   from?: unknown
+  /** An app's message (`user_message`): not the person's */
+  fromApp?: unknown
   live?: unknown
   ended?: unknown
   clearEnded?: unknown
@@ -121,6 +125,12 @@ export class LinkedReports {
     }
     if (!wait) return
     this.remember(sessionId)
+    /*
+     * The person wrote to a session whose report is paused over its own background work there (#1342, as #1344 does for
+     * a local one): what it does from here is theirs. A message with a source (the hub's instruction, another session, an
+     * app) is not; nor is one into the turn the work's ending started (`busy`), whose end is the final report.
+     */
+    if (e.type === 'user_message' && wait.paused && !wait.busy && !e.from && !e.fromApp) return this.tookOver(sessionId, wait)
     if (e.type === 'background_tasks') {
       if (wait.paused) this.settleLater(sessionId, wait)
       return
@@ -216,6 +226,19 @@ export class LinkedReports {
     }, PAUSED_REPORT_SETTLE_MS)
     timer.unref?.()
     this.settling.set(sessionId, timer)
+  }
+
+  /**
+   * The person wrote to the session there while its report was paused (#1342): the wait ends, the orchestrator is told
+   * once, and none of the session's later turns is reported to it. Only where the report may go now (`gate`): a child
+   * start_agent started has its own rule for the person's turns (`RemoteAgents`, which reads the event first)
+   */
+  private tookOver(sessionId: string, wait: LinkedReport): void {
+    if (this.gate(sessionId) !== 'deliver') return
+    const paused = this.pausedTasksNow(sessionId, wait)
+    const known = this.about.get(sessionId)
+    this.drop(sessionId)
+    void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { tookOver: true, paused }, known)
   }
 
   /** The paused work ended with no turn after it: the report goes out with how each task ended */
@@ -333,9 +356,12 @@ export class LinkedReports {
      * A read that failed says so (#1186): an empty preview read as a turn that said nothing. A machine that could not
      * be reached says that, or where its last words were
      */
-    const words = unreachable ? null : await reader.lastWords(sessionId, 600).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    // Nor its words once the person has taken it over: what is there now is not the assigned work's
+    const tookOver = !!work && 'tookOver' in work
+    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
-      !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
+      tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
+      : !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
       : words.ok ? words.text
       : `(its last response could not be read there: ${words.error})`
     const seq = words?.ok && words.seq !== null ? words.seq : undefined
