@@ -18,12 +18,13 @@ import type { RoutedMachine } from './router.js'
  * or older one could; links.test.ts runs the real one.
  */
 
-function machine(answers: Record<string, unknown>, o: { reachable?: boolean; mirror?: { sessions?: unknown[]; projects?: unknown[] } } = {}): RoutedMachine {
+function machine(answers: Record<string, unknown>, o: { reachable?: boolean; waitsForPerson?: boolean; mirror?: { sessions?: unknown[]; projects?: unknown[] } } = {}): RoutedMachine {
   return {
     id: 'm1',
     name: 'Box',
     q: new Qualifier('m1', 1),
     reachable: o.reachable ?? true,
+    ...(o.waitsForPerson ? { waitsForPerson: true } : {}),
     call: async (method) => {
       const a = answers[method]
       if (a instanceof Error) throw a
@@ -187,6 +188,14 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [away]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'Box is not reachable right now' })
     const failing = machine({ 'host.lastAnswer': new Error('the link closed') })
     expect(await linkedSessions(() => [failing]).lastWords('m1.w1', 600)).toEqual({ ok: false, error: 'the link closed' })
+  })
+
+  it('tells a call on a machine only the person connects to ask the person, at once, and never connects it (#1341)', async () => {
+    const m = machine({}, { reachable: false, waitsForPerson: true })
+    const reader = linkedSessions(() => [m])
+    for (const r of [await reader.send('m1.w1', 'hi', 'h1'), await reader.read('m1.w1'), await reader.lastWords('m1.w1', 600)]) {
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Box is not connected, and nothing here connects it by itself; ask the person to connect it') })
+    }
   })
 
   it('quotes a conversation line that is not one line, and keeps one that is', async () => {
@@ -468,6 +477,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       describe: () => (linked ? { name: 'Worker', project: 'api on Box' } : null),
       lastWords: async () => ({ ok: true as const, text: 'all done', length: 0, seq: null }),
       machineLinked: (id: string) => linked && id === 'm1',
+      machineWaitsForPerson: () => false,
       backgroundTasks: (id: string) => (id === 'm1' ? listed() : Promise.resolve(null)),
     } as unknown as LinkedSessions
     mgr.useLinkedReader(links)
@@ -678,6 +688,35 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(2)
       expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work finished\./)
       // Told once: a later turn there is not the assigned work
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+    })
+
+    // #1342: the person's message goes straight to the machine; the hub sees the machine's record of it
+    it("the person writing to the session there ends the paused report: told once, and their failed turn is not 'the assigned work failed'", async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+      await h.settle(1)
+      expect(h.reports()[0]).toContain('The assigned work paused')
+
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact' })
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] The person continued in this session themselves; its later turns are theirs, and none of them will be reported to you.')
+      expect(h.reports()[1]).toContain('no final report follows')
+      // What the orchestrator's model reads is Centralu's words with the id, never the task's own description
+      await eventually(() => h.messages().length === 2)
+      expect(h.messages()[1]).toContain('The person continued in this session themselves')
+      expect(h.messages()[1]).not.toContain('pnpm verify')
+
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+      h.mgr.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
       turn(h)
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)

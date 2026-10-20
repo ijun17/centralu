@@ -1,11 +1,11 @@
 /** `local/agent-adapter-checks` protects the adapter boundary in docs/architecture.md §2. */
 import { describe, expect, it } from 'vitest'
-import { ESLint } from 'eslint'
+import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const eslint = new ESLint({ cwd: ROOT })
+const eslint = virtualFileLinter()
 
 async function checks(filePath: string, code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath: join(ROOT, filePath), warnIgnored: false })

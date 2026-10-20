@@ -9,6 +9,12 @@ export const APP_SETTINGS_DDL = `
 `
 
 /**
+ * This computer's id as a hub (#550), made once and kept: the host id in every mail id and address (#1347, mailbox §11.4).
+ * Written by `hubSelfId` (links/stored.ts); the store's purge reads it to find this host's own mail rows
+ */
+export const HUB_SELF_KEY = 'hub.selfId'
+
+/**
  * A key the store's own bookkeeping keeps in `app_settings`: the reader floor (reader-gate.ts), the steps a swap left
  * for later (migrate-runner.ts) and an owed vacuum (vacuum.ts). Read before schema.sql and the migrations have run, so
  * a store from before v16 has no table yet, which reads as null, as a missing row does.

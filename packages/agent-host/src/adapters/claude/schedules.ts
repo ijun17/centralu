@@ -1,5 +1,6 @@
 import type { BackgroundTask } from '@cc/protocol'
-import { str, type Json } from './json.js'
+import { isObj } from '../../json-value.js'
+import { contentBlocks, str, type Json } from './json.js'
 
 /** Claude Code's scheduling tools (sdk-tools.d.ts, SDK 0.3.263): the timers they set live in the CLI's process */
 const SCHEDULE_TOOLS: ReadonlySet<string> = new Set(['ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList'])
@@ -46,8 +47,9 @@ export class ClaudeSchedules {
 
   /** Reads one assistant or user message; true when the timers changed */
   push(m: Json): boolean {
-    const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
-    if (!Array.isArray(content)) return this.prune()
+    // Words where the blocks should be (the summary after /compact) are no block: read as none, with the timers pruned
+    const content = contentBlocks(m)
+    if (content.length === 0) return this.prune()
     if (str(m.type) === 'assistant') {
       for (const b of content) {
         if (str(b.type) === 'tool_use' && SCHEDULE_TOOLS.has(str(b.name))) this.calls.set(str(b.id), { name: str(b.name), input: (b.input ?? {}) as Json })
@@ -99,10 +101,12 @@ export class ClaudeSchedules {
       return this.crons.delete(guess)
     }
     if (call.name === 'CronList' && Array.isArray(out.jobs)) {
-      const listed = new Set((out.jobs as Json[]).map((j) => str(j.id)))
+      // A list item that is not an object reads as no job (#1339): a `null` here crashed the stream loop
+      const jobs = out.jobs.filter(isObj)
+      const listed = new Set(jobs.map((j) => str(j.id)))
       let changed = false
       for (const id of [...this.crons.keys()]) if (!listed.has(id)) changed = this.crons.delete(id) || changed
-      for (const j of out.jobs as Json[]) {
+      for (const j of jobs) {
         const id = str(j.id)
         if (!id || this.crons.has(id)) continue
         this.crons.set(id, { id: `schedule-cron-${id}`, due: now + CRON_EXPIRY_MS, description: `Scheduled prompt, ${str(j.humanSchedule) || str(j.cron)}` })

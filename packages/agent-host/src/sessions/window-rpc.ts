@@ -31,6 +31,18 @@ export const WINDOW_METHODS = [
   'trash.purge',
   'trash.purgeSubagentSteps',
   'trash.purgeRuns',
+  'projects.list',
+  'projects.setTrusted',
+  'apps.list',
+  'machines.list',
+  'approvals.rules',
+  'approvals.deleteRule',
+  'sessions.list',
+  'apps.permissions',
+  'apps.forgetPermission',
+  'projectConsents.list',
+  'projectConsents.revoke',
+  'apps.setShared',
 ] as const satisfies readonly RpcMethodName[]
 
 export type WindowMethod = (typeof WINDOW_METHODS)[number]

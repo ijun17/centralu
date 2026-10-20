@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
-import { storeMirror, storeProjectOrder, storeRegistry } from './stored.js'
+import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry } from './stored.js'
 
 /** The linked machines and the headers mirror in the hub's store (#82, store v46) */
 
@@ -157,5 +157,34 @@ describe('the project order across machines in the store (#734)', () => {
     expect(storeProjectOrder(store).read()).toEqual(['m1.b', 'h2', 'm1.a'])
     store.settings.setAppSetting('hub.projectOrder', '{oops')
     expect(order.read()).toEqual([])
+  })
+})
+
+describe('this host’s id (#550, and the host id in every mail address)', () => {
+  it('two hosts on one store that both find none at first end up with the one that was written first', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-hub-self-'))
+    const file = join(dir, 'store.db')
+    const a = new Store(file)
+    const b = new Store(file)
+    try {
+      // `a` has read "none" when `b` makes and keeps its id; `a` then makes its own
+      const read = a.settings.appSetting.bind(a.settings)
+      let first = true
+      a.settings.appSetting = (key: string) => {
+        if (first) {
+          first = false
+          return null
+        }
+        return read(key)
+      }
+      const winner = hubSelfId(b)
+      const loser = hubSelfId(a)
+      expect(loser).toBe(winner)
+      expect(hubSelfId(b)).toBe(winner)
+    } finally {
+      a.close()
+      b.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

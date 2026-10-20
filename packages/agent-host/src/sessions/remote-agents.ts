@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import { NOT_REACHABLE } from '../adapters/contract.js'
+import { awayPhrase, NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
@@ -179,7 +179,12 @@ export class RemoteAgents {
   private loaded: RemoteAgent[] | null = null
   private readonly waits = new Map<string, TurnWait>()
   /** Children whose parent was told their link dropped, until it is back */
-  private readonly toldDown = new Set<string>()
+  /**
+   * The children whose caller was told the link dropped, with whether the notice said that nothing here reconnects the machine
+   * (#1341). One told only that the link dropped is told again when the machine turns out to wait for the person: the person
+   * turned Auto reconnect off, or disconnected it, while it was down
+   */
+  private readonly toldDown = new Map<string, boolean>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
@@ -214,7 +219,7 @@ export class RemoteAgents {
         continue
       }
       this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
-      if (!r.owed.paused) this.toldDown.add(r.sessionId)
+      if (!r.owed.paused) this.toldDown.set(r.sessionId, false)
     }
   }
 
@@ -1061,8 +1066,16 @@ export class RemoteAgents {
    * (`LinkedReports.linkChanged`).
    */
   private linkChanged(machine: unknown): void {
-    const m = machine as { id?: unknown; name?: unknown; status?: unknown } | null
+    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown } | null
     if (!m || typeof m.id !== 'string' || m.status === 'connected') return
+    /*
+     * Nothing here reconnects it (#1341): the person disconnected it, or its Auto reconnect is off and the attempt that
+     * failed or the redials that gave up were the last. Judged by the link and not by the row, which says `unreachable` the
+     * moment a drop starts. With the switch off the caller is told once, when this is so, and not at the first sign of
+     * a drop that the quick redial, an attempt or an install or update may undo
+     */
+    const alone = this.host.linkedReader?.machineWaitsForPerson(m.id) === true
+    const mayRecover = m.autoReconnect === false && !alone && m.status !== 'versions_differ' && m.status !== 'updating'
     const name = typeof m.name === 'string' && m.name ? m.name : m.id
     for (const rec of this.records()) {
       if (rec.machineId !== m.id) continue
@@ -1073,13 +1086,20 @@ export class RemoteAgents {
         this.dropWait(rec.sessionId)
         wait.end({ step: 'unreachable', machine: name })
         // The call said it; what ended while the link was down is reported once it is back, seen working or not (#1038 review)
-        this.toldDown.add(rec.sessionId)
+        this.toldDown.set(rec.sessionId, false)
         continue
       }
       const report = this.host.children.linkedReports.get(rec.sessionId)
-      if (!report || report.orchestratorId !== rec.callerId || report.paused || this.toldDown.has(rec.sessionId)) continue
-      this.toldDown.add(rec.sessionId)
-      const rest = 'It cannot be followed until the link is back: ' +
+      const told = this.toldDown.get(rec.sessionId)
+      if (!report || report.orchestratorId !== rec.callerId || report.paused || (told !== undefined && (told || !alone))) continue
+      if (mayRecover) continue
+      this.toldDown.set(rec.sessionId, alone)
+      const why = !alone
+        ? 'It cannot be followed until the link is back: '
+        : m.status === 'disconnected'
+          ? 'The person disconnected the machine, so nothing here reconnects it: ask the person to connect it. It cannot be followed until then: '
+          : "The machine's Auto reconnect is off, so nothing here reconnects it: ask the person to connect it. It cannot be followed until then: "
+      const rest = why +
         'its report comes then, once its turn has ended, if that turn is still yours. agent_session status reads its state once the machine can be reached.'
       void this.host.tellSession(
         rec.callerId,
@@ -1223,16 +1243,19 @@ export class RemoteAgents {
     }
     const all = await reader.projects()
     const away = all.away.find((a) => a.machineId === machine.id)
-    if (away) return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
+    if (away) {
+      // Nothing here connects it (#1341): the sentence names the person, who can; no retry on its own is promised
+      if (away.why === NOT_CONNECTED) return { error: `${machine.name} ${awayPhrase(NOT_CONNECTED)}, so nothing was started there. Try again once it is connected.` }
+      return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
+    }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))
     // A build from before #1038 would not keep the child within the agent depth: a loop of starts between machines
     if (read.some(({ r }) => !r.ok && 'olderBuild' in r)) {
       return { error: `${machine.name} runs an older Centralu, which would not keep a session started from here within the agent depth, so nothing was started there. Update Centralu on ${machine.name}, then try again.` }
     }
-    // Asked and not reached (#1134): a machine that connects when needed lists its projects as last known, and the link
-    // its reads opened failed. That is the machine away, not a machine without the checkout
-    const unreached = read.map(({ r }) => (!r.ok && r.error.includes(NOT_REACHABLE) ? r.error : null))
+    // Asked and not reached: the link went away after the list was read. That is the machine away, not a machine without the checkout
+    const unreached = read.map(({ r }) => (!r.ok && (r.error.includes(NOT_REACHABLE) || r.error.includes(NOT_CONNECTED_PHRASE)) ? r.error : null))
     if (read.length > 0 && unreached.every((e) => e !== null)) {
       return { error: `${machine.name} cannot be reached (${NOT_REACHABLE}), so nothing was started there. Try again once its link is back.` }
     }

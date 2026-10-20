@@ -4,7 +4,6 @@ import type {
   GitSource,
   Interruption,
   LineHeight,
-  MachineConnect,
   MachineInfo,
   RpcResult,
   ApprovalDetail,
@@ -20,7 +19,7 @@ import type {
 export type MachineRequest =
   | { action: 'add'; sshTarget: string; name?: string; wslDistro?: string }
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
-  | { action: 'connect'; machine: string; connect: MachineConnect }
+  | { action: 'auto_reconnect'; machine: string; on: boolean }
   | { action: 'autostart'; machine: string; on: boolean }
 
 /** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
@@ -33,11 +32,14 @@ export type PreferenceChanges = {
   lineHeight?: LineHeight
   /** Minutes of quiet before an idle session sleeps, or 'never' */
   idleSleepMinutes?: number | 'never'
-  checkForUpdates?: boolean
-  applyUpdatesWhenIdle?: boolean
+  /** "Automatic updates" (2026-10-20): checking, and installing and applying when idle, as one setting */
+  autoUpdate?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
-  /** The notification switches (#1306), the ones to change; reversible, no card */
-  notifications?: { approval?: boolean; error?: boolean; done?: boolean; allDone?: boolean; whenFocused?: boolean; sound?: boolean }
+  /**
+   * The notification switches (#1306), the ones to change. The "error" and "every session finished" ones are gone from the
+   * product (2026-10-20): no field, though the stored record keeps them for older builds
+   */
+  notifications?: { approval?: boolean; done?: boolean; whenFocused?: boolean; sound?: boolean }
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
@@ -50,6 +52,29 @@ export type TrashRequest =
   | { action: 'trash_steps'; sessionId: string }
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
+
+/**
+ * One request of the orchestrator's trust commands (#1219, third slice), as the tool runner reads its arguments: what
+ * changes what agents and apps may do. Widening waits for the person's card; narrowing acts at once.
+ */
+export type TrustRequest =
+  | { action: 'list_projects' }
+  | { action: 'project_trust'; project: string; trusted: boolean }
+  | { action: 'list_rules'; project?: string }
+  | { action: 'remove_rule'; id: number }
+  | { action: 'list_app_grants'; app?: string; project?: string }
+  | { action: 'forget_app_answer'; app: string; project?: string; capability: string }
+  | { action: 'revoke_consent'; from: string; to: string; kind: 'delegate' | 'apps' | 'agents' }
+  | { action: 'share_app'; app: string; project?: string; shared: boolean }
+  | { action: 'set_limits'; changes: AgentLimitChanges }
+
+/** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
+export type AgentLimitChanges = {
+  /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
+  agentCeiling?: number | 'preset'
+  /** How many levels of sessions may start agents, 1 to 3 */
+  agentDepth?: number
+}
 
 export type OrchestratedSession = {
   sessionId: string
@@ -93,10 +118,20 @@ export type RecallHit = {
 export const NOT_REACHABLE = 'not reachable right now'
 
 /**
+ * Why a machine nothing here will connect cannot be asked (#1341): the person disconnected it, or its Auto reconnect is
+ * off and the attempt at the hub's start is over. No call connects it; only the person's Connect does
+ */
+export const NOT_CONNECTED = 'not connected until the person connects it'
+
+/** What `awayPhrase` says for `NOT_CONNECTED`: the model is told to ask the person, who is the one who can */
+export const NOT_CONNECTED_PHRASE = 'is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect)'
+
+/**
  * A machine that cannot be asked (`LinkedProject.away`), as the verb phrase after its name: the words a model reads for
- * not reachable, its plain cause for any other
+ * not reachable and for not connected, its plain cause for any other
  */
 export function awayPhrase(why: string): string {
+  if (why === NOT_CONNECTED) return NOT_CONNECTED_PHRASE
   return why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`
 }
 
@@ -202,6 +237,11 @@ export type LinkedSessions = {
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */
   machineLinked(machineId: string): boolean
+  /**
+   * Whether the machine is not connected and nothing here will connect it until the person does (#1341): not while its
+   * client redials, an attempt is under way or an install or update holds it. False for a machine not linked
+   */
+  machineWaitsForPerson(machineId: string): boolean
   /**
    * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
    * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up
@@ -638,7 +678,7 @@ export type OrchestratorTools = {
   listMachines?(): MachineInfo[]
   /**
    * A change to the linked machines (#1219, the machine commands): add, install or update Centralu, remove, reconnect,
-   * connect mode, start at boot. Those that change a machine or this computer's reach wait for the person's card.
+   * Auto reconnect, start at boot. Those that change a machine or this computer's reach wait for the person's card.
    * The answer is the text the model reads. Absent on seats that cannot.
    */
   machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
@@ -653,6 +693,11 @@ export type OrchestratorTools = {
    * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
    */
   trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * Trust (#1219, third slice): list the projects and change a project's trust, through the window's own calls. Trusting
+   * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
+   */
+  trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

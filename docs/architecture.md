@@ -75,6 +75,28 @@ must depict a named CLI use an explained `eslint-disable` comment. A kept proces
 third adapter an enrollment in the registry and an implementation under `adapters/`, rather than an edit across
 session policy, links, costs and UI mocks.
 
+**Data from outside the process is checked, never asserted** (#1339). These all reach the code as `unknown` until
+something checks them:
+- an agent CLI's stream, a Codex app-server's messages, a remote host's or an app's frames;
+- `JSON.parse` of anything, a file, a socket, an environment variable;
+- a JSON column read back from the store.
+
+The check is one of two kinds. A zod schema (`schema.safeParse`, with a path for when it fails) checks a shape with
+several fields. A narrowing guard (`typeof`, `Array.isArray`, `isObj`/`asObj`/`str` in `agent-host/src/json-value.ts`,
+or a `v is T` function that checks all it claims) checks a value read field by field. `x as T` on such a value is a
+claim nothing checks, and the type-aware lint refuses it (`no-unsafe-type-assertion`, the `no-unsafe-*` rules for
+the `any` that `JSON.parse` returns; [CONTRIBUTING.md](../CONTRIBUTING.md)). The same goes for a caught value: `errorMessage(e)`
+from protocol, not `(e as Error).message`.
+
+Where a library parses the stream and declares its type, the adapter reads by that type and the build checks every
+field name against it: the Claude Agent SDK's `SDKMessage`, and Codex's generated protocol types. The values are
+still read carefully (`adapters/claude/json.ts` `ContentBlock`), since the other process may be another version than
+the one the types describe. The same message read back from a file another build wrote is not that type: it goes
+through a guard first (`history.ts` `readableMessage`).
+
+`parseTolerant` (protocol) is the one reader that keeps a value its schema rejects. It is meant for our own protocol
+between two builds of Centralu (docs/protocol.md §4), and is not a check of outside data.
+
 **In the runtime's Rust the same holds, enforced by a test** (`keeper/src/platform_checks.rs`): an OS predicate in
 `cfg(…)`, `cfg!(…)` or a `cfg_attr` condition (`unix`, `windows`, `target_os`, …) and `std::env::consts::OS` fail
 `cargo test` in the keeper crate's `src/` and the window's `src/` outside the OS layer (`keeper/src/os/`),
@@ -354,7 +376,7 @@ window (old build)                  keeper (old)                        window (
 | A keeper too old to know `relaunching` is acceptable only with background mode on | With it on, a window closing never stopped anything; with it off, relaunching would cut every turn, so the app refuses and says why. |
 | The keeper tells the next window it is the relaunched one (`relaunched` in the attach answer) | The window needs to know it came from "Apply now" to switch without a click; the keeper is the one party that saw both windows. The next attach spends the grace, so a window opened by hand later is not mistaken for it. |
 | A keeper that keeps agents switches without a confirmation for a working session or pending card | The keeper hands the agent process and its card over, so neither is lost. Terminals, commands and host-owned in-process calls still drain by their own bounds; an older keeper that cannot hand agents over keeps the confirmation. |
-| "Apply updates automatically when idle" (off by default): the host installs as soon as a check finds a newer version; the window relaunches when idle | Installing is safe while agents work (the keeper and every host run from their own copies). Applying waits for the host's one idle rule (`hostBusy`, `agent-host/src/idle.ts`, reported to the keeper and from it to the window): no session working, waiting for an approval or a question, or running background work, no terminal, no command. A session whose turn has finished (`waiting_input`) is idle; it counted as busy until 2026-10-05, which kept every session that had ever answered in the way. Unknown counts as busy. And no keystroke in a text field for 20 s: a relaunch under someone's fingers reads as a crash. A window with the setting on also switches by itself when idle, and waits instead of asking when something can be lost. |
+| "Automatic updates" (on unless the person turned it off, owner decision 2026-10-20; off by default only in a build run from source): the host installs as soon as a check finds a newer version; the window relaunches when idle | Installing is safe while agents work (the keeper and every host run from their own copies). Applying waits for the host's one idle rule (`hostBusy`, `agent-host/src/idle.ts`, reported to the keeper and from it to the window): no session working, waiting for an approval or a question, or running background work, no terminal, no command. A session whose turn has finished (`waiting_input`) is idle; it counted as busy until 2026-10-05, which kept every session that had ever answered in the way. Unknown counts as busy. And no keystroke in a text field for 20 s: a relaunch under someone's fingers reads as a crash. A window with the setting on also switches by itself when idle, and waits instead of asking when something can be lost. |
 | A window switches by itself only forward: its build must be newer than the host's and, when the keeper is behind, the keeper's (`isNewerBuild`, `platform/src/tauri/switch-plan.ts`) | Before this, "another build" was enough, so opening an older build's window (a backed-up app, an older local build) with the automatic mode on would quietly downgrade the keeper and the host. Newer means a higher app version (semver, prereleases included), and on equal versions a later `builtAt`. What cannot be ordered (no version on either side, equal versions without both build times, a host run from source) is not newer, so nothing happens by itself. Going back stays a button press: the bar says "This window is an older build (…) than the one running (…)" and offers "Switch back to this build". |
 | Never from a window that already runs the installed version, and once per window | The relaunched window still sees the old host's `restart_required`; without the check it would relaunch into itself forever. A failure stays on the line or the bar, never retried in a loop. |
 
@@ -387,6 +409,7 @@ agent-host / tauri ─┴─→ NormalizedEvent stream
 | adapters | Contract tests: replay recorded SDK/protocol responses → verify NormalizedEvent | C4. Possible in CI without a real CLI |
 | ui | Playwright on the core flows only (web dev mode + mock platform) | The bonus of developing in a browser |
 | dependency rules | eslint-plugin-boundaries + dependency-cruiser in CI | Enforce §2 by machine, not by document |
+| types | `tsc` strict, and typescript-eslint's type-aware rules in `pnpm lint`; what predates them is listed per file in `tooling/lint-allowlist/` and only shrinks (`tooling/type-aware-lint.test.ts`, #1339) | A cast on a CLI's message hid a crash the compiler would have refused (`/compact`, #1339) |
 | keeper (§4.1–4.4) | The real binary and host, driven by `scripts/keeper-*integration.mjs`; in CI on macOS without models ([agent-host.md](agent-host.md) §4.1) | Startup order, adoption and handoff only fail with real processes: #329's crash on every restart that held a terminal passed every unit and e2e test (#348) |
 
 ## 7. The connection to M0

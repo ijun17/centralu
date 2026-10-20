@@ -184,6 +184,20 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**An auto-tier change lands without a pull request of yours** (#1259 step 3). When everything
+your branch changes is auto ([below](#review-before-you-say-done): documents and images, fixture
+data, UI icons and fonts, only the kinds the auto rules list), push the branch, made from main, and hand it over with the board's `integrate` (the branch,
+the title, which becomes the squash subject, Why and Not exercised) instead of `open_pr` and
+`queue_merge`. The integrator judges the tier itself, with main's `pnpm tier` and rules on GitHub's
+copy of your branch, and refuses anything that is not auto, naming the files: then open a pull
+request as usual. Auto, it opens the pull request itself as the record (labelled `tier:auto`, and a
+draft until the queue squashes it, so nothing else can merge it: leave it a draft, even if an older
+board's message says to mark it ready) and queues it for your session; it lands after the fast tier like any queued change, and the queue's
+news (landed, a conflict, a failure, a later push that is no longer auto, a `tier:<name>` label above
+auto) comes to your session. One branch per change: no stack. Push a fix to the same branch and call
+`integrate` again; to land it as a pull request of its tier instead, `unqueue` it, mark it ready and
+`queue_merge` it.
+
 **A red run in the queue**: the queue reruns only what failed for the infrastructure's sake (a run
 cancelled with no failed job, a job that hit its timeout, a lost runner, a job on the board app's
 `queue.flakyJobs`). A test or build failure, also in a full run CI cancelled after `verify` failed
@@ -259,6 +273,31 @@ the same pull request (the test's message gives the number). It counts once agai
 main's record lists it, and raises the ceiling for good. In CI a missing or unreadable record of
 main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
 only, and says it did not compare with main.
+
+**Lint reads types, and what predates that only shrinks** (#1339). `pnpm lint` runs typescript-eslint's
+type-aware rules on everything the root `tsconfig.json` compiles: no `any` flowing on from `JSON.parse`
+or a catch, no assertion that narrows (`as T` from `unknown`, `x!`) in shipped code, no promise left
+floating. Data from outside the process goes through a zod schema or a narrowing guard, and a caught
+value's text through `errorMessage(e)` from `@cc/protocol`, not `(e as Error).message`. The findings that
+were there when these rules came in are listed in `tooling/lint-allowlist/`, one list per package, a
+sorted line per file and rule with the number of findings it may hold. A new finding fails, in a listed
+file as anywhere else: fix it, do not list it. A file holding fewer than its line passes, and so does a
+line for a file that is gone: a change that only fixes things need not touch a list, and two that fix one
+finding each in the same file do not fail together. `pnpm lint:tighten` lowers such lines (run it when you
+fix listed findings), and a weekly job (`.github/workflows/lint-tighten.yml`) opens a pull request with
+whatever is left. A count moves only with a file git sees renamed: rename a file (with `git mv`, or `git add` the
+move) and run `pnpm lint:tighten`, which moves its lines to the new path and says so. A file added at a path
+main still has a stale line for holds nothing. Code moved into another file is a
+new finding there, and a count freed in one file is not credit for another. `tooling/type-aware-lint.test.ts`
+compares the lists with main's at the merge base (a push to main with its parent) and refuses any line that
+is new or higher than main's but a renamed file's own (CI's `verify` fetches main's history for it and fails
+without it; elsewhere, without one, the test says it did not compare).
+The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
+that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
+code. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
+lint runs on two threads and without `--cache`: each thread builds the whole program (six took 13.6 GB),
+and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
+another file changed.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
@@ -398,13 +437,13 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 Every change has a risk tier by the paths it touches (#1259): `pnpm tier [--base origin/main]`
 prints it and the files that put it there. The rules, one reason each, are in
 [`.centralu/tiers.json`](.centralu/tiers.json); a change takes the highest tier of its files, and
-a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). No rules, rules that cannot be
+a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). A symbolic link or a submodule is deep, and a file that is executable in the change at least light, whatever its name. No rules, rules that cannot be
 read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
 |---|---|---|
-| auto | `docs/**` (not `security-boundaries.md`), fixture data (not code), UI icons and fonts | none beyond the checks |
-| light | everything no rule names: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
+| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries.md`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
+| light | everything no rule names, and anything in an auto folder of a kind its rule does not list: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
 | deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
 | person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
 

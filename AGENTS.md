@@ -77,7 +77,8 @@ and its **Not exercised** field, and updating documents in the same pull request
 session has the project board app's tools, they carry these rules as code: `open_pr`, `comment`,
 `file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `merge_when_green`, `queue_merge` (many
 PRs or a stack), `mark_ready` (without merge rights), `release`; use them instead of `gh` by hand
-(`help` says which for what).
+(`help` says which for what). A change whose tier is auto (docs, fixture data, UI assets) needs no
+PR of yours: push its branch and hand it over with `integrate`, which lands it.
 The owner answers decisions on the board's screen, saved on their machine only: `list_owner_answers`
 lists those not recorded yet; record each on its issue in English with `comment`, then
 `mark_answer_recorded`. Never post the owner's text as written.

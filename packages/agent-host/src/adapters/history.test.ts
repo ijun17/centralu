@@ -19,6 +19,7 @@ import { normalizeMessage } from './claude/normalize.js'
 import { normalizeNotification } from './codex/normalize.js'
 import { HISTORY_OUTPUT_CHARS, HISTORY_TOOL_ROWS } from './history-events.js'
 import { cleanTitle, stripInjectedBlocks } from './history-text.js'
+import { sdk } from './claude/sdk-message.test-helpers.js'
 
 /**
  * Loading a previous session only ever reads through **each tool's official API** (parsing a
@@ -91,7 +92,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
         { type: 'system', message: { content: 'compact boundary' } },
       ],
     })
-    const live = [...normalizeMessage(call, ''), ...normalizeMessage(result, '')].filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
+    const live = [...normalizeMessage(sdk(call), ''), ...normalizeMessage(sdk(result), '')].filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
     expect(live.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
     expect(await readClaudeHistory('s', '/p', 100)).toEqual([
       { role: 'user', text: 'Fix the build' },

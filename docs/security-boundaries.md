@@ -39,7 +39,7 @@ already left out other sessions', and indents a message's later lines, so text c
 work with it ([agent-host.md](agent-host.md) §1.2.1). They add no reach the caller lacked (the child works on the
 same files under the same or a lower preset), but they multiply what runs. The rules below
 apply to `safe` and `normal`; `auto` opens the consent, ownership and trust
-boundaries (#603), with a log line instead of a card or refusal. The agent depth binds every preset, `auto` included (#867):
+boundaries (#603), with a log line instead of a card or refusal (Claude's own cross-session messaging is closed under `auto` too, below). The agent depth binds every preset, `auto` included (#867):
 
 - **The person's consent.** For a `normal` caller it is the project's trust (#673): only a trusted project's
   sessions can start agents at all, and trusting it was the person's decision about that project, so no card is
@@ -280,28 +280,51 @@ Claude Code can discover other Claude processes on the same machine through
 the same permission-mode class, including two `safe` sessions. That path does not pass through
 Centralu's `ask_project` consent card.
 
-Every `safe` or `normal` Claude query Centralu builds applies inline SDK `settings.crossSessionInbound: 'refuse'`
-to drop inbound peer messages and adds `ListAgents` and its alias `ListPeers` to
-`disallowedTools`. It also forces `CLAUDE_CODE_HARBOR_KITE=0` in the child environment: in the
-inspected CLI versions 2.1.263–2.1.289 this undocumented gate disables peer listing,
-cross-session sends and inbox binding. `SendMessage` remains available because it also
-continues the session's own background subagents. Existing settings, denies and environment
-are merged, and settings-file selection remains governed by project trust and session kind.
+Every Claude query Centralu builds, under every preset, `auto` included, applies inline SDK flag settings
+`crossSessionInbound: 'refuse'` to drop inbound peer messages, adds `ListAgents` and its alias `ListPeers` to
+`disallowedTools`, and sets `CLAUDE_CODE_HARBOR_KITE=0` in the child environment. `SendMessage` remains available
+because it also continues the session's own background subagents. Existing settings, denies and environment are merged,
+and settings-file selection remains governed by project trust and session kind. The host's own
+`CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` are dropped from the environment it passes on: a host
+started inside a Claude session would otherwise hand its children that session's inbox address and secret.
 
-Under `auto`, the adapter applies none of these cross-session controls (#603); the session's
-own CLI settings and environment still apply. For other presets these controls cover workers, orchestrators, coordinators, worktree managers, builders, app
-agents, `start_agent` children and resumed sessions, including fresh keeper processes. A host
-handover that adopts an existing CLI cannot retroactively change its startup flags or
-environment; processes started before this fix must be restarted.
+This is not opened by `auto` (it narrows #603 for this one control, as the mailbox plan's slice 0 decided,
+`docs/plans/mailbox.md` §9.6): two `auto` sessions are the same permission class, the CLI's default delivers between
+them at once, and that would reach another Centralu session past the relations, the record and the guards its own
+messaging keeps. The controls cover workers, orchestrators, coordinators, worktree managers, builders, app agents,
+`start_agent` children and resumed sessions, including fresh keeper processes.
 
-Limits: the environment gate is version-sensitive. The documented inbound refusal and
-discovery denies remain even if that gate stops working, but they alone do not prove outbound
-isolation when a peer address is already known and `SendMessage` stays enabled. Re-run
-`packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades to check discovery,
-delivery to a second session and own-subagent messaging. Unit tests check constructed options;
-the live probe supplies bounded runtime evidence. This is a provider-messaging boundary,
-not OS isolation: commands with the user's permissions can still access same-user files and
-sockets, and processes started outside Centralu are not configured by this adapter.
+What holds, and what does not, said plainly (CLI 2.1.263 to 2.1.299 read and measured):
+
+- **`CLAUDE_CODE_HARBOR_KITE=0` can be undone.** The CLI applies the `env` of the person's **user** settings
+  (`~/.claude/settings.json`), of flag settings and of managed settings onto its environment after it starts, so a user
+  `env` that sets the key to `1` binds the session's inbox again. Project and local settings cannot set it (the key is
+  on their deny list). The environment gate is therefore not the control to rely on. What holds when it is undone is
+  the inline `crossSessionInbound: 'refuse'` (the message is accepted into the inbox and never read: probe case
+  `kite-on-b`) and the `ListAgents` / `ListPeers` denies.
+- **Managed (organisation policy) settings outrank Centralu's inline layer.** The CLI resolves the inbound value as
+  managed, then flag, then user settings; repo files can only tighten it. A managed `crossSessionInbound: accept`
+  reopens the channel, and a managed `env` can turn the gate back on. That is the organisation's decision and Centralu
+  does not override it. A managed file was not tried (it would affect every Claude on the machine).
+- **Below that, the person's own settings do not reopen it.** A project settings file that asks for `accept` loses to
+  the inline layer (probe case `auto-accept-file`). By the CLI's resolution order (read in its binaries, not measured)
+  so do the person's user setting `crossSessionInbound: accept` and the CLI's `/config` switch: flag settings beat user
+  settings. The person's own interactive Claude cannot reach a
+  Centralu session either (probe case `in-from-raw`: the receiver has no inbox to reach).
+- **A process an older host started keeps the flags it was started with**, so a kept `auto` session from before this
+  change has its inbox open. Its launch fingerprint is version 3 now (`launchSettingsFingerprint`), so the host that
+  adopts it restarts it once, at the next safe boundary (the #589 path: at idle, or after its turn), and the restart
+  carries the controls.
+
+Limits: the environment gate is version-sensitive, undocumented, and undoable by user settings as said. The documented
+inbound refusal and the discovery denies do not alone prove outbound isolation when a peer address is already known and
+`SendMessage` stays enabled; the probe measures the outbound side too (`out-to-raw`: a controlled sender is told
+"Cross-session messaging is not available in this session"). Re-run
+`packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades: it addresses the receiver by the name it
+registered (the CLI never routes a session UUID), runs the controlled cases, the mixed ones, and two uncontrolled
+controls that show it can see a leak. Unit tests check constructed options; the live probe supplies bounded runtime
+evidence. This is a provider-messaging boundary, not OS isolation: commands with the user's permissions can still access
+same-user files and sockets, and processes started outside Centralu are not configured by this adapter.
 
 ## What each session's tools can do (#382)
 
@@ -327,8 +350,8 @@ front door" below).
 | `orchestrator` | The central orchestrator | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at other sessions" is on | From a trusted project, reads every project's ordinary sessions on this computer and the linked machines (not an orchestrator's, a coordinator's or an app's); from an untrusted one, its own project only (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
-| none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
+| `reader` | Every other session in a project (always: "Let sessions look at other sessions" is no longer a setting, owner decision 2026-10-20, and a stored "off" is not read) | From a trusted project, reads every project's ordinary sessions on this computer and the linked machines (not an orchestrator's, a coordinator's or an app's); from an untrusted one, its own project only (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
+| none | A session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
 one) was folded into ordinary sessions (#561 part 3): a session starts worktree agents itself with `start_agent`, works
@@ -358,7 +381,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `install_machine` | yes | — | — | — | — |
 | `remove_machine` | yes | — | — | — | — |
 | `reconnect_machine` | yes | — | — | — | — |
-| `set_machine_connect` | yes | — | — | — | — |
+| `set_machine_auto_reconnect` | yes | — | — | — | — |
 | `set_machine_autostart` | yes | — | — | — | — |
 | `get_preferences` | yes | — | — | — | — |
 | `set_preferences` | yes | — | — | — | — |
@@ -367,6 +390,15 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `trash_subagent_steps` | yes | — | — | — | — |
 | `delete_trashed` | yes | — | — | — | — |
 | `empty_trash` | yes | — | — | — | — |
+| `list_projects` | yes | — | — | — | — |
+| `set_project_trust` | yes | — | — | — | — |
+| `list_approval_rules` | yes | — | — | — | — |
+| `remove_approval_rule` | yes | — | — | — | — |
+| `list_app_grants` | yes | — | — | — | — |
+| `forget_app_answer` | yes | — | — | — | — |
+| `revoke_project_consent` | yes | — | — | — | — |
+| `share_app` | yes | — | — | — | — |
+| `set_agent_limits` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
@@ -557,20 +589,28 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `handoff_session` (the orchestrator hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words, each quoted; "always" for this orchestrator while the host serves it, recorded only for a call that passed every check; an unknown or unusable tool is refused before the card) | asks | asks | open | asks | asks | asks | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the central orchestrator only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an orchestrator or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its live children move to the successor (`moveChildren`, scope `live`), and the successor keeps the original's preset |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `add_project` (the orchestrator adds a folder that already exists, here or on a linked machine, #1220) | asks (a card with the machine, the full path, that it exists and is a folder, and whether it is a git repository with its `origin`, every time) | asks | asks | asks | asks | asks | asks | asks | `ProjectCreation.addFolderAsked` / `addFolderOnMachine` (`sessions/project-creation.ts`) → `askHost` with `alwaysAsk`: `auto` does not answer it, since the folder can be anything on that disk and, once a project, the orchestrator can start sessions in it. The facts are read on the folder's machine (`projects.inspect`, git config only, none of the repository's programs); a missing path, a file or a folder already a project is refused before the card, and on Allow the folder is registered as the sidebar's Add project registers it (`addProject`; on a linked machine that machine's `projects.add`), untrusted when new. The central orchestrator only, as a rare command behind `centralu_run` |
-| `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and connect mode; the central orchestrator only |
+| `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and whether it reconnects by itself; the central orchestrator only |
 | `add_machine`, `install_machine` (install or update), `remove_machine`, `set_machine_autostart` (the orchestrator changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The central orchestrator only, as rare commands behind `centralu_run` |
-| `reconnect_machine`, `set_machine_connect` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setConnect`: what the Machines row's Reconnect and connect setting do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
-| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, the notification switches, idle sleep, update checking and moving idle sessions to a new agent CLI (the orchestrator changes a setting the window offers, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field; `sessionTools`, the agent ceiling, depth and models, trust, approval rules and app grants have none, and an unknown field is refused by name. The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
-| `set_preferences` `applyUpdatesWhenIdle: true` when it is off, or `checkForUpdates: true` when it is off and apply is on (#1219) | asks (a card saying that a newer Centralu then installs by itself and the desktop window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAutoApply`. Turning either off asks nothing. A denial leaves the pair as it was and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
-| `set_preferences` `notifications.approval: false` or `notifications.error: false`, when the switch is on, or `notifications.sound: false` while either would still notify (#1306) | asks (a card naming the notification that stops, or the sound, and what the person then does not hear of, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `prefs.set`. These two are the ones that tell the person a card waits, so turning them off is the orchestrator choosing what the person stops hearing about; The sound is the same stop: it is how an approval or an error reaches someone away (`notices.ts` alerts through it; the OS banner path does not reach them), so turning it off while either would still notify asks too, and once neither notifies it asks nothing. Turning them on, one already off, and the other switches (`done`, `allDone`, `whenFocused`) ask nothing. One card for all of them in a call. A denial keeps the notifications notifying, and keeps the sound on with them (off, it would silence them); the other switches of the call still change |
+| `reconnect_machine` on a machine away on its own with Auto reconnect on, `set_machine_auto_reconnect` turning Auto reconnect off, or on where it already is (#1219, #1341) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setAutoReconnect`: what the Machines row's Reconnect and Auto reconnect switch do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
+| `reconnect_machine` on a machine the person disconnected or whose Auto reconnect is off and that is not connected, `set_machine_auto_reconnect` turning Auto reconnect back on (#1341) | asks (a card naming the machine and what connecting does: it connects over ssh with the person's keys; every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"`, then the same `Links` call. An agent does not undo what the person chose by itself: only `machines.disconnect` leaves a machine `disconnected`, and a switch that is off is the person's choice that nothing reconnects the machine by itself, so an agent reconnecting it is that. A machine away on its own with the switch on is reconnected with no card, and one that is already connected is only answered as connected: no card, nothing done. A denied card changes nothing. The central orchestrator only |
+| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, the notification switches, idle sleep, update checking and moving idle sessions to a new agent CLI (the orchestrator changes a setting the window offers, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field; `sessionTools` (always on, not a setting), the agent ceiling, depth and models, trust, approval rules and app grants have none, and an unknown field is refused by name. The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
+| `set_preferences` `autoUpdate: true` while checking or installing is off ("Automatic updates", #1219; one setting since 2026-10-20) | asks (a card saying that a newer Centralu then installs by itself and the desktop window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAuto` and `updates.setAutoApply` for the half or halves that are off. Turning it off asks nothing. A denial leaves both halves as they were and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
+| `set_preferences` `notifications.approval: false`, when the switch is on, or `notifications.sound: false` while it would still notify (#1306) | asks (a card naming the notification that stops, or the sound, and what the person then does not hear of, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `prefs.set`. The approval notification is the one that tells the person a card waits, so turning it off is the orchestrator choosing what the person stops hearing about; the sound is the same stop: it is how an approval reaches someone away (`notices.ts` alerts through it; the OS banner path does not reach them), so turning it off while an approval would still notify asks too, and once it no longer notifies it asks nothing. Turning them on, one already off, and the other switches (`done`, `whenFocused`) ask nothing. One card for both in a call. A denial keeps the approval notification on, and the sound on with it (off, it would silence it); the other switches of the call still change. The "error" and "every session finished" notifications are gone from the product (2026-10-20): `error` and `allDone` are refused by name |
 | `list_trash`, `restore_trashed`, `trash_subagent_steps` (the orchestrator reads the trash, brings a session or its subagent steps back, or moves a session's subagent steps there, #1219) | allowed (a restore that brings back a deleted project's folder asks, below) | allowed | allowed | open | allowed | allowed | allowed | open | `TrashFlow.run` (`sessions/trash-flow.ts`) → the window's own calls through the router (`trash.list`, `subagents.usage`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`), so a linked machine's trash is reached as the window reaches it and the host's checks decide (a session not in the trash is refused, a restore whose project folder is gone is refused by the host). Nothing is lost: all three are reversible. The central orchestrator only, as rare commands behind `centralu_run` |
 | `restore_trashed` of a session whose project was deleted (#1219) | asks (a card naming the session, the project and the folder that will be registered again, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `trash.restore`, which registers the folder as a project again (untrusted), what `add_project` asks about. A session not in the trash is refused before any call |
 | `delete_trashed` (one trashed session, or its trashed subagent steps, for good) and `empty_trash` (everything listed: sessions, kept app runs, trashed steps) (#1219) | asks (a card naming the session or the counts, the size, up to ten names, the tool conversation files and worktrees that go with them, and that it cannot be undone, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then the window's `trash.purge`, `trash.purgeSubagentSteps` and `trash.purgeRuns`, one per item the card named (`trash.empty` is not called: it takes everything there is). Refused before the card: a session that is not in the trash (a live session is never deleted from here), steps not in the trash. After Allow the trash is read again: a session restored (or deleted) while the card stood is left alone, one that reached the trash meanwhile is not deleted, and steps moved there after the card are kept (`upTo`). The trash on a linked machine that could not be reached is left alone and named. The central orchestrator only |
+| `list_projects` (the orchestrator reads the projects, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` (`sessions/trust-flow.ts`) → the window's own call through the router (`projects.list`). The central orchestrator only, as a rare command behind `centralu_run` |
+| `set_project_trust` with `trusted: false` (the orchestrator takes a project's trust away, #1219) | asks (a card saying the project's own deny rules and hooks stop applying, auto sessions included, and its sessions restart, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `projects.setTrusted`. Not only narrowing: an untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's deny rules and blocking hooks no longer bind its agents. After Allow the project is read again: removed, moved, unreachable or already untrusted, nothing more changes. The central orchestrator only |
+| `list_approval_rules`, `remove_approval_rule` (the orchestrator reads the approval rules, or removes one, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`approvals.rules`, `approvals.deleteRule`; a linked machine's rule by its folded id). Removing only narrows: that action asks again. No command adds or widens a rule; a rule comes only from the person answering a card "always". The central orchestrator only, as rare commands behind `centralu_run` |
+| `list_app_grants`, `forget_app_answer`, `revoke_project_consent`, and `share_app` with `shared: false` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`apps.list`, `apps.permissions`, `apps.forgetPermission`, `projectConsents.list`, `projectConsents.revoke`, `apps.setShared`). Each only narrows: a forgotten answer or a revoked consent asks the person again next time, and an app no longer shared is detached from other projects' sessions. The central orchestrator only |
+| `share_app` with `shared: true` (#1219) | asks (a card naming the app, its project and what it may ask for, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `apps.setShared`. A root app or a user-folder app has no share switch and is refused before the card. After Allow the app is read again: one removed, already shared, or whose `uses` changed meanwhile is not shared. Sharing still needs the person's consent for each pair of projects before another project's session attaches it. The central orchestrator only |
+| `set_agent_limits` (the orchestrator changes the limits on agents: running agents per project, levels that may start agents, #1219) | asks (a card naming each limit as it is and as it becomes, every change, narrowing too, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `prefs.set` with exactly the named fields. Values are checked with the window's own patch schema before the card; nothing to change asks nothing. After Allow the limits are read again: one the person changed in Settings while the card stood leaves everything as it is. `set_preferences` has no field for them, the agent models stay the person's, and `sessionTools` (always on since 2026-10-20) is refused by name. The central orchestrator only |
+| `set_project_trust` with `trusted: true` (#1219) | asks (a card naming the project, its folder and machine, and each of its apps with what it may ask for, in the window's trust card's words, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `projects.setTrusted`. After Allow the project and its apps are read again: a project removed meanwhile, or whose apps changed (one added by a pull, or what one may ask for), is not what the card named and is not trusted; one the person trusted meanwhile is left as it is. Refused before the card: a name no project has, or one two projects share (their ids are named). The central orchestrator only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
 | `update_centralu` action `apply` (any profile that has the tool) | refused | asks | asks | open | refused | asks | asks | open | `applyUpdateAsked` → `askHost` (an `other` card, `about: 'centralu_apply'`) after a window answered ready (`UpdateApplyBroker`); app agents refused; the window re-checks with its button's rules (`agentApplyVerdict`: the bundle's own version must be the installed one and newer than the window) |
-| Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
+| Claude's independent-session discovery and messaging | refused | refused | refused | refused | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, under every preset (`auto` too since the mailbox plan's slice 0; #603's opening no longer applies to it) |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
 | `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
@@ -671,11 +711,13 @@ what runs), a name already linked, and an install this computer cannot make.
 **Settings and the trash from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
 window's Settings changes, through the window's own calls, so the same schemas and handlers decide. The reversible
 settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
-at once. What widens what agents may do or cost (`sessionTools`, the agent ceiling, depth and models), trust, approval
-rules and app grants have no field: an unknown field is refused by name. "Apply updates when idle" turned on (or checking turned on while it is) is a
-setting that asks (as is turning off the approval or error notification, below): with both on, code arrives and the window relaunches without a later question, which is what
+at once. What widens what agents may do or cost (the agent ceiling, depth and models), trust, approval rules and app
+grants have no field: an unknown field is refused by name, and so is `sessionTools`, which is not a setting any more (the
+reader set is always on, owner decision 2026-10-20); the trust commands below handle trust, rules, grants and the limits,
+each behind its own card where it widens. "Automatic updates" turned on (`autoUpdate`) is a
+setting that asks (as is turning off the approval notification, below): with both on, code arrives and the window relaunches without a later question, which is what
 `update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
-is read as allow, once). Turning off the notification for an approval or an error asks too, and so does turning off the sound while either still
+is read as allow, once). Turning off the notification for an approval asks too, and so does turning off the sound while it still
 notifies: they are what tells the person a card waits, and the orchestrator should not decide that they stop hearing of one.
 
 The trash is the person's safety net, so deleting from it for good is the one thing there that asks (`delete_trashed`, `empty_trash`):
@@ -684,16 +726,36 @@ go with them), and the host deletes exactly what the card named and is still in 
 and moving a session's subagent steps to the trash lose nothing and ask nothing. A live session cannot be deleted
 through these commands: it has to be in the trash first, which `agents.deleteSession` and the sidebar do.
 
+**Trust from the orchestrator** (#1219, third slice). Trust is what lets a project's apps run and its setting files
+apply, so the orchestrator only asks for it, and asks to take it away as well: an untrusted project's sessions read
+the person's own settings only, so its own deny rules and the hooks that block tools stop binding its agents (`auto`
+sessions included). `set_project_trust` with `trusted: true` raises a card that names the project, its folder and machine, and each app the trust covers with what it may ask for
+(the same wording as the window's trust card, `usesLines`). What the card named is checked again after Allow, so a
+project whose apps changed while the card stood is not trusted on an answer about other apps. Approval rules only
+narrow from the orchestrator: it may list and remove them, and no command adds one, so a standing "allow" still comes
+only from the person's own "always" on a card. An app's remembered answers and the consents between projects can only
+be forgotten or revoked from the orchestrator, which makes the next attempt ask the person (a forgotten "deny" too: the
+app asks the person again, never the orchestrator, so no card guards it); sharing an app with other projects asks, and an
+app's own capability question is still answered by the person alone. Every card quotes what a manifest supplies (an app's
+name, description, the background work it declares) with control and format characters escaped, so a line break or a
+bidi override in someone's repository cannot make the card say something it does not; a project's folder is named whole.
+An app's id, which is its folder's name, is quoted too. A project whose machine cannot be reached is refused before any
+card, and so is one whose machine could not list its apps (they are asked of that machine alone, `apps.list` with
+`machine`, so a failure is not read as "no app"). The limits on agents
+(running agents per project, levels that may start agents) bound the
+orchestrator's own children too, so every change to them asks, narrowing as well as widening.
+
 ### Turning things off
 
 The table describes `safe`/`normal`. Under `auto`, project trust and revoked remembered
 consents do not close delegation or attachment; the session's preset is checked on each call.
 Auto attachments are recorded separately from consent grants and stop counting after a preset
-downgrade. The session-tools switch and app-sharing switch still apply to every preset.
+downgrade. The app-sharing switch still applies to every preset. The session-tools switch is gone (always on,
+2026-10-20).
 
 | Change | orchestrator | scoped | builder | reader |
 |---|---|---|---|---|
-| "Let sessions look at other sessions" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
+| "Let sessions look at other sessions" off (an older window sending it, or a record an earlier build stored) | — | — | — | No change: the reader set is always on (owner decision 2026-10-20). The host reads the switch as on (`UiPreferencesCommands.uiPreferences`), does not store an "off" (`setUiPreferences`), and neither the profile rule (`toolProfileFor`) nor the reader set (`readerToolsFor`) reads it, so its calls, the bridge's `toolProfileOf` and apps it attached are unaffected |
 | Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards, its sessions' `ask_project` and fork cards, and its queued `ask_project` requests are withdrawn and their callers told (#673); those of an `auto` session stay, and are read again at delivery |
 | The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
 | The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again, and an `ask_project` request for the pair still queued is withdrawn (one an `auto` session queued stays, and is read again at delivery); for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |

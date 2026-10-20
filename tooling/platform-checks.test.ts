@@ -4,7 +4,7 @@
  * boundaries.test.ts does, so no file is created.
  */
 import { describe, expect, it } from 'vitest'
-import { ESLint } from 'eslint'
+import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +14,7 @@ import { PLATFORM_MODULES as MODULES } from '../eslint.config.js'
 const PLATFORM_MODULES = MODULES as string[]
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const eslint = new ESLint({ cwd: ROOT })
+const eslint = virtualFileLinter()
 
 async function checks(filePath: string, code: string): Promise<string[]> {
   const [res] = await eslint.lintText(code, { filePath: join(ROOT, filePath), warnIgnored: false })

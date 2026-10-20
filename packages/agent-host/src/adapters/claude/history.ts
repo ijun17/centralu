@@ -1,9 +1,10 @@
 import { launchesSubagent, type NormalizedEvent } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
-import { finite, trimmed } from '../../json-value.js'
+import { asObj, finite, isObj, trimmed } from '../../json-value.js'
 import { HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
-import { normalizeMessage } from './normalize.js'
+import { blocksOf, type AssistantBody } from './json.js'
+import { assistantEvents, userEvents } from './model-messages.js'
 import { toolResultEvent } from '../tool-result.js'
 
 /**
@@ -155,15 +156,14 @@ export async function readClaudeHistory(
 
 /**
  * A message as the live normalizer reads it: a text body becomes its one text block, and a content list keeps only
- * its blocks (objects), so a string, an object or a `null` where the SDK has a list reads as no content.
+ * the blocks the readers act on (`blocksOf`), so a string, an object or a `null` where the SDK has a list reads as no
+ * content. A row from a transcript file is not the SDK's type (#1339): another build may have written it, so this is
+ * what checks it, and what the readers take is the shape they check field by field.
  */
-function readableMessage(message: unknown): unknown {
+function readableMessage(message: unknown): AssistantBody {
   if (typeof message === 'string') return { content: [{ type: 'text', text: message }] }
-  if (typeof message !== 'object' || message === null) return { content: [] }
-  const content = (message as { content?: unknown }).content
-  if (typeof content === 'string') return { ...message, content: [{ type: 'text', text: content }] }
-  const blocks = Array.isArray(content) ? content.filter((b): b is object => typeof b === 'object' && b !== null) : []
-  return { ...message, content: blocks }
+  if (!isObj(message)) return { content: [] }
+  return { content: blocksOf(message.content), id: message.id, usage: isObj(message.usage) ? message.usage : undefined }
 }
 
 /**
@@ -173,9 +173,9 @@ function readableMessage(message: unknown): unknown {
  * and plan are not part of a conversation read back (`historyEvents`). A call that launches a subagent is noted in
  * `agents`, for its result (`userLines`).
  */
-function assistantLines(message: unknown, agents: Set<string>): HistoryMessage[] {
+function assistantLines(message: AssistantBody, agents: Set<string>): HistoryMessage[] {
   const out: HistoryMessage[] = []
-  const events = normalizeMessage({ type: 'assistant', message }, HISTORY_SESSION)
+  const events = assistantEvents({ message }, HISTORY_SESSION)
   for (const e of events) {
     // A tag inside the model's own words is something the model actually wrote, so nothing is stripped here
     if (e.type === 'message_delta' && e.text.trim()) out.push({ role: 'assistant', text: e.text.trim() })
@@ -208,12 +208,12 @@ function agentResult(e: Extract<NormalizedEvent, { type: 'tool_result' }>, agent
  * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
  * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843).
  */
-function userLines(message: unknown, agents: ReadonlySet<string>): HistoryMessage[] {
+function userLines(message: AssistantBody, agents: ReadonlySet<string>): HistoryMessage[] {
   const raw = userText(message)
   if (COMPACT_SUMMARY.test(raw)) return [{ role: 'system', event: { type: 'compaction', sessionId: HISTORY_SESSION, failed: false } }]
   const text = stripInjectedBlocks(raw)
   const out: HistoryMessage[] = text ? [{ role: 'user', text }] : []
-  const events = normalizeMessage({ type: 'user', message }, HISTORY_SESSION)
+  const events = userEvents({ message }, HISTORY_SESSION)
   out.push(...historyEvents(events.map((e) => (e.type === 'tool_result' ? agentResult(e, agents) : e))))
   return out
 }
@@ -221,13 +221,13 @@ function userLines(message: unknown, agents: ReadonlySet<string>): HistoryMessag
 /** The text blocks of a user message: what the person typed, before injected blocks are stripped */
 function userText(message: unknown): string {
   if (typeof message === 'string') return message.trim()
-  const content = (message as { content?: unknown } | null)?.content
+  const content = asObj(message).content
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const b of content) {
-    const block = b as { type?: unknown; text?: unknown }
-    if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+    const block = asObj(b)
+    if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
   }
   return parts.join('\n\n').trim()
 }

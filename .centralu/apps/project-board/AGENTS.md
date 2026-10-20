@@ -604,6 +604,76 @@ looked into).
   Tests: `tooling/project-board-queue.test.ts` ("the main guard …"), with a real git checkout and a
   fake `gh`.
 
+### The integrator (#1259 step 3)
+
+A change whose risk tier is **auto** (docs, fixture data, UI assets: `.centralu/tiers.json`) lands without
+its session opening a pull request. The session pushes a branch made from main and hands it over with
+**`integrate`** (`branch`, `title`, `why`, `notExercised`, `whatChanged?`, `verified?`, `closes?`, `owner?`;
+model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
+
+- **Main is not protected** (no branch protection, no rulesets, 2026-10-19), but the integrator never pushes
+  to main: it lands through the queue's own path, so one engine lands every change (lease, driver, batches
+  of the quick tier, conflicts, notices, the main guard and its reverts), and a protected main later changes
+  nothing here.
+- **The judge** (`judgeBranch`): never the session's word or checkout. Main and the branch are fetched from
+  GitHub into the queue's checkout (`QUEUE.conflicts.checkout`, under `refs/centralu-integrate/<pid>-<random>`,
+  removed again; the checkout's branches and work are not touched), and **main's own** `scripts/tier.mjs`
+  (written to a temporary folder from main, run with `--base <main> --head <branch> --json`) judges what the
+  branch adds since it left main, with main's `.centralu/tiers.json`; an answer whose rules did not come from
+  main is not taken. A branch that rewrites the judge or the rules is judged by main's, which call those
+  files deep. No checkout, no remote, no judge or rules on main, a judge that answers nothing, or anything
+  else that keeps it from being judged: deep (`unjudged`), so refused.
+- **Refused**, with nothing written: no maintain or admin (then `open_pr` and `mark_ready`), a fork's branch,
+  the default branch, a title whose squash subject would be over 72 characters (#1222: before any batch), a
+  description the template refuses (an `open_pr` dry run), a branch not on GitHub, a branch with nothing over
+  main, and any tier but auto, with the files and rules that put it there and the normal path (`open_pr`
+  after the review its tier asks for, then `queue_merge`).
+- **The record is a draft until the squash** (#1259 review): GitHub refuses to merge a draft, and so do
+  `merge_when_green` and every version of this queue, so a board server started before this code (a session's,
+  which can drive the queue for days) or a merge by hand cannot land a record it did not judge. This queue accepts
+  a draft only for an item it marked `auto` (`decideBefore`, the batch's build, run and landing), and `land` readies
+  it (`gh pr ready`) right before the squash, under the lease, turning it back into a draft when the squash does
+  not happen, also when it throws (a rate limit, no network: `land` re-drafts, then rethrows); a poll that finds a record ready for review (a person, `mark_ready`, a driver stopped in between)
+  turns it back first. Chosen over a capability flag on the lease: an older driver can take the lease after the
+  hand-over, and a flag cannot stop what it does then.
+- **Only through a batch**: an `auto` item's own run is CI's `changes` job alone (a draft), so `decideCi` never reads it as
+  a gate: the item waits for a batch, which runs the quick tier on what lands, and needs attention (`batch`) when the
+  queue cannot batch. `integrate` refuses where the queue has no batches or no two tiers of CI (`project.json`
+  `queue.batch`, `ci.fullTier`), or no checkout or remote to judge in (`setup`).
+- **An older board** polling the record says it is a draft and to mark it ready; `integrate`'s answer tells the session to
+  leave it. If someone readies it anyway, the next poll here turns it back.
+- **Labels only raise**: an open pull request taken as the record is refused when its highest `tier:<name>` label
+  is above auto (`labelTier`).
+- **A fetch that fails** while judging (no network, GitHub down) is refused with "integrate again", not as deep.
+- **The record**: a pull request into the default branch the integrator opens itself with `open_pr`'s
+  procedure (the template, the title and public-text rules; Situations checked and Usability `n/a`: no code
+  runs in an auto change), its Verified carrying the integrator's Tier line, where and how it judged,
+  and that it was handed over with `integrate`, labelled `tier:auto`. An open pull request from the branch is
+  the record instead (handed over again after a fix; one stacked on another branch is refused).
+  Chosen over a commit trailer and a board event: the main guard, its reverts, the release notes and
+  `landedItem` read `(#N)`, and a trailer would need a second landing path beside the queue's.
+- **Queued** for the session as `queue_merge` queues (`owner` and `author` both the given `owner`, its notice
+  address), the item marked `auto` (`branch`, the `head` and `main` it judged, the Tier `line`, `at`); from
+  there it is any item: kept on main, batched for the quick tier, squashed as "Title (#N)", its branch
+  deleted, its news posted into the session.
+- **Judged again by the queue** (`judgeHead`): on each new head a poll reads (`pollItem`, before its CI is
+  read), kept on the item as `tierAt` (`head`, `main`, `tier`, `line`, `reason`), and once more inside `land`,
+  right before the squash, against main as it is then (its rules may have moved since). Not auto → attention
+  `tier`, once per head, to the session that handed it over: the files, and to take out what is not auto and
+  push, or get its tier's review and `queue_merge` it. Such a head goes to no CI read and no batch; one stopped
+  at landing ends its batch's landing as any refused merge does and keeps the judgment, so polls do not land it
+  again, and gets no "Passed CI in queue/batch-N" status (`land`'s `beforeMerge` posts it once its checks
+  passed). A head that **could not be judged** (a fetch that failed, the branch gone, no checkout, a fork's pull
+  request) throws, so it counts as a failed poll: nothing lands meanwhile, it is tried again, and the session
+  hears only after three in a row (`errorReason`); in a batch, three such failures end the batch.
+  Queued with `queue_merge`, a record is an ordinary pull request again (`auto` and `tierAt` dropped).
+- **Labels**: a `tier:<name>` label above auto (a person's, raised by hand) stops an integrated item on every poll
+  and at the squash (`labelReason`; the queue reads labels with each pull request, `QUEUE_PR_FIELDS`).
+- **Older drivers**: a watch command or app server started from a board older than this judges nothing, but it
+  never lands a draft, and the record is one until this code squashes it (above), so it cannot land a record.
+- Tests: `tooling/project-board-queue.test.ts` ("the integrator …"), with a real git checkout whose main
+  carries this repository's judge and rules, and the fake `gh`.
+
 ## Which tool for which task (#957)
 
 `help` (model only, read-only) answers a fixed table: which of this app's tools to use for a
@@ -698,8 +768,8 @@ step shows on the screen.
 - **Read fresh at every call**: main's commit and the tags from the remote (`git fetch`/`ls-remote`
   under refs of the call's own, removed again), CI on main from GitHub, the release workflow's runs.
   `release_status` (read-only, agents and the screen's "Release" dialog) answers the phase
-  (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), CI on main, the
-  checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
+  (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), the release
+  commit and how far behind main it is (#1350), CI on it, the checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
   the last tag (the release notes draft, without `chore(release)` commits) and the next step.
 - **Release CI sources (#633 review):** match GitHub Actions check-suite ids to runs of the
   configured CI workflow files and exact commit/event (main push or PR). Release/rehearsal checks
@@ -709,9 +779,24 @@ step shows on the screen.
   cancellation. Generated release bumps have their own build concurrency group per commit.
   Status reports this publication gate. The inline event scan does not follow called scripts or
   actions; review those manually as described in docs/releasing.md.
-- **CI evidence for rehearse and tag (#629):** main green is used directly and main failure always
-  blocks. Otherwise the merged bump PR may supply green required checks only when main is its
-  single-parent squash commit and the PR head has the identical Git tree. Audit required workflow
+- **The release commit (#1350):** a release is cut from the bump's own squash commit, not main's head.
+  `releaseCommit` walks main's first-parent history back from its head to the first commit that
+  does not declare main's version (`release.source`); that commit is the default for `rehearse` and
+  `tag`, and `commit` names another one of that run (main's head among them). A version main no
+  longer declares (a later commit changed it, a newer bump) is refused, by `version` or by `commit`.
+  Everything the release reads is read at that commit: CI, the version files, the rehearsals (those on
+  it, and those on the bump branch at a commit with its tree), the PR evidence. What lands after it
+  does not matter, and a rehearsal of main's head does not count (only runs on the release commit, or
+  on the bump branch at a commit with its tree). The notes run from the last tag to the release commit;
+  what came after is listed as "Not in this release". A shallow checkout whose history stops before
+  the bump is refused (the boundary is not the bump). `tag` and `rehearse`
+  need a clean checkout, not one on main or at main (the tag is pushed by id); `bump` still does.
+  Off main's head `rehearse` pushes the commit to `branchPrefix` + the version (never moved: a branch
+  there with another tree is refused) and dispatches the workflow on it; `tag` deletes that branch
+  after the push when it is still at the release commit (a bump PR's head is not).
+- **CI evidence for rehearse and tag (#629):** CI on the release commit green is used directly and its
+  failure always blocks. Otherwise the merged bump PR may supply green required checks only when the
+  release commit is its single-parent squash commit and the PR head has the identical Git tree. Audit required workflow
   jobs for event/branch behavior first; such jobs or unmapped required names require main CI. Both
   steps and status say which evidence they used, or why it was refused. Bump still needs main CI.
 - **`release`** (`step`, `confirm?`, `path?`): each step checks everything first and refuses with every
@@ -730,18 +815,18 @@ step shows on the screen.
     checked with `dryRun` before the push: the merged list under Why, the files under What changed.
     It warns, never refuses, when other builds' jobs (running plus queued, of every active run) reach
     three quarters of `release.runners` (default 20): the bump PR's CI would queue behind them (#1035).
-  - `rehearse`: CI green, the version untagged and its files consistent; starts the workflow on main
+  - `rehearse`: CI green on the release commit, the version untagged and its files consistent; starts the workflow on main (or, when main has moved past the release commit, on a branch at it)
     with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
     A rehearsal already running or passed on that commit is not started again. While main's version
     is released (#1035), it rehearses the open bump PR instead: on its branch, with no CI required,
     when exactly one `branchPrefix` branch after main's version has an open PR into main (or
     `version` names it), its head is the PR's head, main's head is an ancestor of it (else the
     squash would give main another tree), and it carries that version consistently and untagged.
-  - `tag` (`version?`, `skipRehearsal?`): the checkout as for bump, CI green, main's version after the
+  - `tag` (`version?`, `commit?`, `skipRehearsal?`): a clean checkout, CI green on the release commit, main's version after the
     latest tag and untagged (a release tag is never moved), its files consistent, and a successful
-    rehearsal on that commit, or on `branchPrefix` + the version at a commit with main's tree (the
+    rehearsal on that commit, or on `branchPrefix` + the version at a commit with its tree (the
     bump PR's rehearsal; the rule #629 uses for its CI), unless `skipRehearsal: true`. The newest of
-    those counts. Pushes the tag on main's commit by its id
+    those counts. Pushes the tag on the release commit by its id
     (lightweight, as before; no local tag is made) and answers the release run.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve
@@ -777,7 +862,7 @@ step shows on the screen.
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
   decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
-  mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, merge_queue, unqueue), `help-tools.mjs` (help),
+  mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
   edit_private_words).
 - What the families share: `config.mjs` (project.json, read once at start), `board.mjs` (the cached
@@ -789,7 +874,8 @@ step shows on the screen.
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
   (pure) and their steps on GitHub. `run-failure.mjs` — why a CI run failed, real or infrastructure
-  (pure: the rerun policy). `queue-conflict.mjs` — the git work of a conflict.
+  (pure: the rerun policy). `queue-conflict.mjs` — the git work of a conflict. `queue-integrate.mjs` —
+  the integrator's judge of a branch's tier, and the record's texts (#1259 step 3).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).

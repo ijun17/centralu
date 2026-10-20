@@ -221,7 +221,7 @@ describe('v58 — trashed_at on subagent steps (#418)', () => {
     raw.close()
 
     const s = new Store(file)
-    expect(s.migrationsRun).toBe(3) // v58, then v59 (#1134) and v60 (#550)
+    expect(s.migrationsRun).toBe(4) // v58, then v59 (#1134), v60 (#550) and v61 (#1347)
     expect(seqs(s.messages.loadSubagentMessages('s1', A))).toEqual([1, 2])
     s.close()
     // What the build before v58 writes names no trashed_at: such a step is under its card

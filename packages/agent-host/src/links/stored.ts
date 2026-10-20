@@ -5,6 +5,7 @@ import type { ProjectOrder } from './router.js'
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
+import { HUB_SELF_KEY } from '../dev-services/store/store-keys.js'
 
 /**
  * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
@@ -19,23 +20,28 @@ export function storeRegistry(store: Store): MachineRegistry {
     remove: (id) => store.machines.removeLinkedMachine(id),
     setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
     setAsks: (id, on) => store.machines.setLinkedMachineAsks(id, on),
-    setConnect: (id, connect) => store.machines.setLinkedMachineConnect(id, connect),
+    setAutoReconnect: (id, on) => store.machines.setLinkedMachineAutoReconnect(id, on),
   }
 }
 
 /**
  * This computer's id as a hub (#550): made once and kept in its store, so a machine it links to knows it again after
  * a restart or a reconnect. A setting the previous build never reads, so it needs no migration. Shaped as a machine id,
- * since the machine qualifies this hub's project ids with it
+ * since the machine qualifies this hub's project ids with it. It is also the host id in every mail id and address.
  */
-const HUB_SELF_KEY = 'hub.selfId'
+const HUB_SELF_ID = /^hub-[0-9a-f]{8}$/
 
 export function hubSelfId(store: Store): string {
   const kept = store.settings.appSetting(HUB_SELF_KEY)
-  if (kept && /^hub-[0-9a-f]{8}$/.test(kept)) return kept
+  if (kept && HUB_SELF_ID.test(kept)) return kept
   const made = `hub-${randomBytes(4).toString('hex')}`
-  store.settings.setAppSetting(HUB_SELF_KEY, made)
-  return made
+  /*
+   * Written under the write lock, keeping an id another host wrote since the read above: during a swap two hosts on one
+   * store can both find none, and both would otherwise keep their own (every mail address made under the losing id would
+   * then name a host that is not this one). Read back, so both answer with the one that was kept
+   */
+  store.settings.updateAppSetting(HUB_SELF_KEY, (current) => (current !== null && HUB_SELF_ID.test(current) ? current : made))
+  return store.settings.appSetting(HUB_SELF_KEY) ?? made
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')

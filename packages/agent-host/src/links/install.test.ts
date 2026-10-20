@@ -77,7 +77,8 @@ describe('the install scripts per shell (plan §10.2)', () => {
         const line = typeof cmd === 'string' ? cmd : cmd.command
         expect(line.length).toBeLessThanOrEqual(WINDOWS_INLINE_MAX)
         expect(line).toMatch(/^powershell -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/)
-        if (typeof cmd !== 'string') expect(cmd.stdin).toMatch(/^[A-Za-z0-9+/=]+$/)
+        // The script as base64, then the line that ends it (stdin-frame.test.ts)
+        if (typeof cmd !== 'string') expect(cmd.stdin).toMatch(/^[A-Za-z0-9+/=]+\n\.\n$/)
       }
       // The installer step is the one that does not fit: it goes on stdin, whole
       const install = steps(spec)[2]!

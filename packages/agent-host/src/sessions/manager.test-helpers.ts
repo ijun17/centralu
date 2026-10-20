@@ -5,7 +5,7 @@
  */
 import { afterEach } from 'vitest'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, InputOrigin, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
@@ -14,11 +14,14 @@ import { createRpcHandler } from '../rpc.js'
 export class FakeHandle implements SessionHandle {
   externalId: string | null = 'ext-1'
   sent: string[] = []
+  /** The origin each of `sent` was handed with, in the same order (`InputOrigin`): undefined when none */
+  origins: (InputOrigin | undefined)[] = []
   approvals: { requestId: string; decision: ApprovalDecision }[] = []
   disposed = false
   constructor(readonly sessionId: string, private emit: EventSink) {}
-  send(text: string) {
+  send(text: string, opts?: { origin?: InputOrigin }) {
     this.sent.push(text)
+    this.origins.push(opts?.origin)
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
   }
   /**

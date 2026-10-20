@@ -472,6 +472,7 @@ export class SessionStarts {
       this.host.store.sessions.upsertSession(info)
       this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       this.host.cardRests.turnAsked(id)
+      // Never stamped: its only producer is a handoff, whose opening quotes a note written by an agent, not the person's typing
       handle.send(params.initialPrompt)
     }
     return info

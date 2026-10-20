@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, errorMessage, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -19,6 +19,7 @@ import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
+import { MailService } from './mail/service.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
@@ -38,6 +39,8 @@ import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { UpdateService } from './updates.js'
+import { installsByDefault, updateSwitches } from './update-switches.js'
+import { installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
@@ -387,6 +390,12 @@ const userAppAdoption = new UserAppAdoption({
   changed: () => events.push({ type: 'projects_changed' }),
 })
 /*
+ * The mailbox (#1347, docs/plans/mailbox.md): slice 1 is its store and model. Nothing posts yet and nothing is delivered,
+ * so all this host does with it is keep what it holds for as long as it should (§4.4, once the host is ready, below).
+ * The host's id is read from the setting a hub already keeps, and only when mail needs it.
+ */
+const mail = new MailService(store.mail, { hostId: () => hubSelfId(store) })
+/*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
  */
@@ -406,16 +415,19 @@ if (held) {
  * comparison. Checking here instead runs code shipped alongside the app itself, so it can never be
  * older than the app, and it skips the stale launcher entirely.
  *
- * The check result **only informs** the person. Swapping out the running app is irreversible, so
- * it is never done silently — it happens only when they click it, or when they turned on
- * "Apply updates automatically when idle" (#352), and then only once nothing is running.
+ * Installing happens when the person clicks, or by itself with "Automatic updates" on (#352; on unless the person turned
+ * it off, owner decision 2026-10-20), and then only once nothing is running; relaunching into the new build is the
+ * window's step.
  */
-const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
-const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
-// On by default when nothing has been saved yet: see below
-const autoUpdateCheck = flagSetting(store.settings, AUTO_UPDATE_CHECK_KEY, true)
-// Off unless the person turned it on (#352): installing without a click is asked for, never assumed
-const autoApplyUpdates = flagSetting(store.settings, AUTO_APPLY_UPDATES_KEY, false)
+// Both on for a person who never chose (2026-10-20); installing only in the person's desktop app: update-switches.ts
+const installByDefault = installsByDefault({
+  build: BUILD,
+  startedBy: launch.startedBy,
+  bundlePath: hostBuild(BUILD, launch.keeperSource).bundlePath ?? null,
+  installedCopy: installedCopyPath(),
+  env: process.env,
+})
+const { auto: autoUpdateCheck, autoApply: autoApplyUpdates } = updateSwitches(store.settings, { installByDefault })
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
@@ -571,8 +583,6 @@ const links = new Links({
     ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
     selfName: hubName,
   }),
-  // A machine that connects when needed stays up while a session here waits on a child there (#1134)
-  workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
 })
 /*
  * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back
@@ -751,6 +761,17 @@ if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_
 setTimeout(() => {
   userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
   userAppAdoption.watch()
+}, 0)
+/*
+ * What the mailbox keeps and for how long (store/mail-retention.ts), once the host is ready: by now the host this one
+ * replaced is gone, and it never read these tables anyway. Once per start until the delivery engine's own sweep (slice 2).
+ */
+setTimeout(() => {
+  try {
+    mail.sweep()
+  } catch (err) {
+    console.error(`[mail] retention failed; it runs again on the next start: ${errorMessage(err)}`)
+  }
 }, 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a

@@ -153,7 +153,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         </div>
       )}
       <InstalledRow m={m} />
-      <ConnectWhenNeeded m={m} />
+      <AutoReconnectSwitch m={m} />
       <AutostartSwitch m={m} />
       <AsksSwitch m={m} />
       <HubAutoSwitch m={m} />
@@ -285,38 +285,34 @@ function InstalledRow({ m }: { m: MachineInfo }) {
 }
 
 /**
- * When this computer opens the machine's link (#1134, owner decision 2026-10-18). Connecting at start stays the default:
- * an orchestrator working through the machine hears its reports and cards as they happen. A laptop that is often
- * closed, or a server used once a week, can connect only when something needs it instead. The box shows what the host
- * answered, as the autostart switch does.
+ * Auto reconnect (#1341, owner decision 2026-10-20), on by default: this computer connects when it starts and again
+ * after every drop. Off, it tries once when it starts and then only when you press Connect, which suits a laptop that is
+ * often closed or a server used once a week. The box shows what the host answered, as the autostart switch does.
  */
-function ConnectWhenNeeded({ m }: { m: MachineInfo }) {
-  const setConnect = useStore((s) => s.setMachineConnect)
+function AutoReconnectSwitch({ m }: { m: MachineInfo }) {
+  const setAutoReconnect = useStore((s) => s.setMachineAutoReconnect)
   const [pending, setPending] = useState(false)
-  const on = m.connect === 'when_needed'
   return (
     <div className="mt-1.5">
       <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
         <input
           type="checkbox"
           className="accent-ink-muted"
-          checked={on}
+          checked={m.autoReconnect}
           disabled={pending || !!m.operation}
           onChange={(e) => {
             setPending(true)
-            void setConnect(m.id, e.target.checked ? 'when_needed' : 'at_start').finally(() => setPending(false))
+            void setAutoReconnect(m.id, e.target.checked).finally(() => setPending(false))
           }}
-          data-testid={`machine-connect-when-needed-${m.id}`}
+          data-testid={`machine-auto-reconnect-${m.id}`}
         />
-        <span>Connect only when needed</span>
+        <span>Auto reconnect</span>
       </label>
-      {on && (
-        <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-connect-note-${m.id}`}>
-          Not connected when Centralu starts. It connects when you open one of its projects or sessions, or an agent is
-          started or sent work there, and disconnects once nothing has needed it for 10 minutes and no session there is
-          working. Its sessions keep running there meanwhile.
-        </p>
-      )}
+      <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-auto-reconnect-note-${m.id}`}>
+        {m.autoReconnect
+          ? 'Connects when Centralu starts and again after every drop.'
+          : 'Tries once when Centralu starts. After a drop it stays away until you press Connect, and agents do not connect it for you.'}
+      </p>
     </div>
   )
 }

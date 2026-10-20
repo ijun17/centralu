@@ -1783,6 +1783,36 @@ Rule: the step-2 `.mjs` travels gzipped; every step's command stays under 30,000
 Guard: `host/links/install.test.ts` "fits one Windows command line in every shell, the installer itself included".
 Platforms: Windows and WSL remotes.
 
+**RE18. A script on a Windows remote's stdin is read from the stream up to a marker line, and confirmed.**
+Happened: the update of a Windows machine stopped at the `centralu` step twice (#1360): the step's PowerShell sat in
+`[Console]::In.ReadToEnd()` with no child process until ssh's 30-minute limit. Reproduced on the same PC (Windows 11, OpenSSH
+9.5, Windows PowerShell 5.1) through a private sshd on loopback and the installer's real command: `ReadToEnd` never
+returned in 2 to 9 runs of 30 one after another and 13 to 18 of 30 ten at a time, at 17,000 characters of stdin, which is
+the installer's own size; `[Console]::In.ReadLine()` up to a marker line hung in 1 to 4 runs of 30 to 80 at 100,000
+characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6; `OpenStandardInput().Read()` into a 64 KB buffer
+until the marker did not hang in 200 of 200 runs at 17,000 and at 100,000 characters (and not with a 4 KB buffer, or reading to the
+end). Payload size is not the cause; the text readers are. Each hung step leaves its `cmd.exe`, PowerShell and `conhost.exe`
+behind on the remote (113 of them after one afternoon of tests, until new sessions failed with 0xC0000142).
+Rule: a script goes on stdin as base64 and a line with one dot; the reader prints `CENTRALU-STDIN-READY`, reads bytes until
+that line (a CRLF after the dot is taken too), prints `CENTRALU-STDIN-OK`, then runs the script; `exec` waits 60 s for the
+first line (ssh's connecting has its own six-attempt allowance inside it; a remote that does not start PowerShell is not one
+that lost its input: fail, no second try; a reader whose process is more than 30 s old when it says it runs reads nothing and exits 4,
+so a PowerShell that came up after the hub gave up cannot run the step from the input waiting in its pipe) and 30 s after it for the second. The reader ends on its own 20 s after the first line,
+checking the time after every read and again before it confirms (exit 4, nothing more printed), so it is gone before the hub's 30 s
+are over; the hub then sends the step once more, but only for the reader's own exits (3: the input was cut; 4: its time ran out) or a missing
+confirmation after 30 s; ssh's 255 or a signal after READY says nothing of what the remote did next (the confirmation may be on its way
+and the step started), so it is "ssh could not reach", not sent again (the script runs only after the confirmation, so a step the
+reader gave up on has not started), and
+fails saying the remote never confirmed the input when that fails too.
+The input is written **with the command, not after PowerShell says it runs** (measured with the final reader, 17,000 characters,
+ten at a time): written at once it arrived in 80 of 80 runs (and 80 of 80 at 100,000 characters); written when READY came back,
+10 and 7 of 80 and 11 of 40 never arrived within the reader's 20 s; written 100 ms after READY, 0 of 40 did. So a step cannot be
+kept from receiving its input by holding the input back; the reader's own deadline is what keeps a late first reader from running
+after the hub gave up.
+Guard: `host/links/stdin-frame.test.ts` (the reader on Windows PowerShell 5.1 with a 100 KB script and the input never
+closed, a cut input, the confirmation wait and the second try).
+Platforms: Windows and WSL remotes (a WSL step is read the same way by the PowerShell that starts it).
+
 ## 14. How the runtime is tested
 
 These are practices, not invariants of the code; they say how a replacement module is proven.

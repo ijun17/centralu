@@ -91,6 +91,23 @@ describe('when a claude stream ends without warning', () => {
     )
   })
 
+  // After /compact the CLI feeds the summary back as a user message whose content is a string. Reading it as a list threw inside the
+  // stream loop, and the adapter reported the process as crashed 2 s after the marker (the turn failed with `.filter is not a function`)
+  it('survives the string-content user message the CLI writes after /compact: the stream goes on, and no crash is raised', async () => {
+    const events: NormalizedEvent[] = []
+    const adapter = new ClaudeAdapter()
+    const handle = await adapter.createSession({ sessionId: 's-compact', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    control.push({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 25485, post_tokens: 3686, duration_ms: 39099 } })
+    control.push({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation. Summary: ...' }, isSynthetic: true })
+    // And a message after it, to show the loop is still reading
+    control.push({ type: 'assistant', message: { id: 'msg_after', role: 'assistant', content: [{ type: 'text', text: 'Carrying on.' }] } })
+    await tick()
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    expect(events).toContainEqual({ type: 'compaction', sessionId: 's-compact', failed: false, before: 25485, after: 3686 })
+    expect(events.some((e) => e.type === 'message_delta' && e.text === 'Carrying on.')).toBe(true)
+    await handle.dispose()
+  })
+
   it('does not call it a crash when we ourselves closed it (the lesson from losing a day on codex)', async () => {
     const events: NormalizedEvent[] = []
     const adapter = new ClaudeAdapter()

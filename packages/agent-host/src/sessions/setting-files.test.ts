@@ -257,15 +257,10 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
   if (tool === 'claude') {
     const o = state.claude.at(-1)!
     // Check the actual query built by the manager for every kind, trust and preset, on start and resume (#569).
-    if (preset === 'auto') {
-      expect(o.settings).not.toHaveProperty('crossSessionInbound', 'refuse')
-      expect(o.disallowedTools).not.toContain('ListAgents')
-      expect(o.disallowedTools).not.toContain('ListPeers')
-    } else {
-      expect(o.settings).toMatchObject({ crossSessionInbound: 'refuse' })
-      expect(o.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
-      expect((o.env as Record<string, string>).CLAUDE_CODE_HARBOR_KITE).toBe('0')
-    }
+    // Under every preset, auto included (the mailbox plan's slice 0)
+    expect(o.settings).toMatchObject({ crossSessionInbound: 'refuse' })
+    expect(o.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
+    expect((o.env as Record<string, string>).CLAUDE_CODE_HARBOR_KITE).toBe('0')
     expect(o.disallowedTools).not.toContain('SendMessage')
     const sources = JSON.stringify(o.settingSources)
     const files = !('settingSources' in o) ? 'all' : sources === '[]' ? 'none' : sources === '["user"]' ? 'user' : sources

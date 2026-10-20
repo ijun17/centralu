@@ -15,10 +15,9 @@ import { resolveCommand, type ToolLaunch } from './tool-launch.js'
  * check that runs in the host ships *with the app*, so it is never older than the app
  * it is checking, and it bypasses every stale launcher on the way.
  *
- * **Notify; install when asked.** The check is read-only and its failures are swallowed;
- * replacing the running program is not, so it happens only when someone asks — by clicking,
- * or by turning on "Apply updates automatically when idle" (#352, `autoApply`), which asks in
- * advance. Either way the host stops at `restart_required`: relaunching into the new build is
+ * **Notify; install when asked or allowed.** The check is read-only and its failures are swallowed;
+ * replacing the running program is not, so it happens by a click, or by itself with `autoApply` on (#352), which is part
+ * of Settings' "Automatic updates" and on for a person who never chose (owner decision 2026-10-20, update-switches.ts). Either way the host stops at `restart_required`: relaunching into the new build is
  * the window's step ("Apply now"), because only the window knows whether someone is typing,
  * and the keeper's switch afterwards is what keeps every running turn.
  */
@@ -242,7 +241,7 @@ export class UpdateService {
       // passes in.
       readAuto: deps.readAuto ?? (() => true),
       writeAuto: deps.writeAuto ?? (() => {}),
-      // Off unless saved on: installing by itself is something a person has to ask for (#352)
+      // Off when nothing is given (tests); the host passes the stored switch, on unless turned off (update-switches.ts)
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
       wait: deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),

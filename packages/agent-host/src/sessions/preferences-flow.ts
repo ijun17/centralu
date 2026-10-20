@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -17,14 +17,10 @@ const HIDDEN = /[\p{Cc}\p{Cf}\u2028\u2029]/u
 /** A theme the person can pick: a preset, or a theme file that reads cleanly */
 type ThemeChoice = { id: string; name: string; base: 'dark' | 'light'; file: boolean }
 
-/** The cards for the update switches (see the comment where they are asked) */
-const APPLY_CARD =
-  'Turn on "Apply updates automatically when idle"? From then on this computer installs a newer Centralu by itself as soon as one is ' +
-  'published, and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
-const CHECK_CARD =
-  'Turn on checking for updates automatically? "Apply updates automatically when idle" is on, so as soon as a newer Centralu is published ' +
-  'this computer installs it by itself and the desktop window relaunches into it when nothing is busy, without asking again. You can turn ' +
-  'either off in Settings, Updates.'
+/** The card for turning automatic updates on (see the comment where it is asked) */
+const UPDATE_CARD =
+  'Turn on "Automatic updates"? From then on this computer checks for a newer Centralu, installs it by itself as soon as one is published, ' +
+  'and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
 
 const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 
@@ -33,11 +29,16 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
  * `set_preferences` changes the reversible ones the window offers. Each is the call the window makes (`prefs.set`,
  * `agents.setSleepPolicy`, `updates.setAuto`, ...) through the router, so the host checks it as it checks the window:
  * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
- * (`sessionTools`, the agent ceiling, depth and models, trust, approval rules), has no field here.
+ * (the agent ceiling, depth and models, trust, approval rules), has no field here: the trust commands (`trust-flow.ts`)
+ * change trust, rules, grants and the limits on agents, each behind its own card where it widens. "Let sessions look at
+ * other sessions" (`sessionTools`) is not a setting any more (owner decision 2026-10-20): always on, so neither command
+ * names it.
  *
- * Reversible means no card, with two exceptions. Turning off the notification for an approval or an error asks first (the
- * two that tell the person a card waits), and so does the sound while either still notifies. And "apply updates when idle" turned **on** asks first, in every preset. With
- * it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
+ * Reversible means no card, with two exceptions. Turning off the notification for an approval asks first (the one that
+ * tells the person a card waits), and so does the sound while it still notifies. The "error" and "every session finished"
+ * notifications are gone from the product (owner decision 2026-10-20): the window no longer raises them, so neither command
+ * names them, and their stored switches stay readable for older builds. And "Automatic updates" turned **on** asks first,
+ * in every preset. With it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
  * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
  * (docs/agent-host.md §4.5). Turning it off, and every other switch, acts at once.
  */
@@ -84,22 +85,22 @@ export class PreferencesFlow {
       `- Text size: ${p.textSize} (${TEXT_SIZES.join(', ')}; 1 is the default)`,
       `- Body font: ${p.bodyFont ? plainQuoted(p.bodyFont, 200) : "the app's own"}; code font: ${p.codeFont ? plainQuoted(p.codeFont, 200) : "the app's own"}`,
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
-      `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
       'Notifications (set_preferences notifications)',
-      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval or error one off, or the sound while either notifies, asks the person`,
+      `- Approval needed: ${onOff(notify.approval)}; a session finishes out of sight: ${onOff(notify.done)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval one off, or the sound while it notifies, asks the person`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
         : '- Idle sleep: not available on this host',
       'Updates',
       updates.status === 'fulfilled'
-        ? `- Check for updates automatically: ${onOff(updates.value.auto)} (checkForUpdates); apply updates automatically when idle: ${onOff(updates.value.autoApply)} (applyUpdatesWhenIdle, asks the person to turn on); running ${updates.value.current}${updates.value.latest ? `, latest known ${updates.value.latest}${updates.value.newer ? ' (newer)' : ''}` : ''}`
+        ? `- Automatic updates (check, install, and apply when idle): ${automatic(updates.value)} (autoUpdate, asks the person to turn on); running ${updates.value.current}${updates.value.latest ? `, latest known ${updates.value.latest}${updates.value.newer ? ' (newer)' : ''}` : ''}`
         : '- Updates: not available on this host',
       versions.status === 'fulfilled'
         ? `- Move idle sessions to a newly installed agent CLI: ${onOff(versions.value.autoApply)} (moveIdleSessionsToNewAgentCli)`
         : '- Agent CLI versions: not available on this host',
-      'Kept by the person (no command changes these)',
-      `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)}; Centralu's read-only tools in ordinary sessions: ${onOff(p.sessionTools)}`,
+      'Kept by the person (no command changes this)',
+      `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)}`,
+      'Limits on agents (set_agent_limits changes them, behind the person\'s card)',
       `- Agents: running per project ${p.agentCeiling === undefined || p.agentCeiling === null ? 'by preset' : p.agentCeiling === 0 ? 'unlimited' : p.agentCeiling}; levels that may start agents ${p.agentDepth ?? 1}`,
     ]
     return { ok: true, text: lines.join('\n') }
@@ -154,59 +155,49 @@ export class PreferencesFlow {
     const switches: Record<string, boolean> = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
     /*
      * Turning off what tells the person a card waits asks first: the orchestrator would be choosing what the person stops
-     * hearing about. That is the notification for an approval, the one for an error, and the sound, which is how both reach
-     * someone who is away (notices.ts alerts through the sound; the OS banner path does not reach them), so turning it off
-     * counts while an approval or an error would still notify. Turning them on, and every other switch, asks nothing. A
-     * denial keeps them notifying, and the other switches of the call still change. A switch already off is no change.
+     * hearing about. That is the notification for an approval, and the sound, which is how it reaches someone who is away
+     * (notices.ts alerts through the sound; the OS banner path does not reach them), so turning the sound off counts while an
+     * approval would still notify. Turning them on, and every other switch, asks nothing. A denial keeps them as they were,
+     * and the other switches of the call still change. A switch already off is no change.
      */
-    const stops = (['approval', 'error'] as const).filter((k) => switches[k] === false)
-    if (stops.length || switches.sound === false) {
-      let current: Partial<Record<'approval' | 'error' | 'sound', boolean>> = {}
+    if (switches.approval === false || switches.sound === false) {
+      let current: Partial<Record<'approval' | 'sound', boolean>> = {}
       try {
         current = (await callWindow(rpc, 'prefs.get', {})).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
       } catch {
         /* unread: treated as on, so it asks */
       }
-      const turning = stops.filter((k) => current[k] !== false)
       // One already off needs no write, and none is made: nothing the card did not name goes out after it
-      for (const k of stops) if (!turning.includes(k)) delete switches[k]
+      const turning = switches.approval === false && current.approval !== false
+      if (switches.approval === false && !turning) delete switches.approval
       const muting = switches.sound === false && current.sound !== false
       if (switches.sound === false && !muting) delete switches.sound
-      // What would still notify once the approved stops are made
-      const stays = (k: 'approval' | 'error') => (switches[k] === false ? false : current[k] !== false)
-      const silences = muting && (stays('approval') || stays('error'))
-      if (turning.length || silences) {
-        const names = turning.map((k) => (k === 'approval' ? '"awaiting approval"' : '"error"'))
-        const heard = turning.map((k) => (k === 'approval' ? 'an agent waits for your approval' : 'a session fails'))
-        const lost = turning.map((k) => (k === 'approval' ? 'an approval' : 'a failure'))
-        const stop = turning.length
-          ? `Stop the ${names.join(' and ')} ${turning.length === 1 ? 'notification' : 'notifications'}? Centralu would no longer show a notice or play a sound when ${heard.join(' or ')}, ` +
-            `so ${lost.join(' or ')} could go unnoticed while you are away. You can turn ${turning.length === 1 ? 'it' : 'them'} back on in Settings, Notifications.`
+      // The sound counts while an approval notifies now: off with it in one call, the card names both
+      const silences = muting && current.approval !== false
+      if (turning || silences) {
+        const stop = turning
+          ? 'Stop the "awaiting approval" notification? Centralu would no longer show a notice or play a sound when an agent waits for your approval, ' +
+            'so an approval could go unnoticed while you are away. You can turn it back on in Settings, Notifications.'
           : ''
         const sound = silences
-          ? turning.length
-            ? ' The sound is also turned off, and the sound is how an approval or an error reaches you when you are away.'
-            : 'Turn off the notification sound? The sound is how an approval or an error reaches you when you are away; without it they show a notice only, which you may not see. You can turn it back on in Settings, Notifications.'
+          ? turning
+            ? ' The sound is also turned off, and the sound is how an approval reaches you when you are away.'
+            : 'Turn off the notification sound? The sound is how an approval reaches you when you are away; without it an approval shows a notice only, which you may not see. You can turn it back on in Settings, Notifications.'
           : ''
-        const refused = await this.ask(
-          sessionId,
-          stop + sound,
-          signal,
-          turning.length === 0 ? 'the sound stays on' : turning.length === 1 && !silences ? 'it keeps notifying' : 'they keep notifying',
-        )
+        const refused = await this.ask(sessionId, stop + sound, signal, turning && silences ? 'the approval notification and the sound stay on' : turning ? 'it keeps notifying' : 'the sound stays on')
         if (refused) {
           failed.push(`Notifications: ${refused}`)
-          for (const k of turning) delete switches[k]
-          // With an approval or an error still notifying, the sound stays on too: off, it would silence them
-          if (muting && (current.approval !== false || current.error !== false)) delete switches.sound
+          delete switches.approval
+          // With an approval still notifying, the sound stays on too: off, it would silence it
+          if (silences) delete switches.sound
         }
       }
-      // Neither notifies any more: the sound goes off with nothing to silence, and nothing asks
+      // An approval no longer notifies: the sound goes off with nothing to silence, and nothing asks
     }
     if (Object.keys(switches).length) {
       await attempt('Notifications', async () => {
         const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
-        return `Now: notifications: approval ${onOff(now.approval)}, error ${onOff(now.error)}, a session finishes out of sight ${onOff(now.done)}, every session finished ${onOff(now.allDone)}, even while focused ${onOff(now.whenFocused)}, sound ${onOff(now.sound)}.`
+        return `Now: notifications: approval ${onOff(now.approval)}, a session finishes out of sight ${onOff(now.done)}, even while focused ${onOff(now.whenFocused)}, sound ${onOff(now.sound)}.`
       })
     }
     if (sleep !== undefined) {
@@ -216,51 +207,56 @@ export class PreferencesFlow {
       })
     }
     /*
-     * The two update switches together. Code arrives unasked once checking and applying are both on, so the card is for the
-     * change that makes it so, whichever of the two completes it: apply turned on, or checking turned on while apply is on.
-     * Turning either off, or leaving them as they are, asks nothing. (docs/agent-host.md §4.5)
+     * "Automatic updates" (owner decision 2026-10-20): one setting over the two stored switches, checking (`updates.setAuto`)
+     * and installing and applying when idle (`updates.setAutoApply`). Code arrives unasked once both are on, so turning it on
+     * asks unless both are on already (unread counts as off, so it asks). Turning it off asks nothing, and turns installing
+     * off first, so a check landing between the two calls installs nothing. Both setters are called either way (each does
+     * nothing when already so): a card may stand for minutes, and what was read before it may have changed. Checking goes on
+     * first, so its check finds the release before installing is on to take it. (docs/agent-host.md §4.5)
      */
-    let checkUpdates = changes.checkForUpdates
-    let applyUpdates = changes.applyUpdatesWhenIdle
-    if (checkUpdates === true || applyUpdates === true) {
-      try {
-        const before = await callWindow(rpc, 'updates.status', { force: false })
-        const turningApplyOn = applyUpdates === true && !before.autoApply
-        const checksComeOn = () => checkUpdates === true && !before.auto && (applyUpdates ?? before.autoApply)
-        if (turningApplyOn || checksComeOn()) {
-          const refused = await this.ask(sessionId, turningApplyOn ? APPLY_CARD : CHECK_CARD, signal)
+    if (changes.autoUpdate !== undefined) {
+      const on = changes.autoUpdate
+      let go = true
+      if (on) {
+        let both = false
+        try {
+          const before = await callWindow(rpc, 'updates.status', { force: false })
+          both = before.auto && before.autoApply
+        } catch {
+          /* unread: asked as if off */
+        }
+        if (both) {
+          done.push('Automatic updates are on.')
+          go = false
+        } else {
+          const refused = await this.ask(sessionId, UPDATE_CARD, signal)
           if (refused) {
-            failed.push(`${turningApplyOn ? 'Applying updates' : 'Update checks'}: ${refused}`)
-            if (turningApplyOn) applyUpdates = undefined
-            // With apply left off, checking coming on is no longer the change that lets code arrive unasked
-            if (checksComeOn()) checkUpdates = undefined
+            failed.push(`Automatic updates: ${refused}`)
+            go = false
           }
         }
-      } catch (e) {
-        failed.push(`Updates: ${(e as Error).message}`)
-        if (checkUpdates === true) checkUpdates = undefined
-        if (applyUpdates === true) applyUpdates = undefined
       }
-    }
-    if (checkUpdates !== undefined) {
-      const enabled = checkUpdates
-      await attempt('Update checks', async () => {
-        const now = await callWindow(rpc, 'updates.setAuto', { enabled })
-        return `Checking for updates automatically is ${onOff(now.auto)}.`
-      })
+      if (go) {
+        const steps: ['updates.setAuto' | 'updates.setAutoApply', boolean][] = on
+          ? [['updates.setAuto', true], ['updates.setAutoApply', true]]
+          : [['updates.setAutoApply', false], ['updates.setAuto', false]]
+        try {
+          let now: UpdateStatus | null = null
+          for (const [method, enabled] of steps) now = await callWindow(rpc, method, { enabled })
+          done.push(`Automatic updates are ${automatic(now!)}.`)
+        } catch (e) {
+          // Halfway is a change too: say which half is on now, when that can be read
+          const now = await callWindow(rpc, 'updates.status', { force: false }).catch(() => null)
+          if (now) done.push(`Automatic updates are now ${automatic(now)}.`)
+          failed.push(`Automatic updates: ${(e as Error).message}`)
+        }
+      }
     }
     if (changes.moveIdleSessionsToNewAgentCli !== undefined) {
       const enabled = changes.moveIdleSessionsToNewAgentCli
       await attempt('Agent CLI versions', async () => {
         const now = await callWindow(rpc, 'agents.setAutoApplyVersions', { enabled })
         return `Moving idle sessions to a newly installed agent CLI is ${onOff(now.autoApply)}.`
-      })
-    }
-    if (applyUpdates !== undefined) {
-      const enabled = applyUpdates
-      await attempt('Applying updates', async () => {
-        const now = await callWindow(rpc, 'updates.setAutoApply', { enabled })
-        return `Applying updates automatically when idle is ${onOff(now.autoApply)}.`
       })
     }
 
@@ -292,6 +288,13 @@ export class PreferencesFlow {
 }
 
 const onOff = (on: boolean) => (on ? 'on' : 'off')
+
+/** "Automatic updates" as Settings shows it: on when checking and applying both are, and which half is on otherwise */
+function automatic(s: Pick<UpdateStatus, 'auto' | 'autoApply'>): string {
+  if (s.auto && s.autoApply) return 'on'
+  if (!s.auto && !s.autoApply) return 'off'
+  return s.auto ? 'off (checking is on, installing is off)' : 'off (installing is on, checking is off)'
+}
 
 /** The presets, then the theme files that read cleanly: what a window's theme list offers */
 function themeChoices(files: readonly { id: string; name: string; base: 'dark' | 'light'; broken: boolean }[]): ThemeChoice[] {

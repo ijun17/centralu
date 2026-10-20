@@ -88,6 +88,129 @@ export class StepsV58 extends MigrationRange {
           `)
         },
       },
+      {
+        to: 61,
+        breaksOlderReaders: false,
+        /**
+         * The mailbox (#1347, docs/plans/mailbox.md §4.1): one durable channel between sessions, apps and the person.
+         * Six tables that nothing reads or writes yet (slice 1: the store and the model).
+         *
+         *   mail_threads       a conversation that is also a task: subject, state, owner, assignee, next step, links.
+         *                      `id` is `<hostId>.t_<ulid>` (§11.4); `home` is the host that owns the task fields; `rev`
+         *                      counts task-field changes; `pinned_at` keeps a done thread past retention (a column the
+         *                      design's table left out and §4.4 asks for)
+         *   mail_participants  who is in a thread and in which role (owner, assignee, member); `left_at` when they left;
+         *                      `read_seq`, the last message of the thread they have read (where `mail read` goes on from)
+         *   mail_blockers      what stands in a thread's way (at most 5), resolved or not
+         *   mail_messages      one post: sender, kind, body, and `facts`, which only Centralu writes. `id` is
+         *                      `<hostId>.m_<ulid>`; `seq` is its place in the thread on this host. `dedupe_key` is unique
+         *                      per thread and sender, so a change posted twice is stored once and no sender can use up
+         *                      another's key (the design's table says per thread; a session could otherwise claim the key
+         *                      an app or Centralu will use)
+         *   mail_receipts      one recipient's progress with one message: due, attempted, delivered, read, handled
+         *   mail_turns         whose each turn of a session was, when it started (§6). `mail_turns_open` finds a thread's
+         *                      running turn without scanning a row for every turn of every session
+         *
+         * No foreign keys, as `report_marks`: a trashed session's rows stay while it is in the trash and go when the
+         * trash is emptied (`purgeSession`), and addresses name parties on other hosts too (§11.4). No CHECK on a word
+         * (state, kind): a newer build may write one this build does not know, and an older build writing a row must not
+         * fail on it.
+         *
+         * **Expand only (#292's rule).** New tables and indexes. An older host serving the same store during a swap never
+         * names them: it keeps writing `report_marks`, `delegated_turns` and `queued_requests`, which the newer build
+         * adopts when it takes over (slice 3), and a session it deletes leaves these rows alone.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS mail_threads (
+              id          TEXT PRIMARY KEY,
+              home        TEXT NOT NULL,
+              project_id  TEXT,
+              subject     TEXT NOT NULL,
+              origin      TEXT NOT NULL,
+              depth       INTEGER NOT NULL DEFAULT 0,
+              parent_id   TEXT,
+              follows     TEXT,
+              state       TEXT NOT NULL,
+              outcome     TEXT,
+              owner       TEXT NOT NULL,
+              assignee    TEXT,
+              next_step   TEXT,
+              links       TEXT NOT NULL DEFAULT '{}',
+              rev         INTEGER NOT NULL DEFAULT 0,
+              pinned_at   INTEGER,
+              created_at  INTEGER NOT NULL,
+              updated_at  INTEGER NOT NULL,
+              state_since INTEGER NOT NULL,
+              done_at     INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS mail_threads_state ON mail_threads(state, updated_at);
+            CREATE TABLE IF NOT EXISTS mail_participants (
+              thread_id TEXT NOT NULL,
+              address   TEXT NOT NULL,
+              role      TEXT NOT NULL,
+              joined_at INTEGER NOT NULL,
+              left_at   INTEGER,
+              read_seq  INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (thread_id, address)
+            );
+            CREATE INDEX IF NOT EXISTS mail_participants_address ON mail_participants(address);
+            CREATE TABLE IF NOT EXISTS mail_blockers (
+              thread_id   TEXT NOT NULL,
+              n           INTEGER NOT NULL,
+              kind        TEXT NOT NULL,
+              ref         TEXT,
+              text        TEXT NOT NULL,
+              resolved_at INTEGER,
+              PRIMARY KEY (thread_id, n)
+            );
+            CREATE TABLE IF NOT EXISTS mail_messages (
+              id          TEXT PRIMARY KEY,
+              thread_id   TEXT NOT NULL,
+              seq         INTEGER NOT NULL,
+              home_seq    INTEGER,
+              sender      TEXT NOT NULL,
+              kind        TEXT NOT NULL,
+              urgent      INTEGER NOT NULL DEFAULT 0,
+              needs_owner INTEGER NOT NULL DEFAULT 0,
+              wake        TEXT,
+              reply_to    TEXT,
+              body        TEXT NOT NULL,
+              facts       TEXT NOT NULL DEFAULT '{}',
+              dedupe_key  TEXT,
+              created_at  INTEGER NOT NULL,
+              UNIQUE (thread_id, seq),
+              UNIQUE (thread_id, sender, dedupe_key)
+            );
+            CREATE INDEX IF NOT EXISTS mail_messages_dedupe ON mail_messages(sender, dedupe_key) WHERE dedupe_key IS NOT NULL;
+            CREATE TABLE IF NOT EXISTS mail_receipts (
+              message_id   TEXT NOT NULL,
+              recipient    TEXT NOT NULL,
+              due_at       INTEGER NOT NULL,
+              attempt_at   INTEGER,
+              delivered_at INTEGER,
+              read_at      INTEGER,
+              handled_at   INTEGER,
+              held         TEXT,
+              attempts     INTEGER NOT NULL DEFAULT 0,
+              last_error   TEXT,
+              PRIMARY KEY (message_id, recipient)
+            );
+            CREATE INDEX IF NOT EXISTS mail_receipts_pending ON mail_receipts(recipient, due_at) WHERE delivered_at IS NULL;
+            CREATE TABLE IF NOT EXISTS mail_turns (
+              session_id TEXT NOT NULL,
+              turn_seq   INTEGER NOT NULL,
+              thread_id  TEXT,
+              started_by TEXT NOT NULL,
+              started_at INTEGER NOT NULL,
+              ended_at   INTEGER,
+              outcome    TEXT,
+              PRIMARY KEY (session_id, turn_seq)
+            );
+            CREATE INDEX IF NOT EXISTS mail_turns_open ON mail_turns(thread_id) WHERE ended_at IS NULL;
+          `)
+        },
+      },
     ]
   }
 }

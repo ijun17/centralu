@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { BROKEN_ROOT_APP_ID, scanProject } from './discovery.js'
+import { usesLines } from '@cc/protocol'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { PROJECT_APPS, plantApp } from './test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
@@ -150,7 +151,7 @@ describe('a manifest at a project root', () => {
 })
 
 describe('what an app declares, for its project trust card (#1141)', () => {
-  it("an untrusted project's apps, root and inner alike, carry what their manifests declare they may ask for; one declaring nothing carries none", () => {
+  it("an untrusted project's apps, root and inner alike, carry what their manifests declare they may ask for; one declaring nothing carries an empty declaration, and an invalid one none (#1219: absent is 'not known')", () => {
     writeManifest({ uses: { agent: true, host: ['sessions.list'] } })
     plantApp(join(projRoot, ...PROJECT_APPS), 'notes', { uses: { apps: ['board'] } })
     plantApp(join(projRoot, ...PROJECT_APPS), 'plain')
@@ -158,7 +159,13 @@ describe('what an app declares, for its project trust card (#1141)', () => {
     rt.refresh()
     expect(root()).toMatchObject({ status: 'untrusted', uses: { agent: true, host: ['sessions.list'] } })
     expect(rt.list().find((a) => a.appId === 'notes')).toMatchObject({ status: 'untrusted', uses: { apps: ['board'] } })
-    expect(rt.list().find((a) => a.appId === 'plain')).not.toHaveProperty('uses')
+    const plain = rt.list().find((a) => a.appId === 'plain')!
+    expect(plain.uses).toBeDefined()
+    expect(usesLines(plain.uses!)).toEqual([])
+    plantApp(join(projRoot, ...PROJECT_APPS), 'broken', { name: '' })
+    rt.refresh()
+    expect(rt.list().find((a) => a.appId === 'broken')).toMatchObject({ status: 'invalid' })
+    expect(rt.list().find((a) => a.appId === 'broken')).not.toHaveProperty('uses')
   })
 })
 

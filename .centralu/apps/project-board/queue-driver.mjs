@@ -22,6 +22,8 @@ import {
   deleteBranch,
   FATAL,
   GitHubError,
+  markDraft,
+  markReady,
   mergePr,
   openPrsOnBase,
   QUEUE_PR_FIELDS,
@@ -59,6 +61,7 @@ import {
   resetFor,
 } from './queue.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
+import { judgeHead, labelReason } from './queue-integrate.mjs'
 import { classifyRun } from './run-failure.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
@@ -308,9 +311,17 @@ export function batchable(pr) {
  * old failure their tops' newer runs had outlived. But a lower failing after the top's green run is
  * evidence (#1072 under #1075, a runner-dependent bug the top failed on too), so that one still stops it.
  */
-export async function land(item, pr, ref, renew, defaultBranch, { provedAt = null } = {}) {
+export async function land(item, pr, ref, renew, defaultBranch, { provedAt = null, beforeMerge = null } = {}) {
   const repo = item.repo
   const n = ref(repo, item.pr)
+  // Handed over with integrate (#1259 step 3): judged once more right before the squash, against main as it is now
+  // (its rules may have moved since the poll judged this head); `tierAt` keeps the judgment, so polls do not land it again
+  if (item.auto) {
+    const labelled = labelReason(n, pr.labels)
+    if (labelled) return { state: 'attention', reason: labelled }
+    const t = await judgeHead({ dir: QUEUE.conflicts.checkout, repo, n, pr, defaultBranch })
+    if (t.tier !== 'auto') return { state: 'attention', reason: t.reason, tierAt: t }
+  }
   for (const l of item.lowers ?? []) {
     const lp = await readPr(repo, l)
     if (lp.state !== 'OPEN') continue
@@ -335,7 +346,35 @@ export async function land(item, pr, ref, renew, defaultBranch, { provedAt = nul
       }
   }
   if (!renew()) return { yielded: true }
+  // What the caller does once every check here passed (a batch's status on the head), right before the merge
+  await beforeMerge?.()
   const msg = squashMessage({ number: pr.number, title: pr.title, description: pr.body })
+  // An integrated record is a draft until this moment (#1259 step 3): readied and squashed in one step by the lease
+  // holder, and a draft again when the squash does not happen, so no other path lands it unjudged
+  const record = item.auto && pr.isDraft
+  const redraft = () => (record ? markDraft(repo, pr.number).catch((e) => console.error(`[project-board] merge queue: ${n} could not be turned back into a draft: ${e?.message ?? e}`)) : null)
+  if (!record) return squash(item, pr, n, msg, defaultBranch)
+  // Whatever happens between readying and the squash (GitHub refusing it, a rate limit, no network), it is a draft again
+  let out
+  try {
+    await markReady(repo, pr.number)
+    out = await squash(item, pr, n, msg, defaultBranch)
+  } catch (e) {
+    await redraft()
+    throw e
+  }
+  if (out.state !== 'merged') {
+    await redraft()
+    // Turned back into a draft, a squash GitHub held (its own merge queue, auto-merge) is not coming
+    if (out.reason?.kind === 'not-merged')
+      out.reason = { kind: 'not-merged', text: `gh pr merge answered for ${n} at ${short(pr.headRefOid)}, but GitHub does not show it merged (a merge queue or auto-merge on GitHub may hold it). Handed over with integrate, it was turned back into a draft, which also stops what GitHub held: integrate it again once that is sorted out.` }
+  }
+  return out
+}
+
+/** The squash itself, on the head that was read, and GitHub's word that it merged. */
+async function squash(item, pr, n, msg, defaultBranch) {
+  const repo = item.repo
   const why = await mergePr(repo, pr.number, pr.headRefOid, msg.subject, msg.body)
   if (why) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
   // gh can exit 0 without a merge (GitHub's own merge queue, auto-merge): only GitHub's word counts
@@ -486,7 +525,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew, save, landed = [] }) {
+async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegrated = () => true }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -496,6 +535,15 @@ async function pollItem(item, { now, ref, renew, save, landed = [] }) {
   const events = []
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
 
+  // A record handed over with integrate stays a draft until it lands (#1259 step 3): one found ready for review (a
+  // person, mark_ready, a driver stopped between readying and squashing) is turned back, before anything reads it
+  // Still queued as the integrator's (taken out meanwhile, the session may be readying it for queue_merge: not ours to undo)
+  if (item.auto && pr.state === 'OPEN' && !pr.isDraft && stillIntegrated()) {
+    if (!renew()) return { yielded: true }
+    await markDraft(repo, item.pr)
+    Object.assign(pr, { isDraft: true, mergeStateStatus: 'DRAFT' })
+    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was ready for review; turned back into a draft: a record handed over with integrate stays one until the queue squashes it, so nothing else (merge_when_green, an older board, a merge by hand) can land it unjudged.` })
+  }
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }
@@ -512,6 +560,19 @@ async function pollItem(item, { now, ref, renew, save, landed = [] }) {
     base.conflict = null
     // Not behind everything queued while it was fixed (#1182): batches and the list take it first
     base.front = item.front ?? at
+  }
+  // Handed over with integrate (#1259 step 3): judged on each new head; one that is not auto goes on to no CI or batch
+  // A tier:<name> label above auto stops it on every poll, whatever the judge said of its head
+  const labelled = !d && item.auto ? labelReason(ref(repo, item.pr), pr.labels) : null
+  if (labelled) d = { state: 'attention', reason: labelled }
+  if (!d && item.auto) {
+    let t = view.tierAt?.head === pr.headRefOid ? view.tierAt : null
+    if (!t) {
+      // A judgment stays for its head; one that could not be made throws, and is counted as a failed poll
+      t = await judgeHead({ dir: QUEUE.conflicts.checkout, repo, n: ref(repo, item.pr), pr, defaultBranch })
+      base.tierAt = t
+    }
+    if (t.tier !== 'auto') d = { state: 'attention', reason: t.reason }
   }
   // The latest CI run of each workflow on the head, once read: what proved it, if it lands
   let runs = []
@@ -571,6 +632,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [] }) {
     const provedAt = runs.map((r) => r.createdAt).filter(Boolean).sort().at(-1) ?? null
     const landed = await land(view, pr, ref, renew, defaultBranch, { provedAt })
     if (landed.yielded) return { yielded: true }
+    if (landed.tierAt) patch.tierAt = landed.tierAt
     d = landed
   }
 
@@ -640,7 +702,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     .map((i) => ({ pr: i.pr, head: i.head }))
   let r
   try {
-    r = await pollItem(item, { now, ref, renew, save, landed })
+    r = await pollItem(item, { now, ref, renew, save, landed, stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`

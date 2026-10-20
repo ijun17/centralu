@@ -1,0 +1,34 @@
+# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.
+# Lowered by `pnpm lint:tighten`, which also moves a file's lines along a rename git sees; no line may be new or higher than main's.
+packages/platform/src/mock/agent-versions.ts @typescript-eslint/no-non-null-assertion 1
+packages/platform/src/mock/app-builder.ts @typescript-eslint/no-non-null-assertion 1
+packages/platform/src/mock/app-builder.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/app-registry.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/default-tool.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
+packages/platform/src/mock/demo.ts @typescript-eslint/consistent-type-assertions 2
+packages/platform/src/mock/demo.ts @typescript-eslint/no-unnecessary-type-assertion 2
+packages/platform/src/mock/fan-out.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/platform/src/mock/grid.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/handoff.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/machines.ts @typescript-eslint/no-non-null-assertion 1
+packages/platform/src/mock/memory-fs.ts @typescript-eslint/no-non-null-assertion 1
+packages/platform/src/mock/preferences.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/platform/src/mock/projects.ts @typescript-eslint/no-non-null-assertion 3
+packages/platform/src/mock/proposals.ts @typescript-eslint/no-non-null-assertion 3
+packages/platform/src/mock/session-store.ts @typescript-eslint/consistent-type-assertions 4
+packages/platform/src/mock/session-store.ts @typescript-eslint/no-unsafe-type-assertion 9
+packages/platform/src/mock/sessions.ts @typescript-eslint/no-non-null-assertion 2
+packages/platform/src/mock/sessions.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/themes.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/mock/trash.ts @typescript-eslint/no-non-null-assertion 2
+packages/platform/src/mock/trash.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/platform/src/mock/trash.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/platform/src/platform.contract.test.ts @typescript-eslint/no-floating-promises 1
+packages/platform/src/platform.contract.test.ts @typescript-eslint/only-throw-error 2
+packages/platform/src/tauri/index.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/platform/src/tauri/switch-plan.ts @typescript-eslint/no-non-null-assertion 1
+packages/platform/src/tauri/to-error.test.ts @typescript-eslint/only-throw-error 1
+packages/platform/src/tauri/to-error.test.ts @typescript-eslint/prefer-promise-reject-errors 1
+packages/platform/src/web/index.ts @typescript-eslint/no-unnecessary-type-assertion 2
+packages/platform/src/web/index.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/platform/src/web/rpc-client.ts @typescript-eslint/no-unsafe-type-assertion 3

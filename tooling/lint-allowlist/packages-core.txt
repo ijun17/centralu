@@ -1,0 +1,11 @@
+# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.
+# Lowered by `pnpm lint:tighten`, which also moves a file's lines along a rename git sees; no line may be new or higher than main's.
+packages/core/src/grid/panels.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/core/src/grid/panels.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/core/src/grid/project.ts @typescript-eslint/no-non-null-assertion 1
+packages/core/src/grid/project.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/core/src/inbox/inbox.ts @typescript-eslint/no-non-null-assertion 3
+packages/core/src/machines/add-machine.ts @typescript-eslint/no-non-null-assertion 1
+packages/core/src/machines/vscode.ts @typescript-eslint/no-non-null-assertion 2
+packages/core/src/session/reducer.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/core/src/session/state-machine.test.ts @typescript-eslint/no-unnecessary-type-assertion 5
