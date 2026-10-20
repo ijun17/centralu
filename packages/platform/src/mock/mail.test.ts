@@ -62,6 +62,19 @@ describe('the mock mailbox', () => {
     await expect(p.mail.unblock(id, 1)).rejects.toMatchObject({ code: 'refused' })
   })
 
+  it('a pause lifted sends what it held: a thread’s turns, or a session’s budget', async () => {
+    const p = createMockPlatform()
+    const boss = mockSessionParty('s0', 'Boss')
+    p.seedMail({ subject: 'a', from: boss, body: 'x', held: { reason: 'budget', recipient: worker } })
+    const looped = p.seedMail({ subject: 'b', from: boss, body: 'y', held: { reason: 'loop', recipient: worker } })
+    await p.mail.resume({ threadId: looped })
+    expect((await p.mail.list()).held.map((h) => h.reason)).toEqual(['budget'])
+    await p.mail.resume({ sessionId: 's9' })
+    expect((await p.mail.list()).held).toHaveLength(1)
+    await p.mail.resume({ sessionId: 's1' })
+    expect((await p.mail.list()).held).toEqual([])
+  })
+
   it('remembers what the person pressed, and the crowd waits no more once answered', async () => {
     const p = createMockPlatform()
     p.mockMail.waiting = 12

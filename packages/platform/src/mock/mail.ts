@@ -187,6 +187,16 @@ export class MailMock {
     },
     resume: async (target) => {
       this.calls.push('sessionId' in target ? `resume:session:${target.sessionId}` : `resume:thread:${target.threadId}`)
+      // A pause lifted sends what it held: a thread's turns (`loop`), or a session's budget (`budget`)
+      const freed = this.heldRows.filter((h) => ('sessionId' in target ? h.reason === 'budget' && h.recipient.sessionId === target.sessionId : h.reason === 'loop' && h.threadId === target.threadId))
+      this.heldRows = this.heldRows.filter((h) => !freed.includes(h))
+      for (const h of freed) {
+        const t = this.threads.get(h.threadId)
+        if (t) {
+          t.row.held = Math.max(0, t.row.held - 1)
+          this.touch(t)
+        }
+      }
     },
     wake: async (wake) => {
       this.calls.push(`wake:${wake}`)
