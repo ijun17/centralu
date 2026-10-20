@@ -80,7 +80,8 @@ export function firstChoice(choices: readonly MachineChoice[]): MachineChoice | 
  */
 export function probeProblem(probe: MachineProbe): MachineProblem | null {
   if (!probe.reachable) {
-    const p = machineProblem({ status: 'unreachable', error: probe.error, name: probe.sshTarget, sshTarget: probe.sshTarget })!
+    // An unreachable machine always has a problem to name; the fallback is the line it would read as with no error
+    const p = machineProblem({ status: 'unreachable', error: probe.error, name: probe.sshTarget, sshTarget: probe.sshTarget }) ?? { title: `${probe.sshTarget} is away`, fix: null }
     // Said of a link that retries on its own; here nothing retries until the person picks the host again
     const fix = p.fix?.replace(/reconnect$/, 'pick it again').replace(/\.? ?Centralu keeps trying$/, '') || null
     return { title: p.title, fix }

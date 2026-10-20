@@ -37,7 +37,7 @@ describe('event → transition', () => {
     ['limit_reached', 'working', 'limited'],
     ['error', 'working', 'error'],
   ] as const)('%s: %s → %s', (type, from, to) => {
-    const r = transition(from, ev({ type } as never))
+    const r = transition(from, ev({ type }))
     expect(r.state).toBe(to)
     expect(r.illegal).toBe(false)
   })
@@ -48,7 +48,7 @@ describe('event → transition', () => {
 
   it('usage/context/title/files_touched do not change the state', () => {
     for (const type of ['usage_update', 'context_update', 'session_title', 'files_touched'] as const) {
-      expect(transition('waiting_input', ev({ type } as never)).state).toBe('waiting_input')
+      expect(transition('waiting_input', ev({ type })).state).toBe('waiting_input')
     }
   })
 })
@@ -65,7 +65,7 @@ describe('blocking illegal transitions', () => {
     // Ignoring a request the host actually sent leaves the agent blocked forever — the table filters only
     // inferences
     for (const type of ['approval_request', 'question_request'] as const) {
-      const r = transition('idle', ev({ type } as never))
+      const r = transition('idle', ev({ type }))
       expect(r.illegal).toBe(false)
       expect(r.state).toBe('waiting_approval')
     }
@@ -73,9 +73,9 @@ describe('blocking illegal transitions', () => {
 
   it('a resolve moves to working only from waiting_approval — a late one changes nothing, and is not illegal', () => {
     for (const type of ['approval_resolved', 'question_resolved'] as const) {
-      expect(transition('waiting_approval', ev({ type } as never)).state).toBe('working')
+      expect(transition('waiting_approval', ev({ type })).state).toBe('working')
       for (const from of ['waiting_input', 'error', 'idle', 'limited', 'working'] as SessionState[]) {
-        const r = transition(from, ev({ type } as never))
+        const r = transition(from, ev({ type }))
         expect(r.state, `${type} in ${from}`).toBe(from)
         expect(r.illegal).toBe(false)
       }

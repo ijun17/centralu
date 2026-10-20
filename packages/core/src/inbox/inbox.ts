@@ -184,10 +184,11 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
  * It follows the inbox order exactly, so the order is approval → error → awaiting response.
  */
 export function nextWaitingSession(inbox: readonly InboxItem[], currentId: string | null): string | null {
-  if (inbox.length === 0) return null
-  if (currentId == null) return inbox[0]!.id
+  const first = inbox[0]
+  if (!first) return null
+  if (currentId == null) return first.id
   const idx = inbox.findIndex((i) => i.id === currentId)
-  if (idx === -1) return inbox[0]!.id
-  return inbox[(idx + 1) % inbox.length]!.id
+  if (idx === -1) return first.id
+  return (inbox[(idx + 1) % inbox.length] ?? first).id
 }
 

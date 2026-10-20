@@ -1,4 +1,4 @@
-import { MACHINE_ID_RE, appKeyOf, type GridPanel, type GridSpan } from '@cc/protocol'
+import { MACHINE_ID_RE, appKeyOf, isRecord, type GridPanel, type GridSpan } from '@cc/protocol'
 import { sanitizeGridSpan } from './span.js'
 
 /**
@@ -96,8 +96,8 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
       if (item) put(sessionGridPanel(item))
       continue
     }
-    if (!item || typeof item !== 'object') continue
-    const v = item as { kind?: unknown; sessionId?: unknown; projectId?: unknown; appId?: unknown; span?: unknown; machine?: unknown }
+    if (!isRecord(item)) continue
+    const v = item
     if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId)
       put(sessionGridPanel(v.sessionId))
     else if (
@@ -111,7 +111,7 @@ export function sanitizeGridPanels(raw: unknown): GridPanel[] {
       // A linked machine's user-folder app (#82) keeps its machine. A malformed one is dropped: read as none, the panel would become this computer's app of the same id
       const machine = typeof v.machine === 'string' && MACHINE_ID_RE.test(v.machine) ? v.machine : null
       if (v.machine !== undefined && v.machine !== null && machine === null) continue
-      put({ ...appGridPanel(v.projectId as string | null, v.appId, machine), ...(span ? { span } : {}) })
+      put({ ...appGridPanel(v.projectId, v.appId, machine), ...(span ? { span } : {}) })
     }
   }
   return out
