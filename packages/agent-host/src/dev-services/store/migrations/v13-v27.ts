@@ -1,3 +1,4 @@
+import { isObj } from '../../../json-value.js'
 import { oneRow } from '../rows.js'
 import { indexedText } from '../search-index.js'
 import { APP_SETTINGS_DDL, MigrationRange, type MigrationStep } from './context.js'
@@ -413,13 +414,18 @@ export class StepsV13ToV27 extends MigrationRange {
           closeRun()
           continue
         }
-        let payload: Record<string, unknown>
+        let parsed: unknown
         try {
-          payload = JSON.parse(r.payload) as Record<string, unknown>
+          parsed = JSON.parse(r.payload)
         } catch {
           closeRun() // leave an unparsable row untouched — keeping it is better than losing it while trying to merge
           continue
         }
+        if (!isObj(parsed)) {
+          closeRun() // JSON that is no object is no streamed event either: left as it is
+          continue
+        }
+        const payload = parsed
         const text = typeof payload.text === 'string' ? payload.text : ''
         if (head && head.sessionId === r.session_id && head.kind === r.kind) {
           head.text += text

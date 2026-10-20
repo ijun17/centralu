@@ -298,7 +298,6 @@ packages/agent-host/src/dev-services/project-folder.ts @typescript-eslint/no-uns
 packages/agent-host/src/dev-services/pty-slot.ts @typescript-eslint/no-unsafe-type-assertion 6
 packages/agent-host/src/dev-services/schema-doc.ts @typescript-eslint/no-unsafe-type-assertion 8
 packages/agent-host/src/dev-services/store-subagent-trash.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/dev-services/store/migrations/v13-v27.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/strays.ts @typescript-eslint/no-non-null-assertion 3
 packages/agent-host/src/dev-services/strays.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/terminal.ts @typescript-eslint/await-thenable 1
