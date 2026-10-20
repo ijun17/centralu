@@ -283,3 +283,164 @@ fn a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that() {
     assert!(said.borrow()[0].contains("older than #538"), "{:?}", said.borrow());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// #1405: every op the dispatcher answers is in `OPS`, so the token test below sends it.
+#[test]
+fn ops_are_listed() {
+    let src = include_str!("mod.rs");
+    let body = &src[src.find("fn handle(k: Arc<Keeper>").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut answered: Vec<String> = Vec::new();
+    for line in body.lines().map(str::trim_start) {
+        // `"op" =>`, `"a" | "b" if … =>`
+        if !line.starts_with('"') || !line.contains("=>") {
+            continue;
+        }
+        let arms = line.split("=>").next().unwrap().split(" if ").next().unwrap();
+        for op in arms.split('|').map(|a| a.trim().trim_matches('"')) {
+            if !answered.iter().any(|o| o == op) {
+                answered.push(op.to_string());
+            }
+        }
+    }
+    let mut listed: Vec<String> = OPS.iter().map(|s| s.to_string()).collect();
+    answered.sort();
+    listed.sort();
+    assert_eq!(answered, listed, "an op the dispatcher answers is missing from OPS, or OPS names one it no longer answers");
+}
+
+/// The front door's token as the keeper makes it (32 hex characters).
+const DOOR_TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+/// A keeper whose host is up behind the door.
+fn keeper_with_a_host(data: &Path) -> Arc<Keeper> {
+    let k = test_keeper(data);
+    k.state.lock().unwrap().status = HostStatus::Ready(HostInfo { port: 4321, token: DOOR_TOKEN.into() });
+    k
+}
+
+/// One request over `keeper.sock` from this process, and every line that comes back within `wait`.
+fn ask(sock: &Path, req: &Value, wait: Duration) -> Vec<String> {
+    use std::io::BufRead;
+    let mut s = UnixStream::connect(sock).unwrap();
+    s.write_all(&json_line(req)).unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    let mut r = BufReader::new(s.try_clone().unwrap());
+    let mut lines = Vec::new();
+    let end = Instant::now() + wait;
+    let mut line = String::new();
+    while Instant::now() < end {
+        match r.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => lines.push(std::mem::take(&mut line)),
+            // A timeout keeps what was read so far in `line`, and the loop reads on
+            Err(_) => continue,
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/**
+ * #1405, the test the design asks for: a process that is not a Centralu window (this test binary)
+ * sends every op `keeper.sock` answers and reads every line that comes back, the pushed status of
+ * an attach included, and none of them carries the front door's token. `status` and `attach` carry
+ * the limited credential in its place; `switch` and `upgrade` are refused. `stop` (it ends this
+ * process) and `restart` (it starts a host) are not sent: neither answer carries a view.
+ */
+#[test]
+fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
+    let data = PathBuf::from(format!("/tmp/cck-token-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    let sock = k.sock.clone();
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let limited = limited::limited_token(DOOR_TOKEN);
+    for op in OPS.iter().copied().filter(|op| !matches!(*op, "stop" | "restart")) {
+        let req = match op {
+            "attach" => json!({ "op": "attach", "protocol": KEEPER_PROTOCOL }),
+            "set_background" => json!({ "op": "set_background", "on": true }),
+            "switch" => json!({ "op": "switch", "source": { "commit": "abc" } }),
+            "upgrade" => json!({ "op": "upgrade", "exe": "/tmp/centralu-keeper", "source": { "commit": "abc" } }),
+            other => json!({ "op": other }),
+        };
+        // An attach stays open: push a status to it while it does, then read what came
+        if op == "attach" {
+            let k2 = k.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                if let Ok(mut st) = k2.state.lock() {
+                    k2.broadcast(&mut st);
+                }
+            });
+        }
+        let lines = ask(&sock, &req, Duration::from_millis(if op == "attach" { 900 } else { 400 }));
+        assert!(!lines.is_empty(), "{op} answered nothing");
+        for line in &lines {
+            assert!(!line.contains(DOOR_TOKEN), "{op} handed the token to a process that is not a window: {line}");
+        }
+        match op {
+            "status" | "attach" => {
+                let first: Value = serde_json::from_str(&lines[0]).unwrap();
+                assert_eq!(first["view"]["status"]["token"], json!(limited), "{op}");
+                assert_eq!(first["view"]["rights"], json!("limited"), "{op}");
+                if op == "attach" {
+                    assert!(lines.len() >= 2, "the attach got no pushed status to check");
+                    let pushed: Value = serde_json::from_str(&lines[1]).unwrap();
+                    assert_eq!(pushed["view"]["status"]["token"], json!(limited));
+                }
+            }
+            "switch" | "upgrade" => assert!(lines[0].contains("window_only"), "{op}: {}", lines[0]),
+            _ => {}
+        }
+    }
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// A window's view carries the token, and a push goes to each window in its own credential.
+#[test]
+fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
+    let data = PathBuf::from(format!("/tmp/cck-rights-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    let token = |v: &KeeperView| match &v.status {
+        HostStatus::Ready(i) => i.token.clone(),
+        _ => panic!("no host"),
+    };
+    {
+        let st = k.state.lock().unwrap();
+        assert_eq!(token(&k.view(&st, true)), DOOR_TOKEN);
+        assert_eq!(k.view(&st, true).rights.as_deref(), Some("full"));
+        assert_eq!(token(&k.view(&st, false)), limited::limited_token(DOOR_TOKEN));
+    }
+    // Two windows adopted from this process (neither is a window by its executable); one marked a
+    // window as `Window::start` marks the app's own
+    let (w1, k1) = UnixStream::pair().unwrap();
+    let (w2, k2) = UnixStream::pair().unwrap();
+    adopt_window(&k, k1);
+    adopt_window(&k, k2);
+    {
+        let mut st = k.state.lock().unwrap();
+        assert!(st.subscribers.iter().all(|w| !w.full), "a process that is not a window was taken for one");
+        st.subscribers[0].full = true;
+        k.broadcast(&mut st);
+    }
+    let read = |s: &UnixStream| {
+        use std::io::BufRead;
+        s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut line = String::new();
+        BufReader::new(s.try_clone().unwrap()).read_line(&mut line).unwrap();
+        line
+    };
+    assert!(read(&w1).contains(DOOR_TOKEN));
+    let other = read(&w2);
+    assert!(!other.contains(DOOR_TOKEN) && other.contains(&limited::limited_token(DOOR_TOKEN)));
+    let _ = fs::remove_dir_all(&data);
+}

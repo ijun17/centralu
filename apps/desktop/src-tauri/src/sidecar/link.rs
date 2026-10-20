@@ -469,6 +469,12 @@ impl KeeperLink {
     fn on_view(&self, app: &AppHandle, view: Option<&Value>) {
         let Some(view) = view.and_then(|v| serde_json::from_value::<KeeperView>(v.clone()).ok()) else { return };
         let status = view.status.clone();
+        // A keeper that did not take this window for one (#1405, keeper/window_peer.rs) hands it the limited credential:
+        // the window still works for everything everyday, and the log says why the rest is refused
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if view.rights.as_deref() == Some("limited") && matches!(status, HostStatus::Ready(_)) && !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[window] the keeper gave this window the limited credential: it did not recognise this executable as a Centralu window");
+        }
         let changed = {
             let Ok(mut st) = self.state.lock() else { return };
             match &status {

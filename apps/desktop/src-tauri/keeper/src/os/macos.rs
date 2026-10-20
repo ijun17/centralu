@@ -147,3 +147,25 @@ impl ExitBackend {
         None
     }
 }
+
+/// The executable `pid` runs (#1405), by `proc_pidpath`.
+pub fn exe_of_pid(pid: u32) -> io::Result<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    const PROC_PIDPATHINFO_MAXSIZE: usize = 4 * 1024;
+    let mut buf = vec![0u8; PROC_PIDPATHINFO_MAXSIZE];
+    let pid = libc::c_int::try_from(pid).map_err(|_| io::Error::other("pid out of range"))?;
+    // SAFETY: buf is valid for writes of its length, which is what we pass.
+    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    if n <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    buf.truncate(n as usize);
+    Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(&buf)))
+}
+
+/// What `codesign --display --verbose=2` says about `exe` (#1405, `window_peer::team_in` reads its
+/// team): written to stderr. None when it could not be run.
+pub fn code_signature_display(exe: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("/usr/bin/codesign").arg("--display").arg("--verbose=2").arg(exe).output().ok()?;
+    Some(String::from_utf8_lossy(&out.stderr).into_owned())
+}

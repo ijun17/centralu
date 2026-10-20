@@ -71,6 +71,10 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 
+// The clients here are Node processes, not a Centralu window: a debug keeper started with this counts every peer as one,
+// so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release keeper ignores it.
+process.env.CC_KEEPER_TEST_ANY_PEER = '1'
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
 const BIN = join(TARGET, 'debug', 'centralu')

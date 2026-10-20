@@ -50,13 +50,14 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
         };
         // The answer is the first line the window's writer sends, queued under the same lock as
         // the window joins the push list, so no event can overtake it.
-        let answer = json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched });
         // The request has been read: the reader waits for the window's end with no bound
         let _ = stream.set_read_timeout(None);
         let Some(w) = Window::start(&k, id, stream) else {
             st.attached = st.attached.saturating_sub(1);
             return;
         };
+        // Its own view: the token only for a window (#1405, `Window::full`)
+        let answer = json!({ "ok": true, "view": k.view(&st, w.full), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched });
         w.push.answer(json_line(&answer));
         st.subscribers.push(w);
         k.broadcast(&mut st);

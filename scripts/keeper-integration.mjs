@@ -61,6 +61,10 @@ import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, sce
 import { scenarioFromACopy, scenarioRelaunch } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
 
+// The clients here are Node processes, not a Centralu window: a debug keeper started with this counts every peer as one,
+// so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release keeper ignores it.
+process.env.CC_KEEPER_TEST_ANY_PEER = '1'
+
 async function main() {
   if (!process.argv.includes('--no-build')) {
     log('bundling the host (pnpm bundle:host)')
