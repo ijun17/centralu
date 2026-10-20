@@ -110,7 +110,7 @@ test("Settings: when agents compact starts on at 60%, moves in steps of 5, and t
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.autoCompact ?? null)
   await open()
