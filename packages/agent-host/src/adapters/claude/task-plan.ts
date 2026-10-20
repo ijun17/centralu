@@ -1,6 +1,6 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import { planUpdate } from '../plan.js'
-import { asObj } from '../../json-value.js'
+import { asObj, isObj } from '../../json-value.js'
 import { str, type Json } from './json.js'
 
 /**
@@ -56,7 +56,8 @@ export class ClaudeTaskPlan {
     } else {
       if (!Array.isArray(record?.tasks)) return []
       this.tasks.clear()
-      for (const t of record.tasks as Json[]) if (str(t.id)) this.tasks.set(str(t.id), { text: str(t.subject), status: str(t.status) })
+      // A list item that is not an object reads as no task (#1339): a `null` here crashed the stream loop
+      for (const t of record.tasks.filter(isObj)) if (str(t.id)) this.tasks.set(str(t.id), { text: str(t.subject), status: str(t.status) })
     }
     return [planUpdate(this.sessionId, [...this.tasks.values()], 'text')]
   }

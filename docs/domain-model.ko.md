@@ -382,6 +382,33 @@ classDiagram
 - `workspace`: UI의 스냅숏. 한 줄.
 - `commit_sessions`: 커밋 귀속.
 
+### 2.5 메일함
+
+세션, 앱, 사람 사이의 일과 대화를 나르는 하나의 영속 통로. 설계는 [plans/mailbox.md](plans/mailbox.md)(#1347)에 있다.
+**1단계뿐이다: 테이블과 모델은 있고(스토어 v61), 아직 아무도 글을 쓰지 않으며 아무것도 전달되지 않는다.**
+
+| 개념 | 뜻 |
+|---|---|
+| 스레드 | 일이기도 한 대화: 제목, 상태(`open`, `running`, `review`, `blocked`, `done`), 소유자(일을 준 쪽이자 보고를 받는 쪽), 담당자, 막힘, 다음 단계, 링크. `done`인 스레드는 더 이상 메일을 받지 않는다. 이어서 할 일은 그 스레드를 가리키는 새 스레드다 |
+| 참여자 | 스레드 안의 당사자: 소유자, 담당자, 구성원. 참여자만 글을 쓸 수 있다(사람과 Centralu는 예외) |
+| 메시지 | 글 하나: 보낸 쪽, 종류(`assign`, `question`, `answer`, `report`, `notice`, `note`, `event`), 본문(보낸 쪽의 말), `facts`(Centralu가 아는 사실). `facts`와 `event`는 Centralu만 쓴다 |
+| 수신 기록 | 한 수신자가 한 메시지를 어디까지 받았는가: 예정, 시도, 전달, 읽음, 처리. 전달 안 된 메일은 수신 기록을 조회한 것이다 |
+| 주소 | 메일에서 당사자를 부르는 이름: `session:<hostId>/<sessionId>`, `app:<hostId>/<projectId>/<appId>`, `person`, 그리고 `centralu`(보내기만 한다). 호스트 id가 처음부터 모든 id와 주소에 들어 있어서, 나중에 링크를 건너 메일이 가도 고쳐 쓸 것이 없다 |
+| 턴 기록 | 세션의 각 턴이 어느 스레드가 시작한 것인가(`mail_turns`). 3단계부터 쓴다 |
+
+저장되는 곳:
+
+- `mail_threads`: 스레드와 그 일의 필드, 고정 표시, 그 일을 가진 호스트.
+- `mail_participants`: 스레드 안에 누가 어떤 역할로 있는가.
+- `mail_blockers`: 스레드의 길을 막고 있는 것.
+- `mail_messages`: 글, Centralu의 `facts`, 같은 변화가 두 번 올라가지 않게 하는 키.
+- `mail_receipts`: 각 수신자가 각 메시지를 어디까지 받았는가.
+- `mail_turns`: 세션의 각 턴이 속한 스레드.
+
+호스트 교체 동안 같은 스토어를 맡은 옛 빌드는 이 테이블을 이름으로 부르지 않는다(v61은 더하기만 한다). 휴지통에서 지워진
+세션은 자기 수신 기록, 스레드 안의 자리, 턴 기록을 함께 가져간다. 보존(끝난 스레드는 30일과 180일 뒤, 읽은 알림은 14일 뒤)은
+`MailService.sweep`이고, 호스트가 준비된 뒤 한 번 돌린다([plans/mailbox.md](plans/mailbox.md) §4.4).
+
 ## 3. 세션 상태
 
 `packages/protocol/src/session-state.ts`이고, `packages/core/src/session/state-machine.ts`가 다시 내보낸다. 상태가

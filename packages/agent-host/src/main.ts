@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, errorMessage, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -19,6 +19,7 @@ import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
+import { MailService } from './mail/service.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
@@ -389,6 +390,12 @@ const userAppAdoption = new UserAppAdoption({
   changed: () => events.push({ type: 'projects_changed' }),
 })
 /*
+ * The mailbox (#1347, docs/plans/mailbox.md): slice 1 is its store and model. Nothing posts yet and nothing is delivered,
+ * so all this host does with it is keep what it holds for as long as it should (§4.4, once the host is ready, below).
+ * The host's id is read from the setting a hub already keeps, and only when mail needs it.
+ */
+const mail = new MailService(store.mail, { hostId: () => hubSelfId(store) })
+/*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
  */
@@ -754,6 +761,17 @@ if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_
 setTimeout(() => {
   userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
   userAppAdoption.watch()
+}, 0)
+/*
+ * What the mailbox keeps and for how long (store/mail-retention.ts), once the host is ready: by now the host this one
+ * replaced is gone, and it never read these tables anyway. Once per start until the delivery engine's own sweep (slice 2).
+ */
+setTimeout(() => {
+  try {
+    mail.sweep()
+  } catch (err) {
+    console.error(`[mail] retention failed; it runs again on the next start: ${errorMessage(err)}`)
+  }
 }, 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a

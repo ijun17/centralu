@@ -131,14 +131,14 @@ packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/no-unsafe
 packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/restrict-template-expressions 1
 packages/agent-host/src/adapters/claude/app-proxy.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/background-tasks.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/adapters/claude/background-tracker.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/agent-host/src/adapters/claude/background-tracker.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/cli-messages.ts @typescript-eslint/no-base-to-string 2
 packages/agent-host/src/adapters/claude/cli-messages.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/detect.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/claude/exe-link.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/adapters/claude/goal-tracker.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/adapters/claude/goal-tracker.ts @typescript-eslint/no-unsafe-type-assertion 4
-packages/agent-host/src/adapters/claude/history.ts @typescript-eslint/no-unsafe-type-assertion 4
+packages/agent-host/src/adapters/claude/history.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/index.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/claude/index.test.ts @typescript-eslint/only-throw-error 1
 packages/agent-host/src/adapters/claude/index.ts @typescript-eslint/no-non-null-assertion 1
@@ -152,7 +152,7 @@ packages/agent-host/src/adapters/claude/permissions.ts @typescript-eslint/no-unn
 packages/agent-host/src/adapters/claude/permissions.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/adapters/claude/refresh-race.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/schedules.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/adapters/claude/schedules.ts @typescript-eslint/no-unsafe-type-assertion 4
+packages/agent-host/src/adapters/claude/schedules.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/sdk-query.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/session-cards.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/session-servers.ts @typescript-eslint/no-non-null-assertion 2
@@ -163,10 +163,8 @@ packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-unsafe-
 packages/agent-host/src/adapters/claude/subagent.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/adapters/claude/surface.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-non-null-assertion 1
-packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/adapters/claude/tool-summary.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/turn-ending.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/adapters/claude/usage.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/windows-start.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-unnecessary-type-assertion 3

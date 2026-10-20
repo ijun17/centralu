@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { withTimeout } from '../../timing.js'
-import { filled, finite } from '../../json-value.js'
+import { filled, finite, isObj } from '../../json-value.js'
 
 /**
  * Claude usage and limits (FR-9).
@@ -39,7 +39,8 @@ type RawLimit = {
 /** Response shape to our shape. This is the boundary that keeps the tool's type from leaking out. */
 export function toSnapshot(raw: unknown): UsageSnapshot {
   const res = (raw ?? {}) as { subscription_type?: unknown; rate_limits?: { limits?: unknown } | null }
-  const limits = Array.isArray(res.rate_limits?.limits) ? (res.rate_limits.limits as RawLimit[]) : []
+  // A list item that is not an object reads as no limit (#1339): a `null` here failed the whole usage read
+  const limits = Array.isArray(res.rate_limits?.limits) ? (res.rate_limits.limits.filter(isObj) as RawLimit[]) : []
 
   const windows: UsageWindow[] = []
   for (const l of limits) {

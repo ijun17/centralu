@@ -253,8 +253,9 @@ export class ClaudeAdapter implements AgentAdapter {
     // Keep this alongside the query option construction. Bump the version when a setting the
     // adapter derives (including cross-session controls) changes without changing these inputs.
     // Normal v2 retires kept processes launched without an explicit mode (#578); safe's flags are unchanged.
+    // Auto v3 retires the ones an older host started without the cross-session controls (#1347 slice 0): they are restarted once, at the safe boundary (#589).
     // Code intelligence (#686) only when off, so every fingerprint stored before it reads the same
-    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles, ...(settings.noCodeIntelligence ? { noLsp: true } : {}) })
+    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : settings.permissionPreset === 'auto' ? 3 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles, ...(settings.noCodeIntelligence ? { noLsp: true } : {}) })
   }
 
   async detect(): Promise<DetectResult> {
