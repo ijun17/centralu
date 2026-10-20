@@ -93,6 +93,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      */
     case 'item/agentMessage/delta': {
       const p = paramsOf(n, 'item/agentMessage/delta')
+      // A `text` is not in AgentMessageDeltaNotification: read as before, for a CLI that sends one
       return [{ type: 'message_delta', sessionId, role: 'assistant', text: str(p.delta) || str(asObj(n.params).text), ...messageIdOf(p.itemId) }]
     }
 
@@ -353,7 +354,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
     case 'configWarning':
     case 'deprecationNotice': {
-      const p = n.method === 'configWarning' ? paramsOf(n, 'configWarning') : paramsOf(n, 'deprecationNotice')
+      const p = paramsOf(n, n.method)
       const text = [str(p.summary).trim(), str(p.details).trim()].filter(Boolean).join('\n')
       return text ? [{ type: 'notice', sessionId, level: 'warning', text, oncePerSession: true, ...noticeWords(n.method, text) }] : []
     }
