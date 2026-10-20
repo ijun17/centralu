@@ -29,6 +29,20 @@ export const HOST_REQUEST_LIMITS = { maxOpen: 8, lifetimeMs: 15 * 60_000, window
 /** How long a generic card's parameters may be: what runs is what the card shows, whole, so a longer call is refused */
 const SHOWN_PARAMS_MAX = 2000
 
+/** What `HostRequest` holds of a name the program gave (its `client`), escapes included */
+const QUOTED_NAME_MAX = 200
+
+/**
+ * A name quoted for a card (`plainQuoted`), within `QUOTED_NAME_MAX` once its escapes are written: a name of format
+ * characters is several times longer quoted, and a request over its schema's bound is one the window cannot read
+ */
+export function quotedName(value: string): string {
+  for (let max = 60; ; max = Math.floor(max / 2)) {
+    const quoted = plainQuoted(value, max)
+    if (quoted.length <= QUOTED_NAME_MAX || max === 0) return quoted
+  }
+}
+
 export type HostRequestsDeps = {
   emit: (event: NormalizedEvent) => void
   /** The window's RPC as the router answers it: what an allowed call runs through, with the token's rights */
@@ -196,7 +210,7 @@ export class HostRequests {
       requestId: randomUUID(),
       method,
       question,
-      client: from.client === null ? null : plainQuoted(from.client),
+      client: from.client === null ? null : quotedName(from.client),
       createdAt,
       expiresAt: createdAt + this.limits.lifetimeMs,
     }

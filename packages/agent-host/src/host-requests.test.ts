@@ -1,7 +1,7 @@
 /** Host requests (#1405): the limited credential's irreversible calls wait for the person's card */
 import { describe, expect, it } from 'vitest'
-import type { HostRequest, NormalizedEvent, TrashedSession } from '@cc/protocol'
-import { HostRequests, type HostRequestsDeps } from './host-requests.js'
+import { HostRequest as HostRequestSchema, type HostRequest, type NormalizedEvent, type TrashedSession } from '@cc/protocol'
+import { HostRequests, quotedName, type HostRequestsDeps } from './host-requests.js'
 
 const row = (id: string, name: string, extra: Partial<TrashedSession> = {}): TrashedSession =>
   ({ id, name, tool: 'claude', project: null, deletedAt: 1000, messages: 4, bytes: 2048, conversationFile: 'keep', worktree: null, ...extra })
@@ -174,6 +174,21 @@ describe('a host request (#1405)', () => {
     h.requests.answer(card.requestId, 'allow')
     await expect(asked).resolves.toEqual({ done: 'projects.delete' })
     expect(h.calls).toEqual([['projects.delete', params]])
+  })
+
+  it('quotes a name of format characters within what the request may hold, so the window can read the card', async () => {
+    const h = harness()
+    // 200 characters is what a hello's client may be; each bidi override is six once escaped
+    const name = String.fromCharCode(0x202e).repeat(200)
+    const asked = h.requests.ask('projects.delete', { projectId: 'p1' }, { client: name }, new AbortController().signal)
+    const card = await h.nextCard()
+    expect(card.client).toMatch(/^"(\\u202e)+…"$/)
+    expect(HostRequestSchema.safeParse(card).success).toBe(true)
+    h.requests.answer(card.requestId, 'deny')
+    await caught(asked)
+    // An astral format character is nine; a plain name stays whole
+    expect(quotedName(String.fromCodePoint(0xe0001).repeat(100)).length).toBeLessThanOrEqual(200)
+    expect(quotedName('host-rpc')).toBe('"host-rpc"')
   })
 
   it('never runs a parameter the card did not show: parameters too long to show whole are refused, not cut', async () => {
