@@ -13,6 +13,8 @@ import { MachineFlow, type MachineOps } from './machine-flow.js'
 import { PreferencesFlow } from './preferences-flow.js'
 import { TrashFlow } from './trash-flow.js'
 import { TrustFlow } from './trust-flow.js'
+import { AppUpkeepFlow } from './app-upkeep-flow.js'
+import { HousekeepingFlow } from './housekeeping-flow.js'
 import type { WindowRpc } from './window-rpc.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
@@ -189,6 +191,10 @@ export class SessionManager {
   private readonly trashFlow: TrashFlow
   /** The orchestrator's trust commands (trust-flow.ts) */
   private readonly trustFlow: TrustFlow
+  /** The orchestrator's app upkeep commands (app-upkeep-flow.ts) */
+  private readonly appUpkeepFlow: AppUpkeepFlow
+  /** The orchestrator's housekeeping and read commands (housekeeping-flow.ts) */
+  private readonly housekeepingFlow = new HousekeepingFlow()
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
@@ -330,6 +336,7 @@ export class SessionManager {
     this.preferencesFlow = new PreferencesFlow(this.parts())
     this.trashFlow = new TrashFlow(this.parts())
     this.trustFlow = new TrustFlow(this.parts())
+    this.appUpkeepFlow = new AppUpkeepFlow(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
@@ -505,7 +512,10 @@ export class SessionManager {
   useWindowRpc(rpc: WindowRpc): void {
     this.preferencesFlow.useRpc(rpc)
     this.trashFlow.useRpc(rpc)
+    this.trashFlow.useSessions({ lossesOf: (id) => this.trash.lossesOf(id), deleteIfQuiet: (id, also) => this.trash.trashIfQuiet(id, also) })
     this.trustFlow.useRpc(rpc)
+    this.appUpkeepFlow.useRpc(rpc)
+    this.housekeepingFlow.useRpc(rpc)
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -2074,6 +2084,8 @@ export class SessionManager {
       preferencesRequest: (sessionId, req, signal) => this.preferencesFlow.run(sessionId, req, signal),
       trashRequest: (sessionId, req, signal) => this.trashFlow.run(sessionId, req, signal),
       trustRequest: (sessionId, req, signal) => this.trustFlow.run(sessionId, req, signal),
+      appUpkeepRequest: (sessionId, req, signal) => this.appUpkeepFlow.run(sessionId, req, signal),
+      housekeepingRequest: (sessionId, req) => this.housekeepingFlow.run(sessionId, req),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),

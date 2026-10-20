@@ -21,6 +21,9 @@ export type MachineRequest =
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
   | { action: 'auto_reconnect'; machine: string; on: boolean }
   | { action: 'autostart'; machine: string; on: boolean }
+  /** #1219, the machine calls left: disconnect acts at once, rolling back and uninstalling wait for the person's card, the last two read */
+  | { action: 'disconnect' | 'rollback' | 'uninstall' | 'activity'; machine: string }
+  | { action: 'ssh_hosts' }
 
 /** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
 export type PreferenceChanges = {
@@ -35,6 +38,10 @@ export type PreferenceChanges = {
   /** "Automatic updates" (2026-10-20): checking, and installing and applying when idle, as one setting */
   autoUpdate?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
+  /** "Send with Ctrl+Enter instead of Enter" (#1219, fourth slice): a way of typing, kept on the host with the other screen preferences */
+  sendWithModifierEnter?: boolean
+  /** The sidebar groups to fold or unfold (#666), by the session whose children they hide: a way of looking, nothing more */
+  foldedGroups?: { fold?: string[]; unfold?: string[] }
   /**
    * The notification switches (#1306), the ones to change. The "error" and "every session finished" ones are gone from the
    * product (2026-10-20): no field, though the stored record keeps them for older builds
@@ -43,13 +50,19 @@ export type PreferenceChanges = {
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
-export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: PreferenceChanges }
+export type PreferencesRequest =
+  | { action: 'get' }
+  | { action: 'set'; changes: PreferenceChanges }
+  /** The session header's "restart idle sessions on the new agent CLI" (#297): a session that is busy is left as it is */
+  | { action: 'apply_agent_versions' }
 
 /** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
 export type TrashRequest =
   | { action: 'list' }
   | { action: 'restore'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'trash_steps'; sessionId: string }
+  /** #1219: a session that is not the caller's child, moved to the trash (reversible) */
+  | { action: 'delete_session'; sessionId: string }
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
 
@@ -67,6 +80,28 @@ export type TrustRequest =
   | { action: 'revoke_consent'; from: string; to: string; kind: 'delegate' | 'apps' | 'agents' }
   | { action: 'share_app'; app: string; project?: string; shared: boolean }
   | { action: 'set_limits'; changes: AgentLimitChanges }
+
+/**
+ * One request of the orchestrator's app upkeep commands (#1219, fourth slice), as the tool runner reads its arguments: looking
+ * after an app the way its screens in the window do. Removing waits for the person's card; the rest read or undo themselves.
+ */
+export type AppUpkeepRequest =
+  | { action: 'versions' | 'check' | 'errors' | 'usage' | 'restart' | 'remove'; app: string; project?: string }
+  | { action: 'restore_version'; app: string; project?: string; id: string }
+  | { action: 'runs'; app: string; project?: string; limit?: number }
+
+/**
+ * One request of the orchestrator's housekeeping and read commands (#1219, fourth slice), as the tool runner reads its
+ * arguments: renaming a session, clearing its ended background tasks, and reading how the agent CLIs stand, a project's git
+ * state and its files. None asks.
+ */
+export type HousekeepingRequest =
+  | { action: 'rename_session'; sessionId: string; name: string }
+  | { action: 'clear_background_tasks'; sessionId: string }
+  | { action: 'agent_status'; tool?: string }
+  | { action: 'agent_models'; tool: string }
+  | { action: 'git_status'; project: string }
+  | { action: 'search_files'; project: string; query: string; limit?: number }
 
 /** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
 export type AgentLimitChanges = {
@@ -698,6 +733,10 @@ export type OrchestratorTools = {
    * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
    */
   trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /** The housekeeping and read commands (#1219, fourth slice) */
+  housekeeping?(req: HousekeepingRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /** The app upkeep commands (#1219, fourth slice) */
+  appUpkeep?(req: AppUpkeepRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.
