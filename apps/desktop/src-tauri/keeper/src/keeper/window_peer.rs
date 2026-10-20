@@ -8,18 +8,22 @@
 //! A peer is a window when the kernel's record of who connected (`peer_pid`, as of its `connect`)
 //! names a process whose executable is the app's own: a file named `centralu` (the window's binary
 //! in the macOS bundle, the AppImage, the Linux packages and a debug build alike, `exe.rs`). On a
-//! keeper signed with a team identifier (a macOS release), the peer's executable must also be
-//! signed by the same team (`codesign`): a copy of another program renamed `centralu` is not.
+//! keeper signed with a team identifier, the peer's executable must also be signed by that team
+//! (`codesign --display`): a copy of another program renamed `centralu` is not. No release is signed
+//! with a team today (macOS releases are signed ad hoc, `tauri.conf.json`), so in every build that
+//! ships the name decides; the team check is there for the day one is.
 //!
 //! **Not a wall.** A process of this user can start the app's own executable, which opens a
-//! window the person sees; on an unsigned keeper (a debug build, Linux) it can also rename a
-//! program of its own. What this closes is the easy path: a script asking the socket for the token.
+//! window the person sees, and where the name decides it can also run a program of its own renamed
+//! `centralu`. What this closes is the easy path: a script asking the socket for the token.
 //!
-//! A window never fails this check by an error of the keeper's: an executable it cannot name, or a
-//! signature it cannot read, counts against the peer only where the keeper is itself signed and
-//! the peer's team is read and differs. Elsewhere the name decides.
+//! **How it fails.** A peer whose pid or executable the kernel does not name is not a window: the
+//! token is not handed out on a guess. Where the keeper has a team and `codesign` cannot be run at
+//! all, the name decides, as it does for an unsigned keeper; a peer `codesign` reads as unsigned,
+//! ad hoc or another team's is not a window. Every refusal is logged with the executable and why,
+//! and a window that was given the limited credential says so in its own log (`sidecar/link.rs`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use std::os::unix::net::UnixStream;
@@ -29,12 +33,33 @@ const WINDOW_EXE: &str = "centralu";
 
 /// Whether the process at the other end of `stream` is a Centralu window.
 pub fn is_window(stream: &UnixStream) -> bool {
+    judge(stream).is_ok()
+}
+
+/// The same, with why not: the executable, when the kernel named one, and the reason.
+pub fn judge(stream: &UnixStream) -> Result<(), String> {
     if test_any_peer() {
-        return true;
+        return Ok(());
     }
-    let Ok(pid) = crate::os::peer_pid(stream) else { return false };
-    let Ok(exe) = crate::os::exe_of_pid(pid) else { return false };
-    named_as_window(&exe) && same_signer(&exe)
+    let pid = crate::os::peer_pid(stream).map_err(|e| format!("the kernel named no peer process ({e})"))?;
+    let exe = crate::os::exe_of_pid(pid).map_err(|e| format!("the executable of pid {pid} could not be read ({e})"))?;
+    judge_exe(&exe, own_team().as_deref(), team_of)
+}
+
+/// The rule for one executable: `ours` is this keeper's team (None: it judges no signatures), and
+/// the team reader is passed in for the tests.
+pub fn judge_exe(exe: &Path, ours: Option<&str>, read_team: impl Fn(&Path) -> Signer) -> Result<(), String> {
+    if !named_as_window(exe) {
+        return Err(format!("{} is not the window's executable", exe.display()));
+    }
+    let Some(ours) = ours else { return Ok(()) };
+    match read_team(exe) {
+        Signer::Team(t) if t == ours => Ok(()),
+        Signer::Team(t) => Err(format!("{} is signed by team {t}, not this keeper's {ours}", exe.display())),
+        Signer::NoTeam => Err(format!("{} is not signed by this keeper's team {ours}", exe.display())),
+        // `codesign` could not be run at all: the name decides, as for an unsigned keeper
+        Signer::Unread => Ok(()),
+    }
 }
 
 /// The executable's file name is the window's. Linux marks an executable replaced since the
@@ -44,23 +69,39 @@ pub fn named_as_window(exe: &Path) -> bool {
     name == WINDOW_EXE || name == format!("{WINDOW_EXE} (deleted)")
 }
 
-/// On a keeper signed by a team, the peer's executable is signed by the same team. A keeper with
-/// no team (unsigned, ad hoc, Linux) does not judge signatures, and neither does one that cannot
-/// read its own.
-fn same_signer(exe: &Path) -> bool {
-    let Some(ours) = own_team() else { return true };
-    team_of(exe).as_deref() == Some(ours.as_str())
+/// What `codesign` says signed an executable.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Signer {
+    /// Signed by this team
+    Team(String),
+    /// Unsigned, signed ad hoc, or no team
+    NoTeam,
+    /// `codesign` could not be run, or there are no signatures to read here
+    Unread,
 }
 
-/// This keeper's own team identifier, read once.
+/// This keeper's own team identifier, read once. None: it judges no signatures.
 fn own_team() -> Option<String> {
     static OWN: OnceLock<Option<String>> = OnceLock::new();
-    OWN.get_or_init(|| std::env::current_exe().ok().and_then(|exe| team_of(&exe))).clone()
+    OWN.get_or_init(|| {
+        let exe: PathBuf = std::env::current_exe().ok()?;
+        match team_of(&exe) {
+            Signer::Team(t) => Some(t),
+            _ => None,
+        }
+    })
+    .clone()
 }
 
-/// The team identifier `exe` is signed with, or None (unsigned, ad hoc, or no signatures here).
-fn team_of(exe: &Path) -> Option<String> {
-    team_in(&crate::os::code_signature_display(exe)?)
+/// What signed `exe`, as `codesign --display` says it (the OS layer runs it, macOS only).
+fn team_of(exe: &Path) -> Signer {
+    match crate::os::code_signature_display(exe) {
+        None => Signer::Unread,
+        Some(display) => match team_in(&display) {
+            Some(t) => Signer::Team(t),
+            None => Signer::NoTeam,
+        },
+    }
 }
 
 /// The `TeamIdentifier=` line of `codesign --display --verbose=2`; "not set" is no team.
@@ -74,14 +115,13 @@ pub fn team_in(display: &str) -> Option<String> {
  * integration scripts (`scripts/keeper-*.mjs`), whose clients are Node processes. A release build
  * ignores it: the check is compiled out with `debug_assertions`.
  */
-fn test_any_peer() -> bool {
+pub fn test_any_peer() -> bool {
     cfg!(debug_assertions) && std::env::var_os("CC_KEEPER_TEST_ANY_PEER").is_some_and(|v| v == "1")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn the_window_is_the_app_executable_by_name() {
@@ -107,11 +147,30 @@ mod tests {
     }
 
     #[test]
+    fn a_misnamed_peer_is_refused_with_its_path() {
+        let why = judge_exe(Path::new("/usr/bin/node"), None, |_| Signer::Unread).unwrap_err();
+        assert!(why.contains("/usr/bin/node"), "{why}");
+    }
+
+    #[test]
+    fn a_keeper_with_a_team_takes_only_its_own_teams_window() {
+        let exe = Path::new("/Applications/Centralu.app/Contents/MacOS/centralu");
+        assert!(judge_exe(exe, Some("AB12"), |_| Signer::Team("AB12".into())).is_ok());
+        assert!(judge_exe(exe, Some("AB12"), |_| Signer::Team("ZZ99".into())).unwrap_err().contains("team ZZ99"));
+        assert!(judge_exe(exe, Some("AB12"), |_| Signer::NoTeam).is_err(), "an ad hoc or unsigned copy named centralu");
+        // codesign could not run at all: the name decides, as on a keeper with no team
+        assert!(judge_exe(exe, Some("AB12"), |_| Signer::Unread).is_ok());
+        // A keeper with no team judges no signatures
+        assert!(judge_exe(exe, None, |_| Signer::NoTeam).is_ok());
+    }
+
+    #[test]
     fn a_process_that_is_not_the_window_is_not_one() {
         // The test binary is the peer of both ends here: it is not named `centralu`
         let (a, _b) = UnixStream::pair().unwrap();
         if !test_any_peer() {
-            assert!(!is_window(&a));
+            let why = judge(&a).unwrap_err();
+            assert!(why.contains("not the window's executable"), "{why}");
         }
     }
 }

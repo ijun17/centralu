@@ -57,7 +57,11 @@ export function keeperSocketPath(env: Env = process.env, home: string = homedir(
   return join(dataDir(env, home), 'keeper.sock')
 }
 
-export type HostDoor = { port: number; token: string }
+/**
+ * The front door's port, the credential the keeper handed this script, and which one it is (`view.rights`, #1405):
+ * `limited` from a keeper that judges windows, null from one from before it, which hands every process the token
+ */
+export type HostDoor = { port: number; token: string; rights: 'full' | 'limited' | null }
 
 /** One request on the keeper's control socket: a JSON line out, a JSON line back. */
 function ask(sock: string, request: unknown, timeoutMs: number): Promise<unknown> {
@@ -100,7 +104,7 @@ export async function readHostDoor(env: Env = process.env, opts: { platform?: st
   const reply = (await ask(sock, { op: 'status' }, opts.timeoutMs ?? STATUS_TIMEOUT_MS)) as {
     ok?: boolean
     error?: unknown
-    view?: { status?: { state?: string; port?: unknown; token?: unknown; message?: unknown } }
+    view?: { status?: { state?: string; port?: unknown; token?: unknown; message?: unknown }; rights?: unknown }
   } | null
   if (!reply || reply.ok !== true) {
     const why = typeof reply?.error === 'string' ? `: ${reply.error}` : ''
@@ -109,7 +113,8 @@ export async function readHostDoor(env: Env = process.env, opts: { platform?: st
   const status = reply.view?.status
   const state = status?.state
   if (state === 'ready' && typeof status?.port === 'number' && typeof status.token === 'string' && status.token !== '') {
-    return { port: status.port, token: status.token }
+    const rights = reply.view?.rights === 'limited' || reply.view?.rights === 'full' ? reply.view.rights : null
+    return { port: status.port, token: status.token, rights }
   }
   if (state === 'failed') {
     const message = typeof status?.message === 'string' ? ` (${status.message})` : ''
@@ -196,6 +201,8 @@ export async function run(env: Env = process.env, deps: Deps = {}): Promise<numb
     }
     log(`Open http://127.0.0.1:${port}/  (127.0.0.1, not localhost)`)
     log('Warning: the page carries a credential to this app\'s host (it reads every conversation), and any user of this machine can read it from there. Use this on a single-user machine only.')
+    // A keeper from before #1405 hands every process the full token: the page can then do anything the window can
+    if (door.rights !== 'limited') log("This app's keeper predates the limited credential: the page carries the full host token, and can delete for good without asking. Update the app to close that.")
     log('The credential stays the same until the app is fully quit and opened again: run this again then.')
     return await (deps.startVite ?? startVite)({
       args: ['--config', 'vite.config.ts', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],

@@ -159,10 +159,10 @@ impl State {
 
     /// Counts a window another keeper handed over as attached and adds it to the push list; returns
     /// its id. A window back spends the wait for one the keeper closed.
-    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream) -> u64 {
+    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream, full: bool) -> u64 {
         let id = self.count_window();
         self.reattach_until = None;
-        if let Some(w) = Window::start(k, id, stream) {
+        if let Some(w) = Window::start(k, id, stream, full) {
             self.subscribers.push(w);
         }
         id
@@ -210,7 +210,9 @@ impl Window {
      * `watch_window` sees as the connection ends) finds the grace already set. None, and the
      * connection shut down, when no thread could be started for it: the window attaches again.
      */
-    fn start(k: &Arc<Keeper>, id: u64, stream: UnixStream) -> Option<Window> {
+    /// `full`: whether the peer is a Centralu window (`window_peer::judge`), judged by the caller before it takes the
+    /// state lock, since the judgement may run `codesign`.
+    fn start(k: &Arc<Keeper>, id: u64, stream: UnixStream, full: bool) -> Option<Window> {
         let k2 = k.clone();
         let on_fail = move |e: &std::io::Error| {
             log(&format!("window {id} stopped taking its status ({e}); closing its connection"));
@@ -221,10 +223,6 @@ impl Window {
                 }
             }
         };
-        let full = window_peer::is_window(&stream);
-        if !full {
-            log(&format!("window {id} is not a Centralu window by its executable: it gets the limited credential"));
-        }
         let stream = Arc::new(stream);
         match push::Pusher::start(stream.clone(), on_fail) {
             Ok(push) => Some(Window { id, full, stream, push }),

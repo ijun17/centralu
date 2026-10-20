@@ -319,22 +319,23 @@ fn keeper_with_a_host(data: &Path) -> Arc<Keeper> {
     k
 }
 
-/// One request over `keeper.sock` from this process, and every line that comes back within `wait`.
-fn ask(sock: &Path, req: &Value, wait: Duration) -> Vec<String> {
+/// One request over `keeper.sock` from this process: the lines that come back, read until `want` of them have, the
+/// keeper closes the connection, or 10 s pass (a bound for a stalled keeper, not a wait the test depends on).
+fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
     use std::io::BufRead;
     let mut s = UnixStream::connect(sock).unwrap();
     s.write_all(&json_line(req)).unwrap();
-    s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
     let mut r = BufReader::new(s.try_clone().unwrap());
     let mut lines = Vec::new();
-    let end = Instant::now() + wait;
+    let end = Instant::now() + Duration::from_secs(10);
     let mut line = String::new();
-    while Instant::now() < end {
+    while lines.len() < want && Instant::now() < end {
         match r.read_line(&mut line) {
             Ok(0) => break,
-            Ok(_) => lines.push(std::mem::take(&mut line)),
-            // A timeout keeps what was read so far in `line`, and the loop reads on
-            Err(_) => continue,
+            Ok(_) if line.ends_with('\n') => lines.push(std::mem::take(&mut line)),
+            // A timeout, or a line not whole yet: what was read stays in `line`, and the loop reads on
+            _ => continue,
         }
     }
     if !line.is_empty() {
@@ -352,6 +353,10 @@ fn ask(sock: &Path, req: &Value, wait: Duration) -> Vec<String> {
  */
 #[test]
 fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
+    if window_peer::test_any_peer() {
+        eprintln!("skipped: CC_KEEPER_TEST_ANY_PEER=1 makes every peer a window");
+        return;
+    }
     let data = PathBuf::from(format!("/tmp/cck-token-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
@@ -370,17 +375,22 @@ fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
             "upgrade" => json!({ "op": "upgrade", "exe": "/tmp/centralu-keeper", "source": { "commit": "abc" } }),
             other => json!({ "op": other }),
         };
-        // An attach stays open: push a status to it while it does, then read what came
+        // An attach stays open: push statuses to it until its two lines are read
+        let pushing = Arc::new(AtomicBool::new(op == "attach"));
         if op == "attach" {
-            let k2 = k.clone();
+            let (k2, pushing) = (k.clone(), pushing.clone());
             thread::spawn(move || {
-                thread::sleep(Duration::from_millis(300));
-                if let Ok(mut st) = k2.state.lock() {
-                    k2.broadcast(&mut st);
+                while pushing.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(50));
+                    if let Ok(mut st) = k2.state.lock() {
+                        k2.broadcast(&mut st);
+                    }
                 }
             });
         }
-        let lines = ask(&sock, &req, Duration::from_millis(if op == "attach" { 900 } else { 400 }));
+        // Every other op is answered with one line and the connection closed: read to the end
+        let lines = ask(&sock, &req, if op == "attach" { 2 } else { usize::MAX });
+        pushing.store(false, Ordering::SeqCst);
         assert!(!lines.is_empty(), "{op} answered nothing");
         for line in &lines {
             assert!(!line.contains(DOOR_TOKEN), "{op} handed the token to a process that is not a window: {line}");
@@ -406,6 +416,10 @@ fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
 /// A window's view carries the token, and a push goes to each window in its own credential.
 #[test]
 fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
+    if window_peer::test_any_peer() {
+        eprintln!("skipped: CC_KEEPER_TEST_ANY_PEER=1 makes every peer a window");
+        return;
+    }
     let data = PathBuf::from(format!("/tmp/cck-rights-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
@@ -442,5 +456,45 @@ fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
     assert!(read(&w1).contains(DOOR_TOKEN));
     let other = read(&w2);
     assert!(!other.contains(DOOR_TOKEN) && other.contains(&limited::limited_token(DOOR_TOKEN)));
+    let _ = fs::remove_dir_all(&data);
+}
+
+/**
+ * #1405, the other side: a process whose executable is named `centralu` gets the front door's token. This test binary,
+ * copied as `centralu` and run again to make the request, is that process; the kernel names its executable, as it
+ * names the window's. (A keeper with a team would also want the copy signed by it; no keeper in a test has one.)
+ */
+#[test]
+fn a_process_named_centralu_gets_the_token() {
+    const NAME: &str = "keeper::server::tests::a_process_named_centralu_gets_the_token";
+    // The copy, run again: it is the client
+    if let Ok(sock) = std::env::var("CCK_TEST_CLIENT_SOCK") {
+        let lines = ask(Path::new(&sock), &json!({ "op": "status" }), 1);
+        // The harness writes its own words before this on the same line: the reader finds the marker anywhere
+        println!("REPLY {}", lines.first().map(|l| l.trim()).unwrap_or(""));
+        return;
+    }
+    let data = PathBuf::from(format!("/tmp/cck-named-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    let sock = k.sock.clone();
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let copy = data.join("centralu");
+    fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
+    let out = std::process::Command::new(&copy)
+        .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+        .env("CCK_TEST_CLIENT_SOCK", &sock)
+        .env_remove("CC_KEEPER_TEST_ANY_PEER")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let reply = stdout.lines().find_map(|l| l.find("REPLY ").map(|at| &l[at + 6..])).unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
+    let v: Value = serde_json::from_str(reply).unwrap();
+    assert_eq!(v["view"]["status"]["token"], json!(DOOR_TOKEN), "{reply}");
+    assert_eq!(v["view"]["rights"], json!("full"));
     let _ = fs::remove_dir_all(&data);
 }

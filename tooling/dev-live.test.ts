@@ -37,7 +37,7 @@ async function fakeKeeper(reply: (request: any) => unknown | undefined) {
   return { dir, requests, env: { CC_DATA_DIR: dir } as Record<string, string | undefined> }
 }
 
-const ready = (port = 41234, token = TOKEN) => ({ ok: true, view: { keeper: { pid: 1 }, status: { state: 'ready', port, token }, background: false } })
+const ready = (port = 41234, token = TOKEN, rights: string | undefined = 'limited') => ({ ok: true, view: { keeper: { pid: 1 }, status: { state: 'ready', port, token }, background: false, ...(rights ? { rights } : {}) } })
 const view = (status: unknown) => ({ ok: true, view: { status } })
 
 /** A port nobody listens on, and a held one. */
@@ -82,7 +82,7 @@ describe('dev:live: where the keeper is', () => {
 describe('dev:live: reading the keeper', () => {
   unixIt('asks for `status` and returns the front door\'s port and token', async () => {
     const k = await fakeKeeper(() => ready(41234))
-    await expect(readHostDoor(k.env, { platform: 'darwin' })).resolves.toEqual({ port: 41234, token: TOKEN })
+    await expect(readHostDoor(k.env, { platform: 'darwin' })).resolves.toEqual({ port: 41234, token: TOKEN, rights: 'limited' })
     expect(k.requests).toEqual([{ op: 'status' }])
   })
 
@@ -139,9 +139,20 @@ describe('dev:live: the command', () => {
     expect(launch.env.VITE_HOST_TOKEN).toBe(TOKEN)
     expect(r.out.join('\n')).toContain(`http://127.0.0.1:${port}/`)
     expect(r.out.join('\n')).toMatch(/single-user machine only/)
-    expect(r.out.join('\n')).toMatch(/token stays the same until the app is fully quit and opened again/)
+    expect(r.out.join('\n')).toMatch(/credential stays the same until the app is fully quit and opened again/)
+    // A keeper of #1405 handed it the limited credential: nothing more to warn of
+    expect(r.out.join('\n')).not.toMatch(/full host token/)
     expect([...r.out, ...r.errs, ...launch.args].join('\n')).not.toContain(TOKEN)
     expect(process.env.VITE_HOST_TOKEN).toBeUndefined()
+  })
+
+  unixIt('says so when an older keeper handed it the full token (#1405)', async () => {
+    const k = await fakeKeeper(() => ready(41234, TOKEN, undefined))
+    const port = await freePort()
+    const r = recorder()
+    expect(await run({ ...k.env, PORT: String(port) }, { ...r.deps, platform: 'darwin' })).toBe(0)
+    expect(r.out.join('\n')).toMatch(/predates the limited credential: the page carries the full host token/)
+    expect([...r.out, ...r.errs].join('\n')).not.toContain(TOKEN)
   })
 
   unixIt('stops with one line when no app is running, and starts no Vite', async () => {

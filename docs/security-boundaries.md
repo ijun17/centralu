@@ -1295,9 +1295,14 @@ door's port and a credential, stop the host, and make the keeper run a host from
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
   `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) whose file is
-  named `centralu`, the window's binary in every build; on a keeper signed with a team identifier (a macOS release),
-  that executable is also signed by the same team (`codesign --display`). A window adopted in a keeper handoff is judged
-  again from its socket, whose peer record travels with it.
+  named `centralu`, the window's binary in every build; on a keeper signed with a team identifier, that executable is
+  also signed by the same team (`codesign --display`). No release is signed with a team today (macOS releases are
+  signed ad hoc), so in every build that ships the name decides. A peer whose pid or executable the kernel does not
+  name is not a window; where the keeper has a team and `codesign` cannot run at all, the name decides. The keeper
+  judges before it takes its state lock, logs every refusal with the executable and why, and a window given the
+  limited credential says so in its own log. A window adopted in a keeper handoff is judged again from its socket,
+  whose peer record travels with it. A test runs a copy of the test binary named `centralu` against the socket and
+  checks that it gets the token.
 - **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
   every status pushed to it. It alone may `switch` and `upgrade`, which start a build of the request's naming and hand
   it the token.
@@ -1309,7 +1314,8 @@ door's port and a credential, stop the host, and make the keeper run a host from
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
   checks the list against the dispatcher.
 - **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees; on a
-  keeper that is not signed with a team (a debug build, Linux) it can also run a program of its own renamed `centralu`.
+  keeper that is not signed with a team (every build that ships today) it can also run a program of its own renamed
+  `centralu`: deliberate, not the easy path this closes.
   A debug keeper started with `CC_KEEPER_TEST_ANY_PEER=1` counts every peer as a window, for the integration scripts,
   whose clients are Node processes; a release keeper compiles that out. An older keeper (before #1405) still hands the
   token to every process until the app is fully quit or the keeper is updated (its update hands over to a keeper that
