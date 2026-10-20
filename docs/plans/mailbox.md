@@ -344,7 +344,14 @@ One host component, `MailDelivery`, owns every receipt. It works events first an
 It keeps one delivery in flight per mailbox. A delivery that starts a turn carries:
 
 - **at most one thread that is the receiver's work**: mail in a thread where the receiver is the assignee or a member,
-  whose owner will get the turn's report. The oldest due one goes first; the others wait for the next turn.
+  whose owner will get the turn's report. The others wait for the next turn. Which one goes (as built in slice 2):
+  1. a thread with the person's words or urgent mail;
+  2. then a thread with a `question`;
+  3. then the oldest due.
+
+  Within each class, the oldest goes first. So §7.9's "the person's threads first" holds for every wake, not only after a
+  long stop. A thread passed over for longer than the maximum hold of §7.10 (5 minutes for a question, 15 for the rest)
+  moves up to the first class, so a stream of newer questions cannot starve older work.
 - **all due mail in threads the receiver owns**: reports and notices about work it gave. Their turn is the receiver's
   own business, so they can share one wake (§6 says which thread such a turn belongs to).
 
