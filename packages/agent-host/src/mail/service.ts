@@ -33,6 +33,7 @@ import {
   mayEditTask,
   mayPostKind,
   refuse,
+  refusalReason,
   reopensReview,
   settableStates,
   stateAfterUnblocked,
@@ -54,6 +55,11 @@ import {
 export type MailPolicy = {
   /** A reason in words when `from` may not write to `to` in this thread (null for a thread being opened), else null */
   mayWrite(from: string, to: string, thread: ThreadRow | null): string | null
+  /**
+   * A reason in words when `to` cannot read mail at all, whoever writes: a session whose seat has no `mail` tool (the wake names a call
+   * it cannot make, §9.3). Asked before anything else about the receiver, also for a reply in a thread it is in
+   */
+  cannotRead?(to: string): string | null
 }
 
 export type MailServiceOptions = {
@@ -319,10 +325,23 @@ export class MailService {
       const body = this.checkBody(sender.kind, input.body, false)
       if (input.replyTo !== undefined) this.checkReplyTo(thread.id, input.replyTo)
 
-      for (const to of this.recipients(thread.id, caller)) this.mayWriteOrRefuse(caller, to, thread)
+      // A participant that is gone, or whose seat cannot read mail, gets no receipt: the others are written to all the same. Refused
+      // only when there is no one left to take it, so the sender learns why
+      const reachable: string[] = []
+      let refusal: Error | undefined
+      for (const to of this.recipients(thread.id, caller)) {
+        try {
+          this.mayWriteOrRefuse(caller, to, thread)
+          reachable.push(to)
+        } catch (e) {
+          if (!(e instanceof Error) || refusalReason(e) === undefined) throw e
+          refusal ??= e
+        }
+      }
+      if (refusal !== undefined && reachable.length === 0) throw refusal
       // The person writes into any thread, and from then on is in it (the Inbox's reply box, §10.1); a role they have stays
       if (sender.kind === 'person') this.records.putParticipantIfAbsent(thread.id, PERSON, 'member', now)
-      const message = this.insertPost(thread.id, caller, input.kind, body, {}, input, now, input.replyTo)
+      const message = this.insertPost(thread.id, caller, input.kind, body, {}, input, now, input.replyTo, reachable)
       let after = thread
       if (thread.state === 'review' && reopensReview(standing, input.kind)) {
         after = this.moveState(thread, { state: 'running' }, now, { change: 'state', from: 'review', to: 'running', by: caller }, 'The owner sent more: the thread is running again.')
@@ -671,7 +690,7 @@ export class MailService {
     const items: MailFrameItem[] = []
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
       if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
-      if (this.policy.mayWrite(message.sender, recipient, thread) !== null) continue
+      if (this.policy.mayWrite(message.sender, recipient, thread) !== null || this.policy.cannotRead?.(recipient)) continue
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
       // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
@@ -881,6 +900,8 @@ export class MailService {
   }
 
   private mayWriteOrRefuse(from: string, to: string, thread: ThreadRow | null): void {
+    const cannot = this.policy.cannotRead?.(to) ?? null
+    if (cannot !== null) throw refuse('no_mailbox', cannot, { to })
     const why = this.policy.mayWrite(from, to, thread)
     if (why !== null) throw refuse('policy', why, { from, to })
   }

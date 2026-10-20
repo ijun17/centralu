@@ -29,6 +29,7 @@ const REFUSALS = [
   'blockers_stand',
   'no_blocker',
   'bad_follows',
+  'no_mailbox',
   'bad_value',
   'policy',
 ] as const

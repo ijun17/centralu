@@ -205,14 +205,18 @@ describe('which kind a sender may post (§3.2)', () => {
     expect(refusedFor(() => mail.post(b.thread.id, S1, { kind: 'answer', body: 'this', replyTo: q.message.id }))).toBe('bad_value')
   })
 
-  it('a post the policy refuses for one of its recipients is not stored for any of them', () => {
+  it('a post the policy refuses for one of its recipients goes to the others; refused whole only when none is left; opening a thread with such a member is refused', () => {
     const refusing: MailPolicy = { mayWrite: (_from, to) => (to === S3 ? 'not for S3' : null) }
     const { mail, store } = setup(refusing)
     const { thread } = openBy(mail, assignInput())
     // S3 is put in the thread behind the policy's back, as a relation that has since been withdrawn
     store.mail.putParticipant(thread.id, S3, 'member', NOW)
-    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'x' }))).toBe('policy')
-    expect(store.mail.messagesAfter(thread.id, 0)).toHaveLength(1)
+    const note = mail.post(thread.id, S1, { kind: 'note', body: 'x' })
+    expect(store.mail.receiptsOf(note.message.id).map((r) => r.recipient)).toEqual([S2])
+    // Nobody left to take it: S2 leaves, and S1's next word has no one
+    store.mail.leaveParticipant(thread.id, S2, NOW)
+    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'y' }))).toBe('policy')
+    expect(store.mail.messagesAfter(thread.id, 0)).toHaveLength(2)
     expect(refusedFor(() => openBy(mail, assignInput({ members: [S3], subject: 'again' })))).toBe('policy')
     expect(store.mail.threadsOfParty(S1, 'owner')).toHaveLength(1)
   })

@@ -20,6 +20,7 @@ import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
+import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
@@ -394,7 +395,15 @@ const userAppAdoption = new UserAppAdoption({
  * so all this host does with it is keep what it holds for as long as it should (§4.4, once the host is ready, below).
  * The host's id is read from the setting a hub already keeps, and only when mail needs it.
  */
-const mail = new MailService(store.mail, { hostId: () => hubSelfId(store) })
+const mail = new MailService(store.mail, {
+  hostId: () => hubSelfId(store),
+  // Who may write to whom (§9.1), read from the sessions that are here
+  policy: mailRelations({
+    session: (id) => mgr.sessionInfo(id),
+    mailTool: (id) => mgr.toolProfileOf(id) === 'reader',
+    inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
+  }),
+})
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

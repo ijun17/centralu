@@ -801,6 +801,11 @@ export class SessionManager {
     })
   }
 
+  /** A session that is here (not in the trash), as the mailbox's relations read it (#1347); undefined for one that is gone */
+  sessionInfo(id: string): SessionInfo | undefined {
+    return this.meta.get(id)
+  }
+
   /** Active sessions running in the same directory (the basis for FR-2's concurrent-session warning) */
   activeSessionsIn(projectId: string): SessionInfo[] {
     return this.listSessions().filter((s) => s.projectId === projectId)
