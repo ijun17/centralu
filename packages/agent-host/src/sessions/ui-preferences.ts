@@ -1,5 +1,5 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import { parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import type { AppAccess } from './app-access.js'
@@ -106,10 +106,12 @@ export class UiPreferenceStore {
     // orchestrator) changing different ones do not undo each other. `current` has the field once the read above carried it; a
     // row that is not a JSON object has none, and the switches then start from the snapshot's, as the window shows them
     // The session tools switch is always on (2026-10-20): what an older window sends for it is not stored
-    const { notifyPolicy: switches, sessionTools: _alwaysOn, ...rest } = patch
+    const { notifyPolicy: switches, autoCompact: compact, sessionTools: _alwaysOn, ...rest } = patch
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
-    const written = { ...rest, ...(notifyPolicy ? { notifyPolicy } : {}) }
+    // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
+    const autoCompact = compact ? { ...readAutoCompact(current.autoCompact), ...compact } : undefined
+    const written = { ...rest, ...(notifyPolicy ? { notifyPolicy } : {}), ...(autoCompact ? { autoCompact } : {}) }
     const stored = this.storedUiPreferences()
     /*
      * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273

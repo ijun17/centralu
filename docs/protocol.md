@@ -85,7 +85,7 @@ type NormalizedEvent =
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
   | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: one model request's input, for the prompt cache (agent-host.md §6.1)
-  | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
+  | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate', model? }  // model: the model the tool resolved the name to (#1376)
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by?, person? }  // #30: a non-human hand changed settings; by 'tool': the agent tool switched by itself (#304); person: a client called agents.updateSettings (#659)

@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, agentDepthOf, hubAutoOf, type ToolName, type ToolStatus } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MIN_AUTO_COMPACT_SHARE, agentDepthOf, autoCompactOf, hubAutoOf, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -922,6 +922,7 @@ function SessionToolsSwitch() {
       </p>
       <AgentModelsSection />
       <HubAutoSwitch />
+      <AutoCompactSetting setPrefs={setPrefs} />
     </div>
   )
 }
@@ -949,6 +950,53 @@ function HubAutoSwitch() {
           </>
         }
       />
+    </div>
+  )
+}
+
+/**
+ * When agents compact by themselves (#1376): a share of the model's window, set by Centralu for Claude and Codex alike. On
+ * by default at 60%; off, nothing is passed and each agent's own settings decide.
+ */
+function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch) => Promise<void> }) {
+  const { controlled, share } = useStore((s) => autoCompactOf(s.prefs))
+  const percent = Math.round(share * 100)
+  return (
+    <div className="mt-4">
+      <SettingToggle
+        checked={controlled}
+        onChange={(next) => setPrefs({ autoCompact: { controlled: next } })}
+        label="Let Centralu set when agents compact"
+        testId="settings-auto-compact"
+        hint={
+          <>
+            Agents compact their conversation by themselves at a share of the model&apos;s window, for Claude and Codex
+            alike. Off, Centralu passes nothing and each agent&apos;s own settings decide. On, Centralu also turns auto
+            compact on for Claude if you turned it off in your own Claude settings. A running session takes a change when
+            its process next starts; a model Centralu has not read a window from yet takes it from its second start.
+            Claude never compacts before 67,000 tokens. Linked computers are told this setting when they connect and when
+            it changes; one from before it applies nothing.
+          </>
+        }
+      />
+      {controlled && (
+        <label className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
+          Compact at
+          <input
+            type="range"
+            min={Math.round(MIN_AUTO_COMPACT_SHARE * 100)}
+            max={Math.round(MAX_AUTO_COMPACT_SHARE * 100)}
+            step={5}
+            className="w-32 accent-line-strong"
+            data-testid="settings-auto-compact-share"
+            value={percent}
+            onChange={(e) => void setPrefs({ autoCompact: { share: Number(e.target.value) / 100 } })}
+          />
+          <span className="readout w-16 text-ink" data-testid="settings-auto-compact-share-value" aria-hidden>
+            {percent}% of the window
+          </span>
+        </label>
+      )}
     </div>
   )
 }

@@ -51,6 +51,19 @@ describe('screen preferences across builds', () => {
     }
   })
 
+  it("the auto-compact setting (#1376) reads as on at 60% for an older record, merges field by field, and an older build's write keeps it", () => {
+    const { mgr, row } = setup(JSON.stringify({ textSize: 1 }))
+    // Not in the record until chosen: an older record reads as the default through autoCompactOf, and nothing is written for it
+    expect(mgr.uiPreferences().autoCompact).toBeUndefined()
+    expect(mgr.setUiPreferences({ autoCompact: { share: 0.5 } }).autoCompact).toEqual({ controlled: true, share: 0.5 })
+    // One field at a time: the share stays when the control is turned off
+    expect(mgr.setUiPreferences({ autoCompact: { controlled: false } }).autoCompact).toEqual({ controlled: false, share: 0.5 })
+    expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
+    // An older build writing another field keeps what it does not know (#384)
+    mgr.setUiPreferences({ sendWithModifierEnter: true })
+    expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
+  })
+
   it('a broken row reads as the defaults, says so once with the row name, and the next change replaces it', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { mgr, row } = setup('{"textSize": 1.1, ')

@@ -22,7 +22,7 @@ export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; p
 export type QueryHandle = AsyncIterable<ClaudeMessage> &
   UsageQuery &
   ModelQuery & {
-    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number; model?: string; autoCompactThreshold?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
     /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
@@ -57,6 +57,37 @@ export type ClaudeQueryInputs = {
   spawn: (o: LocalSpawnSpec) => AgentProcess
   /** The session's approval and question cards, for the preset it runs under */
   canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => ReturnType<ClaudeCards['canUseTool']>
+}
+
+/** What the CLI accepts as `autoCompactWindow` (its settings schema and `--autocompact`): 100k to 1M tokens */
+export const CLAUDE_AUTO_COMPACT_MIN = 100_000
+export const CLAUDE_AUTO_COMPACT_MAX = 1_000_000
+/**
+ * The CLI compacts when context reaches its auto-compact window **minus 33,000 tokens**. Measured on CLI 2.1.296 with
+ * `getContextUsage()`: `autoCompactThreshold` was `maxTokens - 33,000` with the setting and without it, at 200k and at 1M
+ * (167,000 of 200,000; 967,000 of 1,000,000; 100,000 for a window of 133,000). The adapter checks its own constant against what
+ * the CLI reports (`reportContext`). To land the point at the tokens Centralu means, the window passed is that many more.
+ */
+export const CLAUDE_AUTO_COMPACT_BUFFER = 33_000
+
+/** The `autoCompactWindow` that makes the CLI compact at `tokens`, inside what it accepts */
+export function claudeAutoCompactWindow(tokens: number): number {
+  return Math.min(CLAUDE_AUTO_COMPACT_MAX, Math.max(CLAUDE_AUTO_COMPACT_MIN, Math.round(tokens) + CLAUDE_AUTO_COMPACT_BUFFER))
+}
+
+/**
+ * The settings Centralu passes in the CLI's flag layer, for this session alone (no file is touched): language-server
+ * plugins off when code intelligence is (#686), and where the CLI compacts by itself (#1376). `autoCompactEnabled` goes
+ * with the window, so Centralu's control means what it says when the person's own config turned it off. Nothing when
+ * Centralu does not control it. (The CLI's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` environment variable still takes precedence
+ * over a setting.)
+ */
+export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>, codeIntelligence: ClaudeQueryInputs['codeIntelligence']): { settings?: Record<string, unknown> } {
+  const settings = {
+    ...codeIntelligence.settings,
+    ...(opts.autoCompactTokens ? { autoCompactEnabled: true, autoCompactWindow: claudeAutoCompactWindow(opts.autoCompactTokens) } : {}),
+  }
+  return Object.keys(settings).length ? { settings } : {}
 }
 
 /** The options a session's `query()` starts with */
@@ -135,7 +166,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
         }
       : {}),
     ...permissionOptions,
-    ...codeIntelligence,
+    ...flagSettings(opts, codeIntelligence),
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
     ...(probeIds.has(sessionId) ? { strictMcpConfig: true } : {}),
     /*

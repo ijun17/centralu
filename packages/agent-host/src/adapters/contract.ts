@@ -58,6 +58,12 @@ export type CreateSessionOpts = {
   verbosity?: string
   /** Response speed (codex's service_tier). Supported tiers are stated by the model list (ModelOption.tiers) */
   serviceTier?: string
+  /**
+   * Where the agent compacts its conversation by itself, in tokens (#1376): Centralu's share of the model's window
+   * (`sessions/auto-compact.ts`). Claude takes it as `autoCompactWindow` (it compacts a little before it, by its own
+   * reserve), Codex as `model_auto_compact_token_limit`. Absent: nothing is passed and the agent's own settings decide.
+   */
+  autoCompactTokens?: number
   permissionPreset: PermissionPreset
   /**
    * Whether this session's working folder is trusted (M4 decision 3, #92, #152) — **whether files
@@ -329,6 +335,13 @@ export interface SessionHandle {
 export interface AgentAdapter {
   readonly tool: ToolName
   readonly capabilities: AdapterCapabilities
+  /**
+   * For a tool whose reported context window is the smaller of the model's and the compaction point it was started with
+   * (#1376: Claude's CLI is; Codex reports the model's own): the largest window a process started with `autoCompactTokens`
+   * can report. The host reads a reading against it (`ModelWindows.note`): below it is the model's real window, at it only
+   * "at least this".
+   */
+  windowCeilingFor?(autoCompactTokens: number): number
   /**
    * Who this tool is, for the screens that draw a row per tool.
    *

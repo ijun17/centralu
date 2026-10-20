@@ -1,5 +1,5 @@
 import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol'
-import { isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
+import { DEFAULT_AUTO_COMPACT, isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
 import type { AgentPort, SendIntent } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -64,7 +64,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -275,6 +275,12 @@ export class SessionsMock {
       this.store.sessions.set(sessionId, next)
       this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
       return next
+    },
+    // The mock keeps no model windows or preferences: the default setting, and a session with a context reading counts as read
+    autoCompact: async (sessionId: string) => {
+      const c = DEFAULT_AUTO_COMPACT
+      const window = this.store.sessions.get(sessionId)?.context?.window ?? null
+      return { controlled: c.controlled, share: c.share, tokens: c.controlled && window ? Math.round(window * c.share) : null }
     },
     /** Fakes a worktree in the mock too — the UI needs to be able to test "ask, then delete" */
     worktreeStatus: async (sessionId: string) => {

@@ -39,6 +39,15 @@ export async function initializeAppServer(client: CodexClient, sessionId: string
   }
 }
 
+/**
+ * Where the thread compacts by itself (#1376): `model_auto_compact_token_limit`, a per-thread value that overrides the one in
+ * the person's `config.toml` without editing it. Sent on start and on resume alike (a resume's config is an override of
+ * the resumed thread); nothing when Centralu does not control it, and the file's setting decides.
+ */
+export function autoCompactConfig(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>): Record<string, number> {
+  return opts.autoCompactTokens ? { model_auto_compact_token_limit: opts.autoCompactTokens } : {}
+}
+
 /** What `thread/resume` is sent: `servers` are the MCP servers (`CodexServers.mcpConfig`), `workspaceConfig` the sandbox's (`sandboxConfig`) */
 export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<string, unknown>, workspaceConfig: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -76,6 +85,7 @@ export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<stri
       model_reasoning_summary: 'auto',
       ...(opts.verbosity ? { model_verbosity: opts.verbosity } : {}),
       ...(opts.serviceTier ? { service_tier: opts.serviceTier } : {}),
+      ...autoCompactConfig(opts),
       /*
        * MCP servers are loaded **on resume too** (M4 A-5, plan "to confirm separately" 1).
        *
@@ -156,6 +166,7 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
       ...(opts.verbosity ? { model_verbosity: opts.verbosity } : {}),
       // Response speed (measured: priority = "Fast, 1.5x speed, increased usage")
       ...(opts.serviceTier ? { service_tier: opts.serviceTier } : {}),
+      ...autoCompactConfig(opts),
       // MCP servers — the orchestrator's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
       ...servers,
       // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)

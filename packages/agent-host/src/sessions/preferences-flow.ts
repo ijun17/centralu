@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, autoCompactOf, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -26,6 +26,13 @@ const UPDATE_CARD =
 const FOLDED_GROUPS_MAX = 500
 
 const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
+
+/** The setting in a line */
+function autoCompactText(c: AutoCompact): string {
+  return c.controlled
+    ? `agents compact at ${Math.round(c.share * 100)}% of the model's window, set by Centralu`
+    : "Centralu does not set when agents compact; each agent's own settings decide"
+}
 
 /**
  * The orchestrator's preference commands (#1219, second slice): `get_preferences` reads every setting Settings shows,
@@ -92,6 +99,8 @@ export class PreferencesFlow {
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
       'Notifications (set_preferences notifications)',
       `- Approval needed: ${onOff(notify.approval)}; a session finishes out of sight: ${onOff(notify.done)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval one off, or the sound while it notifies, asks the person`,
+      'Auto compact (set_preferences autoCompact)',
+      `- ${autoCompactText(autoCompactOf(p))}`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
@@ -210,6 +219,16 @@ export class PreferencesFlow {
       await attempt('Notifications', async () => {
         const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
         return `Now: notifications: approval ${onOff(now.approval)}, a session finishes out of sight ${onOff(now.done)}, even while focused ${onOff(now.whenFocused)}, sound ${onOff(now.sound)}.`
+      })
+    }
+    // When agents compact (#1376): reversible and only theirs to read, so no card; applies to a session's next process start
+    const compact = Object.fromEntries(Object.entries(changes.autoCompact ?? {}).filter(([, v]) => v !== undefined))
+    if (Object.keys(compact).length) {
+      await attempt('Auto compact', async () => {
+        const checked = UiPreferencesPatch.safeParse({ autoCompact: compact })
+        if (!checked.success) throw new Error(`Nothing changed: ${issuesOf(checked.error)}.`)
+        const now = autoCompactOf(await callWindow(rpc, 'prefs.set', { patch: checked.data }))
+        return `Now: ${autoCompactText(now)}. It reaches a running session when its process next starts.`
       })
     }
     if (sleep !== undefined) {

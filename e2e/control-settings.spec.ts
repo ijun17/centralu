@@ -110,6 +110,34 @@ test('Settings: auto from a linked computer starts on, and turning it off is rem
   await expect(page.getByTestId('settings-hub-auto')).not.toBeChecked()
 })
 
+// #1376: Centralu sets when agents compact, at 60% of the model's window, unless the person turns its control off
+test("Settings: when agents compact starts on at 60%, moves in steps of 5, and turning Centralu's control off hides the share", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.autoCompact ?? null)
+  await open()
+  await expect(page.getByTestId('settings-auto-compact')).toBeChecked()
+  const share = page.getByTestId('settings-auto-compact-share')
+  await expect(share).toHaveValue('60')
+  await expect(page.getByTestId('settings-auto-compact-share-value')).toHaveText('60% of the window')
+  await share.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.65 })
+
+  await page.getByTestId('settings-auto-compact').uncheck()
+  await expect.poll(saved).toEqual({ controlled: false, share: 0.65 })
+  await expect(share).toHaveCount(0)
+
+  await page.reload()
+  await open()
+  await expect(page.getByTestId('settings-auto-compact')).not.toBeChecked()
+  await page.getByTestId('settings-auto-compact').check()
+  await expect(share).toHaveValue('65')
+})
+
 test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
@@ -391,6 +419,36 @@ test('Settings: turning off a notification policy is persisted (E-5)', async ({ 
  * Now the list comes straight from the tool's official API, and effort levels arrive attached to
  * each model.
  */
+// #1376: a session whose model's window Centralu has not read says that the agent's own setting decides for now
+test("The session's settings say when Centralu has not read the model's window to set where the agent compacts, and say nothing when its control is off", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.getByTestId('settings-open').click()
+  const note = page.getByTestId('settings-auto-compact-note')
+  await expect(note).toContainText("has not read this model's window yet")
+
+  // A machine from before the setting says "Unknown method"; any other failure is its own words, not that
+  const fail = (message: string) =>
+    page.evaluate((m) => {
+      ;(window as any).__store.getState().platform.agents.autoCompact = async () => {
+        throw new Error(m)
+      }
+    }, message)
+  await page.keyboard.press('Escape')
+  await fail('Unknown method: agents.autoCompact. This Centralu host does not have it.')
+  await page.getByTestId('settings-open').click()
+  await expect(note).toContainText('predates the Auto compact setting')
+  await page.keyboard.press('Escape')
+  await fail('connection lost')
+  await page.getByTestId('settings-open').click()
+  await expect(note).toContainText('Could not read where this session compacts (connection lost)')
+  await expect(note).not.toContainText('predates')
+
+  // Turned off in Settings: Centralu says nothing about it here
+  await page.evaluate(() => (window as any).__store.getState().setPrefs({ autoCompact: { controlled: false } }))
+  await expect(note).toHaveCount(0)
+})
+
 test('The model list comes from what the tool reports, and effort only appears for models that support it', async ({
   page,
 }) => {

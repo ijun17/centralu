@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, PROTOCOL_VERSION, RESERVED_APP_IDS, errorMessage, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, errorMessage, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -577,6 +577,8 @@ const links = new Links({
    * on, and the allowlist a machine's call is answered from (ask_project into this computer's projects, nothing else)
    */
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
+  // When agents compact: this hub's setting governs the machines it links (#1376)
+  autoCompact: () => autoCompactOf(mgr.uiPreferences()),
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
     projects: () => mgr.projectsForMachines(),

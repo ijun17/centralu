@@ -188,6 +188,31 @@ describe('get_preferences', () => {
   })
 })
 
+describe('auto compact (#1376)', () => {
+  it('get_preferences says where agents compact, and set_preferences changes the share and the control, no card', async () => {
+    const orc = await mgr.orchestrator()
+    expect((await run(orc.id, 'get_preferences')).text).toContain("- agents compact at 60% of the model's window, set by Centralu")
+
+    const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
+    expect(share.isError).toBeFalsy()
+    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu. It reaches a running session when its process next starts.")
+    expect(await prefs()).toMatchObject({ autoCompact: { controlled: true, share: 0.5 } })
+
+    const off = await run(orc.id, 'set_preferences', { autoCompact: { controlled: false } })
+    expect(off.text).toContain("Centralu does not set when agents compact; each agent's own settings decide")
+    expect(await prefs()).toMatchObject({ autoCompact: { controlled: false, share: 0.5 } })
+    expect((await run(orc.id, 'get_preferences')).text).toContain("- Centralu does not set when agents compact; each agent's own settings decide")
+    expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('refuses a share outside what the setting takes, and changes nothing', async () => {
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 1.5 } })
+    expect(r.text).toContain('Auto compact')
+    expect(await prefs()).not.toHaveProperty('autoCompact')
+  })
+})
+
 describe('set_preferences: appearance', () => {
   it('picks a theme by id or by name, setting the side of its base and showing that side', async () => {
     const orc = await mgr.orchestrator()

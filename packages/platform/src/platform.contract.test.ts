@@ -1046,6 +1046,23 @@ describe.each([
     })
   })
 
+  describe('the auto-compact setting (#1376)', () => {
+    it('is not in the record until chosen, then a patch changes only the fields it names, in the mock and on the host alike', async () => {
+      expect((await h.platform.prefs.load()).autoCompact).toBeUndefined()
+      expect((await h.platform.prefs.save({ autoCompact: { share: 0.5 } })).autoCompact).toEqual({ controlled: true, share: 0.5 })
+      expect((await h.platform.prefs.save({ autoCompact: { controlled: false } })).autoCompact).toEqual({ controlled: false, share: 0.5 })
+      expect((await h.platform.prefs.load()).autoCompact).toEqual({ controlled: false, share: 0.5 })
+    })
+  })
+
+  describe('where a session compacts (#1376)', () => {
+    it('answers what the next start passes: the setting, and no tokens for a model whose window has not been read', async () => {
+      const p = await aProject()
+      const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+      expect(await h.platform.agents.autoCompact(s.id)).toEqual({ controlled: true, share: 0.6, tokens: null })
+    })
+  })
+
   describe('a fresh install with a snapshot from before #312', () => {
     it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
       await h.platform.workspace.save({ textScale: 4 })

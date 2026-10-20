@@ -2,6 +2,7 @@ import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
   HostHandover,
+  errorMessage,
   type HostLogon,
   type MachineInfo,
   type MachineOperation,
@@ -336,6 +337,22 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const changed = note !== this.asksNote
     this.asksNote = note
     if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+  }
+
+  /**
+   * Tells the machine this hub's "when agents compact" setting (#1376), as a change of its own preferences: the machine
+   * starts and wakes its sessions from them. Said at every connect and when the hub's setting changes, so the machine
+   * applies what the person set here. A machine from before it drops the field and applies nothing, which its sessions'
+   * menu says (`agents.autoCompact` answers "Unknown method" there). Best effort: the next connect tells it again
+   */
+  async offerAutoCompact(client: RemoteClient | null = this.client): Promise<void> {
+    const setting = this.deps.autoCompact?.()
+    if (!setting || !client?.connected) return
+    try {
+      await client.call('prefs.set', { patch: { autoCompact: setting } })
+    } catch (err) {
+      this.deps.log?.(`[links] ${this.name}: could not tell it when agents compact (${errorMessage(err)}); it is told again at the next connect`)
+    }
   }
 
   /**
@@ -888,6 +905,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.setStatus('connected', null)
     // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect
     void this.offerAsks(client)
+    // And when agents compact (#1376)
+    void this.offerAutoCompact(client)
     /*
      * The UI re-reads this machine's sessions and projects, and wakes the ones that were live
      * before and are not now (a remote host that restarted without a keeper). Sent on every

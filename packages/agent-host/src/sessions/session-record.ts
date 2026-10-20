@@ -1,3 +1,4 @@
+import type { ModelWindows } from './auto-compact.js'
 import type { CacheLedger } from './cache-ledger.js'
 import {
   appViewRecord,
@@ -36,6 +37,8 @@ export const STREAM_FLUSH_MS = 2000
  */
 export type SessionRecordHost = {
   readonly cacheLedger: CacheLedger
+  /** Each model's context window as the tools reported it (`ModelWindows`, auto-compact.ts) */
+  readonly modelWindows: ModelWindows
   readonly emit: (e: NormalizedEvent) => void
   readonly meta: Map<string, SessionInfo>
   observeCommit: (e: Extract<NormalizedEvent, { type: "tool_call" | "tool_result"; }>, m: SessionInfo) => void

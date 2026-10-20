@@ -1,5 +1,5 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { isRecord, parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 
@@ -92,7 +92,8 @@ export class PreferencesMock {
   private write(patch: UiPreferencesPatch): void {
     // Read through the schema as the host's `prefs.set` does, so a text size lands on a step here too
     const notifyPolicy = patch.notifyPolicy ? { ...(this.uiPrefs.notifyPolicy ?? readNotifyPolicy(undefined)), ...patch.notifyPolicy } : undefined
-    this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch, ...(notifyPolicy ? { notifyPolicy } : {}) })
+    const autoCompact = patch.autoCompact ? { ...readAutoCompact(this.uiPrefs.autoCompact), ...patch.autoCompact } : undefined
+    this.uiPrefs = parseUiPreferences({ ...this.uiPrefs, ...patch, ...(notifyPolicy ? { notifyPolicy } : {}), ...(autoCompact ? { autoCompact } : {}) })
     this.uiPrefsStored = true
     try {
       localStorage.setItem('cc-mock-prefs', JSON.stringify(this.uiPrefs))
