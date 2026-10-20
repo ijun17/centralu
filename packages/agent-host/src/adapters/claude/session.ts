@@ -67,9 +67,14 @@ export class ClaudeSession implements SessionHandle {
   private inputReceipts = new InputReceipts()
   /** Person messages already handed to the SDK, so an interrupt receipt can report cancellations. */
   private personInputs = new Set<string>()
+  /**
+   * Quiet inputs (the mailbox's mail that must not wake) not yet answered. The CLI answers each with a `result` 40 to 160 ms later
+   * though no turn ran (measured on 2.1.296), and that is no finished turn: it is not shown as one
+   */
+  private quietInputs = new Set<string>()
   private trackedInputKnown = false
   /** Installed only after the initial CLI metadata confirms the protocol we have verified. */
-  sendTracked?: (text: string, observer?: InputObserver) => Promise<void>
+  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin }) => Promise<void>
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
   /** The init message's command list was compared with the adapter's limitations (#270): once per process */
@@ -326,11 +331,21 @@ export class ClaudeSession implements SessionHandle {
       this.turnOpen = true
       if (!this.cards.pending.size && !this.cards.questions.size) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     }
+    // The first thing the CLI says for an input is a turn run for it (`user_message_uuid`): it took it
+    if (m.user_message_uuid) this.inputReceipts.accept(m.user_message_uuid)
     if (m.type === 'system' && m.subtype === 'init') this.onInit(m)
     this.servers.noteAppCalls(msg)
     if (m.type === 'assistant') this.raceRetry.seen(msg as RaceMsg)
     if (m.type === 'result') this.turnOpen = false
     let events = this.stream.push(msg)
+    if (m.type === 'result') {
+      const named = Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((x): x is string => typeof x === 'string') : []
+      const ids = named.length > 0 ? named : m.user_message_uuid ? [m.user_message_uuid] : []
+      const quietOnly = ids.length > 0 && ids.every((id) => this.quietInputs.has(id))
+      for (const id of ids) this.quietInputs.delete(id)
+      // A result that answers only quiet inputs ended no turn: no finished turn, and no second reading of the same usage
+      if (quietOnly) events = events.filter((e) => e.type !== 'turn_complete' && e.type !== 'usage_update')
+    }
     const retrying = m.type === 'result' && this.raceRetry.afterResult(msg as RaceMsg)
     // What this result folded in, for the host to read while it handles the events that end the turn (#1377)
     this.resultInputs = m.type === 'result' && !retrying && this.sendTracked ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
@@ -373,9 +388,9 @@ export class ClaudeSession implements SessionHandle {
     if (!this.trackedInputKnown) {
       this.trackedInputKnown = true
       if (tracksInputs(m)) {
-        this.sendTracked = (text, observer) => {
+        this.sendTracked = (text, observer, opts) => {
           const receipt = this.inputReceipts.create(observer)
-          this.sendInput(text, receipt.id, receipt)
+          this.sendInput(text, receipt.id, receipt, opts?.origin)
           return receipt.done
         }
       }
@@ -501,6 +516,7 @@ export class ClaudeSession implements SessionHandle {
   private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean, origin?: InputOrigin, quiet?: boolean): void {
     if (quiet) {
       // No turn: the process reads it and answers nothing, and the session stays at rest (the mailbox's mail that must not wake)
+      this.quietInputs.add(uuid)
       this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}), quiet: true })
       this.notify?.()
       this.notify = null

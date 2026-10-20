@@ -2711,6 +2711,23 @@ tool-neutral (`sessions/interruptions.ts`):
 | The screen shows it beside the state: the inbox row's word and **Continue**, the sidebar mark's ring and tooltip, a line above the composer (product-spec FR-15) | The state alone looks the same for a stopped turn and a finished one; Continue is the one message that goes on |
 | `CLAUDE_CODE_MAX_RETRIES` is left as the CLI sets it | Its three minutes outlast most drops; a longer budget would hold a turn hostage through a long outage |
 
+### 4.6.3 The mailbox's delivery in the host (#1347)
+
+`MailDelivery` (`mail/delivery.ts`) starts once the host is ready and **stops first** when it leaves, before the sessions are let go of
+(`lifecycle/shutdown.ts`), so a host handing over wakes no session the next one takes. A delivery already waiting for a session to
+wake checks again before it sends (`deliverMail`'s `leaving`). It writes a heartbeat (`mail.heartbeat`) with each 60 s sweep, except
+while the person has not answered for a crowd of sleeping sessions, so that a restart asks again. A host that was off, or away without
+stopping, more than 30 minutes wakes a sleeping session only for mail that needs it (§7.9). The sweep also runs the mailbox's retention
+and moves on the work of a session that left without telling the mailbox. Sleeping sessions are resumed two at a time.
+
+A wake is delivered when the tool says it took the input (`takeInput`, `sessions/session-events.ts`); a tool silent for 90 s counts as
+having taken it, because sending it again could run the work twice. If that tool then **fails** the input (a session closed with it
+queued, a rejected `turn/start`), the delivery makes the mail unread and undelivered again and holds it `failed` for the person (Inbox:
+Retry): a failure told that late does not prove the tool never ran it, so nothing sends it again by itself. A failure after the tool
+took it is not acted on. The tool keeps the wake in its own record as a user turn; the host writes no user row for it, so the catch-up and the import
+that read the record back leave the wake out (`mail/wake-text.ts`, used by `stripInjectedBlocks`): the `✉` line the delivery
+wrote is its only trace in the conversation, and `read_session` and `recall` never show it as the person's message.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

@@ -16,7 +16,7 @@ const S2 = sessionAddress(HOST, 's2')
 const APP = appAddress(HOST, 'p1', 'board')
 
 /** A clock and a scheduler that move only when a test moves them */
-function world(options: { policyAllows?: boolean } = {}) {
+function world() {
   const store = new Store()
   const clock = { t: NOW }
   const timers: { at: number; fn: () => void; id: number }[] = []
@@ -345,6 +345,20 @@ describe('one delivery at a time per mailbox, and the sweep (§5)', () => {
     w.clock.t += 181 * 24 * 60 * 60_000
     await w.delivery.sweep()
     expect(w.store.mail.thread(old.id)).toBeUndefined()
+  })
+
+  it('the sweep moves on the work of a session that left without telling the mailbox', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    w.states.set('s2', { kind: 'gone' })
+    await w.delivery.sweep()
+    expect(w.store.mail.thread(thread.id)).toMatchObject({ assignee: null, state: 'open', owner: S1 })
+    // And not the work of one that is here
+    const kept = openBy(w.mail, { by: S1, kind: 'assign', subject: 'kept', body: 'x', assignee: sessionAddress(HOST, 's3') }).thread
+    await w.delivery.sweep()
+    expect(w.store.mail.thread(kept.id)?.assignee).toBe(sessionAddress(HOST, 's3'))
   })
 
   it('does nothing once stopped', async () => {

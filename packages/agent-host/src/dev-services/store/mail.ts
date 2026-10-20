@@ -325,6 +325,17 @@ export class MailRecords {
       })
   }
 
+  /** The parties that own or are assigned a thread that is not done: whom the sweep asks whether they are still here */
+  partiesOfOpenThreads(): string[] {
+    return this.db
+      .prepare<[], { address: string }>(
+        `SELECT owner AS address FROM mail_threads WHERE state != 'done'
+         UNION SELECT assignee FROM mail_threads WHERE state != 'done' AND assignee IS NOT NULL`,
+      )
+      .all()
+      .map((r) => r.address)
+  }
+
   /** Whether there is a thread at all: a host that never made mail has nothing to move when a session goes */
   hasThreads(): boolean {
     return !!this.db.prepare<[], { one: number }>(`SELECT 1 AS one FROM mail_threads LIMIT 1`).get()
@@ -651,6 +662,19 @@ export class MailRecords {
       .prepare<[string, string], { n: number | null }>(`SELECT MAX(attempts) AS n FROM mail_receipts WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
       .get(recipient, JSON.stringify(messageIds))
     return row?.n ?? 0
+  }
+
+  /**
+   * A delivery the tool failed after all (late, once it was counted as taken): the receipts that delivery marked delivered at
+   * `deliveredAt` are unread and undelivered again, unless handled or held for the person since. Mail delivered again by a later
+   * wake has another time and is left alone. Returns the ids put back
+   */
+  undeliver(recipient: string, messageIds: readonly string[], deliveredAt: number): string[] {
+    const ids = JSON.stringify(messageIds)
+    const where = `recipient = ? AND delivered_at = ? AND handled_at IS NULL AND (held IS NULL OR held = 'released') AND message_id IN (SELECT value FROM json_each(?))`
+    const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_receipts WHERE ${where}`).all(recipient, deliveredAt, ids).map((r) => r.message_id)
+    this.db.prepare(`UPDATE mail_receipts SET delivered_at = NULL, read_at = NULL WHERE ${where}`).run(recipient, deliveredAt, ids)
+    return put
   }
 
   /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox. Not "uncertain": nothing went */

@@ -17,7 +17,7 @@ let mail: MailService
 beforeEach(() => {
   world = managerWorld()
   mail = new MailService(world.store.mail, { hostId: () => 'hub-aaaaaaaa' })
-  world.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id) })
+  world.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: () => {} })
 })
 
 const create = async () => (await world.rpc('agents.createSession', { projectId: ((await world.rpc('projects.add', { path: tmpdir() })) as { id: string }).id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
@@ -52,7 +52,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
     const fresh = managerWorld()
     let asked = 0
     const quiet = new MailService(fresh.store.mail, { hostId: () => (asked++, 'hub-aaaaaaaa') })
-    fresh.mgr.useMail({ sessionGone: (id) => void quiet.sessionGone(id) })
+    fresh.mgr.useMail({ sessionGone: (id) => void quiet.sessionGone(id), sessionChanged: () => {} })
     const s = (await fresh.rpc('agents.createSession', { projectId: ((await fresh.rpc('projects.add', { path: tmpdir() })) as { id: string }).id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
     await fresh.rpc('agents.deleteSession', { sessionId: s.id })
     expect(asked).toBe(0)
@@ -65,6 +65,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
       sessionGone: () => {
         throw new Error('disk full')
       },
+      sessionChanged: () => {},
     })
     await world.rpc('agents.deleteSession', { sessionId: worker.id })
     expect(world.store.trash.isTrashed(worker.id)).toBe(true)

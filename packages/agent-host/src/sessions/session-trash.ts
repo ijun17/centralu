@@ -55,6 +55,8 @@ export type SessionTrashHost = {
   forgetHeldNotices: (sessionId: string) => void
   /** The mail it held: the work it was given or gave moves on (#1347, `MailService.sessionGone`). Never throws */
   mailGone: (sessionId: string) => void
+  /** The session is back: the mail that waited for it may go (#1347). Never throws */
+  mailPoke: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -541,6 +543,8 @@ export class SessionTrash {
       this.host.meta.set(sessionId, withHubMark(this.host.store.settings, fixed))
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
+      // Its receipts and memberships were kept in the trash (§4.1), and its mail goes now; the work it held has moved on and is not given back
+      this.host.mailPoke(sessionId)
       if (recovered) this.host.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })
       return { session, project: registered }
     })

@@ -47,8 +47,12 @@ export type MailInput = {
 
 export type MailSessions = {
   receiver(sessionId: string): ReceiverState
-  /** Resolves when the tool took the input (§7.6.2); rejects with the reason when it did not, or could not be woken, and with `MailNotAtRest` when the receiver left rest meanwhile */
-  deliver(sessionId: string, input: MailInput): Promise<void>
+  /**
+   * Resolves when the tool took the input (§7.6.2); rejects with the reason when it did not, or could not be woken, and with `MailNotAtRest`
+   * when the receiver left rest meanwhile. A tool that stayed silent past the wait counts as having taken it; if it then fails the input,
+   * which it never ran, `late` is called with the error (after this has resolved)
+   */
+  deliver(sessionId: string, input: MailInput, late?: (error: Error) => void): Promise<void>
 }
 
 export type MailDeliveryOptions = {
@@ -143,7 +147,55 @@ export class MailDelivery {
     } catch (e) {
       console.error(`[mail] retention failed; it runs again at the next sweep: ${errorMessage(e)}`)
     }
+    this.moveOnWorkOfGoneSessions()
     await Promise.all(this.records.recipientsWithMail().map((r) => this.process(r)))
+  }
+
+  /**
+   * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `sessionGone`,
+   * or the call failed) still holds work: it is moved on now (§3.3). Cheap: only the owners and assignees of open threads
+   */
+  private moveOnWorkOfGoneSessions(): void {
+    for (const address of this.records.partiesOfOpenThreads()) {
+      const party = parseAddress(address)
+      if (party?.kind !== 'session' || this.sessions.receiver(party.sessionId).kind !== 'gone') continue
+      try {
+        this.service.sessionGone(party.sessionId)
+      } catch (e) {
+        console.error(`[mail] ${address}: the work it held could not be moved on (${errorMessage(e)})`)
+      }
+    }
+  }
+
+  /** The tool did not take the wake: tried again after a wait that doubles, or held for the person when it has failed too often */
+  private failedTry(recipient: string, messageIds: readonly string[], error: string): void {
+    const attempts = this.records.attemptsOf(recipient, messageIds)
+    if (attempts >= this.o.maxAttempts) {
+      this.records.transaction(() => {
+        this.records.failAttempt(recipient, messageIds, error, this.now())
+        this.records.setHeld(recipient, messageIds, 'failed')
+      })
+      return
+    }
+    const retryIn = Math.min(this.o.maxRetryMs, this.o.retryBaseMs * 2 ** Math.max(0, attempts - 1))
+    this.records.transaction(() => this.records.failAttempt(recipient, messageIds, error, this.now() + retryIn))
+    this.look(recipient)
+  }
+
+  /**
+   * The tool failed a wake after the wait for it ran out and the wake was counted as taken (§7.6.2). Counted as taken, the mail was
+   * delivered and read; failed, it must not stay so. It is not sent again by itself, though: a failure told this late (the session was
+   * stopped or closed, a turn that took the input among others ended in an error) does not prove the tool never ran it, and sending
+   * work twice is worse than asking. So it is unread and undelivered again, with the error, and held `failed` for the person (Inbox:
+   * Retry). Only the receipts that wake delivered: mail delivered again since by another wake, handled, or held is left alone
+   */
+  private takeBack(recipient: string, messageIds: readonly string[], deliveredAt: number, cause: Error): void {
+    this.records.transaction(() => {
+      const ids = this.records.undeliver(recipient, messageIds, deliveredAt)
+      if (ids.length === 0) return
+      this.records.failAttempt(recipient, ids, errorMessage(cause), this.now())
+      this.records.setHeld(recipient, ids, 'failed')
+    })
   }
 
   /** Looks at a mailbox: now if its mail is due, else when it is */
@@ -219,29 +271,24 @@ export class MailDelivery {
     const { drained } = plan
     const quiet = !drained.wake
 
+    const delivered: { at?: number } = {}
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line })
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line }, (e) => {
+        // Told after `deliver` resolved, so the time is set
+        if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
+      })
     } catch (e) {
       if (e instanceof MailNotAtRest) {
         this.records.undoAttempt(recipient, drained.messageIds)
         return
       }
-      const attempts = this.records.attemptsOf(recipient, drained.messageIds)
-      const error = errorMessage(e)
-      if (attempts >= this.o.maxAttempts) {
-        this.records.transaction(() => {
-          this.records.failAttempt(recipient, drained.messageIds, error, this.now())
-          this.records.setHeld(recipient, drained.messageIds, 'failed')
-        })
-        return
-      }
-      const retryIn = Math.min(this.o.maxRetryMs, this.o.retryBaseMs * 2 ** Math.max(0, attempts - 1))
-      this.records.transaction(() => this.records.failAttempt(recipient, drained.messageIds, error, this.now() + retryIn))
-      this.look(recipient)
+      this.failedTry(recipient, drained.messageIds, errorMessage(e))
       return
     }
     // The tool took it (§7.6): delivered, and read for what went in whole
-    this.records.transaction(() => this.records.markDelivered(recipient, drained.messageIds, drained.inline, this.now()))
+    const deliveredAt = this.now()
+    delivered.at = deliveredAt
+    this.records.transaction(() => this.records.markDelivered(recipient, drained.messageIds, drained.inline, deliveredAt))
     if (!quiet) this.lastWake.set(recipient, this.now())
   }
 

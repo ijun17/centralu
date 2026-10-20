@@ -241,7 +241,15 @@ export type EventSink = (event: NormalizedEvent) => void
  * A session handle. Its adapter reports the running CLI's version once per process as an
  * `agent_version` event (#297), from what the tool itself says when it starts.
  */
-export type InputObserver = { complete(): void; fail(error: Error): void }
+export type InputObserver = {
+  complete(): void
+  fail(error: Error): void
+  /**
+   * The tool took the input: Codex answered `turn/start`, Claude started a turn for it. Before `complete`, which waits for the turn to be
+   * recorded. The mailbox's delivery counts a wake as delivered from here, not from the write (docs/plans/mailbox.md §7.6.2)
+   */
+  accepted?(): void
+}
 
 /**
  * Who wrote an input, when the host can say so. The person's own typing is stamped `human`; the mailbox's delivery is stamped
@@ -270,7 +278,7 @@ export interface SessionHandle {
    */
   turnInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
-  sendTracked?(text: string, observer?: InputObserver): Promise<void>
+  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin }): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

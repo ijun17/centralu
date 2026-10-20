@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, errorMessage, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -20,6 +20,7 @@ import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
+import { MailDelivery } from './mail/delivery.js'
 import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
@@ -391,9 +392,8 @@ const userAppAdoption = new UserAppAdoption({
   changed: () => events.push({ type: 'projects_changed' }),
 })
 /*
- * The mailbox (#1347, docs/plans/mailbox.md): slice 1 is its store and model. Nothing posts yet and nothing is delivered,
- * so all this host does with it is keep what it holds for as long as it should (§4.4, once the host is ready, below).
- * The host's id is read from the setting a hub already keeps, and only when mail needs it.
+ * The mailbox (#1347, docs/plans/mailbox.md): its model, and the delivery that wakes a receiver with its mail (§5), which starts
+ * once the host is ready (below). The host's id is read from the setting a hub already keeps, and only when mail needs it.
  */
 const mail = new MailService(store.mail, {
   hostId: () => hubSelfId(store),
@@ -404,8 +404,10 @@ const mail = new MailService(store.mail, {
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
-// A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3)
-mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id) })
+const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions())
+// A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
+// to rest, answers a card or is restored may now take the mail it was holding
+mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id) })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
@@ -734,6 +736,7 @@ const shutdown = new Shutdown({
       updates,
       agentVersions,
       sleeper,
+      mailDelivery,
       stopActivity: () => stopActivity(),
       git: { stopAll: () => stopGitChildren() },
       links,
@@ -777,16 +780,10 @@ setTimeout(() => {
   userAppAdoption.watch()
 }, 0)
 /*
- * What the mailbox keeps and for how long (store/mail-retention.ts), once the host is ready: by now the host this one
- * replaced is gone, and it never read these tables anyway. Once per start until the delivery engine's own sweep (slice 2).
+ * The mailbox's delivery and its sweep (retention among them) start once the host is ready: by now the host this one replaced
+ * is gone, so only one host delivers (§4.2). The sweep is delivery's own, every 60 s.
  */
-setTimeout(() => {
-  try {
-    mail.sweep()
-  } catch (err) {
-    console.error(`[mail] retention failed; it runs again on the next start: ${errorMessage(err)}`)
-  }
-}, 0)
+setTimeout(() => mailDelivery.start(), 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a
  * stopped host left owed (#396). By the time this timer fires the ready line has gone out and the

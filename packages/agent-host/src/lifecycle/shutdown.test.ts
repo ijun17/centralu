@@ -70,6 +70,7 @@ function parts() {
     updates: { stop: rec('updates') },
     agentVersions: { stop: rec('agent versions') },
     sleeper: { stop: rec('sleeper') },
+    mailDelivery: { stop: rec('mail delivery') },
     stopActivity: rec('activity'),
     git: { stopAll: async () => void did.push('git') },
     links: { stop: async () => void did.push('links') },
@@ -132,6 +133,16 @@ describe('the stop plan (HO8)', () => {
       await runSteps(stopPlan(mode, false, f.p), () => {})
       expect(f.did).toContain('sleeper')
       expect(f.did.indexOf('sleeper')).toBeLessThan(f.did.indexOf(mode === 'detach' ? 'sessions detach' : 'sessions end'))
+    }
+  })
+
+  it('the mailbox’s delivery stops before the sessions are let go of, so a host that is leaving wakes no session the next one takes over (#1347)', async () => {
+    for (const mode of ['detach', 'stop'] as const) {
+      const f = parts()
+      f.releaseSessions()
+      await runSteps(stopPlan(mode, false, f.p), () => {})
+      expect(f.did).toContain('mail delivery')
+      expect(f.did.indexOf('mail delivery')).toBeLessThan(f.did.indexOf(mode === 'detach' ? 'sessions detach' : 'sessions end'))
     }
   })
 

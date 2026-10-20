@@ -3,6 +3,7 @@ import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recover
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { withHubMark } from './hub-preset.js'
+import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -803,10 +804,40 @@ export class SessionManager {
   }
 
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
-  private mailHooks: { sessionGone(sessionId: string): void } | null = null
+  private mailHooks: { sessionGone(sessionId: string): void; sessionChanged(sessionId: string): void } | null = null
 
-  useMail(hooks: { sessionGone(sessionId: string): void }): void {
+  useMail(hooks: { sessionGone(sessionId: string): void; sessionChanged(sessionId: string): void }): void {
     this.mailHooks = hooks
+  }
+
+  /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */
+  mailSessions(): MailSessions {
+    return {
+      receiver: (id) => this.mailReceiver(id),
+      deliver: (id, input, late) =>
+        this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, late),
+    }
+  }
+
+  /** Whether a session can be told of mail now, and how (`ReceiverState`, mail/delivery.ts) */
+  private mailReceiver(id: string): ReceiverState {
+    const m = this.meta.get(id)
+    if (!m) return { kind: 'gone' }
+    // A host that is leaving tells nobody anything: the next one delivers (§4.2)
+    if (this.handingOver || this.disposing) return { kind: 'busy', why: 'turn' }
+    // A card is standing: mail is never taken as its answer (§7.1). `waiting_input` is not one: it is the state a turn ends in
+    // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
+    if (m.pendingApproval || m.pendingQuestions.length > 0 || m.state === 'waiting_approval') return { kind: 'busy', why: 'card' }
+    switch (m.state) {
+      case 'working':
+        return { kind: 'busy', why: 'turn' }
+      case 'limited':
+        return { kind: 'busy', why: 'limited' }
+      default: {
+        const live = this.handles.has(id)
+        return { kind: 'ready', live, quiet: live && this.adapters.get(m.tool)?.quietInput === true }
+      }
+    }
   }
 
   /** A session that is here (not in the trash), as the mailbox's relations read it (#1347); undefined for one that is gone */
@@ -1890,6 +1921,13 @@ export class SessionManager {
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
+      mailPoke: (id) => {
+        try {
+          self.mailHooks?.sessionChanged(id)
+        } catch (e) {
+          console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
+        }
+      },
       mailGone: (id) => {
         try {
           self.mailHooks?.sessionGone(id)

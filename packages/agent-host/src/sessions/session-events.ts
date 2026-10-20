@@ -8,6 +8,7 @@ import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.j
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
+import { MailNotAtRest } from '../mail/delivery.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia } from './app-messages.js'
 import type { ChildReports } from './child-reports.js'
@@ -50,6 +51,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     readonly reports: ChildReports
     /** A session's live process, or `session_not_found` */
     requireHandle: (sessionId: string) => SessionHandle
+    /** Something about a session changed that may let its mail go (#1347): it came to rest, a card was answered. Never throws */
+    mailPoke: (sessionId: string) => void
     resumeSession: (sessionId: string, adopt?: AgentProcess) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
@@ -59,6 +62,51 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
  * session's conversation (`deliver`). Moved out of the session manager as it was (#428); what it reaches of the
  * manager is `SessionEventsHost`.
  */
+/** How long a tool may take to say it took a wake before it is taken as taken (it has not failed, and sending again could run the work twice) */
+export const MAIL_ACCEPT_MS = 90_000
+
+/**
+ * Hands a wake to the tool and waits until the tool took it (docs/plans/mailbox.md §7.6.2): Codex when `turn/start` answers, Claude
+ * when a turn runs for it, and a rejection or a process that closed with the wake still queued is a failure, so the mailbox keeps the
+ * mail and tries again. A tool that cannot track its inputs (an older CLI) has taken it when the write returns, as before.
+ *
+ * A tool silent for `MAIL_ACCEPT_MS` counts as having taken it. If it fails the input after that (a CLI slow to start that closes with the
+ * wake still queued, a Codex whose `turn/start` is rejected late) it never ran it, so `late` is told and the mailbox puts the mail
+ * back; a failure after the tool took the input is not told, since sending it again could run the work twice.
+ */
+async function takeInput(handle: SessionHandle, text: string, late?: (e: Error) => void): Promise<void> {
+  const origin = { kind: 'channel', server: 'centralu' } as const
+  if (!handle.sendTracked) {
+    handle.send(text, { origin })
+    return
+  }
+  const tracked = handle.sendTracked.bind(handle)
+  // 'counted': the wait ran out and the wake went on as taken, with the tool still silent
+  let state: 'waiting' | 'counted' | 'taken' | 'failed' = 'waiting'
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (state !== 'waiting') return
+      state = 'counted'
+      console.error(`[mail] ${handle.sessionId.slice(0, 8)}: the tool has not said it took the wake in ${MAIL_ACCEPT_MS / 1000} s; counted as taken`)
+      resolve()
+    }, MAIL_ACCEPT_MS)
+    timer.unref()
+    const done = () => {
+      clearTimeout(timer)
+      state = 'taken'
+      resolve()
+    }
+    const fail = (e: Error) => {
+      clearTimeout(timer)
+      const was = state
+      if (was === 'waiting' || was === 'counted') state = 'failed'
+      if (was === 'waiting') reject(e)
+      else if (was === 'counted') late?.(e)
+    }
+    tracked(text, { accepted: done, complete: done, fail }, { origin }).then(done, fail)
+  })
+}
+
 export class SessionEvents {
   constructor(private readonly host: SessionEventsHost) {}
 
@@ -255,6 +303,8 @@ export class SessionEvents {
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
     if (endedTurn && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
+    // A turn ended, a card was answered or a state was stated: the mail it was holding may go (#1347)
+    if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
     // A paused report's work may just have ended (#721)
@@ -293,6 +343,7 @@ export class SessionEvents {
     this.host.emit(change)
     // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
     if (!inTurn(m.state) && this.host.children.queued.has(m.id)) this.host.queue.scheduleDrain(m.id)
+    this.host.mailPoke(m.id)
   }
 
   /**
@@ -529,6 +580,51 @@ export class SessionEvents {
     else h.send(input, inputId ? { id: inputId } : undefined)
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
+  }
+
+  /**
+   * The mailbox's delivery to a session (#1347, docs/plans/mailbox.md §7.1): the wake frame, as the CLI's input stamped as the
+   * channel of Centralu, and a compact line in the conversation (§9.2). Never a message of the person's: no user row is written,
+   * so nothing in the conversation reads as them. `quiet` goes into a live process without a turn; otherwise the session is woken
+   * (resumed if it sleeps), as a message to it is. Throws when the tool does not take it, and the mailbox tries again
+   */
+  async deliverMail(
+    sessionId: string,
+    input: { text: string; quiet: boolean; line: string },
+    gate: { leaving(): boolean; atRest(): boolean } = { leaving: () => false, atRest: () => true },
+    late?: (e: Error) => void,
+  ): Promise<void> {
+    // Asked again after every wait and right before the send: what was true when the delivery began may not be (§4.2, §7.1)
+    const clear = () => {
+      if (gate.leaving()) throw rpcError('Centralu is restarting: the mail waits for the next host')
+      if (!gate.atRest()) throw new MailNotAtRest()
+    }
+    const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
+    if (restarting) await restarting
+    this.host.openSession(sessionId)
+    if (input.quiet) {
+      const handle = this.host.handles.get(sessionId)
+      if (!handle) throw rpcError('The session is not running: quiet mail waits for its next wake')
+      clear()
+      handle.send(input.text, { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    } else {
+      // A wake in progress is waited out, then the session is woken if it sleeps, as for any message (#839)
+      if (this.host.resuming.has(sessionId) && this.host.handles.has(sessionId)) await this.host.resumeSession(sessionId)
+      if (!this.host.handles.has(sessionId)) {
+        const r = await this.host.resumeSession(sessionId)
+        if (!r.resumed) throw rpcError(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`, 'session_not_found')
+      }
+      // The host started to leave while the session was waking, or the person started a turn in it: the mail waits, and this sends nothing
+      clear()
+      this.host.notBeingRemoved(sessionId)
+      const handle = this.host.requireHandle(sessionId)
+      this.host.record.closeStream(sessionId)
+      // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
+      this.host.cardRests.turnAsked(sessionId)
+      await takeInput(handle, input.text, late)
+    }
+    // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
+    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'mail', text: input.line })
   }
 
   /**
