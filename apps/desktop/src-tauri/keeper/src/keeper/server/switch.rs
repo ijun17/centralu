@@ -282,6 +282,8 @@ pub(super) fn refuse(k: &Arc<Keeper>, asked: &BuildSource, r: content::Refusal) 
     st.swap = Some(SwapView {
         message: Some(r.message),
         refused: Some(r.reason.to_string()),
+        refused_check: r.check.map(String::from),
+        refused_file: r.file,
         ..SwapView::begun(Phase::Failed, asked.clone(), st.source.clone())
     });
     k.broadcast(&mut st);

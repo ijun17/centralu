@@ -82,6 +82,11 @@ struct LinkState {
     shell: Option<crate::shell::Report>,
     /// The shell did not start a keeper once: every later start in this window's life is direct.
     shell_off: bool,
+    /// Why the shell refused this window's content, when it did and the reason is a verification failure, worded from
+    /// what the window found reading that content itself (`through_shell`). Shown once in a native window (`announce`).
+    shell_refusal: Option<crate::refusal::Refusal>,
+    /// The refusals already shown in this window's life.
+    shown: crate::refusal::Shown,
 }
 
 pub struct KeeperLink {
@@ -283,11 +288,68 @@ impl KeeperLink {
             return true;
         };
         let started = report.started;
+        // Read before the report is stored: finding out why can take a moment (it hashes the content)
+        let refusal = self.shell_refusal(resources, &report);
         if let Ok(mut st) = self.state.lock() {
             st.shell_off |= !started;
             st.shell = Some(report);
+            st.shell_refusal = refusal;
         }
         started
+    }
+
+    /**
+     * The shell refused this window's content: a refusal to show in a native window (#634), when it is one about
+     * verification and a release says so (`notify`). The shell's status carries a sentence and no hashes, and the
+     * shell cannot change without asking every person for their permissions again, so the window reads its own
+     * content again (`keeper::content::diagnose`: reads and hashes, starts nothing) to say which file or check failed.
+     */
+    fn shell_refusal(&self, resources: &std::path::Path, report: &crate::shell::Report) -> Option<crate::refusal::Refusal> {
+        if report.started || !report.notify {
+            return None;
+        }
+        let reason = report.reason.as_deref()?;
+        let found = (reason == "content")
+            .then(|| crate::keeper::content::diagnose(&self.data, &resources.join("content")))
+            .flatten()
+            .and_then(|r| {
+                Some(crate::refusal::Found { check: r.check?.to_string(), file: r.file, message: r.message })
+            });
+        crate::refusal::Refusal::from_shell(reason, report.message.as_deref().unwrap_or(""), found, env!("CARGO_PKG_VERSION"))
+    }
+
+    /**
+     * Shows each new refusal of signed content in a native window, drawn here and not by the web UI that the host feeds:
+     * the shell's refusal of this window's content, and the keeper's of a new build's (`swap.refused`). Each is shown
+     * once. Shows only: nothing it names is run, trusted or unlocked. Thread-safe to call from any view.
+     */
+    fn announce_refusals(&self, app: &AppHandle) {
+        let new: Vec<crate::refusal::Refusal> = {
+            let Ok(mut st) = self.state.lock() else { return };
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            // Only a refusal of this window's own build: the keeper keeps the last swap's view for a window that
+            // attaches later, and an old window's refused update is not this one's to announce on every launch
+            let from_keeper = st.view.as_ref().and_then(|v| v.swap.as_ref()).filter(|s| s.is_to(&self.app_build)).and_then(|s| {
+                let failed = s.phase == crate::keeper::swap::Phase::Failed;
+                // The refused build is this window's own (filtered above): its version is the one this window carries,
+                // not whatever the request that asked for the switch said
+                let r = crate::refusal::Refusal::from_swap(
+                    s.refused.as_deref().filter(|_| failed),
+                    s.refused_check.as_deref(),
+                    s.refused_file.as_deref(),
+                    s.message.as_deref(),
+                    Some(env!("CARGO_PKG_VERSION")),
+                    s.from.as_ref().and_then(|b| b.version.as_deref()),
+                )?;
+                Some((r, s.started_at))
+            });
+            let shell = st.shell_refusal.clone();
+            crate::refusal::due(&mut st.shown, shell.as_ref(), from_keeper.as_ref().map(|(r, at)| (r, *at)), now_ms)
+        };
+        for r in new {
+            eprintln!("[window] showing why signed content was refused ({}): {}", r.reason, r.message);
+            crate::refusal::show(app, crate::refusal::dialog(&r), crate::keeper::log_path(&self.data));
+        }
     }
 
     /// How this window starts a keeper (and, in the same words, how the shell does: `keeper::exe::Start`).
@@ -362,6 +424,8 @@ impl KeeperLink {
         let mode = self.plan(client::alive(&self.sock));
         if mode != StartMode::Attach {
             self.launch_keeper(mode).map_err(|e| format!("could not launch the keeper: {e}"))?;
+            // The shell may have refused the content on the way: said now, not only once a keeper has attached
+            self.announce_refusals(app);
             client::wait_alive(&self.sock, Duration::from_secs(25))?;
         }
         let (closed_tx, closed_rx) = mpsc::channel::<()>();
@@ -431,6 +495,8 @@ impl KeeperLink {
             emit(app, &status);
             let _ = app.emit("host-build", build);
         }
+        // Whether or not the UI heard of it: a refusal is shown by this process itself
+        self.announce_refusals(app);
     }
 
     fn shutting_down(&self) -> bool {
