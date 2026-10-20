@@ -934,10 +934,9 @@ own, under the name it called it by (`UserAppAdoptionRecords.carry`).
 or the Share button in the app's header (`apps.setShared`). It is kept in the store's settings table
 (`app_shared:<project>/<app>`, absent means off) and reported in the app list (`shared: true`).
 Turning it off detaches the app from every session that attached it.
-Attachments count only while the session holds the reader set: turning "Let sessions look at their own
-project" off in Settings takes them away at once (detach_app goes with the set). Turning it off also
-forgets the ones allowed with "Allow once", and turning it on again brings back the rest: those under
-an "always" the person still keeps, and user-folder apps (owner decision, #382).
+Attachments count only while the session holds the reader set, which every ordinary session in a project does: the
+Settings switch that took it away, and with it the attached apps and the ones allowed "once" (#382), is gone (owner
+decision 2026-10-20, always on).
 
 **The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1; the orchestrator's as commands):
 

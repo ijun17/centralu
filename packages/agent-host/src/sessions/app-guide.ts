@@ -123,12 +123,12 @@ Every session has a permission preset: Safe (ask for everything), Normal (ask wh
 Changing a live session's settings restarts the conversation in place — the change applies from
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
-and approved skills, and whether every session can look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
+and approved skills; every session can always look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
 Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
 Check from Settings → Updates. It reports a new version based on the npm registry, and the person
-clicks to install it. With automatic checking on, the check runs on startup, every six hours, when
+clicks to install it. With "Automatic updates" on (the default), the check runs on startup, every six hours, when
 Updates opens, and on focus when the last check is over an hour old. With it off, use Check now.
 Ordinary checks follow npm, including dist-tag rollbacks. Installing reuses a successful check
 from the last minute or checks again. Only while installing can a higher stored version seen less
@@ -138,7 +138,7 @@ An install asked for with nothing newer known checks first; nothing newer is the
 a failure. The installed app is replaced by the npm release, even a higher released version, except
 a newer local build (<base>.local.N) waiting to be applied, which is kept; the line says so.
 Once installed, the desktop app offers "Apply now": it relaunches into the new version, and running
-agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
+agents, terminals and commands keep going. "Automatic updates" also
 installs a new version without a click and applies it once no session is working or waiting, no
 terminal or command is running, and the person is not typing. An agent can ask for the same Apply now
 (update_centralu's apply action): under auto it applies, under normal the person is asked on a card,

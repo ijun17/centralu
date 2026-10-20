@@ -133,13 +133,14 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(agentRunText(await w.mgr.agentSession(s, { sessionId: s, action: 'status' })).text).not.toContain('action="delete"')
   })
 
-  it('list says the set is turned off, rather than that nothing is left', async () => {
+  it('list keeps answering after an older window sent the session tools off: they are always on (2026-10-20)', async () => {
     const s = await session()
     await startRunning(s, 'a job')
     const tools = handleOf(s)!.opts.orchestratorTools!
     w.mgr.setUiPreferences({ sessionTools: false })
     const r = await runOrchestratorTool(tools, 'agent_session', { action: 'list' }, { sessionId: s, profile: 'reader' })
-    expect(r).toMatchObject({ text: 'Turned off in Settings', isError: true })
+    expect(r.isError).toBeFalsy()
+    expect(r.text).not.toContain('Turned off in Settings')
   })
 })
 

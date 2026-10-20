@@ -208,7 +208,7 @@ classDiagram
   own project. A delegated session is told by the delegated turn it is running, not by a stored relationship (#614). Moving a role into a
   stored flag was avoided on purpose, so the flag cannot drift from the relationship (#13, #80).
 - The tool profile follows from these, first match wins: orchestrator, coordinator (`scoped`), builder, ordinary
-  session in a project (`reader`, unless Settings turns it off), none (`toolProfileFor`).
+  session in a project (`reader`, always: no setting turns it off since 2026-10-20), none (`toolProfileFor`).
 
 Where it is stored:
 
