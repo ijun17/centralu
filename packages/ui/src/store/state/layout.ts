@@ -48,6 +48,15 @@ export type LayoutSlice = {
    */
   showIgnored: boolean
   /**
+   * Whether to keep the composer folded in grid panels (user request, 2026-09-10).
+   *
+   * When on, each panel's composer stays folded down to **only the rounded card's top edge**, and
+   * rises to **float over** the conversation when the mouse is over the bottom of the panel. The
+   * conversation's height does not change, so the row being read is not pushed around. When off, it
+   * stays expanded at all times, as before.
+   */
+  foldComposer: boolean
+  /**
    * Whether the evidence lane (git, files) is open.
    * Why it is a panel and not a tab: git status is not a screen that **replaces** the conversation,
    * it is **evidence** for what the conversation claims. Grouping things that are not alternatives
@@ -132,4 +141,5 @@ export type LayoutSlice = {
   toggleDir(projectId: string, path: string): void
   /** Show or hide what .gitignore hides (#17) */
   setShowIgnored(show: boolean): void
+  setFoldComposer(fold: boolean): void
 }

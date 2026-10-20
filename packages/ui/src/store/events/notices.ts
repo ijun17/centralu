@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
-import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type SessionSummary } from '@cc/core'
+import { allDoneNotification, badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type SessionSummary } from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { AppState, Notice, StoreGet, StoreSet } from '../state.js'
 import { projectScreenSessions } from '../screens.js'
@@ -40,9 +40,12 @@ function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notic
 
 /**
  * The notices an event raises as it arrives, before it touches the conversation: a request to start an
- * agent, its answer, and a finished turn.
+ * agent, its answer, and a finished turn. Returns whether it already alerted the person.
  */
-export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): void {
+export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): boolean {
+  /** Whether this event already alerted the person — a flag so the same instant does not fire twice */
+  let announced = false
+
   /*
    * A session asks to start another agent (#673): a notice every time, on screen or not, until it is answered. It
    * used to stand unseen in a session the person was not looking at until it was withdrawn, and the session then
@@ -113,6 +116,7 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
        * every other notification — quietly leave only the card while the app is in view.
        */
       if (s.notifyPolicy.done && (!s.appFocused || s.notifyPolicy.whenFocused)) {
+        announced = true
         void s.platform?.system
           .alert('done', s.notifyPolicy.sound)
           .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
@@ -131,6 +135,7 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
     const projectId = s.sessions[sessionId]?.projectId
     if (projectId) get().refreshProjectGit(projectId)
   }
+  return announced
 }
 
 /**
@@ -150,6 +155,7 @@ export function notifyStateChange(
   sessionId: string,
   cur: SessionSummary,
   withSeq: SessionSummary,
+  announced: boolean,
   set: StoreSet,
   get: StoreGet,
 ): void {
@@ -159,16 +165,17 @@ export function notifyStateChange(
     const platform = st.platform
     if (!platform) return
 
-    /*
-     * Only an approval sounds and raises a banner now (owner, 2026-10-20): the "error" and "once when every session
-     * finishes" switches are gone from Settings, and their saved values are read but no longer followed. An error is
-     * still told in the top bar below; a finished turn keeps its own sound (`noticeEvent`).
-     */
-    const ctx = { appFocused: st.appFocused, policy: { ...st.notifyPolicy, error: false } }
+    const ctx = { appFocused: st.appFocused, policy: st.notifyPolicy }
+    const after = Object.values(st.sessions)
+    const before = after.map((x) => (x.id === sessionId ? cur : x))
 
     // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
     const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
-    const notice = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
+    const one = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
+    const all = allDoneNotification(after, before, ctx)
+    // If there is a per-session notice, use only that — do not fire twice at the same instant
+    // If a per-session completion already fired, "all done" does not fire on top of it — twice at the same instant is just noise
+    const notice = one ?? (announced ? null : all)
     if (notice) {
       // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
       // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
@@ -179,7 +186,8 @@ export function notifyStateChange(
         .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
     }
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
-    if (notice || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
+    // "All done" is not about a single session, so it never creates a card (a per-session card already exists for that).
+    if (one || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*
        * The notification policy decides the sound and the banner, not whether the top bar says it (owner, 2026-10-18).
        * With the cards gone, a notice is one line the inbox's capsule writes out for a few seconds and nothing that

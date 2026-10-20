@@ -544,6 +544,29 @@ uxTask({
   budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
 })
 
+// Every step is a control on screen: New folder, the name field, Create
+uxTask({
+  id: 'create-project.mouse',
+  task: 'Create a new project (an empty folder)',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The folder goes where the dialog says, ~/Centralu by default (#515); choosing another location is not counted'],
+  start: demo,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('create-project'))
+    await u.until('the create-project dialog', () => expect(page.getByTestId('create-project-dialog')).toBeVisible())
+    // The name field takes the keyboard as the dialog opens
+    await u.fill(page.getByTestId('create-project-name'), 'game')
+    await u.until('the folder it will make', () => expect(page.getByTestId('create-project-path')).toHaveText('/Users/you/Centralu/game'))
+    await u.click(page.getByTestId('create-project-confirm'))
+  },
+  goal: async (page) => {
+    await expect(page.getByTestId('create-project-dialog')).toHaveCount(0)
+    await expect(page.getByTestId('project-game')).toBeVisible()
+  },
+  budget: { operators: 15, M: 2, H: 3, seconds: 7.8 },
+})
+
 uxPending({
   id: 'create-project.orchestrator',
   task: 'Create a new project by asking the orchestrator',

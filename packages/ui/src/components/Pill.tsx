@@ -57,8 +57,7 @@ export function pillClass({
   // The bar's translucent fill, except on a failure, which stands on the bar's own ground (the update line's)
   const fill = size === 'bar' && edge !== 'dashed' ? 'bg-surface-hover/30' : ''
   return [
-    // A capsule never breaks its words: in a narrow card the text beside it wraps instead (owner, 2026-10-19)
-    'flex shrink-0 items-center whitespace-nowrap rounded-full border transition-colors',
+    'flex items-center rounded-full border transition-colors',
     SIZE[size],
     EDGE[edge],
     fill,

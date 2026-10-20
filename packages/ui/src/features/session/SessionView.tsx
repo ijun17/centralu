@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { DragEvent, ReactNode, RefObject } from 'react'
+import type { DragEvent, ReactNode } from 'react'
 import { isInTurn, shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { Kbd, canContinue } from '../../components/primitives.jsx'
 import { useSessionAway, useSessionFolder } from '../../store/selectors.js'
 import { lazyComponent } from '../../components/lazy.jsx'
-import { usePresence } from '../../components/presence.js'
 import { isFileDrag } from '../files/dragPath.js'
 import { APP_LINK_DROP_EVENT, type AppLinkDrop } from '../app-frame/dragRelay.js'
 import { isOutsideLink } from './dragLink.js'
@@ -23,19 +22,6 @@ import { EMPTY_CHAT } from './empty.js'
  * — it does not rise while the hand is in the middle of the conversation.
  */
 const COMPOSER_REACH = 54
-
-/**
- * When a grid or project-screen panel folds its composer (owner, 2026-10-20): once the open composer, at its resting
- * one-line height, would take more than a third of the panel. A one-line composer is about 95px, so a two-row grid on
- * an ordinary window (panels of 330–420px) keeps it open, and three rows (about 270px) fold it; a larger text size
- * makes the composer taller against the same panel and folds sooner.
- *
- * Unfolding waits until it would take under 32%, so a panel dragged slowly across the line does not flip at every pixel.
- * The folded card also measures a few pixels taller than the open one (its own border and padding), which widens that
- * band a little: with the usual composer, a panel folds below about 285px and opens again above about 312px.
- */
-const FOLD_SHARE = 1 / 3
-const UNFOLD_SHARE = 0.32
 
 /** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
 const CommandRunnerOverlay = lazyComponent(() =>
@@ -89,7 +75,7 @@ export function SessionPane({
   sessionId,
   headerExtra,
   headerDrag,
-  foldWhenShort = false,
+  fold = false,
 }: {
   sessionId: string
   /**
@@ -102,15 +88,14 @@ export function SessionPane({
    */
   headerExtra?: ReactNode
   /**
-   * Whether the composer may collapse when the pane is short (the grid and the project screen).
+   * Whether to keep the composer collapsed (the grid, requested by a user on 2026-09-10).
    *
-   * Collapsing came from a two-row grid leaving too little room to read (a user, 2026-09-10) — of a
-   * 370px cell, the input area took up 95px, and only 22px of that was the actual text field.
-   * Collapsed, **only the rounded card's top edge** remains, and it rises above the conversation
-   * once a hand comes near the bottom. It was a setting until 2026-10-20; now the pane decides by
-   * its own height (`FOLD_SHARE`), so a tall panel keeps the composer open and a short one folds it.
+   * This came from a two-row grid leaving too little room to read — of a 370px cell, the input
+   * area took up 95px, and only 22px of that was the actual text field. Collapsed, **only the
+   * rounded card's top edge** remains, and it rises above the conversation once a hand comes
+   * near the bottom. It overlays rather than pushing, so the row being read does not move.
    */
-  foldWhenShort?: boolean
+  fold?: boolean
   /**
    * Uses the header as **the handle that moves the pane** (the grid).
    *
@@ -145,11 +130,9 @@ export function SessionPane({
    * half of this lesson — a `draggable` ancestor is why the whole cell stopped being one.
    */
   const [runOpen, setRunOpen] = useState(false)
-  // The run window goes back up the way it came down (usePresence keeps it for its exit)
-  const runPresence = usePresence(runOpen)
   const scrollRef = useRef<HTMLDivElement>(null)
   /**
-   * Whether the collapsed composer is raised (only meaningful while `fold` holds).
+   * Whether the collapsed composer is raised (only meaningful when `fold` is set).
    *
    * Four triggers are **OR'd together**: a hand near the bottom (hover), **a hand over the
    * raised card**, focus in the input field, or that row's menu (model, permissions) being
@@ -185,7 +168,7 @@ export function SessionPane({
    * An item dragged out of an app view lands here as an event, not a drop (#308): the page never
    * hears a drag from another origin, so the view's relay reports where it ended and the frame
    * hands the link to the element under that point (app-frame/dragRelay.ts). Anywhere on the pane
-   * counts, as for a file (#116): the composer may be folded away.
+   * counts, as for a file (#116): the composer is usually folded away.
    */
   const paneRef = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -201,8 +184,6 @@ export function SessionPane({
     pane.addEventListener(APP_LINK_DROP_EVENT, onAppDrop)
     return () => pane.removeEventListener(APP_LINK_DROP_EVENT, onAppDrop)
   }, [])
-  const composerRef = useRef<HTMLDivElement>(null)
-  const fold = useShortPane(foldWhenShort, paneRef, composerRef)
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
   /*
@@ -213,6 +194,7 @@ export function SessionPane({
    * lines. This value becomes the margin below the conversation, so any mismatch leaves that
    * much of the last line hidden under the card.
    */
+  const composerRef = useRef<HTMLDivElement>(null)
   const [composerH, setComposerH] = useState(0)
   useLayoutEffect(() => {
     const el = composerRef.current
@@ -334,8 +316,8 @@ export function SessionPane({
       /*
        * The whole pane is a drop target (#116) — not just the composer.
        *
-       * While the composer is collapsed (a short grid or project panel), the only place that
-       * could actually accept a drop was off-screen. Someone carrying a file over
+       * Since the composer is collapsed by default (the store's foldComposer), the only place
+       * that could actually accept a drop was usually off-screen. Someone carrying a file over
        * had nothing to aim at.
        *
        * Handling it here fixes all three screens at once: the focus view, a grid cell, and the
@@ -551,81 +533,31 @@ export function SessionPane({
         ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}
-        /*
-          Followed whether folded or not: the pane folds and unfolds as it is resized (`useShortPane`), and a card that
-          folds while the person is typing in it has to know it is in use and stay up.
-        */
-        onMouseEnter={() => setOverComposer(true)}
-        onMouseLeave={() => setOverComposer(false)}
-        onFocusCapture={() => setComposerFocused(true)}
-        onBlurCapture={(e) => {
-          // Focus moving within the same box has not actually left it (attach button ↔ input field)
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setComposerFocused(false)
-        }}
+        onMouseEnter={fold ? () => setOverComposer(true) : undefined}
+        onMouseLeave={fold ? () => setOverComposer(false) : undefined}
+        onFocusCapture={fold ? () => setComposerFocused(true) : undefined}
+        onBlurCapture={
+          fold
+            ? (e) => {
+                // Focus moving within the same box has not actually left it (attach button ↔ input field)
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setComposerFocused(false)
+              }
+            : undefined
+        }
       >
         <Composer
           sessionId={session.id}
           framed={!fold}
-          onMenuOpenChange={setComposerMenu}
+          onMenuOpenChange={fold ? setComposerMenu : undefined}
           dropRef={composerDrop}
         />
       </div>
 
       {/* The frequently used commands window (#60) — opens inside the pane. In a grid cell,
       the window is that cell's size */}
-      {runPresence.shown && session.projectId && (
-        <CommandRunnerOverlay
-          projectId={session.projectId}
-          sessionId={session.id}
-          leaving={runPresence.leaving}
-          onClose={() => setRunOpen(false)}
-        />
+      {runOpen && session.projectId && (
+        <CommandRunnerOverlay projectId={session.projectId} onClose={() => setRunOpen(false)} />
       )}
     </section>
   )
-}
-
-/**
- * Whether a pane that may fold its composer is short enough to (`FOLD_SHARE`). Measured from the pane itself with a
- * ResizeObserver, not from the window: a grid's rows, a project screen's panel sizes and the text size all decide it.
- * Both heights are layout pixels (`offsetHeight`), so the text size's zoom cancels out of the share.
- */
-function useShortPane(
-  enabled: boolean,
-  paneRef: RefObject<HTMLElement | null>,
-  composerRef: RefObject<HTMLDivElement | null>,
-): boolean {
-  const [short, setShort] = useState(false)
-  useLayoutEffect(() => {
-    const pane = paneRef.current
-    const shell = composerRef.current
-    if (!enabled || !pane || !shell) {
-      setShort(false)
-      return
-    }
-    const measure = () => {
-      const paneH = pane.offsetHeight
-      const restH = restingHeight(shell)
-      if (paneH <= 0 || restH <= 0) return
-      const share = restH / paneH
-      setShort((was) => (was ? share > UNFOLD_SHARE : share > FOLD_SHARE))
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(pane)
-    ro.observe(shell)
-    return () => ro.disconnect()
-  }, [enabled, paneRef, composerRef])
-  return enabled && short
-}
-
-/**
- * The composer's height with its text field at one line: what it takes at rest. A long draft grows the field (up to
- * five lines) and must not fold the composer from under the person writing it; the panel's height decides that.
- */
-function restingHeight(shell: HTMLElement): number {
-  const input = shell.querySelector('textarea')
-  if (!input) return shell.offsetHeight
-  const line = Math.max(22, parseFloat(getComputedStyle(input).lineHeight) || 0)
-  return shell.offsetHeight - Math.max(0, input.offsetHeight - line)
 }

@@ -245,7 +245,6 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
           type="button"
           onClick={() => setStickyOpen((v) => !v)}
           aria-expanded={stickyOpen}
-          data-mine-bubble
           className="w-full cursor-pointer truncate rounded-bubble border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
         >
           {stickyText}
@@ -267,7 +266,6 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
               reason to expand it is to read it — the conversation showing through a long
               question would immediately defeat that purpose.
             */
-            data-mine-bubble
             className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
           >
             {stickyText}

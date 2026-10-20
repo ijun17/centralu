@@ -64,7 +64,7 @@ more before anything happens.
 - The same character means "in progress" on a label that changes while it works: "Restarting the agent…"
   (`session/SessionHeader.tsx`), "Deleting…" (`project/DeleteProjectDialog.tsx`), "Looking for Claude Code
   and Codex…" (`onboarding/Intro.tsx`), "Asking <machine> what is running…" (`settings/MachinesSection.tsx`).
-- Breaks it: "Add a folder as a project" (`sidebar/Sidebar.tsx`) opens a folder picker
+- Breaks it: "New folder" and "Add project" (`sidebar/Sidebar.tsx`) open a dialog or a folder picker
   without "…"; "running…" (`session/chat-rows/CentraluCall.tsx`) is the one progress word in lower case.
 
 ### 1.5 An error says what happened, why, and what to do
@@ -119,8 +119,8 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
 - The product is "Centralu", used where the person needs to know who did something: "Stopped: Centralu
   quit or restarted" (`components/primitives.tsx`), "Keep agents running after Centralu quits"
   (`settings/Settings.tsx`).
-- Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`)
-  and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
+- Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`,
+  `project/CreateProjectDialog.tsx`) and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
   `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
 
 ### 1.9 No internal words on screen unless the person needs them

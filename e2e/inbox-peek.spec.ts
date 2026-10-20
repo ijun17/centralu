@@ -4,10 +4,10 @@ import { newSession, setup } from './fixtures/project-screen.js'
 /**
  * The inbox's capsule writes a new notice out (owner, 2026-10-18; features/inbox/InboxPill.tsx): the cards that stood
  * in the top right are gone, and a turn that finished, an approval or an error is one line that grows out of the
- * capsule for 5 s (PEEK_MS; 4 s until 2026-10-20) and folds back into the count. A finished turn on screen is judged seen when that line
+ * capsule for 4 s (PEEK_MS) and folds back into the count. A finished turn on screen is judged seen when that line
  * folds (features/notices/Notices.tsx); one that arrives while the window is behind waits until the person is back.
  *
- * The page's clock is held, so "5 s" is read off the clock the app reads, not off a machine under load.
+ * The page's clock is held, so "4 s" is read off the clock the app reads, not off a machine under load.
  */
 
 const peek = (page: Page) => page.getByTestId('inbox-peek')
@@ -34,7 +34,7 @@ async function twoSessions(page: Page): Promise<{ away: string; shown: string }>
   return { away, shown }
 }
 
-test('a turn that finished is written out in the capsule for 5 s, then folds back into the count', async ({ page }) => {
+test('a turn that finished is written out in the capsule for 4 s, then folds back into the count', async ({ page }) => {
   const { away } = await twoSessions(page)
   await expect(peek(page)).not.toHaveAttribute('data-open')
 
@@ -46,8 +46,8 @@ test('a turn that finished is written out in the capsule for 5 s, then folds bac
   await expect(page.getByTestId('notice')).toHaveCount(0)
   await expect(page.getByTestId('notices')).toHaveCount(0)
 
-  // Still there just before 5 s, folded just after
-  await page.clock.runFor(4_850)
+  // Still there just before 4 s, folded just after
+  await page.clock.runFor(3_850)
   await expect(peek(page)).toHaveAttribute('data-open', 'true')
   await page.clock.runFor(200)
   await expect(peek(page)).not.toHaveAttribute('data-open')
@@ -62,7 +62,7 @@ test('a turn that finished on screen is told too, and done with once its line ha
   await expect(peek(page)).toHaveText(`${await nameOf(page, shown)} finished`)
   expect(await notices(page)).toEqual([`${shown}:done`])
 
-  await page.clock.runFor(5_200)
+  await page.clock.runFor(4_200)
   await expect(peek(page)).not.toHaveAttribute('data-open')
   await expect.poll(() => notices(page)).toEqual([])
 })
@@ -81,6 +81,6 @@ test('a notice that arrived while the window was behind is written out when the 
   await page.clock.runFor(50)
   await expect(peek(page)).toHaveAttribute('data-open', 'true')
   await expect(peek(page)).toHaveText(`${await nameOf(page, shown)} finished · 1 more`)
-  await page.clock.runFor(5_200)
+  await page.clock.runFor(4_200)
   await expect(peek(page)).not.toHaveAttribute('data-open')
 })

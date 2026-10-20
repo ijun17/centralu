@@ -71,7 +71,7 @@ export function agentVersionsTests(): void {
       await start(page)
       await installed(page, { claude: '2.1.290', codex: null })
       await page.getByTestId('open-settings').click()
-      await page.getByTestId('settings-tab-background').click()
+      await page.getByTestId('settings-tab-updates').click()
       await expect(page.getByTestId('agent-versions-installed')).toHaveText('Installed: Claude Code 2.1.290')
       const box = page.getByTestId('agent-versions-auto-apply')
       await expect(box).toBeChecked()

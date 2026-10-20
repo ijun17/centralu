@@ -431,21 +431,12 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     if (!platform) return
     try {
       const runs = await platform.commands.state(projectId)
-      set((s) => {
-        const before = s.commandRuns[projectId] ?? {}
-        return {
-          commandRuns: {
-            ...s.commandRuns,
-            // What only this window saw of a run (when it ended, that it was stopped) stays with that same run
-            [projectId]: Object.fromEntries(
-              runs.map((r) => {
-                const was = before[r.command]
-                return [r.command, was?.runId === r.runId ? { ...was, ...r } : r]
-              }),
-            ),
-          },
-        }
-      })
+      set((s) => ({
+        commandRuns: {
+          ...s.commandRuns,
+          [projectId]: Object.fromEntries(runs.map((r) => [r.command, r])),
+        },
+      }))
     } catch {
       // If it could not be read, it is re-read the next time the panel opens — the badge is just dark for a moment
     }
@@ -472,28 +463,10 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
   async stopCommand(projectId, command) {
     const platform = get().platform
     if (!platform) return
-    /*
-     * Marked before asking, so its exit reads as a stop and not as a failure (`CommandRun.stopped`): a dev server ends
-     * with whatever code its signal gives it, and "exit 143" drawn as a failure after pressing Stop reads as a crash. Only
-     * the run that is running now is marked; a re-run meanwhile is a new record without the mark.
-     */
-    const mark = (stopped: boolean) =>
-      set((s) => {
-        const r = s.commandRuns[projectId]?.[command]
-        if (!r?.running) return {}
-        return {
-          commandRuns: {
-            ...s.commandRuns,
-            [projectId]: { ...s.commandRuns[projectId], [command]: { ...r, stopped } },
-          },
-        }
-      })
-    mark(true)
     try {
       await platform.commands.stop(projectId, command)
     } catch (e) {
       // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
-      mark(false)
       set({ toast: `Could not stop: ${(e as Error).message}` })
     }
   },

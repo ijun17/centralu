@@ -27,7 +27,7 @@ async function commandRuns(page: Page): Promise<{ key: string; running: boolean;
   })
 }
 
-test('the run dialog: register → run streams the log in the row, and finishing leaves the exit code', async ({ page }) => {
+test('the run dialog: register → select → run streams the log, and finishing leaves the exit code', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', 'task')
 
@@ -36,10 +36,10 @@ test('the run dialog: register → run streams the log in the row, and finishing
   await page.getByTestId('run-add').click()
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm test')
 
-  // Opening a row's log is not running it — the Run button at the row's start is what runs (owner redesign, 2026-10-19)
+  // Selecting is not running — there is a separate run button (#60 design)
   await page.getByTestId('run-command-0').click()
   expect(await commandRuns(page)).toEqual([])
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-exec').click()
 
   // A running indicator + the log stream
   await expect(page.getByTestId('run-running-0')).toBeVisible()
@@ -66,7 +66,7 @@ test('the run dialog: register → run streams the log in the row, and finishing
   await expect(page.getByTestId('run-log')).toContainText('3 tests passed')
 
   // Rerunning replaces the log — the old log must not mix in ahead of the new run
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-exec').click()
   await expect(page.getByTestId('run-log')).not.toContainText('3 tests passed')
   await expect(page.getByTestId('run-running-0')).toBeVisible()
 })
@@ -79,7 +79,7 @@ test('the run dialog: a dev server is stopped with Stop, and its log is kept', a
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
   await page.getByTestId('run-command-0').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-exec').click()
   await page.evaluate(() => {
     const w = window as never as { __mock: any; __store: any }
     const pid = Object.keys(w.__store.getState().projects)[0]
@@ -87,7 +87,7 @@ test('the run dialog: a dev server is stopped with Stop, and its log is kept', a
   })
   await expect(page.getByTestId('run-log')).toContainText('5173')
 
-  await page.getByTestId('run-stop-0').click()
+  await page.getByTestId('run-stop').click()
   // Stopping clears the running indicator, and the log stays — stopping is a result too
   await expect(page.getByTestId('run-exit-0')).toBeVisible()
   await expect(page.getByTestId('run-log')).toContainText('5173')
@@ -129,7 +129,7 @@ test('the run dialog: output still shows when the stored log cannot be read, und
   await page.getByTestId('run-add').click()
   await page.getByTestId('run-command-0').click()
   await holdLogReads(page)
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-exec').click()
 
   await emitDevOutput(page, 'Server listening on 5173\r\n')
   await failLogReads(page)
@@ -147,7 +147,8 @@ test('the terminal panel: a running command\'s output still shows when its store
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
   await expect(page.getByTestId('run-running-0')).toBeVisible()
   await page.keyboard.press('Escape')
 
@@ -176,7 +177,8 @@ test('the open button turns white while a command is running', async ({ page }) 
   await open.click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
 
   // Closing the dialog leaves the fact that "it is running" showing in the header — the door doubles as an indicator light
   await page.keyboard.press('Escape')
@@ -258,11 +260,12 @@ test('the run dialog: a command goes to the clicked panel\'s project — not whi
   await expect(page.getByTestId(`grid-panel-${beta}`)).toBeVisible()
 
   await page.getByTestId(`grid-panel-${beta}`).getByTestId('run-open').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
 
   // It was recorded as beta's — the log is also visible inside that panel, so there is no need to switch screens (#60)
-  await expect.poll(async () => (await commandRuns(page)).length).toBe(1)
   const runs = await commandRuns(page)
+  expect(runs).toHaveLength(1)
   const betaProjectId = await page.evaluate(() => {
     const s = (window as never as { __store: any }).__store.getState()
     return (Object.values(s.projects) as { id: string; path: string }[]).find((p) => p.path === '/tmp/beta')!
@@ -289,7 +292,7 @@ test('the run dialog: absent from the orchestrator — with no project there is 
   await expect(page.getByTestId('run-open')).toBeHidden()
 })
 
-test('command aliases: the name leads and the command backs it up — in the list, its running row, and the terminal panel (2026-09-06)', async ({ page }) => {
+test('command aliases: the name leads and the command backs it up — in the list, the selected-run row, and the terminal panel (2026-09-06)', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', 'task')
 
@@ -301,11 +304,9 @@ test('command aliases: the name leads and the command backs it up — in the lis
   await expect(page.getByTestId('run-command-0')).toContainText('Dev server')
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
 
-  await page.getByTestId('run-exec-0').click()
-  // The row keeps showing both while it runs: the name leads and the command backs it up
-  await expect(page.getByTestId('run-running-0')).toBeVisible()
-  await expect(page.getByTestId('run-command-0')).toContainText('Dev server')
-  await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
+  await expect(page.getByTestId('run-selected')).toContainText('Dev server · pnpm dev')
   await page.keyboard.press('Escape')
 
   // Both show in the command terminal of the terminal panel too
@@ -340,7 +341,8 @@ test('a running command shows as a terminal in the terminal panel — and goes d
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
   await expect(page.getByTestId('run-running-0')).toBeVisible()
   await page.keyboard.press('Escape')
 
@@ -386,7 +388,8 @@ test('the × on a command terminal means stop — the resulting exit takes the t
   await page.getByTestId('run-open').click()
   await page.getByTestId('run-add-input').fill('pnpm dev')
   await page.getByTestId('run-add').click()
-  await page.getByTestId('run-exec-0').click()
+  await page.getByTestId('run-command-0').click()
+  await page.getByTestId('run-exec').click()
   await page.keyboard.press('Escape')
 
   await page.getByTestId('evidence-tab-terminal').click()

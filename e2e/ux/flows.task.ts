@@ -388,12 +388,13 @@ uxTask({
   task: "Run one of the project's saved commands",
   path: 'mouse',
   access: 'discoverable',
-  notes: ['The ▶ in the session header lists the saved commands; each row has its own Run at its start (2026-10-19)'],
+  notes: ['The ▶ in the session header lists the saved commands; picking one selects it, and Run runs it (#60)'],
   start: demo,
   run: async (u, page) => {
     await u.click(page.getByTestId('run-open'))
     await u.until('the commands', () => expect(page.getByTestId('run-menu')).toBeVisible())
-    await u.click(page.getByTestId('run-exec-0'), { among: page.locator('[data-testid^="run-exec-"]') })
+    await u.click(page.getByTestId('run-command-0'), { among: page.locator('[data-testid^="run-command-"]') })
+    await u.click(page.getByTestId('run-exec'))
   },
   goal: async (page) => expect(page.getByTestId('run-running-0')).toBeVisible(),
   budget: { operators: 15, M: 3, seconds: 9.1 },
@@ -582,19 +583,14 @@ uxTask({
   task: 'Switch to the light theme',
   path: 'mouse',
   access: 'discoverable',
-  notes: [
-    'Settings, Appearance, the theme picker, Light; closing settings afterwards is not counted',
-    'the picker is a native list, which the browser cannot click through: opening it is the one recorded click, and choosing Light in it is not counted',
-  ],
+  notes: ['Settings, Appearance, Light; closing settings afterwards is not counted'],
   start: demo,
   run: async (u, page) => {
     await u.click(page.getByTestId('open-settings'))
     await u.until('settings', () => expect(page.getByTestId('settings')).toBeVisible())
     await u.click(page.getByTestId('settings-tab-appearance'), { among: page.locator('[data-testid^="settings-tab-"]') })
     await u.until('appearance', () => expect(page.getByTestId('settings-theme')).toBeVisible())
-    const pick = page.getByTestId('settings-theme-pick')
-    await u.click(pick)
-    await pick.selectOption('light')
+    await u.click(page.getByTestId('settings-theme-mode-light'))
   },
   goal: async (page) => expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light'),
   budget: { operators: 15, M: 3, seconds: 9.3 },

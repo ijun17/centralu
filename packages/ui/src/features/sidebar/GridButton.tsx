@@ -72,7 +72,7 @@ export function GridButton() {
       >
         <GridIcon />
         <span className="truncate font-medium tracking-tight">Grid</span>
-        {/* No panel count (owner, 2026-10-20): faint, and not something the person reads the grid button for */}
+        {panels.length > 0 && <span className="readout ml-auto text-2xs text-ink-faint">{panels.length}</span>}
       </button>
     </div>
   )

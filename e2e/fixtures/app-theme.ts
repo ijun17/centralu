@@ -18,7 +18,7 @@ const BOARD = new URL('../../.centralu/apps/project-board/', import.meta.url)
 
 /** Dark and Light values from styles/index.css, as the browser computes them */
 const DARK = { floor: '#0f0f0f', ink: 'rgb(237, 237, 237)', signal: 'rgb(255, 255, 255)', danger: 'rgb(255, 155, 145)', thumb: 'rgb(60, 60, 60)' }
-const LIGHT = { floor: '#f0f0f0', ink: 'rgb(42, 42, 42)', signal: 'rgb(17, 17, 17)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(197, 197, 197)' }
+const LIGHT = { floor: '#e8e8e8', ink: 'rgb(31, 31, 31)', signal: 'rgb(0, 0, 0)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(197, 197, 197)' }
 
 /** A board with more cards than its column can show, so the column scrolls */
 const BOARD_STATE = {
@@ -196,8 +196,8 @@ export function appThemeTests() {
     await expect.poll(async () => (await entries(v, 'host-context-changed')).length).toBe(1)
     const [changed] = await entries(v, 'host-context-changed')
     expect(changed.theme).toBe('light')
-    expect(changed.styles.variables).toMatchObject({ '--color-background-primary': LIGHT.floor, '--color-text-primary': '#2a2a2a', '--color-text-warning': '#111111' })
-    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#111111', '--centralu-scrollbar-thumb': '#c5c5c5' })
+    expect(changed.styles.variables).toMatchObject({ '--color-background-primary': LIGHT.floor, '--color-text-primary': '#1f1f1f', '--color-text-warning': '#000000' })
+    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#000000', '--centralu-scrollbar-thumb': '#c5c5c5' })
     // Nothing that did not change goes out again
     expect(changed).not.toHaveProperty('locale')
 
@@ -264,7 +264,7 @@ export function appThemeTests() {
 
     await showTheme(page, 'light')
     await expect.poll(() => schemeOf(v)).toBe('light')
-    // The one column waiting on the owner keeps the signal: the Light preset's near-black
+    // The one column waiting on the owner keeps the signal: pure black on light
     expect(await colorOf(v, '.column.decision .col-head')).toBe(LIGHT.signal)
     expect(await colorOf(v, '.card .title')).toBe(LIGHT.ink)
     expect(await thumb(v, '.cards')).toBe(LIGHT.thumb)
@@ -434,7 +434,7 @@ export function appThemeTests() {
     await expect.poll(() => schemeOf(v)).toBe('light')
     await expect(v.locator('#count')).toBeVisible()
     const { inside, outside } = await insideAndOutside(page)
-    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([240, 240, 240])
+    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([232, 232, 232])
     // Neither a dark canvas from a proxy stuck on dark nor a white one: exactly the page under it
     expect(inside, `frame rgb(${inside.join(', ')})`).toEqual(outside)
   })

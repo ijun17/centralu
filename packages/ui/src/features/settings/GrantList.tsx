@@ -3,8 +3,6 @@ import type { Load } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { formatDay } from '../../app/format.js'
-import { Button } from '../../components/Button.jsx'
-import { SettingsEmpty } from './SettingsLayout.jsx'
 
 /**
  * A list of answers the person gave once and can take back (#850 item 12): the always-allow rules and the projects
@@ -62,44 +60,37 @@ export function GrantList<T>({
   }
 
   const list = load.data?.filter((item) => !gone.includes(keyOf(item)))
-  // Rows of the settings card the caller puts this in (SettingsGroup): the card draws the frame and the hairlines
   return (
     <>
       {error && (
-        <p className="px-4 py-2.5 text-sm text-ink-faint" role="alert" data-testid={testIds.error}>
+        <p className="mt-2 text-sm text-ink-faint" role="alert" data-testid={testIds.error}>
           {error}
         </p>
       )}
       {/* Beside the last list when a refresh failed, in its place when there is none */}
       {load.error !== null && (
-        <div className="px-4 py-3">
-          <LoadFailed what={what} error={load.error} onRetry={() => void load.reload()} testId={testIds.failed} />
-        </div>
+        <LoadFailed what={what} error={load.error} onRetry={() => void load.reload()} className="mt-2" testId={testIds.failed} />
       )}
       {list === undefined ? (
-        load.error === null && (
-          <div className="px-4 py-3">
-            <SkeletonLines lines={2} />
-          </div>
-        )
+        load.error === null && <SkeletonLines lines={2} className="mt-2" />
       ) : list.length === 0 ? (
-        <SettingsEmpty testId={testIds.empty}>{empty}</SettingsEmpty>
+        <p className="mt-2 text-sm text-ink-faint" data-testid={testIds.empty}>
+          {empty}
+        </p>
       ) : (
-        <ul className="divide-y divide-line/70" data-testid={testIds.list}>
+        <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid={testIds.list}>
           {list.map((item) => (
-            <li key={keyOf(item)} className="flex items-center gap-2 px-4 py-2.5" data-testid={testIds.row?.(item)}>
+            <li key={keyOf(item)} className="flex items-center gap-2 px-2.5 py-1.5" data-testid={testIds.row?.(item)}>
               {row(item)}
               <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">{formatDay(dateOf(item))}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
+              <button
+                className="shrink-0 text-xs text-ink-faint hover:text-ink"
                 data-testid={action.testId(item)}
                 disabled={running.includes(keyOf(item))}
                 onClick={() => void takeBack(item)}
               >
                 {action.label}
-              </Button>
+              </button>
             </li>
           ))}
         </ul>

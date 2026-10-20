@@ -42,14 +42,6 @@ async function transitionsDone(loc: ReturnType<Page['getByTestId']>): Promise<vo
   })
 }
 
-/**
- * A grid panel folds its composer by its own height (SessionPane's `foldWhenShort`: below about 285px it folds, above
- * about 312px it opens, with the usual composer). So every scenario here runs in a short window, whose one-row grid
- * gives a panel under that line; the last one makes the window tall to see the composer stay open.
- */
-const SHORT_WINDOW = { width: 1280, height: 320 }
-test.use({ viewport: SHORT_WINDOW })
-
 /** The height of the strip that raises a collapsed composer (the same value as SessionView's COMPOSER_REACH) */
 const COMPOSER_REACH = 54
 
@@ -329,40 +321,28 @@ test('a collapsed composer does not scroll the panel up — a header button gets
 })
 
 /**
- * A panel tall enough keeps the composer open — folding is a rule of the panel's height, not of the grid.
- * And since folding is a concern specific to grid and project panels, the focus view never has this problem
- * to begin with, however short the window.
+ * With the setting off, it behaves as before — collapsing is **optional**.
+ * And since collapsing is a concern specific to the grid, the focus view never has this problem
+ * to begin with.
  */
-test('a panel tall enough keeps the composer open, and the focus view never folds it in the first place', async ({ page }) => {
+test('turning collapsing off keeps the composer always expanded, and the focus view never collapses it in the first place', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
   const panel = page.getByTestId(`grid-panel-${a}`)
-  const shell = panel.getByTestId('composer-shell')
-  const hangsBelow = async () => {
-    const p = (await panel.boundingBox())!
-    const s = (await shell.boundingBox())!
-    return s.y + s.height > p.y + p.height + 1
-  }
-  // The short window folds it: the card hangs below the panel's bottom edge, showing only its top
-  expect((await panel.boundingBox())!.height).toBeLessThan(285)
-  expect(await hangsBelow()).toBe(true)
+  const folded = (await panel.getByTestId('chat-stream').boundingBox())!.height
 
-  // A taller window gives the panel enough height: the composer opens and sits wholly inside it
-  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 800 })
-  await expect.poll(async () => (await panel.boundingBox())!.height).toBeGreaterThan(312)
-  await expect.poll(hangsBelow).toBe(false)
-  await expect(shell).not.toHaveAttribute('data-up', 'true')
+  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setFoldComposer(false))
+  await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
+  // Turning collapsing off makes the composer take its space back — the conversation shrinks by that much
+  const open = (await panel.getByTestId('chat-stream').boundingBox())!.height
+  expect(open).toBeLessThan(folded)
 
-  // Focus view: never folds, however short the window
-  await page.setViewportSize(SHORT_WINDOW)
+  // Focus view: never collapses, regardless of the setting
+  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setFoldComposer(true))
   await page.evaluate((id: string) => (window as never as { __store: any }).__store.getState().focusSession(id), a)
-  const view = page.getByTestId('session-view')
-  await expect(view.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
+  await expect(page.getByTestId('session-view').getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
   await expect(page.getByTestId('prompt-input')).toBeVisible()
-  const v = (await view.boundingBox())!
-  const c = (await view.getByTestId('composer-shell').boundingBox())!
-  expect(c.y + c.height).toBeLessThanOrEqual(v.y + v.height + 1)
 })

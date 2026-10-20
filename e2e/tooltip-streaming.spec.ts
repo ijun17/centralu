@@ -26,8 +26,7 @@ async function staysOpen(page: Page, trigger: Locator, focus = false) {
     const { __mock: mock, __store: store } = window as unknown as MockWindow
     const sessionId = store.getState().focusedSessionId
     const anchor = el.parentElement!
-    // The tip is drawn into the body, not inside its anchor (so a dimmed row cannot make it see-through)
-    const tip = document.body.querySelector(':scope > [role="tooltip"]')!
+    const tip = anchor.querySelector('[role="tooltip"]')!
     const stream = document.querySelector('[data-testid="chat-stream"]')!
     let scrolls = 0
     let interruptions = 0
@@ -38,9 +37,7 @@ async function staysOpen(page: Page, trigger: Locator, focus = false) {
     const observer = new MutationObserver(() => {
       if (!tip.isConnected || getComputedStyle(tip).visibility !== 'visible') interruptions++
     })
-    observer.observe(tip, { childList: true, subtree: true, attributes: true })
-    // The body's own children: the tip being taken away and put back is a flicker too
-    observer.observe(document.body, { childList: true })
+    observer.observe(anchor, { childList: true, subtree: true, attributes: true })
     try {
       for (let i = 1; i <= 50; i++) {
         mock.emit({
@@ -123,12 +120,12 @@ test('the gauge updates its usage and cache content in place while hovered and s
 })
 
 // All custom hover explanations use Tooltip, either directly at these call sites or through IconButton.
-// The project's changed-file count is a row of project-header-centralu's tooltip now, not a mark of its own.
 // Goal/worktree/context/machine/background-task header badges use native title and are unaffected.
 const surfaces = [
   'usage-donut-claude',
   'usage-donut-codex',
   'project-header-centralu',
+  'mark-changed-centralu',
   'git-denied-centralu',
   'fold-summary-landing-site',
   'usage-machine-box',

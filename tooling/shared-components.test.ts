@@ -40,8 +40,10 @@ const ALLOWED: Allowed[] = [
   { file: 'features/onboarding/Intro.tsx', look: 'button', count: 1, why: 'a tool card of the first run, large and two-lined' },
   { file: 'features/orchestrator/OrchestratorView.tsx', look: 'button', count: 3, why: 'two approve buttons brighter than primary on purpose (a proposal waits on the person), and the suggestion tiles' },
   { file: 'features/palette/SearchField.tsx', look: 'button', count: 1, why: 'the search box of the top bar, a button shaped as a field' },
+  { file: 'features/settings/Settings.tsx', look: 'button', count: 1, why: 'the orchestrator tool list: full-width option rows with a check mark' },
   { file: 'features/sidebar/GridButton.tsx', look: 'button', count: 1, why: 'a sidebar navigation tile (rounded-lg), lit while its screen is open' },
   { file: 'features/sidebar/OrchestratorButton.tsx', look: 'button', count: 1, why: 'a sidebar navigation tile (rounded-lg), lit while its screen is open' },
+  { file: 'features/sidebar/Sidebar.tsx', look: 'button', count: 2, why: 'the sidebar search and add-project tiles (rounded-lg), the same family as the navigation tiles' },
   { file: 'features/session/chat-stream/StickyUser.tsx', look: 'button', count: 2, why: 'the pinned user message, a message bubble that opens when pressed' },
   // Capsule actions and capsules whose shape no shared component has yet
   { file: 'features/approval/QuestionCard.tsx', look: 'capsule', count: 1, why: 'Answer, ' + CAPSULE_ACTION },
@@ -68,6 +70,7 @@ const ALLOWED: Allowed[] = [
   },
   { file: 'features/session/chat-rows/CentraluCall.tsx', look: 'button', count: 1, why: 'the session a Centralu call reached, a 24px chip that opens it' },
   { file: 'features/session/chat-rows/CentraluCall.tsx', look: 'capsule', count: 1, why: 'the same chip' },
+  { file: 'features/sidebar/marks/ProjectMarks.tsx', look: 'capsule', count: 1, why: "a project's uncommitted changes, an icon and a count in an 18px capsule inside a sidebar row" },
   { file: 'features/usage/UsageDonuts.tsx', look: 'capsule', count: 1, why: "a linked machine's donuts, drawn by an outline only (owner, 2026-10-18)" },
   // A look no variant has yet
   { file: 'features/machines/MachineTag.tsx', look: 'button', count: 1, why: 'the machine badge, a chip whose solid or dashed edge says whether the link is up' },

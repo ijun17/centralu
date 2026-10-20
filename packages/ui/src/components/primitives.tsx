@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import type { Interruption, SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
 import { formatDuration } from '../app/format.js'
@@ -196,13 +195,7 @@ export function Tooltip({
       onBlurCapture={() => setOpen(false)}
     >
       {children}
-      {/*
-        Drawn into the body, not inside the anchor (owner, 2026-10-20): a tooltip inherited whatever its row wore, so an
-        away machine's dimmed project (opacity 60%) showed its tooltip see-through. Opacity on an ancestor cannot be
-        undone by a child; outside it, the tip is always whole. Fixed positioning already ignored the anchor's box.
-      */}
-      {open &&
-        createPortal(
+      {open && (
         <span
           ref={tipRef}
           role="tooltip"
@@ -211,9 +204,8 @@ export function Tooltip({
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
         >
           {content}
-        </span>,
-          document.body,
-        )}
+        </span>
+      )}
     </span>
   )
 }

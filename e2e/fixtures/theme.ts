@@ -36,20 +36,6 @@ async function openAppearance(page: Page) {
   await expect(page.getByTestId('settings-theme')).toBeVisible()
 }
 
-/** Picks a theme in Settings → Appearance: the one list of every theme, whose side becomes the mode */
-async function pickTheme(page: Page, id: string) {
-  await page.getByTestId('settings-theme-pick').selectOption(id)
-}
-
-async function prefsOf(page: Page): Promise<{ themeMode: string; themeDark: string; themeLight: string }> {
-  return page.evaluate(() => {
-    const { themeMode, themeDark, themeLight } = (window as any).__store.getState().prefs
-    return { themeMode, themeDark, themeLight }
-  })
-}
-
-const windowAppearance = (page: Page) => page.evaluate(() => (window as any).__mock.windowAppearance)
-
 async function writeFile(page: Page, id: string, file: unknown) {
   await page.evaluate(
     ([i, text]) => (window as never as { __mock: Mock }).__mock.writeThemeFile(i!, text!),
@@ -85,45 +71,27 @@ async function presetColors(page: Page, names: readonly string[]): Promise<Recor
 }
 
 export function presetTests() {
-  test('Picking Light shows the Light preset, and the window and color-scheme follow', async ({ page }) => {
+  test('Light mode shows the Light preset, and the window and color-scheme follow', async ({ page }) => {
     await openDemo(page)
     await openAppearance(page)
-    await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
-    expect(await token(page, '--color-ink-signal')).toBe('#111111')
+    await page.getByTestId('settings-theme-mode-light').click()
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#e8e8e8')
+    expect(await token(page, '--color-ink-signal')).toBe('#000000')
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(240, 240, 240)' })
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'light', background: 'rgb(232, 232, 232)' })
     // The conversation is on the floor, as in Dark (#362)
-    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f0f0f0')
-    // The pick is the mode and that side's theme, so the stored preferences keep their shape
-    expect(await prefsOf(page)).toMatchObject({ themeMode: 'light', themeLight: 'light' })
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#e8e8e8')
   })
 
-  test('the app does not follow the OS: a light OS leaves Dark, a stored System reads as Dark, and a picked light theme is held whatever the OS says', async ({ page }) => {
+  test('Follow system picks the light preset when the OS is light', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' })
     await openDemo(page)
-    expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('dark')
-
-    // A `system` an older build stored, with a light theme chosen for the light side: still Dark, and the window is held to Dark (not handed back to the OS)
     await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'system', themeLight: 'hc-light' }))
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
-    expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-
-    // Picking the light theme is what sets the light side
-    await openAppearance(page)
-    await expect(page.getByTestId('settings-theme-pick')).toHaveValue('dark')
-    await pickTheme(page, 'hc-light')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
     expect(await token(page, '--color-line')).toBe('#767676')
-    expect(await prefsOf(page)).toMatchObject({ themeMode: 'light', themeLight: 'hc-light' })
-
-    // And an OS gone dark does not take it away
     await page.emulateMedia({ colorScheme: 'dark' })
-    await page.evaluate(() => new Promise((r) => setTimeout(r, 200)))
-    expect(await token(page, '--color-surface-floor')).toBe('#ffffff')
-    expect(await windowAppearance(page)).toMatchObject({ scheme: 'light' })
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
   })
 
   for (const preset of THEME_PRESETS) {
@@ -161,7 +129,7 @@ export function themeTests() {
     const written = JSON.parse((await fileText(page, 'dark-copy'))!)
     expect(written).toMatchObject({ $schema: './theme.schema.json', name: 'Dark copy', base: 'dark' })
     expect(written.tokens['surface-floor']).toBe(DARK_FLOOR)
-    await expect(page.getByTestId('settings-theme-pick')).toHaveValue('dark-copy')
+    await expect(page.getByTestId('settings-theme-dark')).toHaveValue('dark-copy')
 
     const field = page.getByTestId('theme-token-surface-floor')
     await field.fill('#202830')
@@ -241,42 +209,39 @@ export function themeTests() {
     expect(await token(page, '--color-surface-floor')).toBe('#101820')
   })
 
-  test('a light theme file picked in Settings sets the light side and tells the window; picking Dark again takes it back, whatever the OS says', async ({ page }) => {
+  test('Follow system switches sides with prefers-color-scheme, and the window is handed back to the OS', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' })
     await openDemo(page)
     await writeFile(page, 'paper', { name: 'Paper', base: 'light', tokens: { 'surface-floor': '#fafafa', ink: '#1a1a1a' } })
     await openAppearance(page)
+    await page.getByTestId('settings-theme-light').selectOption('paper')
+    await page.getByTestId('settings-theme-mode-system').click()
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance?.scheme)).toBe(null)
     expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
 
-    await pickTheme(page, 'paper')
+    await page.emulateMedia({ colorScheme: 'light' })
     await expect.poll(() => token(page, '--color-surface-floor')).toBe('#fafafa')
     expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
-    expect(await prefsOf(page)).toMatchObject({ themeMode: 'light', themeLight: 'paper' })
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(250, 250, 250)' })
 
-    // Picked back to Dark, the window is told so (and its own background is the floor); the light side keeps its theme
-    await pickTheme(page, 'dark')
+    await page.emulateMedia({ colorScheme: 'dark' })
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
-    expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'dark', themeLight: 'paper' })
+
+    // Held to Dark, the window is told so (and its own background is the floor)
+    await page.getByTestId('settings-theme-mode-dark').click()
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
   })
 
-  test('there is no accent: Settings offers none, and one an older build stored colours neither focus nor selection', async ({ page }) => {
+  test('the accent colours focus and selection, never the signal', async ({ page }) => {
     await openDemo(page)
     await openAppearance(page)
-    await expect(page.getByTestId('settings-accent-toggle')).toHaveCount(0)
-    const focus = await token(page, '--color-focus')
-    const selection = await token(page, '--color-selection')
-    await page.evaluate(() => (window as any).__store.getState().setPrefs({ accent: '#6ea8fe' }))
-    // Theme changes go through the same path an accent would; let one land each way, then read
-    await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
-    await pickTheme(page, 'dark')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    expect(await token(page, '--color-focus')).toBe(focus)
-    expect(await token(page, '--color-selection')).toBe(selection)
-    expect(await page.evaluate(() => document.documentElement.hasAttribute('data-accent'))).toBe(false)
+    const signal = await token(page, '--color-ink-signal')
+    await page.getByTestId('settings-accent-toggle').check()
+    await expect.poll(() => token(page, '--color-focus')).toBe('#6ea8fe')
+    expect(await token(page, '--color-selection')).toContain('#6ea8fe')
+    expect(await token(page, '--color-ink-signal')).toBe(signal)
+    await page.getByTestId('settings-accent-toggle').uncheck()
+    await expect.poll(() => token(page, '--color-focus')).toBe('#b4b4b4')
   })
 
   test('Import copies a theme file in, and Show in Finder reveals one', async ({ page }) => {
@@ -290,7 +255,7 @@ export function themeTests() {
     await page.getByTestId('settings-theme-import').click()
     await expect(page.getByTestId('theme-file-sunset')).toBeVisible()
     expect(JSON.parse((await fileText(page, 'sunset'))!).tokens['surface-floor']).toBe('#201010')
-    await pickTheme(page, 'sunset')
+    await page.getByTestId('settings-theme-dark').selectOption('sunset')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe('#201010')
 
     await page.getByTestId('theme-reveal-sunset').click()
@@ -300,7 +265,7 @@ export function themeTests() {
     await page.getByTestId('theme-delete-sunset').click()
     await expect(page.getByTestId('theme-file-sunset')).toHaveCount(0)
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    await expect(page.getByTestId('settings-theme-pick')).toHaveValue('dark')
+    await expect(page.getByTestId('settings-theme-dark')).toHaveValue('dark')
   })
 
   test('a theme that breaks the urgency order is flagged next to it', async ({ page }) => {

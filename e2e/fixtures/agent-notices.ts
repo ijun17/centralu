@@ -169,7 +169,7 @@ export function agentNoticesTests(): void {
       expect(dark.centralu).toBe(dark.faint)
       await page.getByTestId('open-settings').click()
       await page.getByTestId('settings-tab-appearance').click()
-      await page.getByTestId('settings-theme-pick').selectOption('light')
+      await page.getByTestId('settings-theme-mode-light').click()
       await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
       await page.keyboard.press('Escape')
       const light = await audienceColors()

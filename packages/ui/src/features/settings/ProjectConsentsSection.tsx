@@ -3,7 +3,6 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { GrantList } from './GrantList.jsx'
-import { SettingsGroup } from './SettingsLayout.jsx'
 
 const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
   delegate: 'may ask',
@@ -33,11 +32,12 @@ export function ProjectConsentsSection() {
   const keyOf = (c: ProjectConsent) => `${c.fromProjectId}>${c.toProjectId}>${c.kind}`
 
   return (
-    <SettingsGroup
-      testId="project-consents"
-      title="Projects reaching other projects"
-      hint="Centralu asks before a session reaches another project. Pairs you allowed always are listed here; revoke one and the next request asks again."
-    >
+    <section className="mt-6 border-t border-line pt-4" data-testid="project-consents">
+      <h3 className="text-sm font-medium text-ink">Projects reaching other projects</h3>
+      <p className="mt-1 text-xs leading-body text-ink-faint">
+        When a session asks another project for something, Centralu asks you first. Each pair you allowed always is
+        listed here; revoke it and the next request asks again.
+      </p>
       <GrantList
         load={read}
         keyOf={keyOf}
@@ -64,6 +64,6 @@ export function ProjectConsentsSection() {
           row: (c) => `project-consent-${keyOf(c)}`,
         }}
       />
-    </SettingsGroup>
+    </section>
   )
 }

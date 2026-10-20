@@ -12,8 +12,9 @@ import { useStore } from '../../store/store.js'
  * eyes catch the view changing while the builder agent fixes it, and lets the person answer a
  * follow-up question from the agent right there. Needing almost nothing new to build is another
  * reason: the conversation panel is exactly the SessionPane the grid already uses (model, permission,
- * composer, approval card, all of it). The composer folds when the pane is short (`foldWhenShort`, the grid's rule),
- * so it does not eat into reading room. Messages are usually sent through the input row below instead.
+ * composer, approval card, all of it). The composer is collapsed — so it does not eat into reading
+ * room in the narrow side panel (the same collapse as the grid). Messages are usually sent through
+ * the input row below instead.
  */
 export function BuilderPane({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const known = useStore((s) => !!s.sessions[sessionId])
@@ -22,7 +23,7 @@ export function BuilderPane({ sessionId, onClose }: { sessionId: string; onClose
       {known ? (
         <SessionPane
           sessionId={sessionId}
-          foldWhenShort
+          fold
           headerExtra={
             <IconButton label="Close the builder conversation" onClick={onClose} testId="builder-pane-close" align="right">
               <CloseIcon />

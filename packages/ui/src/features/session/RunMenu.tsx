@@ -42,13 +42,11 @@ export function RunMenu({
 
   return (
     <IconButton
-      // A short phrase, the state in parentheses as other icon buttons put a consequence (ux-writing 1.3, 1.10)
-      label={running ? 'Saved commands (one is running)' : 'Saved commands'}
+      label={running ? 'Saved commands — one is running' : 'Saved commands — run with live logs'}
       onClick={() => onOpenChange(!open)}
       testId="run-open"
       align="right"
-      // Lit while its window is open too, as the evidence panel's overflow button is, so the two read as one
-      lit={running || open}
+      lit={running}
     >
       <PlayIcon />
     </IconButton>

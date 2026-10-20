@@ -47,6 +47,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const dismissPinned = useStore((s) => s.dismissPinnedView)
   const openNewSession = useStore((s) => s.openNewSession)
   const openApp = useStore((s) => s.openApp)
+  const foldComposer = useStore((s) => s.foldComposer)
   const ref = useRef<HTMLDivElement>(null)
   // Real pixels, as in GridView: the text scale enlarges letters, not the minimum panel (real-size.ts)
   const { width, height } = useRealSize(ref)
@@ -266,7 +267,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                   {sessionId ? (
                     <SessionPane
                       sessionId={sessionId}
-                      foldWhenShort
+                      fold={foldComposer}
                       headerDrag={(e) => startDrag(id, e)}
                       headerExtra={
                         <IconButton

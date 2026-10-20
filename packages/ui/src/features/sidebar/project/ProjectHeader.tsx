@@ -132,30 +132,22 @@ export function ProjectHeader({
         stack up and push out the session list that actually needs to be seen. Instead, it is
         answered by a tooltip when asked for (hover, focus).
       */}
-      {/*
-        The name and its machine badge share one baseline (owner, 2026-10-20): centring their boxes, or nudging the badge
-        by a pixel, suited either a lowercase name ("cc") or a capital one ("MGH") but not both; on the baseline the
-        badge's text stands on the name's line whatever the case. Half the row's gap apart, so the badge reads as part of
-        the name. Which linked machine it is on (#734); this computer's projects carry none.
-      */}
-      <span className="flex min-w-0 items-baseline gap-1">
-        <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
-          <button
-            className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${
-              selected ? '' : 'hover:text-ink-signal'
-            }`}
-            onClick={() => focusProject(projectId)}
-            aria-current={selected ? 'page' : undefined}
-            data-testid={`project-header-${project.name}`}
-          >
-            {project.name}
-          </button>
-        </Tooltip>
-        {project.machine && (
-          // A pixel up from the shared baseline: the room left for descenders sat the box low against the name
-          <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} className="-translate-y-px" />
-        )}
-      </span>
+      <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
+        <button
+          className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${
+            selected ? '' : 'hover:text-ink-signal'
+          }`}
+          onClick={() => focusProject(projectId)}
+          aria-current={selected ? 'page' : undefined}
+          data-testid={`project-header-${project.name}`}
+        >
+          {project.name}
+        </button>
+      </Tooltip>
+      {/* Which linked machine it is on (#734), right of its name; this computer's projects carry none */}
+      {project.machine && (
+        <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} />
+      )}
       {/*
         This project is an app (#1141): its manifest stands at the root. The mark says so where the name is, and opens
         the app's screen. Dimmed when the app cannot run (not trusted, invalid, failed), with the reason in its label,

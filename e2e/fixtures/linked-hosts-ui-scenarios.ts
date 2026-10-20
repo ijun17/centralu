@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { APP_VERSION } from '../../packages/protocol/src/brand.js'
@@ -312,7 +312,7 @@ export function linkedHostsUiTests(): void {
       const calls = watchCalls(page)
       await page.goto('/')
       await expect(page.getByTestId('project-hub-project')).toBeVisible()
-      // No machine yet: the list is as it always was, and the add-a-folder button is the folder picker with nothing to choose
+      // No machine yet: the list is as it always was, and Add project is the folder picker with nothing to choose
       await expect(page.getByTestId('add-project')).not.toHaveAttribute('aria-haspopup', 'menu')
 
       await test.step('add the machine in Settings → Machines', async () => {
@@ -335,26 +335,48 @@ export function linkedHostsUiTests(): void {
         mkdirSync(folder)
         await page.getByTestId('add-project').click()
         await page.getByTestId('add-project-on-remote-box').click()
-        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project · Remote box')
         await page.getByTestId('add-remote-project-path').fill(folder)
         await page.getByTestId('add-remote-project-confirm').click()
         await expect(page.getByTestId('project-machine-second-project')).toHaveText('Remote box')
         expect(calls.find((c) => c.method === 'projects.add')?.params).toEqual({ path: folder, machine: 'remote-box' })
       })
 
+      await test.step("create a new folder there (#515): that machine's host names its ~/Centralu, makes it if missing, and the folder", async () => {
+        const centralu = join(pair.remoteSide.home, 'Centralu')
+        await page.getByTestId('add-project').click()
+        await page.getByTestId('add-project-on-remote-box').click()
+        const dialog = page.getByTestId('add-remote-project-dialog')
+        await dialog.getByTestId('add-remote-project-mode-new').click()
+        await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText(centralu)
+        await dialog.getByTestId('create-project-name').fill('fresh')
+        await expect(dialog.getByTestId('create-project-path')).toHaveText(join(centralu, 'fresh'))
+        await dialog.getByTestId('create-project-confirm').click()
+        await expect(page.getByTestId('project-machine-fresh')).toHaveText('Remote box')
+        expect(readdirSync(join(centralu, 'fresh'))).toEqual([])
+        expect(calls.find((c) => c.method === 'projects.create')?.params).toEqual({ name: 'fresh', machine: 'remote-box' })
+        // A second one of the same name is refused before anything is made
+        await page.getByTestId('add-project').click()
+        await page.getByTestId('add-project-on-remote-box').click()
+        await dialog.getByTestId('add-remote-project-mode-new').click()
+        await dialog.getByTestId('create-project-name').fill('fresh')
+        await expect(dialog.getByTestId('create-project-error')).toContainText('already in')
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+      })
+
       await test.step("a machine's project dragged above this computer's (#734): the hub keeps the one order, across a reload", async () => {
-        expect(await listed(page)).toEqual(['hub-project', 'remote-project', 'second-project'])
+        expect(await listed(page)).toEqual(['hub-project', 'remote-project', 'second-project', 'fresh'])
         // The pointer rests on the row first, as a hand does: the row's hover buttons take their room then (#734), and the
         // name it grabs is where the hand sees it
         await page.getByTestId('project-header-second-project').hover()
         await page.dragAndDrop('[data-testid="project-header-second-project"]', '[data-testid="project-hub-project"]', { targetPosition: { x: 10, y: 2 } })
-        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project'])
+        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
         // The hub's own list answers in that order, the machine's projects by their qualified ids
         const order = async () => ((await hubCall(pair.hub.port, 'projects.list', {})) as { name: string }[]).map((p) => p.name)
-        await expect.poll(order).toEqual(['second-project', 'hub-project', 'remote-project'])
+        await expect.poll(order).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
         await page.reload()
         await expect(page.getByTestId('project-hub-project')).toBeVisible()
-        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project'])
+        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
       })
 
       let id = ''
@@ -493,10 +515,7 @@ export function linkedHostsUiTests(): void {
 
       await test.step('nothing waits for an answer: the machine\'s projects are listed, and its badge still leads back to the offer', async () => {
         await expect(page.getByTestId('project-remote-project')).toBeVisible()
-        // The badge opens the machine's menu; its Machine settings leads to Settings → Machines
         await page.getByTestId('project-machine-remote-project').click()
-        await expect(page.getByTestId('machine-menu-remote-box')).toBeVisible()
-        await page.getByTestId('machine-menu-settings-remote-box').click()
         await expect(page.getByTestId('settings-machines')).toBeVisible()
         await expect(page.getByTestId('machine-update-remote-remote-box')).toBeVisible()
         // "Connect anyway" is only for a link that is held, which one protocol never is

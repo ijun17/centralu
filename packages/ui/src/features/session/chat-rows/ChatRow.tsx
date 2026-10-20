@@ -110,7 +110,6 @@ export const ChatRow = memo(function ChatRow({
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
-            data-mine-bubble
             className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border bg-surface-hover px-3 py-2 text-ink ${
               item.from || item.fromApp ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
             }`}

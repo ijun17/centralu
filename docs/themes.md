@@ -7,22 +7,17 @@ The same section sets the text: its size, the body and code fonts, and the line 
 
 ## Choosing
 
-Settings → Appearance → Theme is **one list of every theme** (the presets, then the person's own
-files): picking one is the whole choice. It is stored with the other screen preferences
-(`UiPreferences`) in three fields, so the stored shape stays what older builds read:
+Four preferences, stored with the other screen preferences (`UiPreferences`):
 
 | Preference | Values | What it does |
 |---|---|---|
-| `themeMode` | `dark` · `light` | Which side shows: the side of the theme picked. A `system` that an older build stored reads as Dark. |
+| `themeMode` | `dark` · `light` · `system` | Which side shows. `system` follows the OS (`prefers-color-scheme`). |
 | `themeDark` | a preset id or a theme file's id | The theme for the dark side |
 | `themeLight` | a preset id or a theme file's id | The theme for the light side |
+| `accent` | a CSS colour, or `null` (default) | Colours focus, selection and checked boxes |
 
-Picking a theme sets `themeMode` to its side and that side's field to its id; the other side keeps its
-last theme. **The app never follows the OS**: Dark is the default and nothing switches it behind the
-person's back (`prefers-color-scheme` is not read, at first paint or after). There is no accent either:
-Settings stopped offering it, and an `accent` an older build stored is not applied. A theme file can
-still set `focus` and `selection` itself. An id that names nothing (a deleted file) falls back to that
-side's preset.
+The two sides are chosen separately so that following the OS switches between two themes the
+person picked. An id that names nothing (a deleted file) falls back to that side's preset.
 
 **Presets** live in the stylesheet: the `@theme` values are the Dark preset, and the others are
 `[data-theme='…']` blocks that set every colour token:
@@ -43,18 +38,16 @@ view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
 Dark is a dark floor (`#0f0f0f`) with raised boxes (`#242424`, ΔL* 9.9 above the floor). The
-sidebar and the top bar (`#181818`, darker at the owner's ask, 2026-10-20) stay apart from the conversation by lightness, not only by
-its edge line: a reader once saw the two as "the same colour" at three steps apart with the line between them,
-and the gap is now ΔL* 3.9 with the line between them (it was 6.5 at `#1d1d1d`). Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
+sidebar (`#1d1d1d`) stays apart from the conversation by lightness, not only by its edge line: a
+reader once saw the two as "the same colour" at three steps apart with the line between them, so
+the gap is kept at ΔL* 6.5. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
 with the inks widened to match: body `#ededed` (16.4:1 on the floor), secondary `#a8a8a8` (8.1:1),
 background `#707070` (3.9:1).
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
-is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
-and no surface is pure white. The signal is `#111111` and the body ink `#2a2a2a`. Three edges are softer than the
-hairline there (owner, 2026-10-19): a resting panel's border (`#d4d4d4`) and an answering one (`#9e9e9e`), a message
-bubble's and a tool card's. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
+is `#e8e8e8`, raised `#f4f4f4`, the sidebar a recess at `#e0e0e0` (ΔL* 2.8 below the conversation),
+and no surface is pure white. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
 more against every reading surface. A test checks the urgency order (below) for every preset, and
 those two thresholds for the high-contrast ones.
 
@@ -63,9 +56,9 @@ marks a finished response multiplies instead of screening on a light side (scree
 white), and file-kind icons get a hairline outline there, since several vscode-icons are drawn pale
 for a dark editor.
 
-**No theme colours the signal for decoration.** `ink-signal` is reserved for "waiting for you"
-(product-spec FR-12); a hue on it would make an ordinary control compete with the one thing
-that must stand out. (There is no accent setting any more; see [Choosing](#choosing).)
+**The accent never colours the signal.** `ink-signal` is reserved for "waiting for you"
+(product-spec FR-12); an accent on it would make an ordinary control compete with the one thing
+that must stand out.
 
 ## Theme files
 
@@ -132,18 +125,19 @@ A session's state is drawn with the same inks and no hue or motion (#736). The s
 looks: idle (the chip's own `line-strong` border), answering (a 1.5px `ink-muted` ring, light grey: working, nothing to do), stopped
 (the same ring dashed, the chip on `surface-selected`: an error, an interruption or a limit) and
 waiting (the solid ring, the chip on `surface-selected`: an approval or a question). A grid or project
-panel follows with its own 1px border: `ink-muted` while answering (a lighter grey, `#9e9e9e`, in Light), `ink-signal` while waiting, dashed `ink-signal` when stopped.
+panel follows with its own 1px border: `ink-muted` while answering, `ink-signal` while waiting, dashed `ink-signal` when stopped.
 
 ## How it is applied
 
 `packages/ui/src/app/theme.ts`. On `<html>`: `data-theme` (the preset), `data-theme-base`
-(`color-scheme` follows it) and the custom tokens as inline custom properties. Everything that reads a token follows — utilities (plain `@theme`, so they read
+(`color-scheme` follows it), the custom tokens as inline custom properties, and the accent's
+tokens on top. Everything that reads a token follows — utilities (plain `@theme`, so they read
 `var()`), CSS, and xterm, which re-reads its theme on every switch (`components/terminalTheme.ts`).
 
 The resolved choice is cached in `localStorage` and applied in `main.tsx` before the first frame,
 since the preferences arrive a round trip later; without it a light theme would open with a dark
 flash. The desktop window is told the side too (`SystemPort.setWindowAppearance`): a window held
-to the theme's appearance, whatever the OS is set to, and reports it to the page.
+to one appearance reports that appearance to the page, so System mode hands it back to the OS.
 `tauri.conf.json` no longer forces the window to Dark.
 
 **The first paint comes before all of that** ([#340](https://github.com/ijun17/centralu/issues/340)). With the window no
@@ -207,7 +201,7 @@ textarea's computed line height in pixels and copies it to its mirror, so it nee
 
 App views get the theme too ([apps.md](apps.md) §6.5): the side as the MCP Apps `theme`, all 76
 standard style variables mapped from these tokens, and in the `centralu` extension the signal colour
-and the scrollbar tokens. Every switch and custom-theme edit reaches open views
+and the scrollbar tokens. Every switch, custom-theme edit and accent change reaches open views
 without reloading them, and so does a change of font or line height: `--font-sans`, `--font-mono` and
 the line-height variables are read from the same tokens. The text size is not sent as sizes (the root
 zoom already scales the frame); `centralu.fontScale` reports it. The signal colour is the standard's warning colour there, so an app that

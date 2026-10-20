@@ -30,8 +30,8 @@ export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'disp
     for (const touched of liveEventWatchers) if (!touched.has(sessionId)) touched.set(sessionId, new Set())
 
     if (sessionEvent(e, sessionId, set, get)) return
-    noticeEvent(e, sessionId, set, get)
+    const announced = noticeEvent(e, sessionId, set, get)
     if (sessionListEvent(e, sessionId, set, get) || appViewEvent(e, sessionId, set, get)) return
-    conversationEvent(e, sessionId, set, get)
+    conversationEvent(e, sessionId, announced, set, get)
   },
 })

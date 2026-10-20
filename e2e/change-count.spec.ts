@@ -2,11 +2,10 @@ import { expect, test } from '@playwright/test'
 import { newSession, setup } from './fixtures/project-screen.js'
 
 /**
- * The number of changed files, in the places it shows: the project's tooltip in the sidebar and the evidence panel's
- * capsule (#850 item 10). A partly staged file is two rows of the panel's list, one under Staged and one under Changes;
- * the panel and the collapsed rail used to count rows and said 3 beside a sidebar that said 2. The rail no longer
- * carries a count (owner, 2026-10-19), and neither does the project's line (owner, 2026-10-20: the count lives in the
- * project's tooltip), so what the sidebar keeps is that tooltip, which stays 2 with the panel collapsed.
+ * The number of changed files, in the places it shows: the sidebar's mark and the evidence panel's capsule (#850 item
+ * 10). A partly staged file is two rows of the panel's list, one under Staged and one under Changes; the panel and the
+ * collapsed rail used to count rows and said 3 beside a sidebar that said 2. The rail no longer carries a count (owner,
+ * 2026-10-19), so what it keeps is the sidebar's mark, which stays 2 with the panel collapsed.
  */
 test('a partly staged file counts once, the same in the sidebar and the panel, and the rail carries no count', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
@@ -25,15 +24,11 @@ test('a partly staged file counts once, the same in the sidebar and the panel, a
   // Both rows of a.ts are listed: the count is of files, not rows
   await expect(page.getByTestId('evidence-git').getByText('a.ts')).toHaveCount(2)
   await expect(page.getByTestId('evidence-change-count')).toHaveText('2')
-  await page.getByTestId('project-header-alpha').hover()
-  await expect(page.getByTestId('project-detail-changed-alpha')).toContainText('2 uncommitted files')
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
 
   await page.getByTestId('evidence-close').click()
   await expect(page.getByTestId('evidence-rail')).toBeVisible()
   await expect(page.getByTestId('evidence-rail')).toHaveText('')
   await expect(page.getByTestId('evidence-rail-count')).toHaveCount(0)
-  await page.getByTestId('project-header-alpha').hover()
-  await expect(page.getByTestId('project-detail-changed-alpha')).toContainText('2 uncommitted files')
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveCount(0)
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
 })

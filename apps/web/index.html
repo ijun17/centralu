@@ -15,12 +15,12 @@
     -->
     <script>
       ;(function () {
-        var floors = { dark: '#0f0f0f', light: '#f0f0f0', 'hc-dark': '#000000', 'hc-light': '#ffffff' }
+        var floors = { dark: '#0f0f0f', light: '#e8e8e8', 'hc-dark': '#000000', 'hc-light': '#ffffff' }
         var t = null
         try {
           var c = JSON.parse(localStorage.getItem('cc-theme') || 'null')
           var m = c && c.mode
-          var light = m === 'light'
+          var light = m === 'light' || (m === 'system' && typeof matchMedia === 'function' && !matchMedia('(prefers-color-scheme: dark)').matches)
           t = c && (light ? c.light : c.dark)
         } catch (e) {}
         var isLight = !!t && t.base === 'light'

@@ -961,6 +961,79 @@
       "breaches": []
     },
     {
+      "id": "create-project.mouse",
+      "task": "Create a new project (an empty folder)",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B H 4K H M P B B",
+      "counts": {
+        "K": 4,
+        "P": 2,
+        "B": 4,
+        "H": 3,
+        "M": 2,
+        "R": 3
+      },
+      "seconds": 7.55,
+      "waitMs": 199,
+      "travelPx": 1048,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "create-project",
+          "operators": "H M P B B",
+          "seconds": 3.01,
+          "pointer": {
+            "D": 453,
+            "W": 87,
+            "ID": 2.63
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the create-project dialog",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 13
+        },
+        {
+          "kind": "type",
+          "label": "\"game\"",
+          "operators": "H 4K",
+          "seconds": 1.52
+        },
+        {
+          "kind": "wait",
+          "label": "the folder it will make",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 157
+        },
+        {
+          "kind": "click",
+          "label": "create-project-confirm",
+          "operators": "H M P B B",
+          "seconds": 3.02,
+          "pointer": {
+            "D": 595,
+            "W": 112,
+            "ID": 2.65
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 29
+        }
+      ],
+      "notes": [
+        "The folder goes where the dialog says, ~/Centralu by default (#515); choosing another location is not counted"
+      ],
+      "breaches": []
+    },
+    {
       "id": "delete-session.mouse",
       "task": "Delete a session (to the trash)",
       "path": "mouse",

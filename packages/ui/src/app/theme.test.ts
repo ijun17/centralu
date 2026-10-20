@@ -14,10 +14,11 @@ const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
 })
 
 describe('which side shows', () => {
-  it('follows the picked mode, never the OS; a stored System mode reads as Dark', () => {
-    expect(activeSide('dark')).toBe('dark')
-    expect(activeSide('light')).toBe('light')
-    expect(activeSide('system')).toBe('dark')
+  it('follows the OS only in System mode', () => {
+    expect(activeSide('dark', false)).toBe('dark')
+    expect(activeSide('light', true)).toBe('light')
+    expect(activeSide('system', true)).toBe('dark')
+    expect(activeSide('system', false)).toBe('light')
   })
 })
 

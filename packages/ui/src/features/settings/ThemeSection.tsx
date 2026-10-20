@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry } from '@cc/protocol'
+import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemeMode } from '@cc/protocol'
 import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SettingsSelect } from './OtherChoice.jsx'
@@ -14,19 +14,30 @@ import {
   readPresetTokens,
   resolveColors,
   resolveSide,
+  systemPrefersDark,
   unusableValues,
   urgencyBreaks,
   type ThemeBase,
 } from '../../app/theme.js'
+import { SettingToggle } from './SettingToggle.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Badge } from '../../components/Badge.jsx'
 import { TextInput } from '../../components/TextField.jsx'
-import { SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
+
+const MODES: { id: ThemeMode; label: string }[] = [
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'system', label: 'Follow system' },
+]
+
+/** The accent a person starts from when they first turn it on — a calm blue that reads on both sides */
+const DEFAULT_ACCENT = '#6ea8fe'
 
 /**
  * Settings → Appearance → Theme (#312).
  *
- * The choice (mode, a theme per side) is a preference; a custom theme is a file in
+ * The choice (mode, a theme per side, the accent) is a preference; a custom theme is a file in
  * the data folder (`themes/<id>.json`), so it can be edited here, in an editor, or by an agent,
  * and every one of those shows up live. This screen only ever writes the file — the host
  * watches the folder and the list comes back through `themes_changed`, the same way a hand edit
@@ -43,7 +54,7 @@ export function ThemeSection() {
   const [editing, setEditing] = useState<string | null>(null)
   const fileManager = platform.capabilities.fileManagerName
 
-  const showing = activeSide(prefs.themeMode)
+  const showing = activeSide(prefs.themeMode, systemPrefersDark())
   const sideKey = (side: ThemeBase) => (side === 'dark' ? 'themeDark' : 'themeLight')
 
   const duplicate = async () => {
@@ -74,44 +85,59 @@ export function ThemeSection() {
   }
 
   return (
-    <SettingsGroup
-      testId="settings-theme"
-      title="Theme"
-      hint="Custom themes are files you can also edit by hand or ask an agent to write; a saved change shows at once."
-    >
-      {/*
-        One list of every theme (owner, 2026-10-19): no Dark/Light/System switch and no theme per side. Picking one
-        sets the mode to its side and that side's choice, so the stored preferences keep their shape and an older
-        build reads them the same way. The app never follows the OS.
-      */}
-      <SettingsRow
-        label="Theme"
-        control={
-          <ThemePicker
-            value={resolveSide(showing, prefs[sideKey(showing)], usable, null).id}
-            files={usable}
-            onPick={(id, base) => void setPrefs({ themeMode: base, [sideKey(base)]: id })}
-          />
-        }
+    <section data-testid="settings-theme">
+      <p className="text-xs leading-body text-ink-faint">
+        Theme. Custom themes are files you can also edit by hand or ask an agent to write; changes show up as soon as the
+        file is saved.
+      </p>
+      <Segmented
+        label="Theme mode"
+        value={prefs.themeMode}
+        onChange={(themeMode) => void setPrefs({ themeMode })}
+        size="md"
+        className="mt-3 gap-2"
+        optionClassName="leading-none"
+        options={MODES.map((m) => ({ value: m.id, label: m.label, testId: `settings-theme-mode-${m.id}` }))}
       />
 
-      <SettingsRow
-        label="Your own theme"
-        hint="Customise copies the theme showing now into a file of your own."
-        control={
-          <>
-            <Button variant="quiet" size="sm" onClick={() => void importFile()} data-testid="settings-theme-import">
-              Import…
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => void duplicate()} data-testid="settings-theme-duplicate">
-              Customise…
-            </Button>
-          </>
-        }
-      />
+      <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-ink-muted">
+        {(['dark', 'light'] as const).map((side) => (
+          <SidePicker key={side} side={side} value={prefs[sideKey(side)]} files={usable} onPick={(id) => void setPrefs({ [sideKey(side)]: id })} />
+        ))}
+      </div>
+
+      <SettingToggle
+        className="mt-3"
+        checked={prefs.accent !== null}
+        onChange={(on) => setPrefs({ accent: on ? DEFAULT_ACCENT : null })}
+        label="Accent colour"
+        hint="Colours focus, selection and checked boxes. Never the white of something waiting for you."
+        testId="settings-accent-toggle"
+      >
+        {prefs.accent !== null && (
+          <input
+            type="color"
+            aria-label="Accent colour"
+            value={/^#[0-9a-f]{6}$/i.test(prefs.accent) ? prefs.accent : DEFAULT_ACCENT}
+            onChange={(e) => void setPrefs({ accent: e.target.value })}
+            className="h-5 w-8 cursor-pointer rounded-sm border border-line bg-transparent"
+            data-testid="settings-accent-color"
+          />
+        )}
+      </SettingToggle>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="md" onClick={() => void duplicate()} data-testid="settings-theme-duplicate">
+          Customise…
+        </Button>
+        <Button variant="quiet" size="md" onClick={() => void importFile()} data-testid="settings-theme-import">
+          Import…
+        </Button>
+        <span className="text-xs text-ink-faint">Customise copies the theme showing now into a file of your own.</span>
+      </div>
 
       {themeFiles.length > 0 && (
-        <ul className="divide-y divide-line/70" data-testid="theme-files">
+        <ul className="mt-3 divide-y divide-line/60 rounded-md border border-line" data-testid="theme-files">
           {themeFiles.map((file) => (
             <ThemeFileRow
               key={file.id}
@@ -124,39 +150,43 @@ export function ThemeSection() {
           ))}
         </ul>
       )}
-    </SettingsGroup>
+    </section>
   )
 }
 
-function ThemePicker({
+function SidePicker({
+  side,
   value,
   files,
   onPick,
 }: {
+  side: ThemeBase
   value: string
   files: ThemeFileEntry[]
-  onPick: (id: string, base: ThemeBase) => void
+  onPick: (id: string) => void
 }) {
-  const choices = [
-    ...THEME_PRESETS.map((p) => ({ id: p.id, name: p.name, base: p.base })),
-    ...files.map((f) => ({ id: f.id, name: f.name, base: f.base })),
-  ]
+  const presets = THEME_PRESETS.filter((p) => p.base === side)
+  const own = files.filter((f) => f.base === side)
+  const resolved = resolveSide(side, value, files, null)
+  const known = presets.some((p) => p.id === value) || own.some((f) => f.id === value)
   return (
     <>
+      <span>{side === 'dark' ? 'Dark theme' : 'Light theme'}</span>
       <SettingsSelect
-        tone="compact"
-        className="w-48"
-        aria-label="Theme"
+        tone="raised"
         value={value}
-        onChange={(e) => {
-          const picked = choices.find((c) => c.id === e.target.value)
-          if (picked) onPick(picked.id, picked.base)
-        }}
-        data-testid="settings-theme-pick"
+        onChange={(e) => onPick(e.target.value)}
+        data-testid={`settings-theme-${side}`}
       >
-        {choices.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
+        {!known && <option value={value}>{`${resolved.name}${resolved.base !== side ? ` (no ${side} theme yet)` : ''}`}</option>}
+        {presets.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+        {own.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name}
           </option>
         ))}
       </SettingsSelect>
@@ -201,7 +231,7 @@ function ThemeFileRow({
   }
 
   return (
-    <li className="px-4 py-2.5" data-testid={`theme-file-${file.id}`}>
+    <li className="px-2.5 py-2" data-testid={`theme-file-${file.id}`}>
       <div className="flex items-center gap-2">
         <span className="min-w-0 truncate text-sm text-ink">{shown.name}</span>
         <span className="text-2xs text-ink-faint">{shown.base}</span>

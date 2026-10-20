@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
 import { foldSummary, groupAttention } from './fold.js'
 
-// Unread by default: an idle (`waiting_input`) session is not counted either way (owner, 2026-10-20)
+// Unread by default: a `waiting_input` session counts only while unread (#669)
 const of = (...states: SessionState[]) => states.map((state) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 1 }))
 
 describe('foldSummary (#205)', () => {
@@ -11,14 +11,16 @@ describe('foldSummary (#205)', () => {
       foldSummary(of('working', 'waiting_approval', 'idle', 'waiting_input', 'waiting_approval', 'working', 'working')),
     ).toEqual([
       { state: 'waiting_approval', count: 2 },
+      { state: 'waiting_input', count: 1 },
       { state: 'working', count: 3 },
     ])
   })
 
-  it('is in urgency order — approval, error, working', () => {
+  it('is in urgency order — approval, error, waiting for input, working', () => {
     expect(foldSummary(of('working', 'waiting_input', 'error', 'waiting_approval')).map((x) => x.state)).toEqual([
       'waiting_approval',
       'error',
+      'waiting_input',
       'working',
     ])
   })
@@ -27,11 +29,11 @@ describe('foldSummary (#205)', () => {
     expect(foldSummary(of('error', 'idle'))).toEqual([{ state: 'error', count: 1 }])
   })
 
-  it('does not count an idle (waiting_input) session, read or unread: the inbox lists the unread ones', () => {
+  it('does not count a read waiting_input session, only an unread one (#669)', () => {
     const read = { state: 'waiting_input' as const, pendingQuestions: [], lastSeq: 3, lastReadSeq: 3 }
     const unread = { state: 'waiting_input' as const, pendingQuestions: [], lastSeq: 4, lastReadSeq: 3 }
     expect(foldSummary([read])).toEqual([])
-    expect(foldSummary([read, unread])).toEqual([])
+    expect(foldSummary([read, unread])).toEqual([{ state: 'waiting_input', count: 1 }])
   })
 
   // The inbox lists an open question as an approval whatever state the session is in (`listedState`); the folded line did not

@@ -51,7 +51,7 @@ export function EvidencePanel() {
   const isRepo = !!project?.git
 
   /*
-   * ⌘⇧1–4 — switch tab. The shortcut table (the palette's Keyboard shortcuts) advertises this, so it has to keep
+   * ⌘⇧1–4 — switch tab. Settings advertises this under Shortcuts, so it has to keep
    * working when the tabs are rearranged (#20). **The digit follows the tab's identity**
    * (1 git · 2 history · 3 files · 4 terminal — PANEL_TABS order), not its seat in the
    * strip: the shortcut list is static text, and static text can only tell the truth

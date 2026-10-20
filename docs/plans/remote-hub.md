@@ -1062,7 +1062,7 @@ the sender's name there, a worktree manager there getting the words as an instru
 creating a session by id and by name and the refusal of a shared name, creating a project after the card, an unknown
 machine), `links/linked-sessions.test.ts` (the report's rules against a stand-in machine: waking is not an end, an
 error says so, one report, none unasked, none after a failed send), `core/approval/approval.test.ts` and
-`e2e/project-cards.spec.ts` (the card and its question naming the machine). No live model, no real ssh link.
+`e2e/create-project.spec.ts` (the card and its question naming the machine). No live model, no real ssh link.
 
 ### 12.5 Step 4 and one question on step 3: decided (owner, 2026-10-18, #550)
 

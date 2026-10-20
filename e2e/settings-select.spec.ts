@@ -34,7 +34,7 @@ test('a font that is not listed shows its name field already open, without takin
 
 test('choosing Other… under an agent model still puts the keyboard in the name field', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
-  await open(page, 'agents')
+  await open(page, 'orchestrator')
   await page.getByTestId('settings-agent-model-claude-light').selectOption({ label: 'Other…' })
   await expect(page.getByTestId('settings-agent-model-claude-light-other')).toBeFocused()
 })

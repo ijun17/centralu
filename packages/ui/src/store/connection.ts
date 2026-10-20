@@ -341,10 +341,9 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
   // The text size used to be restored here too; it is a preference now (UiPreferences.textSize),
   // and the host moved the snapshot's old step into it once (#312 step 5)
-  /*
-   * `foldComposer` (the "fold the message box" switch) is no longer read (owner, 2026-10-20): a grid or project panel
-   * folds its composer by its own height now (SessionPane's `foldWhenShort`). A snapshot that still carries it is fine.
-   */
+  // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
+  const savedFold = (snap as { foldComposer?: boolean }).foldComposer
+  if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
   return Object.values(arrangements).some((saved) => saved.panels === undefined)
 }
 
@@ -482,8 +481,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
               return {
                 commandRuns: {
                   ...s.commandRuns,
-                  // When it ended, as seen here: the commands list says how long ago (`CommandRun.endedAt`)
-                  [pid]: { ...runs, [cmd]: { ...r, running: false, exitCode: e.exitCode, endedAt: Date.now() } },
+                  [pid]: { ...runs, [cmd]: { ...r, running: false, exitCode: e.exitCode } },
                 },
               }
             }
@@ -672,6 +670,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       appSpans: s.appSpans,
       notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
+      foldComposer: s.foldComposer,
       introSeen: s.introSeen,
     } as never
     flushWorkspace(get, set)

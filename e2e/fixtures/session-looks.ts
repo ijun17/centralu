@@ -151,15 +151,6 @@ export function sessionLookTests() {
         const panel = page.getByTestId(`grid-panel-${id}`)
         await expect(panel).toBeVisible()
         const c = await colours(page)
-        /*
-         * In Light a resting panel's edge and the answering one are two greys of their own (owner, 2026-10-19): line-strong and
-         * ink-muted drew every panel there as a dark frame. Stopped and waiting keep the signal, and Dark keeps the tokens.
-         */
-        const panelLine = (look: Look, tokens: Awaited<ReturnType<typeof colours>>) => {
-          if (scheme === 'light' && look === 'idle') return 'rgb(212, 212, 212)'
-          if (scheme === 'light' && look === 'answering') return 'rgb(158, 158, 158)'
-          return tokens[look === 'idle' ? 'lineStrong' : LOOKS[look].line]
-        }
 
         for (const { name, look, patch } of CASES) {
           await patchSession(page, id, patch)
@@ -168,7 +159,7 @@ export function sessionLookTests() {
           for (const side of ['top', 'right', 'bottom', 'left']) {
             await expect(panel, `${name}: ${side}`).toHaveCSS(`border-${side}-width`, '1px')
             await expect(panel, `${name}: ${side}`).toHaveCSS(`border-${side}-style`, want.panelStyle)
-            await expect(panel, `${name}: ${side}`).toHaveCSS(`border-${side}-color`, panelLine(look, c))
+            await expect(panel, `${name}: ${side}`).toHaveCSS(`border-${side}-color`, c[want.line === 'faint-line' ? 'lineStrong' : want.line])
           }
           // No fill: the panel is a screen to read, only its border carries the look
           await expect(panel.getByTestId('pane-header'), name).toHaveCSS('background-color', c.clear)
@@ -204,9 +195,7 @@ export function sessionLookTests() {
     await page.getByTestId('palette-input').fill('settings')
     await page.getByTestId('palette-item-action').click()
     await page.getByTestId('settings-tab-appearance').click()
-    // "Fold the message box" is not a setting any more: a short grid or project panel folds its composer by its own height
-    await expect(page.getByTestId('settings-send-with-mod-enter')).toBeVisible()
-    await expect(page.getByTestId('settings-fold-composer')).toHaveCount(0)
+    await expect(page.getByTestId('settings-fold-composer')).toBeVisible()
     await expect(page.getByTestId('settings-spin-grid')).toHaveCount(0)
     await expect(page.getByTestId('settings-spin-icon')).toHaveCount(0)
     await page.keyboard.press('Escape')
