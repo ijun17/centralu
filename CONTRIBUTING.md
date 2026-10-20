@@ -277,17 +277,22 @@ only, and says it did not compare with main.
 **Lint reads types, and what predates that only shrinks** (#1339). `pnpm lint` runs typescript-eslint's
 type-aware rules on everything the root `tsconfig.json` compiles: no `any` flowing on from `JSON.parse`
 or a catch, no assertion that narrows (`as T` from `unknown`, `x!`) in shipped code, no promise left
-floating. The findings that were there when these rules came in are listed in
-`tooling/lint-allowlist/`, one list per package, a sorted line per file and rule with a count. A listed
-file may hold up to its count, so a new finding in it fails like anywhere else: fix it, do not list it.
-A file that holds fewer passes, so you never have to touch a list for a change of your own; the change
-that sets out to fix listed findings runs `pnpm lint:tighten`, which lowers the lines and never raises
-or adds one. `tooling/type-aware-lint.test.ts` caps each package's total, and the count of type
-assertions (`as T`, safe ones too) in each package's shipped code; both fail only above their number.
-A renamed file takes its lines along to the new path. `eslint` run by itself, and an editor, do not
-read the lists and show the old findings too. The lint runs on several threads and without `--cache`:
-ESLint's cache keys a file on its own content, and a type-aware finding can come from a type another
-file changed.
+floating. Data from outside the process goes through a zod schema or a narrowing guard, and a caught
+value's text through `errorMessage(e)` from `@cc/protocol`, not `(e as Error).message`. The findings that
+were there when these rules came in are listed in `tooling/lint-allowlist/`, one list per package, a
+sorted line per file and rule with a count. A listed file may hold up to its count, so a new finding in it
+fails like anywhere else: fix it, do not list it. A file that holds fewer passes, so fixing something never
+makes you touch a list. Code that moves to another file, or a file you rename, takes its findings along:
+run `pnpm lint:tighten`, which lowers each line to what its file holds and gives what a rule gave up to
+where its findings went, never more. `tooling/type-aware-lint.test.ts` compares the lists with main's at
+the merge base: a line may be new or higher only as such a move, so no rule totals more than on main
+(CI's `verify` fetches main's history for it; elsewhere, without one, the test says it did not compare).
+The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
+that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
+code. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
+lint runs on two threads and without `--cache`: each thread builds the whole program (six took 13.6 GB),
+and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
+another file changed.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes

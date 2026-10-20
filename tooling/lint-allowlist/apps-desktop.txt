@@ -1,5 +1,5 @@
 # Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.
-# Only ever lower these, with `pnpm lint:tighten`; fix a new finding instead of listing it.
+# Written by `pnpm lint:tighten`, which lowers lines and moves a count along with moved code; no rule may total more than on main.
 apps/desktop/src/dialog-layer.tsx @typescript-eslint/no-non-null-assertion 1
 apps/desktop/src/dialog-layer.tsx @typescript-eslint/no-unsafe-type-assertion 1
 apps/desktop/src/harness/relaunch.ts @typescript-eslint/no-non-null-assertion 4

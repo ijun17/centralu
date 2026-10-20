@@ -3,9 +3,13 @@
  *
  * Each line says a file may hold up to so many findings of one rule: `<file> <rule> <count>`, sorted. A file
  * that holds more fails `pnpm lint` with all of them shown, as does any finding in a file or rule no line names.
- * One that holds fewer passes: lowering the counts is `pnpm lint:tighten`, run by the change that fixes them, so
- * other changes in flight never have to touch these lists. A list per package keeps two changes from editing
- * the same file unless they work on the same package.
+ * One that holds fewer passes, so a change in flight never has to touch a list for fixing something. A list per
+ * package keeps two changes from editing the same file unless they work on the same package.
+ *
+ * `pnpm lint:tighten` lowers the lines to what the files hold, and lists what moved: a finding over or outside the
+ * lists takes what the same rule gave up elsewhere in that run (code moved to another file, a file renamed), never
+ * more. tooling/type-aware-lint.test.ts holds every rule's total to main's, so no change can list more than main
+ * had, by hand or by command.
  *
  * This module is the logic; tooling/lint.ts runs ESLint with it.
  */
@@ -15,6 +19,14 @@ import type { ESLint, Linter } from 'eslint'
 import tseslint from 'typescript-eslint'
 
 export const ALLOWLIST_DIR = 'tooling/lint-allowlist'
+
+/**
+ * How ESLint runs. Two threads, not one per core: every thread builds the whole TypeScript program, and on a
+ * 12-thread PC six of them took 13.6 GB for 34.6 s where two took 5.8 GB for 36.9 s (#1343 review), with several
+ * agents' `pnpm verify` running at once. No cache: ESLint's keys a file on its own content, and a type-aware
+ * finding can come from a type another file changed.
+ */
+export const LINT_OPTIONS = { concurrency: 2 } as const satisfies ESLint.Options
 
 /**
  * The rules a line may name: the type-aware ones eslint.config.js turned on (#1339). Any other rule's
@@ -29,7 +41,7 @@ export const LISTABLE_RULES: ReadonlySet<string> = new Set([
 
 const HEADER = [
   '# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.',
-  '# Only ever lower these, with `pnpm lint:tighten`; fix a new finding instead of listing it.',
+  '# Written by `pnpm lint:tighten`, which lowers lines and moves a count along with moved code; no rule may total more than on main.',
 ]
 
 /** file → rule → how many findings it may hold */
@@ -71,17 +83,23 @@ export function formatList(allow: Allowlist): string {
   return [...HEADER, ...lines].join('\n') + '\n'
 }
 
-export function readAllowlist(root: string): Allowlist {
-  const dir = join(root, ALLOWLIST_DIR)
+/** The lists from their files' texts, by file name; throws for a line in another package's list */
+export function parseLists(texts: ReadonlyMap<string, string>): Allowlist {
   const out: Allowlist = new Map()
-  if (!existsSync(dir)) return out
-  for (const name of readdirSync(dir).filter((n) => n.endsWith('.txt')).sort()) {
-    for (const [file, rules] of parseList(readFileSync(join(dir, name), 'utf8'), name)) {
+  for (const [name, text] of [...texts].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    for (const [file, rules] of parseList(text, name)) {
       if (listFileOf(packageOf(file)) !== name) throw new Error(`${name}: ${file} belongs in ${listFileOf(packageOf(file))}`)
       out.set(file, rules)
     }
   }
   return out
+}
+
+export function readAllowlist(root: string): Allowlist {
+  const dir = join(root, ALLOWLIST_DIR)
+  if (!existsSync(dir)) return new Map()
+  const names = readdirSync(dir).filter((n) => n.endsWith('.txt'))
+  return parseLists(new Map(names.map((n) => [n, readFileSync(join(dir, n), 'utf8')])))
 }
 
 /** Writes every package's list, and removes the list of a package with nothing left */
@@ -114,6 +132,11 @@ export function countFindings(root: string, results: ESLint.LintResult[]): Allow
   return out
 }
 
+/** Errors no line may name: other rules', and files that failed to parse */
+export function otherErrors(results: ESLint.LintResult[]): number {
+  return results.reduce((n, r) => n + r.messages.filter((m) => m.severity === 2 && !(m.ruleId && LISTABLE_RULES.has(m.ruleId))).length, 0)
+}
+
 /**
  * The files whose findings these results fully count, so `tighten` may lower their lines: not one that failed to
  * parse (its findings are unknown, not zero) or one ESLint ignored.
@@ -121,6 +144,24 @@ export function countFindings(root: string, results: ESLint.LintResult[]): Allow
 export function countedFiles(root: string, results: ESLint.LintResult[]): Set<string> {
   const ignored = (r: ESLint.LintResult) => r.messages.some((m) => m.ruleId === null && m.severity === 1 && m.message.startsWith('File ignored'))
   return new Set(results.filter((r) => r.fatalErrorCount === 0 && !ignored(r)).map((r) => relativeFile(root, r.filePath)))
+}
+
+export type Disabled = { file: string; line: number; rule: string }
+
+/**
+ * Findings of a type-aware rule that an `eslint-disable` comment hid. Such a comment would skip the lists and every
+ * check on them (#1343 review), so `pnpm lint` fails on it: read the value through a guard instead.
+ */
+export function disabledFindings(root: string, results: ESLint.LintResult[]): Disabled[] {
+  const out: Disabled[] = []
+  for (const r of results) {
+    for (const m of r.suppressedMessages) {
+      if (m.ruleId && LISTABLE_RULES.has(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
+        out.push({ file: relativeFile(root, r.filePath), line: m.line, rule: m.ruleId })
+      }
+    }
+  }
+  return out
 }
 
 export type Over = { file: string; rule: string; count: number; allowed: number }
@@ -162,31 +203,64 @@ function recount(result: ESLint.LintResult): void {
   result.fixableWarningCount = warnings.filter((m) => m.fix).length
 }
 
+const byKey = <T>([a]: [string, T], [b]: [string, T]) => (a < b ? -1 : a > b ? 1 : 0)
+
 /**
- * The lists lowered to what the linted files hold: a line goes down to its file's count, or away at zero or
- * when its file is gone. A file that was not linted this time keeps its lines. Nothing is ever raised or added.
+ * The lists after a run: each line lowered to what its file holds (away at zero, or when the file is gone), then
+ * what moved listed. A finding over or outside the lists, in a file this run counted, takes what its rule gave up
+ * in this run, file by file in order until none is left; no rule ends with more than it started with. A file this
+ * run did not count keeps its lines.
  */
-export function tighten(allow: Allowlist, found: Allowlist, linted: Set<string>, exists: (file: string) => boolean): Allowlist {
+export function tighten(allow: Allowlist, found: Allowlist, counted: Set<string>, exists: (file: string) => boolean): Allowlist {
   const out: Allowlist = new Map()
+  const freed = new Map<string, number>()
   for (const [file, rules] of allow) {
-    if (!exists(file)) continue
+    const gone = !exists(file)
     const kept = new Map<string, number>()
     for (const [rule, max] of rules) {
-      const n = linted.has(file) ? Math.min(max, found.get(file)?.get(rule) ?? 0) : max
+      const n = gone ? 0 : counted.has(file) ? Math.min(max, found.get(file)?.get(rule) ?? 0) : max
+      if (n < max) freed.set(rule, (freed.get(rule) ?? 0) + max - n)
       if (n > 0) kept.set(rule, n)
     }
     if (kept.size > 0) out.set(file, kept)
   }
+  for (const [file, rules] of [...found].sort(byKey)) {
+    if (!counted.has(file)) continue
+    for (const [rule, n] of [...rules].sort(byKey)) {
+      const listed = out.get(file)?.get(rule) ?? 0
+      const moved = Math.min(n - listed, freed.get(rule) ?? 0)
+      if (moved <= 0) continue
+      freed.set(rule, (freed.get(rule) ?? 0) - moved)
+      out.set(file, (out.get(file) ?? new Map<string, number>()).set(rule, listed + moved))
+    }
+  }
   return out
 }
 
-/** Sums a list per package and rule */
-export function totals(allow: Allowlist): Map<string, Map<string, number>> {
-  const out = new Map<string, Map<string, number>>()
-  for (const [file, rules] of allow) {
-    const pkg = out.get(packageOf(file)) ?? new Map<string, number>()
-    for (const [rule, n] of rules) pkg.set(rule, (pkg.get(rule) ?? 0) + n)
-    out.set(packageOf(file), pkg)
-  }
+/** Sums a list per rule */
+export function ruleTotals(allow: Allowlist): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const rules of allow.values()) for (const [rule, n] of rules) out.set(rule, (out.get(rule) ?? 0) + n)
   return out
+}
+
+/**
+ * How the lists compare with main's, line by line: the lines that are new or higher, and the rules whose total
+ * grew. A new or higher line is a move when its rule's total did not grow (the count went down as much elsewhere);
+ * a rule whose total grew is listing something new, which no change may do.
+ */
+export function compareWithBase(base: Allowlist, current: Allowlist): { raised: string[]; grown: string[] } {
+  const raised: string[] = []
+  for (const [file, rules] of [...current].sort(byKey)) {
+    for (const [rule, n] of [...rules].sort(byKey)) {
+      const was = base.get(file)?.get(rule) ?? 0
+      if (n > was) raised.push(`${file} ${rule} ${n} (main: ${was})`)
+    }
+  }
+  const before = ruleTotals(base)
+  const grown = [...ruleTotals(current)]
+    .filter(([rule, n]) => n > (before.get(rule) ?? 0))
+    .sort(byKey)
+    .map(([rule, n]) => `${rule}: ${n}, main ${before.get(rule) ?? 0}`)
+  return { raised, grown }
 }

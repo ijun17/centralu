@@ -3,7 +3,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ALLOWLIST_DIR, applyAllowlist, countedFiles, countFindings, formatList, parseList, readAllowlist, tighten, writeAllowlist, type Allowlist } from './lint-allowlist.js'
+import {
+  ALLOWLIST_DIR,
+  applyAllowlist,
+  compareWithBase,
+  countedFiles,
+  countFindings,
+  disabledFindings,
+  formatList,
+  otherErrors,
+  parseList,
+  readAllowlist,
+  tighten,
+  writeAllowlist,
+  type Allowlist,
+} from './lint-allowlist.js'
 
 const ROOT = join(tmpdir(), 'lint-allowlist-root')
 const UNSAFE = '@typescript-eslint/no-unsafe-type-assertion'
@@ -95,15 +109,11 @@ describe('tightening the lists', () => {
     ['gone.ts', UNSAFE, 1],
     ['other.ts', UNSAFE, 4],
   ])
-  const found = list([['a.ts', UNSAFE, 2], ['b.ts', UNSAFE, 5]])
-  const tightened = tighten(allow, found, new Set(['a.ts', 'b.ts']), (file) => file !== 'gone.ts')
+  const found = list([['a.ts', UNSAFE, 2], ['b.ts', UNSAFE, 5], ['c.ts', BANG, 3], ['d.ts', '@typescript-eslint/no-floating-promises', 1]])
+  const tightened = tighten(allow, found, new Set(['a.ts', 'b.ts', 'c.ts', 'd.ts']), (file) => file !== 'gone.ts')
 
   it('lowers a line to what its file holds, and drops it at zero', () => {
     expect(tightened.get('a.ts')).toEqual(new Map([[UNSAFE, 2]]))
-  })
-
-  it('never raises a line', () => {
-    expect(tightened.get('b.ts')).toEqual(new Map([[UNSAFE, 2]]))
   })
 
   it("drops a missing file's lines and keeps the lines of a file not linted this time", () => {
@@ -111,18 +121,70 @@ describe('tightening the lists', () => {
     expect(tightened.get('other.ts')).toEqual(new Map([[UNSAFE, 4]]))
   })
 
+  it('moves what a rule gave up to where its findings went, never more, and never to another rule', () => {
+    // a.ts and gone.ts gave up two of UNSAFE: b.ts holds three more than its line, and takes those two
+    expect(tightened.get('b.ts')).toEqual(new Map([[UNSAFE, 4]]))
+    // a.ts gave up one of BANG: c.ts, unlisted, takes it
+    expect(tightened.get('c.ts')).toEqual(new Map([[BANG, 1]]))
+    // Nothing gave up a floating promise
+    expect(tightened.has('d.ts')).toBe(false)
+    const total = (l: Allowlist, rule: string) => [...l.values()].reduce((n, r) => n + (r.get(rule) ?? 0), 0)
+    for (const rule of [UNSAFE, BANG]) expect(total(tightened, rule)).toBeLessThanOrEqual(total(allow, rule))
+  })
+
+  it('moves the lines of a renamed file to its new path', () => {
+    const renamed = tighten(list([['old.ts', UNSAFE, 2]]), list([['new.ts', UNSAFE, 2]]), new Set(['new.ts']), (file) => file === 'new.ts')
+    expect(renamed).toEqual(list([['new.ts', UNSAFE, 2]]))
+  })
+
   it('counts only the files whose findings are known: not one that failed to parse, or one ESLint ignored', () => {
     const broken = { ...result('packages/a/src/broken.ts', [{ ...message(null), fatal: true }]), fatalErrorCount: 1 }
     const ignored = result('packages/a/src/ignored.ts', [{ ...message(null, 1), message: 'File ignored because of a matching ignore pattern.' }])
     const counted = countedFiles(ROOT, [broken, ignored, result('packages/a/src/fine.ts', [])])
     expect([...counted]).toEqual(['packages/a/src/fine.ts'])
-    // So a file that does not parse for now keeps its lines
-    const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), new Map(), counted, () => true)
-    expect(kept.get('packages/a/src/broken.ts')).toEqual(new Map([[UNSAFE, 2]]))
+    // So a file that does not parse for now keeps its lines, and gives up nothing to move elsewhere
+    const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), list([['packages/a/src/fine.ts', UNSAFE, 2]]), counted, () => true)
+    expect(kept).toEqual(list([['packages/a/src/broken.ts', UNSAFE, 2]]))
   })
 
-  it('never adds a line', () => {
+  it('adds no line when nothing was given up', () => {
     expect(tighten(new Map(), found, new Set(['a.ts', 'b.ts']), () => true).size).toBe(0)
+  })
+})
+
+describe("the lists against main's", () => {
+  const main = list([
+    ['a.ts', UNSAFE, 2],
+    ['b.ts', UNSAFE, 1],
+  ])
+
+  it('let a line go down or away', () => {
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 1]]))).toEqual({ raised: [], grown: [] })
+  })
+
+  it('let a count move to another file when the rule does not total more', () => {
+    const moved = compareWithBase(main, list([['a.ts', UNSAFE, 1], ['b.ts', UNSAFE, 1], ['c.ts', UNSAFE, 1]]))
+    expect(moved).toEqual({ raised: [`c.ts ${UNSAFE} 1 (main: 0)`], grown: [] })
+  })
+
+  it('refuse a line listed by hand or by a regenerated list, wherever it is (#1343 review)', () => {
+    // The review's case: one fixed and tightened on main, then a new finding listed by hand later
+    const later = compareWithBase(list([['a.ts', UNSAFE, 1]]), list([['a.ts', UNSAFE, 1], ['clock.ts', BANG, 1]]))
+    expect(later.grown).toEqual([`${BANG}: 1, main 0`])
+    expect(compareWithBase(main, list([['a.ts', UNSAFE, 3], ['b.ts', UNSAFE, 1]])).grown).toEqual([`${UNSAFE}: 4, main 3`])
+  })
+})
+
+describe('the lint run', () => {
+  it('names a finding of a type-aware rule an eslint-disable comment hid, not one of another rule or a file-level suppression', () => {
+    const hidden = (ruleId: string, kind: string) => ({ ...message(ruleId), line: 7, suppressions: [{ kind, justification: '' }] })
+    const r = { ...result('packages/a/src/x.ts', []), suppressedMessages: [hidden(BANG, 'directive'), hidden('no-console', 'directive'), hidden(UNSAFE, 'file')] }
+    expect(disabledFindings(ROOT, [r])).toEqual([{ file: 'packages/a/src/x.ts', line: 7, rule: BANG }])
+  })
+
+  it('counts the errors --record-all cannot list: other rules, and files that failed to parse', () => {
+    const results = [result('packages/a/src/x.ts', [message(UNSAFE), message('@typescript-eslint/no-unused-vars'), message(null), message('no-console', 1)])]
+    expect(otherErrors(results)).toBe(2)
   })
 })
 

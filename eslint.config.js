@@ -91,7 +91,8 @@ export default tseslint.config(
    * What predates them is listed per file and rule in tooling/lint-allowlist/, one list per
    * package, and `pnpm lint` (tooling/lint.ts) lets a file hold up to its listed count. So `eslint`
    * run by itself, or an editor, also shows those old findings. Adding lines is not the way past a
-   * finding: tooling/type-aware-lint.test.ts caps each package's total.
+   * finding: tooling/type-aware-lint.test.ts holds every rule's total to main's lists, and refuses an
+   * eslint-disable of these rules.
    */
   {
     files: TYPED_FILES,
