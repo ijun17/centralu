@@ -7,6 +7,7 @@ import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownersh
 import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords, type LinkedMachineRow } from './store/linked-machines.js'
+import { MailRecords } from './store/mail.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords, type ReadOpts } from './store/messages.js'
 import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
@@ -86,6 +87,8 @@ export class Store extends MigrationRunner {
   /** The records of deleted app-agent sessions, kept in the trash (#378) */
   readonly keptRuns: KeptRuns
   readonly children: ChildOwnershipRecords
+  /** The mailbox's threads, messages and receipts (#1347, v61) */
+  readonly mail: MailRecords
   readonly machines: LinkedMachineRecords
   /** User-folder apps registered as projects in place (#1141) */
   readonly adoption: UserAppAdoptionRecords
@@ -109,6 +112,7 @@ export class Store extends MigrationRunner {
     this.appRuns = new AppRunRecords(this.db)
     this.keptRuns = new KeptRuns(this.db)
     this.children = new ChildOwnershipRecords(this.db)
+    this.mail = new MailRecords(this.db)
     this.machines = new LinkedMachineRecords(this.db, this.settings)
     this.adoption = new UserAppAdoptionRecords(this.db, this.settings)
     try {
