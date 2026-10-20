@@ -326,7 +326,8 @@ export class ChildReports {
     const stop = this.host.meta.get(sessionId)?.interruption
     const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
     const outcomeOf = (name: Naming) =>
-      work && 'swapped' in work ? swappedReportLine()
+      work && 'tookOver' in work ? tookOverReportLine(work.paused, name)
+      : work && 'swapped' in work ? swappedReportLine()
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
       : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined, name)

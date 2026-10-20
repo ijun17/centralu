@@ -4,6 +4,7 @@ import type { LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
+import { HUB_SENDER } from './hub-sender.js'
 
 /*
  * The orchestrator's reports from a linked machine's sessions on their own (#82 phase 4, #723): which wait a machine's
@@ -23,6 +24,8 @@ let linked: Set<string>
 let mirror: Map<string, { name: string; project: string }>
 let listing: (machineId: string) => Promise<{ sessionId: string; tasks: BackgroundTask[] }[] | null>
 let closing: boolean
+/** What the host's report gate answers, for every session (`LinkedReportsHost.reportGate`) */
+let gateAnswer: 'deliver' | 'withhold' | 'defer'
 let reports: LinkedReports
 
 beforeEach(() => {
@@ -38,6 +41,7 @@ beforeEach(() => {
   ])
   listing = async () => []
   closing = false
+  gateAnswer = 'deliver'
   /** The hub's reader over its links, as far as the reports read it: the mirror, the last words, and the machine's list */
   const reader = {
     describe: (id: string) => mirror.get(id) ?? null,
@@ -53,6 +57,7 @@ beforeEach(() => {
     get closing() {
       return closing
     },
+    reportGate: () => gateAnswer,
     deliverReport: async (orchestratorId, sessionId, name, project, preview, ending, work) => {
       delivered.push({ orchestratorId, sessionId, name, project, preview, ending: ending.type, ...(ending.error?.message ? { error: ending.error.message } : {}), ...(work ? { work } : {}) })
     },
@@ -213,6 +218,115 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
     await flush()
     expect(delivered).toHaveLength(1)
+  })
+})
+
+/*
+ * #1342, the twin of #1344: the person's message goes straight to the machine, so the hub's `send` never runs there; what
+ * the hub sees is the machine's relayed `user_message`. A paused report was owed until the work's end, which a watcher or
+ * a dev server never reaches, and the person's own failed turn was reported as "The assigned work failed".
+ */
+describe('the person writes to a session whose report is paused there (#1342)', () => {
+  /** The session ends a turn with its verify running: the orchestrator is told it paused */
+  async function paused() {
+    ask('m1.w1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(1)
+  }
+  const person = (sessionId = 'm1.w1', text = '/compact'): LinkedEvent => ({ type: 'user_message', sessionId, seq: 7, text })
+
+  it('ends the wait and tells the orchestrator once; a turn of the person that fails is not reported', async () => {
+    await paused()
+    reports.observe(person())
+    await flush()
+    expect(delivered).toHaveLength(2)
+    expect(delivered[1]).toMatchObject({ orchestratorId: 'o1', sessionId: 'm1.w1', work: { tookOver: true, paused: [{ id: 'bg-verify' }] } })
+    // Not the machine's last words: what is there now is not the assigned work's
+    expect(delivered[1]?.preview).toContain("the person's now")
+    expect(children.linkedReports.has('m1.w1')).toBe(false)
+
+    reports.observe({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+    reports.observe({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
+    // The task ends and a turn follows: still the session's own
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(2)
+  })
+
+  it('does not run the settle wait of a report it ended', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    await paused()
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    reports.observe(person())
+    await flush()
+    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+    await flush()
+    expect(delivered.map((d) => d.work && Object.keys(d.work)[0])).toEqual(['paused', 'tookOver'])
+  })
+
+  it("a message with a source is not the person's: the hub's instruction, another session, an app", async () => {
+    await paused()
+    reports.observe({ ...person(), from: { sessionId: `m1.${HUB_SENDER}`, name: 'Orchestrator' } })
+    reports.observe({ ...person(), from: { sessionId: 'm1.other', name: 'Other' } })
+    reports.observe({ ...person(), fromApp: { appId: 'project-board', projectId: null, name: 'Project board' } })
+    await flush()
+    expect(delivered).toHaveLength(1)
+    expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify'])
+  })
+
+  it("a note into the turn the work's ending started is not a takeover: that turn's end is the final report", async () => {
+    await paused()
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe(person('m1.w1', 'how is it going?'))
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await flush()
+    expect(delivered).toHaveLength(2)
+    expect(delivered[1]?.work).toBeUndefined()
+    expect(delivered[1]).toMatchObject({ ending: 'turn_complete' })
+  })
+
+  it("a report that is not paused is a turn of the orchestrator's still running, which the message joins: it stays owed", async () => {
+    ask('m1.w1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe(person('m1.w1', 'also check the lint'))
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await flush()
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]?.work).toBeUndefined()
+  })
+
+  it('leaves a session whose report the gate does not let through to the gate (a child start_agent started)', async () => {
+    await paused()
+    gateAnswer = 'withhold'
+    reports.observe(person())
+    await flush()
+    expect(delivered).toHaveLength(1)
+  })
+
+  it("a host swap owes nothing of it: the next host holds no wait, and the person's failed turn there reports nothing", async () => {
+    await paused()
+    reports.observe(person())
+    await flush()
+    // A linked wait lives in the hub's memory only (nothing of it is stored); the next host starts empty over the same store
+    const next = new ChildOwnership(store)
+    expect([...next.linkedReports]).toEqual([])
+    const nextDelivered: string[] = []
+    const nextReports = new LinkedReports({
+      children: next,
+      linkedReader: null,
+      hasSession: () => true,
+      closing: false,
+      deliverReport: async (_o, sessionId) => void nextDelivered.push(sessionId),
+    })
+    nextReports.observe({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+    nextReports.observe({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
+    await flush()
+    expect(nextDelivered).toEqual([])
+    nextReports.dispose()
   })
 })
 
