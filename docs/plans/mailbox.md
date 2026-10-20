@@ -56,6 +56,10 @@ Each is argued where the link points, with the alternatives not taken.
    - **Nothing is resent by itself after a crash without showing it** (§7.6).
    - **Token and loop guards** stop idle-notification ping-pong (§7.9).
    - **A done thread takes no more mail:** follow-ups are new linked threads (§3.3).
+   - **Mail held for another thread waits at most 5 or 15 minutes** before a one-line header goes in (§7.10).
+   - **A host back from being off wakes each receiver once**, and only for mail that needs it (§7.9).
+   - **Claude's own cross-session messaging is refused** for every Centralu session, `auto` included, after a live check
+     (§9.6), so nothing bypasses the mailbox.
 5. **Who may write to whom** (§9.1). Sessions along the relations they already have (the work they gave or were given,
    the person, apps they attached). Apps through `uses.mail`, which replaces `uses.notices`: into threads they are in and
    to sessions that called them. An app reaching the orchestrator or a session that never called it stays behind the
@@ -101,7 +105,10 @@ Each is argued where the link points, with the alternatives not taken.
     not-user-input preamble on Claude. Is that wanted, or should the text frame stay as a second layer either way?
 13. **Inbound defaults and guard numbers** (§7.7, §7.9): `auto` sessions hold mail from other sessions and apps; 200,000
     tokens an hour of mail-started turns or 3 empty ones in a row pause a session's mail.
-14. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
+14. **Claude's own cross-session channel under `auto`** (§9.6): refuse it for every Centralu session (narrowing #603),
+    or leave `auto` sessions their CLI's default, which holds cross-class peer mail and delivers same-class mail?
+15. **The maximum hold** (§7.10): 5 minutes for questions and the person's mail, 15 for the rest.
+16. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
 
 ## 2. Words
 
@@ -371,7 +378,7 @@ How mail uses them:
 | **Idle, live** | one stdin message, `origin: { kind: 'peer', from: <address>, fromMode, name: <relation> }` (`channel` with `server: 'centralu'` for Centralu's own reports and notices), `priority: 'next'`. It queries: one turn |
 | **Asleep** (not live) | resume (spawn + `resume`), then as idle. `SessionStart` context cannot replace the message, since it does not start a request (#1324 research) |
 | **In a turn of the same thread** | the same message, `priority: 'next'`: read in this turn after the running tool calls |
-| **In a turn of another thread, or the person's** | held `turn` in the host (§6), then sent as idle when the turn ends. Not `later`: the CLI would start that turn without telling the host which thread it belongs to. `urgent`: a one-line header with `priority: 'next'` |
+| **In a turn of another thread, or the person's** | held `turn` in the host (§6), then sent as idle when the turn ends. Not `later`: the CLI would start that turn without telling the host which thread it belongs to. `urgent`, or held past the maximum hold (§7.10): a one-line header with `priority: 'next'` |
 | **Mail that must not wake** (an app's `wake: false`, a budget-held notice, §7.9) | `shouldQuery: false`: it sits in the transcript and is read with the next prompt. The host still records it as delivered |
 | **Waiting on a card** (`waiting_approval`, `waiting_input`) | held `card` until the card is answered: mail is never taken as the answer |
 | **`limited`** | held `limited` until the limit lifts (the usage refresh) |
@@ -419,10 +426,19 @@ Either way, the fields are set from the start, because they cost nothing and `hu
 |---|---|
 | **Idle, live** | a framed `turn/start` (§7.3's frame in the text): one turn |
 | **Asleep** | `thread/resume`, then as idle |
-| **In a turn of the same thread** | `thread/inject_items` with one `developer`-role item at the next request (no turn of its own), after its own live check (open question 8). Until then, or on an error, held until the turn ends, then a framed `turn/start`. Not `turn/steer`: it is user input, and fails with "no active turn" in the race at a turn's end |
-| **Another thread's turn** | held `turn`. `urgent`: a one-line `developer` inject |
+| **In a turn of the same thread** | `thread/inject_items` with one `developer`-role item at the next request (no turn of its own), after its own live check (open question 8). Until then, or on an error, held until the turn ends, then a framed `turn/start`. Not `turn/steer`: it is user input, and fails with "no active turn" in the race at a turn's end. **The race `inject_items` has instead** is below |
+| **Another thread's turn** | held `turn`. `urgent`, or held past the maximum hold (§7.10): a one-line `developer` inject (with the check below) |
 | **Must not wake** | a `developer` inject with no turn (it does not wake), when the thread is loaded; else held until its next turn |
 | Cards, `limited`, `error`, trash, linked | as Claude |
+
+**The inject race.** `thread/inject_items` takes no `expectedTurnId`, unlike `turn/steer`. If the turn ends between the
+host's state check and the inject, the item only lands in the thread's history. No model request follows, so nobody
+reads it until the next turn, and nothing wakes the session. So the adapter notes the running turn's id before it
+injects. When the inject answers, it checks whether `turn/completed` for that id arrived first. If it did, the delivery
+is not counted as in-turn: the host follows at once with a framed `turn/start` carrying the same messages as headers
+only ("m_… may already be in your history"), and that starts the turn of the thread (§6). The same check covers a
+one-line header injected into another thread's turn. Then a "must not wake" inject into an idle thread is the only
+inject that lands with no turn, by design.
 
 Codex's own multi-agent mailbox (research on #1347) is in memory and lost on a crash, and it hands mail to the model as an
 assistant-role envelope. Neither is used here. The inject item's role is fixed in the builder (`developer`) and never
@@ -487,6 +503,14 @@ Limits:
 - Hooks are CLI behaviour, and so are `origin` and `priority`. All of them go into the vendor-surface drift checks
   (`agent-host.md` §3.1) at the adapter floor.
 - A turn with no tool call gets same-thread mail only at `Stop`.
+- **Claude caps consecutive Stop-hook blocks** (8 by default, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), and a continuation by
+  `additionalContext` may count toward it. The fallback stays far under it:
+  - It continues a turn **at most once per turn**. When the callback sees `stop_hook_active` (a continuation already
+    happened, by this hook or by one of the person's own Stop hooks), it returns nothing, and the mail waits for the turn's
+    end and goes as a new turn.
+  - So it never lengthens a chain someone else started, and it adds one block at most to a turn's count.
+  - If the cap is reached anyway (the CLI ends the turn), nothing is lost: the receipts are not delivered until the
+    callback's text is returned, and they go after the turn as usual.
 
 ### 7.5 Revalidate at drain
 
@@ -582,6 +606,19 @@ app that does not receive gets no assigns (refused at send with the reason).
   (`loop`). The person sees "paused: 20 turns in an hour in this thread" with Resume. Two agents answering each other
   cannot run up usage unseen.
 - **Waking many asleep sessions:** at most 2 resumes at once, behind the memory gate (#686).
+- **After the host was off** (quit, the computer asleep or shut down, a crash): §11.7's rule for a hub coming back applies
+  to a local restart too.
+  - Each receiver gets **one** batched wake for everything that came due while the host was down, never one per message.
+  - When the host was off for more than 30 minutes, only mail that needs the receiver wakes an asleep session:
+    - an `assign`, a `question` or an `answer` in its own work;
+    - a report its owner is waiting on;
+    - an app's `needsOwner` post.
+    
+    The rest waits for that session's next turn.
+  - Wakes go in order: the person's threads first, then threads with a waiting question, then the rest. The resumes are
+    still 2 at a time.
+  - Past 10 asleep sessions to wake, the Inbox asks once: "12 sessions have mail from while Centralu was off: Wake them /
+    Leave them for their next turn". A long-off host does not resume a crowd of sessions by itself.
 - **Idle-notification loops.** Claude Code's agent teams lost 13 to 22% of their tokens to idle notifications going back
   and forth (anthropics/claude-code 47930), and MCP Agent Mail's reminders without an unread filter repeated forever
   (its 274). Three rules here:
@@ -595,6 +632,30 @@ app that does not receive gets no assigns (refused at send with the reason).
   (the rule above), wakes for that session stop: its mail is held `budget` (delivered `shouldQuery: false` on Claude),
   and the person sees "mail paused: N tokens in an hour" with Resume. The person's words and Centralu's report of a turn
   the person started are never held by it.
+
+### 7.10 The longest mail waits for a turn
+
+Holding other-thread mail until the turn ends (§6) keeps reports clean. But a turn can run for hours, and a child's
+question must not sit unread behind it. Claude Code's team users report a teammate not reading its inbox until its task
+ends (anthropics/claude-code 85963). So mail held `turn` has a maximum hold:
+
+- **5 minutes** for a `question` and for mail from the person;
+- **15 minutes** for anything else that would wake (§9.5's app bounds still apply).
+
+Past it, the host puts in a **one-line header**, the same as for `urgent` mail. On Claude that is a message with
+`priority: 'next'`; on Codex, a `developer` inject with §7.2's race check; under the fallback, `PostToolUse`. For example:
+
+```
+2 messages wait in thread t_01J… (a question from your child session). Read them with mail(action="read") when this
+step allows.
+```
+
+- The header gives only host fields (§7.3). Reading it does not move the turn to that thread: the turn's thread stays
+  the one that started it (§6).
+- What the agent does with the mail it reads is its choice, and its reply is a post in the other thread.
+- The header repeats at most once per 30 minutes per thread.
+- A turn with no tool boundary gets the header only on Claude's `priority: 'next'` path (read after the running tool
+  calls) or at the turn's end.
 
 ## 8. What each existing path becomes, and when it is removed
 
@@ -882,6 +943,47 @@ Recommended, c:
 - **Never the orchestrator** unless the orchestrator itself opened the thread (it queued the merge). An app reaching it
   otherwise is task-ledger §13.3.
 
+### 9.6 The CLI's own channel past the mailbox
+
+Claude Code has its own cross-session messaging (v2.1.224 and later):
+
+- `ListAgents` (alias `ListPeers`) finds other Claude processes on the machine through `~/.claude/sessions/<pid>.json`;
+- `SendMessage` writes to their per-session inbox socket (a named pipe on Windows);
+- an idle receiver starts a turn on it.
+
+It lets one Centralu session reach another while bypassing everything here: the relations of §9.1, the inbound policy,
+the loop and token guards, and the record (the person never sees it, and `read_session` cannot tell it from the
+person). The mailbox only holds if this side door is shut.
+
+What Centralu does today (security-boundaries, "Claude's independent-session messaging", #569):
+
+- Every `safe` and `normal` query sets `crossSessionInbound: 'refuse'`, puts `ListAgents` / `ListPeers` in
+  `disallowedTools`, and sets `CLAUDE_CODE_HARBOR_KITE=0` (an undocumented gate on listing, sending and binding the inbox,
+  version-sensitive).
+- `SendMessage` stays, because the same tool continues the session's own background subagents. Denying it would break
+  those.
+- **Under `auto` none of these apply** (#603): the person's own CLI settings rule. The CLI's default holds peer mail at a
+  receiver that runs without asking (bypass) while the sender is of another or an undeclared class, and delivers a
+  same-class sender's at once. So two `auto` sessions can message each other directly today.
+
+Proposed, as part of slice 3's live check:
+
+1. **Check on a real session first.** On the CLI floor and the current CLI, under each preset, run `ListAgents` from one
+   Centralu session and `SendMessage` to another, and record what is listed, delivered, held or refused. The existing
+   probe (`packages/agent-host/scripts/probe-cross-session.mts`) covers `safe` and `normal`; it gains `auto` and a
+   held-then-released case.
+2. **Then refuse inbound peer messages for every Centralu session, `auto` included**, and keep `ListAgents` / `ListPeers`
+   denied. Mail replaces what that channel was for. `SendMessage` stays allowed for subagents, and with nothing listed and
+   every receiver refusing, it reaches no other session. This narrows #603 for this one control. Under `auto`, the
+   person's other CLI settings still apply. A person who wants the CLI's channel for one session turns it on in that
+   session's settings, behind a card, and the session's header then says mail rules do not cover it.
+3. **Mind the mail path itself.** If `crossSessionInbound: 'refuse'` also drops stdin messages stamped
+   `origin: { kind: 'peer' }` (§7.1's gate), Centralu stamps its mail `channel` instead. It does not loosen the refusal.
+
+Limits stay as written in security-boundaries: this is a provider-messaging boundary, not OS isolation. A process the
+person started outside Centralu is not configured by this adapter. A peer address already known before the refusal can
+still be written to, though nothing delivers it.
+
 ## 10. The person
 
 ### 10.1 The Inbox
@@ -1106,7 +1208,7 @@ Each is a PR stack of its own, in order. The store, protocol, host-process and s
 | 0 | **Stamp the person's input `origin: { kind: 'human' }`** on Claude (§7.1): composer, slash commands, Continue. Small and independent of mail | the person's words pass the CLI's `isHuman()` gates; mail can later be told from them | — |
 | 1 | **Store and model** (M1): tables, ids (§11.4), `MailService` post/read/update, `mailFrame`, retention. No producers | nothing visible; the base, with tests (swap: an older build beside the tables) | — |
 | 2 | **Delivery, idle and asleep, and the `mail` tool**: `MailDelivery` (§5; §7.1–§7.3 for idle and asleep receivers, with the SDK fields set; §7.5–§7.7; §7.9), receipts, at-least-once, rates, loop guard; `mail` for sessions; the Inbox's Mail and the person's replies; the compact line in the conversation | agents and the person write to each other durably; mail to the person shows in the Inbox | — |
-| 3 | **In-turn delivery**: first the live checks (§7.1's gate for Claude's `origin` / `priority` / `shouldQuery` and `crossSessionInbound`; Codex `inject_items`), then same-thread mail with `priority: 'next'`, or the hooks of §7.4 if the gate says so | same-thread mail mid-turn without "the user sent" (for `mail` threads) | — |
+| 3 | **In-turn delivery**: first the live checks (§7.1's gate for Claude's `origin` / `priority` / `shouldQuery` and `crossSessionInbound`; the CLI's own `ListAgents` / `SendMessage` under each preset, §9.6; Codex `inject_items` and its race, §7.2), then same-thread mail with `priority: 'next'`, or the hooks of §7.4 if the gate says so | same-thread mail mid-turn without "the user sent" (for `mail` threads); the maximum hold (§7.10) | the CLI's own cross-session channel for `auto` sessions (§9.6), if the owner agrees |
 | 4 | **Reports become mail**: `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`; `mail_turns`; parent threads; adoption of old marks (§4.2) | #1340 fixed by the model (#1344 can land before as the patch); notes into delegated turns go in-turn as mail; script-started sessions report to the person | for this host's sessions: `agentNoteFrame` over stdin, `ChildReports.held`, `untrustedSourceSessionNotification`. The linked path keeps all three until slice 9; marks kept in step |
 | 5 | **Apps**: `uses.mail`, broker calls, `receive`, the `notify` shim; template and `docs/apps.md` | apps post into threads and take assigns | — |
 | 6 | **The board app moves** (§8.3): queue items and stacks as threads, acknowledgement from receipts, GitHub sync with `tasks` scope | the merge queue's news is durable mail, and the app knows what its owner saw | `watch`, `tellSessions`, #1351's list and `ack` (one release later) |
