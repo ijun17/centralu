@@ -222,23 +222,21 @@ describe('what pre-pr reads', () => {
     }
   }
 
-  const plain = (base: string) => {
-    const real = realpathSync(base)
-    return { root: join(real, 'checkout'), tree: join(real, 'worktree') }
-  }
+  // The temporary folder as the system hands it out: on the Windows runner that is the 8.3 short form, on macOS /var
+  const plain = (base: string) => ({ root: join(base, 'checkout'), tree: join(base, 'worktree') })
 
   it('type-checks a worktree whose workspace package is reached both by path and by name as one declaration', { timeout: 60_000 * SLOW }, () => {
     typeChecks('cc-prepr-tsc-', plain)
   })
 
-  // A folder named by two spellings is two folders to tsc, wherever the second spelling comes from. A link to the
-  // temporary folder stands in for the macOS /var and the Windows short name on every platform
+  // A folder named by two spellings is two folders to tsc, wherever the second spelling comes from. On Windows a child
+  // keeps the spelling of the folder it was started in, so a link to the folder is a second spelling there; elsewhere the
+  // system resolves a working folder, and this only shows that a caller's link is harmless
   it('type-checks a worktree and a checkout that the caller names through a link to their folder', { timeout: 60_000 * SLOW }, () => {
     typeChecks('cc-prepr-alias-', (base) => {
-      const real = realpathSync(base)
-      mkdirSync(join(real, 'real'))
-      const alias = join(real, 'alias')
-      symlinkSync(join(real, 'real'), alias, 'junction')
+      mkdirSync(join(base, 'real'))
+      const alias = join(base, 'alias')
+      symlinkSync(join(base, 'real'), alias, 'junction')
       mkdirSync(join(alias, 'checkout'))
       mkdirSync(join(alias, 'worktree'))
       return { root: join(alias, 'checkout'), tree: join(alias, 'worktree') }
@@ -246,15 +244,19 @@ describe('what pre-pr reads', () => {
   })
 
   // The Windows runner's temporary folder (RUNNER~1 in the user's profile): the same folder in its 8.3 short form
-  it.skipIf(process.platform !== 'win32')('type-checks a worktree and a checkout that the caller names in the 8.3 short form of their folder', { timeout: 60_000 * SLOW }, () => {
+  it.skipIf(process.platform !== 'win32')('type-checks a worktree and a checkout that the caller names in the 8.3 short form of their folder', { timeout: 60_000 * SLOW }, (ctx) => {
+    // realpathSync.native writes the long name out (the plain one keeps a short name as it was given)
+    const shortOf = (dir: string) => execSync(`for %I in ("${realpathSync.native(dir)}") do @echo %~sI`, { encoding: 'utf8', shell: 'cmd.exe' }).trim()
+    const probe = mkdtempSync(join(tmpdir(), 'cc-prepr-probe-'))
+    const has83 = shortOf(probe).toLowerCase() !== realpathSync.native(probe).toLowerCase()
+    rmSync(probe, { recursive: true })
+    // A volume with 8.3 names switched off (a Dev Drive) has none to give
+    if (!has83) ctx.skip()
     typeChecks('cc-prepr-short-', (base) => {
-      const real = realpathSync(base)
-      mkdirSync(join(real, 'checkout'))
-      mkdirSync(join(real, 'worktree'))
-      const short = execSync(`for %I in ("${real}") do @echo %~sI`, { encoding: 'utf8', shell: 'cmd.exe' }).trim()
-      // A volume with 8.3 names switched off has none to give: the test would pass without testing anything
-      expect(short.toLowerCase(), '8.3 short names are off on this volume').not.toBe(real.toLowerCase())
-      expect(realpathSync.native(short).toLowerCase()).toBe(real.toLowerCase())
+      mkdirSync(join(base, 'checkout'))
+      mkdirSync(join(base, 'worktree'))
+      const short = shortOf(base)
+      expect(realpathSync.native(short).toLowerCase()).toBe(realpathSync.native(base).toLowerCase())
       return { root: join(short, 'checkout'), tree: join(short, 'worktree') }
     })
   })
