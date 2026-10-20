@@ -51,7 +51,20 @@ async function remoteHost(store = new Store()) {
     await mgr.disposeAll()
     await server.close()
   })
-  return { mgr, store, port, server }
+  return { mgr, store, port, server, adapters }
+}
+
+/** The remote's host goes away and comes back on the same port, as one swapped in place does */
+async function bounce(remote: Awaited<ReturnType<typeof remoteHost>>) {
+  await remote.server.close()
+  const server: HostServer = new HostServer({
+    port: remote.port,
+    token: TOKEN,
+    onRpc: createRpcHandler(remote.mgr, remote.adapters, {}),
+    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
+  })
+  await server.listen()
+  cleanups.push(() => server.close())
 }
 
 const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLine => ({
@@ -265,13 +278,36 @@ describe('a machine with Auto reconnect off (#1341)', () => {
     expect(tunnel!.opens).toBe(2)
   })
 
-  it('does not dial a host that stopped again: the link says so and waits for Connect', async () => {
+  it('dials a short drop again at once, over the same forward: a host that is back within the redials reconnects with no new ssh', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
+    await eventually(() => hub.row().status === 'connected')
+    // Every connect says so to the windows (`machine_resync`): a second one is the link coming back after the drop
+    const resyncs = () => hub.events.filter((e: any) => e.type === 'machine_resync').length
+    const before = resyncs()
+    await bounce(remote)
+    await eventually(() => resyncs() > before && hub.row().status === 'connected')
+    expect(hub.tunnel().opens).toBe(1)
+    expect(hub.tunnel().closes).toBe(0)
+  })
+
+  it('is not said to wait for the person while it redials after a drop', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
     await eventually(() => hub.row().status === 'connected')
     await remote.server.close()
     await eventually(() => hub.row().status === 'unreachable')
-    expect(hub.row().error).toContain('press Connect to try again')
+    expect(hub.row().error).toMatch(/; reconnecting$/)
+    expect(hub.links.get('m1')!.waitsForPerson).toBe(false)
+    await eventually(() => hub.links.get('m1')!.waitsForPerson)
+  })
+
+  it('stays down after the redials fail: the link says so, closes the forward and waits for Connect', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
+    await eventually(() => hub.row().status === 'connected')
+    await remote.server.close()
+    await eventually(() => hub.row().status === 'unreachable' && /press Connect to try again$/.test(hub.row().error ?? ''))
     await pause(WINDOW_MS)
     expect(hub.tunnel().opens).toBe(1)
     expect(hub.row().status).toBe('unreachable')
@@ -309,14 +345,14 @@ describe('a machine with Auto reconnect off (#1341)', () => {
     expect(hub.tunnel().opens).toBe(1)
   })
 
-  it('closes the ssh forward when its client drops, since nothing uses it before Connect', async () => {
+  it('closes the ssh forward once its client gave up redialling, since nothing uses it before Connect', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
     await eventually(() => hub.row().status === 'connected')
     expect(hub.tunnel().closes).toBe(0)
     await remote.server.close()
-    await eventually(() => hub.row().status === 'unreachable')
     await eventually(() => hub.tunnel().closes >= 1)
+    expect(hub.row().status).toBe('unreachable')
   })
 
   it('turning it off does not cancel the retries of an install or update that is running; the switch takes effect after', async () => {

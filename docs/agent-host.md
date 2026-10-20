@@ -2983,9 +2983,11 @@ later). One switch per linked machine, on by default; it replaces the connect mo
 doubling to 5 minutes), so an orchestrator working through it hears reports and cards as they happen.
 
 *Off* is for a laptop that is often closed or a server used once a week: the hub tries **once** when it starts. After a
-drop or a failed attempt it tries nothing more until the person presses Connect (`machines.reconnect`: Settings →
-Machines, or the machine's badge menu in the sidebar). `LinkedMachineConnection.retryLater` does nothing for it, the client
-does not redial the forward (`down` closes it), and the row says `press Connect to try again` where it says
+failed attempt, or a drop that the quick redials do not undo, it tries nothing more until the person presses Connect
+(`machines.reconnect`: Settings → Machines, or the machine's badge menu in the sidebar). The quick redials stay (owner
+decision): after a drop the client dials the same forward again a few times (`LINK_REDIALS`, about 6 s, no new ssh), so a blip
+or a host swapped in place is back with no Connect; only when they fail does the link give up, close the forward and wait.
+`LinkedMachineConnection.retryLater` does nothing for it, and the row says `press Connect to try again` where it says
 `reconnecting` for a machine with the switch on. The one thing it still does by itself is look again at the versions of a
 link held at `versions_differ` (every 60 s): it only reads the connection line, refreshes the row, and connects nothing
 (`readsOnly`). Turning the switch off while connected leaves the link up; turning it on while the link is away tries again

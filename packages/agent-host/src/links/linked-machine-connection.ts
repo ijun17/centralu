@@ -214,6 +214,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // Connecting is an attempt under way (the handshake and its few redials outlast `opening`); a link held at
     // versions_differ or updating waits for something Connect does not give
     if (this.status === 'connecting' || this.status === 'starting' || this.status === 'versions_differ' || this.status === 'updating') return false
+    if (this.redialing) return false
     return this.parked || !this.autoReconnect
   }
 
@@ -223,7 +224,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   get attemptUnderWay(): boolean {
     if (this.reachable || this.stopped) return false
-    return this.opening !== null || this.status === 'connecting' || this.status === 'starting'
+    return this.opening !== null || this.status === 'connecting' || this.status === 'starting' || this.redialing
+  }
+
+  /** The client is dialling the forward again after a drop, or shaking hands: it has not given up (`gaveUp`) */
+  private get redialing(): boolean {
+    return this.client !== null && this.client !== this.gaveUp
   }
 
   /** Resolves once no attempt is under way, or after `waitMs` (a minute): connecting took 2 to 4 s on a LAN, a host started there adds its start */
@@ -748,14 +754,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         terminal: (f) => this.deps.terminal({ ...f, terminalId: this.q.id(f.terminalId) }),
         down: (reason) => {
           if (this.client !== client) return
-          if (!this.autoReconnect) {
-            // Nothing dials again (#1341): the person's Connect opens a new client, and the lists are read again
-            client.close()
-            this.client = null
-            // Nothing will use the forward before the person's Connect, which opens it again
-            void this.tunnel.close().catch(() => {})
-          }
-          this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); ${this.nextStep()}`)
+          /*
+           * A short drop is dialled again at once, with the switch off too (#1341, owner decision): the client redials the
+           * same forward a few times (`LINK_REDIALS`, about 6 s, no ssh), and a blip or a host swapped in place is back
+           * within them. Only when they fail (`gaveUp`) does an off machine stay down until the person's Connect
+           */
+          this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); ${KEEPS_TRYING}`)
         },
         /*
          * A few redials of the same forward did not reach a host (#1143). A detached host that died leaves `ssh -N` up,
@@ -772,6 +776,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
             return
           }
           this.gaveUp = client
+          // Nothing will use the forward before the person's Connect, which opens it again (#1341)
           if (!this.autoReconnect) void this.tunnel.close().catch(() => {})
           this.setStatus('unreachable', `${this.name}'s host did not answer on the link (${reason}); ${this.autoReconnect ? 'asking the machine again' : WAITS_FOR_PERSON}`)
           this.retryLater()
@@ -920,7 +925,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /**
    * Asks the machine again after a delay. `backoff` (the default): the next step of the backoff, and nothing at all
-   * while Auto reconnect is off (#1341), where only the person's Connect tries again. `within`: part of an attempt that
+   * while Auto reconnect is off (#1341), where only the person's Connect tries again (after the client's quick redials,
+   * which an off machine keeps). `within`: part of an attempt that
    * is under way or of the person's own request (a refusal asked again at once, a Connect that met an opening), so it
    * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
    * reads the line and connects nothing (`readsOnly`)
