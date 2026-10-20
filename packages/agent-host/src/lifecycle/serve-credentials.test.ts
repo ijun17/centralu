@@ -23,6 +23,24 @@ describe('reading the full credentials', () => {
     expect(readFullCredentials('half', () => 'half', () => {})).toEqual([])
   })
 
+  it('takes only an entry of the shape the launcher lists and --revoke takes: an 8-hex id and a label', () => {
+    const v = verifierOf(HUB)
+    const file = JSON.stringify({
+      v: 2,
+      key: KEY,
+      full: [
+        { id: 'aaaaaaaa', verifier: v },
+        { id: 'zz', label: 'hand', verifier: v },
+        { id: 'AAAAAAAA', label: 'hand', verifier: v },
+        { id: 'aaaaaaaa', label: 'two words', verifier: v },
+        { id: 'aaaaaaaa', label: '', verifier: v },
+        { id: 'aaaaaaaa', label: 'x'.repeat(81), verifier: v },
+        { id: 'cccccccc', label: 'hub:laptop-0123abcd', verifier: v },
+      ],
+    })
+    expect(readFullCredentials('shapes', () => file).map((c) => c.id)).toEqual(['cccccccc'])
+  })
+
   it('reads again when the file is caught mid-replace, and names none when it stays unreadable', () => {
     let reads = 0
     const flaky = () => (++reads < 3 ? '' : JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] }))
@@ -86,6 +104,15 @@ describe('a centralu serve host takes as full only the credentials serve.json na
     expect((await hello(port, HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
     expect((await hello(port, KEY)).closed).toBe(4001)
     expect((await hello(port, limitedToken(KEY))).frames[0]).toMatchObject({ kind: 'hello_ok' })
+  })
+
+  it('keeps out an entry written by hand that nothing would list: no label, or an id --revoke does not take', async () => {
+    const { port, write } = await serveHost([{ id: 'aaaaaaaa', verifier: verifierOf(HUB), created: 1 }])
+    expect((await hello(port, HUB)).closed).toBe(4001)
+    write([{ id: 'zz', label: 'hand', verifier: verifierOf(HUB), created: 1 }])
+    expect((await hello(port, HUB)).closed).toBe(4001)
+    write([entry('aaaaaaaa', HUB)])
+    expect((await hello(port, HUB)).frames[0]).toMatchObject({ kind: 'hello_ok' })
   })
 
   it('reads the file at each hello: a pairing lets the next one in, a revocation keeps it out', async () => {

@@ -1224,7 +1224,10 @@ A host started with `centralu serve` on another machine is reached by the app th
   as the host runs, measured below in "The front door"), and the file's path in `CC_SERVE_STATE`. It derives what it
   hands out from the key (the limited credential, a bridge's, the proof of a probe) and takes as full only a hello whose
   credential's verifier is in the file, read again at each hello, so a pairing or a revocation applies at once. A hello
-  with the key itself is refused.
+  with the key itself is refused. The host takes exactly the entries the launcher lists and `--revoke` takes (an 8-hex
+  id and a label `--pair` takes, `isListedEntry` on both sides, one test holding the two rules equal): an entry written
+  into the file by hand with no label or another id opens nothing, since one that nobody could see or withdraw would
+  undo the listing below, and the launcher's next write leaves it out.
   - **Who gets a full credential.** Whoever runs `serve --connection --pair <label>`: one is made, printed once and
     kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>` at each link, so its own
     credential lives in its memory only, as the token did, and it needs no store change. The person's window on
