@@ -16,7 +16,7 @@ const S2 = sessionAddress(HOST, 's2')
 const APP = appAddress(HOST, 'p1', 'board')
 
 /** A clock and a scheduler that move only when a test moves them */
-function world() {
+function world(seen: { heartbeat?: number | null } = {}) {
   const store = new Store()
   const clock = { t: NOW }
   const timers: { at: number; fn: () => void; id: number }[] = []
@@ -35,8 +35,10 @@ function world() {
       if (behaviour.fail) throw behaviour.fail
     },
   }
+  const beat = { value: seen.heartbeat ?? null }
   const delivery = new MailDelivery(mail, store.mail, sessions, {
     now: () => clock.t,
+    heartbeat: { read: () => beat.value, write: (ms) => void (beat.value = ms) },
     schedule: (ms, fn) => {
       const id = nextId++
       timers.push({ at: clock.t + ms, fn, id })
@@ -61,7 +63,7 @@ function world() {
     clock.t = end
     await settle()
   }
-  return { store, mail, clock, states, delivered, notes, behaviour, delivery, advance, timers }
+  return { store, mail, clock, states, delivered, notes, behaviour, delivery, advance, timers, beat }
 }
 
 const settle = async () => {
@@ -454,5 +456,238 @@ describe('what a host that died left half done (§7.6.5)', () => {
     again.start()
     again.stop()
     expect(w.store.mail.heldReceipts()).toEqual([])
+  })
+})
+
+describe('a host that was off a long while (§7.9)', () => {
+  const MIN = 60_000
+  const asleep = (w: ReturnType<typeof world>, id: string) => w.states.set(id, { kind: 'ready', live: false, quiet: false })
+
+  it('keeps a heartbeat, so that the next start knows how long it was off', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(3 * MIN)
+    expect(w.beat.value).toBeGreaterThanOrEqual(NOW + 2 * MIN)
+    w.delivery.stop()
+    expect(w.beat.value).toBe(w.clock.t)
+  })
+
+  it('after a short stop it wakes a sleeping session for any mail, as ever', async () => {
+    const w = world({ heartbeat: NOW - 5 * MIN })
+    asleep(w, 's2')
+    const { thread } = assign(w)
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'just a note' })
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(toS2(w)).toHaveLength(1)
+  })
+
+  it('after a long stop a sleeping session is woken only for mail that needs it, and the rest waits for its next turn', async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    asleep(w, 's2')
+    const first = assign(w)
+    w.mail.read(first.thread.id, S2)
+    const note = w.mail.post(first.thread.id, S1, { kind: 'note', body: 'only a note' })
+    w.clock.t += 3_000
+    // Only a note came due while the host was off: nothing wakes it
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(5 * MIN)
+    expect(toS2(w)).toEqual([])
+    expect(w.store.mail.receiptsOf(note.message.id)[0]!.deliveredAt).toBeNull()
+
+    // Mail that came after the start is not held back: a question wakes it, and carries the note too once it is awake
+    w.mail.post(first.thread.id, S1, { kind: 'question', body: 'are you there?' })
+    await w.advance(3_000)
+    expect(toS2(w)).toHaveLength(1)
+    expect(toS2(w)[0]!.input.line).toContain('1 message in 1 thread')
+  })
+
+  it('after a long stop the mail that needs a sleeping session wakes it, with everything that came due for it in one wake', async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    asleep(w, 's2')
+    const { thread } = assign(w)
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'and a note' })
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(toS2(w)).toHaveLength(1)
+    // The note did not need it, and is not in the wake
+    expect(toS2(w)[0]!.input.line).toContain('1 message in 1 thread')
+  })
+
+  it('past ten sleeping sessions to wake nobody is woken: the person is asked, and answers wake them or leave them', async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    const ids = Array.from({ length: 12 }, (_, i) => `a${i}`)
+    for (const id of ids) {
+      asleep(w, id)
+      openBy(w.mail, { by: S1, kind: 'assign', subject: id, body: `work for ${id}`, assignee: sessionAddress(HOST, id) })
+    }
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(5 * MIN)
+    expect(w.delivered).toEqual([])
+    expect(w.delivery.crowdWaiting()).toBe(12)
+
+    await w.delivery.answerCrowd(false)
+    expect(w.delivery.crowdWaiting()).toBe(0)
+    await w.advance(10 * MIN)
+    expect(w.delivered).toEqual([])
+    // Something about one of them happens (the person types to it, say): it is no longer left
+    w.states.set('a3', { kind: 'ready', live: true, quiet: true })
+    w.delivery.poke('a3')
+    await settle()
+    expect(w.delivered.map((d) => d.sessionId)).toEqual(['a3'])
+  })
+
+  it('woken at the person’s word, the ones with the most pressing mail go first and two at a time', async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    const ids = Array.from({ length: 12 }, (_, i) => `a${i}`)
+    for (const id of ids) {
+      asleep(w, id)
+      openBy(w.mail, { by: S1, kind: 'assign', subject: id, body: 'plain', assignee: sessionAddress(HOST, id) })
+    }
+    // a7 has a question waiting, a9 the person's words
+    const q = openBy(w.mail, { by: S1, kind: 'assign', subject: 'q', body: 'x', assignee: sessionAddress(HOST, 'a7') })
+    w.mail.post(q.thread.id, S1, { kind: 'question', body: 'which?' })
+    const p = openBy(w.mail, { by: S1, kind: 'assign', subject: 'p', body: 'x', assignee: sessionAddress(HOST, 'a9') })
+    w.mail.post(p.thread.id, PERSON, { kind: 'note', body: 'please' })
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    const toSleepers = () => w.delivered.filter((d) => d.sessionId.startsWith('a'))
+    expect(toSleepers()).toEqual([])
+    expect(w.delivery.crowdWaiting()).toBe(12)
+
+    let running = 0
+    let most = 0
+    const order: string[] = []
+    let release!: () => void
+    w.behaviour.hold = new Promise<void>((r) => (release = r))
+    const woken = w.delivery.answerCrowd(true)
+    await settle()
+    // Two are in flight, no more, and the first of them is the one the person wrote to
+    running = toSleepers().length
+    most = running
+    expect(most).toBe(2)
+    expect(toSleepers()[0]!.sessionId).toBe('a9')
+    w.behaviour.hold = null
+    release()
+    await woken
+    order.push(...toSleepers().map((d) => d.sessionId))
+    expect(order.slice(0, 3)).toEqual(['a9', 'a7', expect.any(String)])
+    expect(new Set(order)).toEqual(new Set(ids))
+  })
+  /** Twelve sleeping sessions, each with an assign from before the host came back, and a crowd that waits for the person */
+  const crowded = async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    const ids = Array.from({ length: 12 }, (_, i) => `a${i}`)
+    for (const id of ids) {
+      asleep(w, id)
+      openBy(w.mail, { by: S1, kind: 'assign', subject: id, body: `work for ${id}`, assignee: sessionAddress(HOST, id) })
+    }
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(w.delivery.crowdWaiting()).toBe(12)
+    return w
+  }
+  const threadOf = (w: ReturnType<typeof world>, id: string) => w.store.mail.threadsOfParty(sessionAddress(HOST, id), 'assignee')[0]!
+
+  it('the person writing to a session in the crowd is heard by it, and it leaves the crowd; what others write is not', async () => {
+    const w = await crowded()
+    w.mail.post(threadOf(w, 'a4').id, S1, { kind: 'note', body: 'from the owner, since' })
+    w.mail.post(threadOf(w, 'a5').id, PERSON, { kind: 'note', body: 'please look at this' })
+    await w.advance(3_000)
+    expect(w.delivered.map((d) => d.sessionId).filter((id) => id.startsWith('a'))).toEqual(['a5'])
+    // Only the person’s word went, not the assign that came before the host did
+    expect(w.delivered[0]!.input.text).toContain('please look at this')
+    expect(w.delivered[0]!.input.text).not.toContain('work for a5')
+    expect(w.delivery.crowdWaiting()).toBe(11)
+  })
+
+  it('a session the person said to leave for its next turn still hears the person’s later words', async () => {
+    const w = await crowded()
+    await w.delivery.answerCrowd(false)
+    w.mail.post(threadOf(w, 'a2').id, PERSON, { kind: 'note', body: 'after all, now' })
+    await w.advance(3_000)
+    expect(w.delivered.map((d) => d.sessionId).filter((id) => id.startsWith('a'))).toEqual(['a2'])
+  })
+
+  it('a session that comes to rest or is used is not in the crowd any more', async () => {
+    const w = await crowded()
+    w.states.set('a6', { kind: 'ready', live: true, quiet: true })
+    w.delivery.poke('a6')
+    await settle()
+    expect(w.delivery.crowdWaiting()).toBe(11)
+    expect(w.delivered.map((d) => d.sessionId)).toEqual(['a6'])
+  })
+
+  it('does not rewrite the heartbeat while the crowd waits, so a restart asks again instead of waking them all', async () => {
+    const w = await crowded()
+    const before = w.beat.value
+    await w.advance(10 * MIN)
+    w.delivery.stop()
+    expect(w.beat.value).toBe(before)
+    expect(w.beat.value).toBeLessThan(NOW)
+  })
+
+  it('a host that was away without stopping (the computer asleep) is a long stop too, at the next sweep', async () => {
+    const w = world()
+    asleep(w, 's2')
+    const first = assign(w)
+    w.mail.read(first.thread.id, S2)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(3 * MIN)
+    // Eight hours pass with no sweep running, then a note comes due and the sweep wakes up
+    w.clock.t += 8 * 60 * MIN
+    const note = w.mail.post(first.thread.id, S1, { kind: 'note', body: 'only a note' })
+    w.clock.t += 3_000
+    await w.delivery.sweep()
+    expect(toS2(w)).toEqual([])
+    expect(w.store.mail.receiptsOf(note.message.id)[0]!.deliveredAt).toBeNull()
+
+    // A host that kept sweeping is not away: the same note wakes the sleeper
+    const awake = world()
+    asleep(awake, 's2')
+    const second = assign(awake)
+    awake.mail.read(second.thread.id, S2)
+    awake.delivery.start()
+    stop = () => { w.delivery.stop(); awake.delivery.stop() }
+    await awake.advance(3 * MIN)
+    awake.mail.post(second.thread.id, S1, { kind: 'note', body: 'only a note' })
+    await awake.advance(10_000)
+    expect(toS2(awake)).toHaveLength(1)
+  })
+
+  it('the ordinary sweep resumes sleeping sessions two at a time too', async () => {
+    const w = world()
+    const ids = Array.from({ length: 6 }, (_, i) => `a${i}`)
+    for (const id of ids) {
+      asleep(w, id)
+      openBy(w.mail, { by: S1, kind: 'assign', subject: id, body: 'x', assignee: sessionAddress(HOST, id) })
+    }
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    // The sweep start() makes finishes first, with nothing due yet
+    await settle()
+    w.clock.t += 3_000
+    let release!: () => void
+    w.behaviour.hold = new Promise<void>((r) => (release = r))
+    const swept = w.delivery.sweep()
+    await settle()
+    expect(w.delivered.filter((d) => d.sessionId.startsWith('a'))).toHaveLength(2)
+    w.behaviour.hold = null
+    release()
+    await swept
+    expect(new Set(w.delivered.map((d) => d.sessionId))).toEqual(new Set(ids))
   })
 })

@@ -404,7 +404,15 @@ const mail = new MailService(store.mail, {
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
-const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions())
+const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
+  // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions (§7.9). A setting the previous build never reads
+  heartbeat: {
+    read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
+    write: (ms) => {
+      if (store.mail.hasThreads()) store.settings.setAppSetting('mail.heartbeat', String(ms))
+    },
+  },
+})
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
 mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id) })

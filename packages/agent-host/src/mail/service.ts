@@ -14,6 +14,7 @@ import {
   type MessageRow,
   type ParticipantRole,
   type ParticipantRow,
+  type ReceiptRow,
   type ThreadOrigin,
   type ThreadOutcome,
   type ThreadPatch,
@@ -174,6 +175,8 @@ export type DrainResult = {
   wake: boolean
   /** Whether anything in it is urgent or the person's: it does not wait out the 30 s between wakes (§7.9) */
   immediate: boolean
+  /** Whether anything in it is a question: it goes before the rest when many sessions are woken at once (§7.9) */
+  asks: boolean
   /** The line the conversation keeps of the delivery (§9.2): how many, in how many threads, from whom, in Centralu's words */
   line: string
 }
@@ -755,16 +758,18 @@ export class MailService {
    * (§7.6.5: an `assign` the CLI took just before a crash would start the same work twice). `pointed` are those the text only
    * tells of. With `again`, mail that was delivered but is still unread is pointed at once more (§7.6.6), never inline
    */
-  drain(recipient: string, opts: { again?: boolean } = {}): DrainResult {
+  drain(recipient: string, opts: { again?: boolean; skip?: (message: MessageRow, receipt: ReceiptRow) => boolean } = {}): DrainResult {
     this.party(recipient)
     const items: MailFrameItem[] = []
     let wake = false
     let immediate = false
+    let asks = false
     const relations = new Set<string>()
     const threads = new Set<string>()
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
       if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
       if (this.policy.mayWrite(message.sender, recipient, thread) !== null || this.policy.cannotRead?.(recipient)) continue
+      if (opts.skip?.(message, receipt)) continue
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
       // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
@@ -772,6 +777,7 @@ export class MailService {
       const pointerOnly = down && receipt.deliveredAt !== null
       if (wakes(sender ?? 'session', message)) wake = true
       if (message.urgent || sender === 'person') immediate = true
+      if (message.kind === 'question') asks = true
       relations.add(relationWord(recipient, message.sender, thread))
       threads.add(thread.id)
       const about = aboutOf(message.facts)
@@ -789,7 +795,7 @@ export class MailService {
       })
     }
     const frame = buildMailFrame(items)
-    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations) }
+    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations) }
   }
 
   /**

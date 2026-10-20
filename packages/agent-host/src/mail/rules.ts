@@ -124,6 +124,28 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
   return true
 }
 
+/**
+ * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, work given or
+ * asked in its own threads (an assign, a question, an answer), a report its owner is waiting on, and an app's `needsOwner` post. The rest waits for
+ * the session's next turn
+ */
+export function needsReceiver(sender: SenderClass, m: { kind: MessageKind; needsOwner: boolean }): boolean {
+  // The person's words are never the kind that can wait out a stop: they decide
+  if (sender === 'person') return true
+  switch (m.kind) {
+    case 'assign':
+    case 'question':
+    case 'answer':
+      return true
+    case 'report':
+      return true
+    case 'notice':
+      return sender === 'app' && m.needsOwner
+    default:
+      return false
+  }
+}
+
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
 export const DEBOUNCE_MS = 2_000
 

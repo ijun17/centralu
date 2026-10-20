@@ -1,6 +1,7 @@
 import { errorMessage } from '@cc/protocol'
-import type { MailRecords } from '../dev-services/store/mail.js'
-import { parseAddress } from './address.js'
+import type { MailRecords, MessageRow, ReceiptRow } from '../dev-services/store/mail.js'
+import { PERSON, parseAddress } from './address.js'
+import { needsReceiver } from './rules.js'
 import type { MailService } from './service.js'
 
 /**
@@ -70,14 +71,23 @@ export type MailDeliveryOptions = {
   maxRetryMs?: number
   /** After this many failed tries mail is held for the person (Inbox: Retry) */
   maxAttempts?: number
+  /** When the delivery last ran, kept by the host: how long it was off tells how to start (§7.9) */
+  heartbeat?: { read(): number | null; write(ms: number): void }
+  /** A host that was off longer than this wakes a sleeping session only for mail that needs it (30 minutes) */
+  catchUpAfterMs?: number
+  /** More sleeping sessions than this to wake after such a stop, and the person is asked once */
+  crowdOver?: number
+  /** Sleeping sessions resumed at once, after such a stop */
+  resumeAtOnce?: number
 }
 
-const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6 }
+const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2 }
 
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat'>>
+  private readonly heartbeat: MailDeliveryOptions['heartbeat']
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
   private readonly inFlight = new Set<string>()
   private readonly again = new Set<string>()
@@ -85,6 +95,19 @@ export class MailDelivery {
   private readonly timers = new Map<string, () => void>()
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
+  /**
+   * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A sleeping session is then woken only for mail that
+   * needs it, among what came due before; the rest waits for its next turn. Null in a host that was running a moment ago
+   */
+  private cutoff: number | null = null
+  /** The first sweep after such a stop is the catch-up */
+  private catchUpPending = false
+  /** When the sweep last ran: a gap longer than a stop's means the host was away without stopping */
+  private lastSweepAt: number | null = null
+  /** The sleeping sessions that would be woken and are too many to wake without asking (§7.9): the Inbox asks once */
+  private crowd: string[] | null = null
+  /** Sessions the person said to leave for their next turn: not woken until something about them happens */
+  private readonly left = new Set<string>()
   private stopListening: (() => void) | null = null
   private stopSweep: (() => void) | null = null
   private running = false
@@ -103,7 +126,8 @@ export class MailDelivery {
         t.unref()
         return () => clearTimeout(t)
       })
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule')) }
+    this.heartbeat = opts.heartbeat
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat')) }
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -111,6 +135,11 @@ export class MailDelivery {
     if (this.running) return
     this.running = true
     this.sayWhatWasLeftHalfDone()
+    const last = this.heartbeat?.read() ?? null
+    if (last !== null && this.now() - last > this.o.catchUpAfterMs) {
+      this.cutoff = this.now()
+      this.catchUpPending = true
+    }
     this.stopListening = this.service.onChange((c) => {
       for (const r of c.recipients) this.look(r)
     })
@@ -126,6 +155,8 @@ export class MailDelivery {
   }
 
   stop(): void {
+    // While the person has not answered for the crowd, the host is still as it was when it started: a restart asks again
+    if (!this.crowd) this.heartbeat?.write(this.now())
     this.running = false
     this.stopListening?.()
     this.stopSweep?.()
@@ -136,7 +167,14 @@ export class MailDelivery {
   /** Something about a session changed that may let its mail go: it came to rest, a card was answered, a limit lifted, it was restored */
   poke(sessionId: string): void {
     if (!this.running) return
-    this.look(this.service.sessionAddress(sessionId))
+    const address = this.service.sessionAddress(sessionId)
+    // Something happened to it (the person is using it, say): it is no longer one to ask about, nor one to leave
+    this.left.delete(address)
+    if (this.crowd?.includes(address)) {
+      this.crowd = this.crowd.filter((r) => r !== address)
+      if (this.crowd.length === 0) this.crowd = null
+    }
+    this.look(address)
   }
 
   /**
@@ -150,9 +188,90 @@ export class MailDelivery {
     } catch (e) {
       console.error(`[mail] retention failed; it runs again at the next sweep: ${errorMessage(e)}`)
     }
+    const now = this.now()
+    // The host itself may have been away without stopping (the computer asleep): the same rule as after a stop
+    if (this.lastSweepAt !== null && now - this.lastSweepAt > this.o.catchUpAfterMs) {
+      this.cutoff = now
+      this.catchUpPending = true
+    }
+    this.lastSweepAt = now
     this.moveOnWorkOfGoneSessions()
-    await Promise.all(this.records.recipientsWithMail().map((r) => this.process(r)))
+    const recipients = this.records.recipientsWithMail()
+    if (this.catchUpPending) {
+      this.catchUpPending = false
+      await this.catchUp(recipients)
+    } else await this.processAll(recipients)
+    // After the catch-up, so a host that stops while the crowd waits is read as it was when it started (a restart asks again)
+    if (!this.crowd) this.heartbeat?.write(now)
   }
+
+  /** Every mailbox once; the sleeping sessions this wakes are resumed two at a time, as in the catch-up (§7.9) */
+  private async processAll(recipients: string[]): Promise<void> {
+    const asleep: string[] = []
+    const rest: string[] = []
+    for (const recipient of recipients) {
+      const party = parseAddress(recipient)
+      const state = party?.kind === 'session' ? this.sessions.receiver(party.sessionId) : null
+      if (state?.kind === 'ready' && !state.live) asleep.push(recipient)
+      else rest.push(recipient)
+    }
+    await Promise.all([...rest.map((r) => this.process(r)), this.wakeInOrder(asleep)])
+  }
+
+  /**
+   * The first sweep after the host was off a long while (§7.9). Everything that came due while it was down is one batched wake
+   * per receiver, as always. Sessions that are awake take their mail at once. A sleeping one is woken only for mail that needs it,
+   * the person's threads first, then the ones with a question waiting, then the rest, two at a time. Past `crowdOver` of them
+   * nobody is woken: the Inbox asks once (`crowdWaiting`, `answerCrowd`)
+   */
+  private async catchUp(recipients: string[]): Promise<void> {
+    const asleep: { recipient: string; rank: number }[] = []
+    const awake: string[] = []
+    for (const recipient of recipients) {
+      const party = parseAddress(recipient)
+      if (party?.kind !== 'session') continue
+      const state = this.sessions.receiver(party.sessionId)
+      if (state.kind === 'ready' && !state.live) {
+        const d = this.service.drain(recipient, { skip: this.skipOld })
+        if (d.messageIds.length > 0) asleep.push({ recipient, rank: d.immediate ? 0 : d.asks ? 1 : 2 })
+      } else awake.push(recipient)
+    }
+    asleep.sort((a, b) => a.rank - b.rank)
+    if (asleep.length > this.o.crowdOver) this.crowd = asleep.map((a) => a.recipient)
+    else await this.wakeInOrder(asleep.map((a) => a.recipient))
+    await Promise.all(awake.map((r) => this.process(r)))
+  }
+
+  private async wakeInOrder(recipients: string[]): Promise<void> {
+    for (let i = 0; i < recipients.length; i += this.o.resumeAtOnce) {
+      await Promise.all(recipients.slice(i, i + this.o.resumeAtOnce).map((r) => this.process(r)))
+    }
+  }
+
+  /** How many sleeping sessions are waiting for the person to say whether to wake them (§7.9); zero when nobody is asking */
+  crowdWaiting(): number {
+    return this.crowd?.length ?? 0
+  }
+
+  /** The person's answer: wake them (two at a time, the ones with the most pressing mail first), or leave them for their next turn */
+  async answerCrowd(wake: boolean): Promise<void> {
+    const crowd = this.crowd
+    this.crowd = null
+    if (!crowd) return
+    if (!wake) {
+      for (const r of crowd) this.left.add(r)
+      return
+    }
+    await this.wakeInOrder(crowd)
+  }
+
+  /** For a session in the crowd or left for its next turn: everything but the person's words written since the host came back */
+  private readonly skipUnlessPersonSince = (message: MessageRow, receipt: ReceiptRow): boolean =>
+    message.sender !== PERSON || (this.cutoff !== null && receipt.dueAt <= this.cutoff)
+
+  /** What a host that was off a long while does not wake a sleeping session for (`cutoff`) */
+  private readonly skipOld = (message: MessageRow, receipt: ReceiptRow): boolean =>
+    this.cutoff !== null && receipt.dueAt <= this.cutoff && !needsReceiver(parseAddress(message.sender)?.kind ?? 'session', message)
 
   /**
    * A session that left the host's list without telling the mailbox (the host stopped between the trash move and `sessionGone`,
@@ -244,13 +363,16 @@ export class MailDelivery {
     if (!this.running) return
     const party = parseAddress(recipient)
     if (party?.kind !== 'session') return
+    // In the crowd the person has not answered for, or told to be left for its next turn: not woken by what came before that, but
+    // by the person's own words since (they wrote to it)
+    const waiting = !!this.crowd?.includes(recipient) || this.left.has(recipient)
     if (this.inFlight.has(recipient)) {
       this.again.add(recipient)
       return
     }
     this.inFlight.add(recipient)
     try {
-      await this.deliverOnce(recipient, party.sessionId)
+      await this.deliverOnce(recipient, party.sessionId, waiting)
     } catch (e) {
       console.error(`[mail] ${recipient}: delivery failed (${errorMessage(e)})`)
     } finally {
@@ -259,7 +381,7 @@ export class MailDelivery {
     }
   }
 
-  private async deliverOnce(recipient: string, sessionId: string): Promise<void> {
+  private async deliverOnce(recipient: string, sessionId: string, waiting: boolean): Promise<void> {
     const state = this.sessions.receiver(sessionId)
     // Held, not lost: a session that comes to rest, answers its card, or is restored pokes it again
     if (state.kind !== 'ready') return
@@ -270,7 +392,8 @@ export class MailDelivery {
      */
     const now = this.now()
     const plan = this.records.transaction(() => {
-      const drained = this.service.drain(recipient)
+      const skip = waiting ? this.skipUnlessPersonSince : state.live ? undefined : this.skipOld
+      const drained = this.service.drain(recipient, skip ? { skip } : {})
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
       // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9)
       if (drained.wake && !drained.immediate) {
@@ -308,6 +431,12 @@ export class MailDelivery {
     delivered.at = deliveredAt
     this.records.transaction(() => this.records.markDelivered(recipient, drained.messageIds, drained.inline, deliveredAt))
     if (!quiet) this.lastWake.set(recipient, this.now())
+    // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
+    if (waiting) {
+      this.left.delete(recipient)
+      this.crowd = this.crowd?.filter((r) => r !== recipient) ?? null
+      if (this.crowd?.length === 0) this.crowd = null
+    }
   }
 
   /** Looks at the mailbox again after `ms` */

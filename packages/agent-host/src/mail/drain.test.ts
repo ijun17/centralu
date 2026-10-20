@@ -25,7 +25,7 @@ function setup(policy?: MailPolicy) {
 }
 
 /** What a drain says when there is nothing to say */
-const NOTHING = { text: '', messageIds: [], inline: [], pointed: [], wake: false, immediate: false, line: '' }
+const NOTHING = { text: '', messageIds: [], inline: [], pointed: [], wake: false, immediate: false, asks: false, line: '' }
 
 describe('what a drain says (§7.3, §7.5)', () => {
   it('words that flow down (an assign from the owner) are quoted after the frame; the subject never is', () => {
