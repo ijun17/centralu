@@ -374,6 +374,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.send': HUB,
   'host.hubAuto': HUB,
   'host.setHubAuto': HUB,
+  'host.credentials': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,

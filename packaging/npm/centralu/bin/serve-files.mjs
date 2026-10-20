@@ -158,7 +158,7 @@ function parseServeState(raw) {
       if (typeof v.key !== 'string' || v.key.length < 32) return null
       // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
       // the next write leaves it out too, and the host refuses it meanwhile
-      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0 }))
+      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(e.replaced === true ? { replaced: true } : {}) }))
       const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
       return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
     }
@@ -392,9 +392,14 @@ export function pairServe(dataDir, label, platform = process.platform, now = Dat
     /*
      * A hub's or the window's pairing removes the `legacy` one (#1405 review): whoever held it was a hub or the window
      * of before #1405, each of which pairs now, so on a machine no hub links to it does not outlive the window's next
-     * start. Any other label leaves it: a program's own `--pair` does not cut off a hub that has not paired yet
+     * start. Any other label leaves it: a program's own `--pair` does not cut off a hub that has not paired yet. One that
+     * takes the place of an earlier credential of its label is marked `replaced`, which a hub's machine row shows: a
+     * pairing under a label already there (a hub's own, `window`) is a change someone sees, not a silent swap
      */
-    full: [...s.full.filter((e) => e.label !== label && !(takesLegacyPlace(label) && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
+    full: [
+      ...s.full.filter((e) => e.label !== label && !(takesLegacyPlace(label) && e.label === LEGACY_LABEL)),
+      { id, label, verifier: verifierOf(token), created: now, ...(s.full.some((e) => e.label === label) ? { replaced: true } : {}) },
+    ],
   }), platform)
   return { token, id, state }
 }

@@ -265,6 +265,14 @@ export const hostParams = {
    */
   'host.setHubAuto': z.object({ allowed: z.boolean() }),
   /**
+   * The full credentials of this host's `centralu serve` folder (#1405), as `serve --connection` lists them: who each was
+   * made for, when, and whether its pairing took the place of an earlier one of its label. Never their values. The hub
+   * reads it through the link at each connect and every 30 seconds, so a pairing made while the link is up shows on
+   * the machine row. Null on a host `centralu serve` did not start. Asked by the hub directly, never routed; an older
+   * host answers "Unknown method", and the hub keeps what the connection line said
+   */
+  'host.credentials': z.object({}),
+  /**
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
    * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an
    * older machine's lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that turn

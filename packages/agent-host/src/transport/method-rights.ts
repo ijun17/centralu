@@ -364,6 +364,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'host.recall': 'link',
   'host.hubAuto': 'link',
   'host.setHubAuto': 'link',
+  'host.credentials': 'link',
   'host.lastAnswer': 'link',
   'host.send': 'link',
   /** What `kill` does anyway; `centralu serve --stop` asks for it */

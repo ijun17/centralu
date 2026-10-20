@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { readCredentialFile } from './lifecycle/serve-credentials.js'
+import { readCredentialFile, readListedCredentials } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -764,6 +764,8 @@ const router: Router = new Router({
     settleDeletedProjects: () => userAppAdoption.settle(),
     // And what a delete may do to the folder, for the dialog that asks (#1301)
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
+    // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
+    serveCredentials: () => (launch.serveState ? readListedCredentials(launch.serveState, (f) => readFileSync(f, 'utf8')) : null),
     themes,
     terminals,
     updates,

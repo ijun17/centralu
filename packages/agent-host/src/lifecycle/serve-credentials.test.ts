@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -31,6 +31,21 @@ describe('reading the full credentials', () => {
       ],
     })
     expect(readFullCredentials('shapes', () => file).map((c) => c.id)).toEqual(['cccccccc'])
+  })
+
+  it('lists each credential the host takes as a hub row shows it, never its verifier, and none of a file it cannot read', () => {
+    const file = JSON.stringify({
+      v: 2,
+      key: KEY,
+      full: [{ ...entry('aaaaaaaa', HUB), replaced: true }, { id: 'zz', label: 'hand', verifier: verifierOf(HUB) }, entry('bbbbbbbb', WINDOW)],
+    })
+    expect(readListedCredentials('l', () => file)).toEqual([
+      { id: 'aaaaaaaa', label: 'aaaaaaaa', created: 1, replaced: true },
+      { id: 'bbbbbbbb', label: 'bbbbbbbb', created: 1, replaced: false },
+    ])
+    expect(JSON.stringify(readListedCredentials('l', () => file))).not.toContain(verifierOf(HUB))
+    expect(readListedCredentials('l', () => 'half')).toBeNull()
+    expect(readListedCredentials('l', () => JSON.stringify({ v: 1, token: HUB }))).toBeNull()
   })
 
   it('reads again when the file is caught mid-replace, and names none when it stays unreadable', () => {

@@ -108,6 +108,8 @@ export type LinkDeps = {
   versionsRetryMs?: number
   /** For tests: how long a host stays up before the backoff starts over (60 s when absent, #1143) */
   stableMs?: number
+  /** How often a connected link reads the machine's full credentials (`host.credentials`, #1405); 30 s */
+  credentialsMs?: number
   /** For tests: at most `max` hosts the link starts by itself within `windowMs` (3 in 10 minutes when absent, #1143) */
   restarts?: { max: number; windowMs: number }
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */

@@ -28,7 +28,8 @@ export function serveFolder({ env, home, cliPath, platform = process.platform })
  * The credentials (#1405): `paired` (`--pair`, `{ token, id }`) is a full credential just made for whoever asked, and
  * the only one this ever prints; without it the line carries the limited credential, which reads and does the everyday
  * things. An installed host from before verifiers knows one token: `--pair` hands out that one (`legacyHostTokenOf`).
- * `others` names the full credentials the folder holds besides the one just paired, never their values.
+ * `others` names the full credentials the folder holds besides the one just paired, never their values, each marked
+ * `replaced` when its pairing took the place of an earlier one of its label.
  */
 export async function describe({ env, dataDir, state, entry, version, paired = null }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -48,7 +49,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
     port,
     ...(paired ? { token: paired.token, ...(paired.id ? { credential: paired.id } : {}) } : {}),
     ...(verifiers ? { limited: state.token } : {}),
-    others: state.full.filter((e) => e.id !== paired?.id).map(({ id, label, created }) => ({ id, label, created })),
+    others: state.full.filter((e) => e.id !== paired?.id).map(({ id, label, created, replaced }) => ({ id, label, created, ...(replaced ? { replaced: true } : {}) })),
     version: (probe.running ? probe.version : undefined) ?? version,
     protocolVersion,
     dataDir,

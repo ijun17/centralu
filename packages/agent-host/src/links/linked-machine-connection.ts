@@ -1,4 +1,4 @@
-import { isObj } from '../json-value.js'
+import { asObj, isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
   HostHandover,
@@ -17,7 +17,7 @@ import { nodeFloor } from './install.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import { shimNames, StartedNotServing, type ConnectionLine, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, shimNames, StartedNotServing, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
 import { parseHold, readHoldCommand, type SwapHold } from './swap-hold.js'
@@ -79,6 +79,11 @@ const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
 const KEEPS_TRYING = 'reconnecting'
 const WAITS_FOR_PERSON = 'press Connect to try again'
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
+/** How often a connected link reads the machine's full credentials (`host.credentials`, #1405) */
+const CREDENTIALS_MS = 30_000
+/** How many of a machine's other full credentials its row lists; the rest are counted (`otherCredentialsMore`) */
+const OTHER_CREDENTIALS_SHOWN = 32
+
 /** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
 const ATTEMPT_WAIT_MS = 60_000
 /**
@@ -107,6 +112,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected endpoint: Endpoint | null = null
   /** The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said */
   protected revokedHere = new Set<string>()
+  /**
+   * The machine's full credentials as this link last read them through `host.credentials` (#1405), the hub's own among
+   * them; null until read, and on a machine that does not answer it (the connection line's `others` stand then)
+   */
+  private credentials: RemoteCredential[] | null = null
+  /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
+  protected readCredentials: (() => Promise<void>) | null = null
+  private credentialsTimer: ReturnType<typeof setInterval> | undefined
   protected client: RemoteClient | null = null
   /** The client when it stopped redialling (`gaveUp`, #1143) and is waiting, idle, for the next opening */
   private gaveUp: RemoteClient | null = null
@@ -394,13 +407,57 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       autoReconnect: this.autoReconnect,
       updateWaits: true,
       connect: this.autoReconnect ? 'at_start' : 'when_needed',
-      /*
-       * The machine's other full credentials, as the connection line of this link named them (#1405), less any this hub
-       * withdrew since. A snapshot from when the link opened: a pairing there later shows at the next link. None while
-       * not connected, so a list from an earlier link is not taken for the present one
-       */
-      otherCredentials: this.status === 'connected' && this.endpoint?.line.others ? this.endpoint.line.others.filter((c) => !this.revokedHere.has(c.id)) : null,
+      ...this.otherCredentials(),
     }
+  }
+
+  /**
+   * The machine's other full credentials for its row (#1405): as `host.credentials` last said, else as the connection
+   * line of this link named them, less this hub's own and any it withdrew since. None while not connected, so a list
+   * from an earlier link is not taken for the present one. Each is marked when it carries this hub's own label, and the
+   * row says when this hub's own is gone from the list (something paired under its label, or withdrew it)
+   */
+  private otherCredentials(): Pick<MachineInfo, 'otherCredentials' | 'otherCredentialsMore' | 'ownCredentialGone'> {
+    const line = this.endpoint?.line
+    const all = this.credentials ?? line?.others ?? null
+    if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false }
+    const others = all.filter((c) => c.id !== line.credential && !this.revokedHere.has(c.id))
+    const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map((c) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
+    const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => c.id === line.credential)
+    return { otherCredentials: shown, otherCredentialsMore: others.length - shown.length, ownCredentialGone: ownGone }
+  }
+
+  /**
+   * Reads the machine's full credentials through `client` now and every `credentialsMs` while it is this link's and
+   * connected (#1405, `host.credentials`): a pairing made there while the link is up shows on the row within that, not
+   * only at the next link. A machine that does not know the method is not asked again on this link
+   */
+  private watchCredentials(client: RemoteClient): void {
+    clearInterval(this.credentialsTimer)
+    this.credentials = null
+    const stop = () => {
+      clearInterval(this.credentialsTimer)
+      if (this.readCredentials === read) this.readCredentials = null
+    }
+    const read = async (): Promise<void> => {
+      if (this.client !== client || !client.connected) return stop()
+      try {
+        const r = asObj(await client.call('host.credentials', {}))
+        if (this.client !== client) return
+        const listed = credentialsOf(r.credentials)
+        if (listed === null) return stop()
+        const before = JSON.stringify(this.otherCredentials())
+        this.credentials = listed
+        if (JSON.stringify(this.otherCredentials()) !== before) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Unknown method: host.credentials')) return stop()
+        this.deps.log?.(`[links] ${this.name}: could not read its full credentials: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    this.readCredentials = read
+    void read()
+    this.credentialsTimer = setInterval(() => void read(), this.deps.credentialsMs ?? CREDENTIALS_MS)
+    this.credentialsTimer.unref?.()
   }
 
   // ── The reverse direction (#550) ──────────────────────────────────────────────────────────
@@ -1026,6 +1083,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     void this.offerAsks(client)
     // And when agents compact (#1376)
     void this.offerAutoCompact(client)
+    // Who else holds full access there, kept current while the link is up (#1405)
+    this.watchCredentials(client)
     /*
      * The UI re-reads this machine's sessions and projects, and wakes the ones that were live
      * before and are not now (a remote host that restarted without a keeper). Sent on every

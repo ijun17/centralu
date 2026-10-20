@@ -22,6 +22,8 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   autoReconnect: true,
   connect: 'at_start',
   otherCredentials: null,
+  otherCredentialsMore: 0,
+  ownCredentialGone: false,
   autostart: null,
   elevated: null,
   asks: null,

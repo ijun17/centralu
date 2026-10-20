@@ -96,6 +96,8 @@ export class MachinesMock {
         updateWaits: true,
         connect: 'at_start',
         otherCredentials: null,
+        otherCredentialsMore: 0,
+        ownCredentialGone: false,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })

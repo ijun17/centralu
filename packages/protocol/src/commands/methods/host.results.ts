@@ -54,6 +54,12 @@ export const hostResults = {
   'host.recall': z.array(HostRecallHit),
   'host.hubAuto': z.object({ allowed: z.boolean() }),
   'host.setHubAuto': z.object({ allowed: z.boolean() }),
+  'host.credentials': z.object({
+    credentials: z
+      .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), replaced: z.boolean().catch(false).default(false) }))
+      .max(1000)
+      .nullable(),
+  }),
   'host.lastAnswer': HostLastAnswerResult,
   'host.send': z.object({ ok: z.literal(true) }),
   'host.stop': z.union([

@@ -1494,7 +1494,14 @@ A host started with `centralu serve` on another machine is reached by the app th
     holds besides the hub's own, by the label its asker gave (shown quoted, never checked) and its date, with Revoke,
     which runs `serve --revoke` there over the machine's ssh without opening its link (`machines.revokeCredential`; the
     hub's own is refused, since its next link would only make it again). The list is the one the machine named when the
-    link opened, shown while connected, its labels cleaned to one line: a pairing there later shows at the next link. It can also read the key. That
+    link opened, then what the machine's host says through the link (`host.credentials`, read from `serve.json`) at each
+    connect and every 30 seconds: a pairing there while the link is up shows within that. It is shown while connected,
+    its labels cleaned to one line. A pairing under a label already there replaces that credential, as the hub's own
+    re-pairing at each link does, and is marked `replaced` in the file and on the row ("which replaced an earlier one of
+    that name"), so `--pair window` on a machine whose window never paired, or a second pairing under it, is a change
+    the person sees. One under this hub's own label that this hub did not make says so ("under this computer's own name
+    but not made by it"), and the row says when this hub's own is gone from the list. It lists 32 and counts the rest
+    ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
     that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until

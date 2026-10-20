@@ -39,4 +39,33 @@ export function machineCredentialsTests(): void {
     await page.getByTestId('machine-credential-revoke-aaaa1111').click()
     await expect(list).toHaveCount(0)
   })
+
+  test("a re-pairing, one under this computer's own name, its own going and a long list are each said on the row", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-machines').click()
+    const open = page.getByTestId('machines-add-open')
+    if (await open.isVisible()) await open.click()
+    await page.getByTestId('machines-add-name').fill('Box')
+    await page.getByTestId('machines-add-target').fill('me@box')
+    await page.getByTestId('machines-add-confirm').click()
+    await expect(page.getByTestId('machine-row-box')).toBeVisible()
+    await page.evaluate(() => {
+      const mock = (window as any).__mock
+      const row = mock.machinesList.find((m: { id: string }) => m.id === 'box')
+      row.otherCredentials = [
+        { id: 'aaaa1111', label: 'window', created: Date.UTC(2026, 9, 20), replaced: true, hubsName: false },
+        { id: 'bbbb2222', label: 'hub:hub-mac-0123abcd', created: Date.UTC(2026, 9, 21), replaced: true, hubsName: true },
+      ]
+      row.otherCredentialsMore = 3
+      row.ownCredentialGone = true
+      mock.emit({ type: 'machine_status', machine: { ...row } })
+    })
+    const list = page.getByTestId('machine-credentials-box')
+    await expect(list).toContainText('5 others also have full access to this machine')
+    await expect(page.getByTestId('machine-credential-aaaa1111')).toContainText('which replaced an earlier one of that name')
+    await expect(page.getByTestId('machine-credential-bbbb2222')).toContainText('under this computer’s own name but not made by it')
+    await expect(page.getByTestId('machine-credentials-more-box')).toContainText('And 3 more')
+    await expect(page.getByTestId('machine-own-credential-gone-box')).toContainText("This computer's own access there was replaced or withdrawn")
+  })
 }

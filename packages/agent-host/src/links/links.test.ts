@@ -16,6 +16,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
+import type { ListedCredential } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -76,6 +77,8 @@ async function remoteHost(
     updateResume?: UpdateResumeFolder
     /** A host from before #1618: its hello says nothing of the turns it continued, and it continues none */
     before1618?: boolean
+    /** A `centralu serve` host's full credentials, as `host.credentials` answers them (#1405) */
+    credentials?: () => ListedCredential[] | null
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
@@ -83,7 +86,7 @@ async function remoteHost(
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? [], o.onCall),
+    onRpc: without(createRpcHandler(mgr, adapters, { ...(o.activity ? { activity: o.activity } : {}), ...(o.credentials ? { serveCredentials: o.credentials } : {}) }), o.without ?? [], o.onCall),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
@@ -3699,7 +3702,7 @@ describe('machines.revokeCredential (#1405)', () => {
       return { code: revoked ? 0 : 1, stderr: '', stdout: `${JSON.stringify({ v: 1, revoked, id })}\n` }
     }
     // Every line names both, as a line read before a revoke lands would: the row must not take it back
-    const others = () => ['aaaa1111', 'bbbb2222'].map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5 }))
+    const others = () => ['aaaa1111', 'bbbb2222'].map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5, replaced: false }))
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { credential: 'cccc3333', others: others() })), { exec })
     const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
     await eventually(() => status(hub) === 'connected')
@@ -3709,15 +3712,15 @@ describe('machines.revokeCredential (#1405)', () => {
   it("lists the machine's other full credentials on its row, from its connection line", async () => {
     const { hub } = await setup()
     expect(hub.links.list()[0]!.otherCredentials).toEqual([
-      { id: 'aaaa1111', label: 'hub:studio', created: 5 },
-      { id: 'bbbb2222', label: 'agent-script', created: 5 },
+      { id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false, hubsName: false },
+      { id: 'bbbb2222', label: 'agent-script', created: 5, replaced: false, hubsName: false },
     ])
   })
 
   it('withdraws one there over ssh, and the row and the event follow', async () => {
     const { hub, u, runs } = await setup()
     const row = await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
-    expect(row.otherCredentials).toEqual([{ id: 'aaaa1111', label: 'hub:studio', created: 5 }])
+    expect(row.otherCredentials).toEqual([{ id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false, hubsName: false }])
     expect(runs).toEqual(['revoke bbbb2222'])
     await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.otherCredentials?.length === 1))
     // The link was never dropped for it
@@ -3745,6 +3748,61 @@ describe('machines.revokeCredential (#1405)', () => {
     // Asked again, there is none: answered, not an error
     await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
     expect(runs).toEqual(['revoke bbbb2222', 'revoke bbbb2222'])
+  })
+
+  /** A serve machine whose credentials change while the link is up, read every few milliseconds here (every 30 s in use) */
+  async function serveMachine(start: ListedCredential[], o: { without?: string[] } = {}) {
+    let listed = start
+    const remote = await remoteHost(0, new Store(), { credentials: () => listed, ...(o.without ? { without: o.without } : {}) })
+    const line = () => lineFor(remote.port, { credential: 'cccc3333', pairedAs: 'hub:hub-mac-0123abcd', others: [] })
+    const hub = await hubHost(line, new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected')
+    return { hub, set: (next: ListedCredential[]) => (listed = next) }
+  }
+  const cred = (id: string, label: string, replaced = false): ListedCredential => ({ id, label, created: 7, replaced })
+  const own = cred('cccc3333', 'hub:hub-mac-0123abcd', true)
+
+  it('shows a pairing made there while the link is up, without waiting for the next link', async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([])
+    // Something of that user ran `serve --connection --pair window` there, on a machine whose window never paired
+    set([own, cred('dddd4444', 'window')])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'dddd4444', label: 'window', created: 7, replaced: false, hubsName: false }])
+    // Paired again under the same label: the row says it replaced the earlier one
+    set([own, cred('eeee5555', 'window', true)])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.[0]?.id === 'eeee5555')
+    expect(hub.links.list()[0]!.otherCredentials?.[0]).toMatchObject({ label: 'window', replaced: true })
+    expect(status(hub)).toBe('connected')
+  })
+
+  it("marks a credential under this hub's own name that it did not make, and says when its own is gone", async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    // `--pair <this hub's label>` there replaced this hub's own: a credential that would otherwise read as the hub's
+    set([cred('ffff6666', 'hub:hub-mac-0123abcd', true)])
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'ffff6666', label: 'hub:hub-mac-0123abcd', created: 7, replaced: true, hubsName: true }])
+  })
+
+  it('lists the first 32 and counts the rest, so a flood of entries cannot hide the one after them', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    const { hub } = await serveMachine([own, ...many])
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toHaveLength(32)
+    expect(row.otherCredentialsMore).toBe(8)
+  })
+
+  it("keeps the connection line's list from a machine that does not answer host.credentials", async () => {
+    const remote = await remoteHost(0, new Store(), { without: ['host.credentials'] })
+    const others = [{ id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false }]
+    const hub = await hubHost(() => lineFor(remote.port, { credential: 'cccc3333', others }), new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected')
+    await new Promise((r) => setTimeout(r, 80))
+    expect(hub.links.list()[0]!.otherCredentials?.map((c) => c.id)).toEqual(['aaaa1111'])
   })
 
   it("refuses to withdraw this computer's own credential, which the next link would make again, and asks nothing", async () => {
