@@ -42,7 +42,8 @@ export class AgentVersionsMock {
       const busy: string[] = []
       for (const s of this.store.sessions.values()) {
         const to = this.agentVersions.installed[s.tool]
-        if (!s.live || !to || !runsOlderCli(s.agentVersion, to)) continue
+        const from = s.agentVersion
+        if (!s.live || !to || !from || !runsOlderCli(from, to)) continue
         const holds =
           s.state === 'working' ||
           s.state === 'waiting_approval' ||
@@ -53,7 +54,6 @@ export class AgentVersionsMock {
           busy.push(s.id)
           continue
         }
-        const from = s.agentVersion!
         this.sessionsMock.restarted.push(s.id)
         this.emit({ type: 'agent_version', sessionId: s.id, version: to })
         const label = this.toolsMock.detected.find((t) => t.name === s.tool)?.label ?? s.tool

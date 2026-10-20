@@ -32,7 +32,7 @@ export class ProposalsMock {
       const at = this.mcpProposalList.findIndex((p) => p.name === name)
       if (at === -1) throw mockError(`No pending proposal named "${name}"`)
       const [hit] = this.mcpProposalList.splice(at, 1)
-      if (approve) this.mcpApproved.push(hit!.name)
+      if (approve && hit) this.mcpApproved.push(hit.name)
       this.emit({ type: 'orchestrator_proposals_changed' })
     },
     skillProposals: async () => {
@@ -43,7 +43,7 @@ export class ProposalsMock {
       const at = this.skillProposalList.findIndex((p) => p.name === name)
       if (at === -1) throw mockError(`No pending skill proposal named "${name}"`)
       const [hit] = this.skillProposalList.splice(at, 1)
-      if (approve) this.skillList.push({ name: hit!.name, content: hit!.content })
+      if (approve && hit) this.skillList.push({ name: hit.name, content: hit.content })
       this.emit({ type: 'orchestrator_proposals_changed' })
     },
     orchestratorSkills: async () => ({ skills: [...this.skillList] }),

@@ -1,5 +1,5 @@
 /* eslint-disable agent/agent-adapter-checks -- The seeded demo depicts named CLIs, including their sessions and usage fixtures. */
-import type { CacheStats, NormalizedEvent } from '@cc/protocol'
+import type { CacheStats } from '@cc/protocol'
 import type { MockPlatform } from './index.js'
 
 /**
@@ -262,7 +262,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
         ],
       },
     ],
-  } as NormalizedEvent)
+  })
 
   const done = await session(mock, site.id, 'codex', 'Optimize images')
   talk(mock, done.id, [
@@ -573,7 +573,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
         ],
       },
     ],
-  } as NormalizedEvent)
+  })
 
   // A finished one — "waiting" and "done and quiet" need to look different
   const done = await session(mock, site.id, 'codex', 'Shrink the hero images')

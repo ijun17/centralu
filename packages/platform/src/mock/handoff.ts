@@ -1,4 +1,4 @@
-import { isInTurn, type SessionInfo, type ToolName } from '@cc/protocol'
+import { isInTurn, isRecord, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 import { mockError } from './mock-error.js'
@@ -45,7 +45,7 @@ export class HandoffMock {
           asked = true
           continue
         }
-        if (asked && r.role === 'assistant' && r.kind === 'text') note = (r.payload as { text?: string }).text ?? ''
+        if (asked && r.role === 'assistant' && r.kind === 'text') note = isRecord(r.payload) && typeof r.payload.text === 'string' ? r.payload.text : ''
       }
       note = note.trim()
       return note ? { text: note, path: this.placeHandoffNote(s, note) } : null

@@ -1,5 +1,5 @@
 import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol'
-import { oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
+import { isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -225,7 +225,7 @@ export class SessionsMock {
       const row = this.store.messages.get(sessionId)?.at(-1)
       if (row && attachments?.length) {
         const stored = attachments.map((a) => (a.kind === 'image' && this.attachmentData.has(a.path) ? { ...a, data: this.attachmentData.get(a.path) } : a))
-        row.payload = { ...(row.payload as object), attachments: stored }
+        row.payload = { ...(isRecord(row.payload) ? row.payload : {}), attachments: stored }
       }
       s.lastReadSeq = s.lastSeq
       this.emit({ type: 'state_change', sessionId, state: 'working' })
@@ -239,7 +239,7 @@ export class SessionsMock {
       const all = [...this.store.sessions.values()]
       const mine = putInOrder(all.filter((s) => s.projectId === projectId), orderedIds)
       let k = 0
-      const next = all.map((s) => (s.projectId === projectId ? mine[k++]! : s))
+      const next = all.map((s) => (s.projectId === projectId ? (mine[k++] ?? s) : s))
       this.store.sessions = new Map(next.map((s) => [s.id, s] as const))
       return next.map((s) => ({ ...s }))
     },
@@ -302,7 +302,7 @@ export class SessionsMock {
        * become the project's default under this session's tool, and another window hears of it when they changed.
        */
       const at = sess.projectId ? this.projectStore.list.findIndex((p) => p.id === sess.projectId) : -1
-      const owner = at === -1 ? undefined : this.projectStore.list[at]!
+      const owner = at === -1 ? undefined : this.projectStore.list[at]
       if ((s.model !== undefined || s.effort !== undefined) && owner) {
         const before = owner.defaultModels[sess.tool]
         // A new object, as setTrusted swaps one in: the screen may hold the one `add` returned, and must learn of this only from the event

@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol'
-import { appKeyOf, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -104,7 +104,7 @@ export class AppBuilderMock {
       try {
         return { app: structuredClone(app), builder: await this.apps.createBuilder(spec.id, projectId, spec.tool) }
       } catch (e) {
-        return { app: structuredClone(app), builder: null, builderError: (e as Error).message }
+        return { app: structuredClone(app), builder: null, builderError: errorMessage(e) }
       }
     },
     builder: async (appId: string, projectId: string | null): Promise<SessionInfo | null> => {
@@ -123,7 +123,8 @@ export class AppBuilderMock {
     createBuilder: async (appId: string, projectId: string | null, tool?: ToolName): Promise<SessionInfo> => {
       const key = appKeyOf(projectId, appId)
       const have = this.registry.appBuilders.get(key)
-      if (have && this.store.sessions.has(have)) return structuredClone(this.store.sessions.get(have)!)
+      const held = have ? this.store.sessions.get(have) : undefined
+      if (held) return structuredClone(held)
       const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
       if (!app) throw new Error(noSuchAppText({ projectId, appId }))
       if (!app.trusted) {

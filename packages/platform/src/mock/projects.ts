@@ -20,7 +20,10 @@ function projectNotFound(projectId: string): Error {
 /** `items` in the order `orderedIds` names them; ids not named keep their order after them, unknown ids are ignored */
 export function putInOrder<T extends { id: string }>(items: readonly T[], orderedIds: readonly string[]): T[] {
   const byId = new Map(items.map((x) => [x.id, x]))
-  const named = [...new Set(orderedIds)].flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []))
+  const named = [...new Set(orderedIds)].flatMap((id) => {
+    const item = byId.get(id)
+    return item ? [item] : []
+  })
   const rest = items.filter((x) => !orderedIds.includes(x.id))
   return [...named, ...rest]
 }
@@ -136,10 +139,11 @@ export class ProjectsMock {
      */
     setTrusted: async (projectId: string, trusted: boolean) => {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
-      if (at === -1) throw projectNotFound(projectId)
+      const current = this.projectStore.list[at]
+      if (at === -1 || !current) throw projectNotFound(projectId)
       // Swaps in a new object — the screen holds onto the object `add` returned as-is, so mutating it would let a value that never crossed the wire leak into the screen (the real thing's response is always a new object)
-      const was = this.projectStore.list[at]!.trusted
-      this.projectStore.list[at] = { ...this.projectStore.list[at]!, trusted }
+      const was = current.trusted
+      this.projectStore.list[at] = { ...current, trusted }
       this.trustCalls.push({ projectId, trusted })
       // Every window re-reads the project, as the host has them (manager.setProjectTrusted, #719)
       if (was !== trusted) this.emit({ type: 'projects_changed' })

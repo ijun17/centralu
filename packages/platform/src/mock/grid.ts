@@ -1,5 +1,4 @@
-import { appKeyOf } from '@cc/protocol'
-import type { GridPanel } from '@cc/protocol'
+import { appKeyOf, GridPanel } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
@@ -16,7 +15,9 @@ export class GridMock {
     if (this.gridList) return this.gridList
     try {
       const raw = localStorage.getItem('cc-mock-grid')
-      this.gridList = raw ? (JSON.parse(raw) as GridPanel[]) : []
+      const stored: unknown = raw ? JSON.parse(raw) : []
+      // A panel this build cannot read is dropped, as the real list drops it
+      this.gridList = Array.isArray(stored) ? stored.flatMap((p: unknown) => { const r = GridPanel.safeParse(p); return r.success ? [r.data] : [] }) : []
     } catch {
       this.gridList = [] // node, or storage denied — the in-memory copy still works
     }

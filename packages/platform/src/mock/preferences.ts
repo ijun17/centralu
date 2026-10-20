@@ -1,5 +1,5 @@
 import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import { isRecord, parseUiPreferences, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 
@@ -30,7 +30,8 @@ export class PreferencesMock {
       if (this.workspaceSnapshot) return this.workspaceSnapshot
       try {
         const raw = localStorage.getItem('cc-mock-workspace')
-        return raw ? (JSON.parse(raw) as WorkspaceSnapshot) : null
+        const stored: unknown = raw ? JSON.parse(raw) : null
+        return isRecord(stored) ? stored : null
       } catch {
         return null
       }
@@ -66,12 +67,14 @@ export class PreferencesMock {
       // The same one-time move as the host's: a record with no text size takes the snapshot's step (#312 step 5)
       const hasTextSize = typeof stored === 'object' && stored !== null && 'textSize' in stored
       if (!hasTextSize) {
-        const legacy = textSizeFromLegacyStep(((await this.workspace.load()) as { textScale?: unknown } | null)?.textScale)
+        const snapshot: unknown = await this.workspace.load()
+        const legacy = textSizeFromLegacyStep(isRecord(snapshot) ? snapshot.textScale : undefined)
         if (legacy !== null) this.write({ textSize: legacy })
       }
       // And the notification switches (#1306): a record with none takes the snapshot's, or the defaults, once
       if (this.uiPrefs.notifyPolicy === undefined) {
-        const carried = readNotifyPolicy(((await this.workspace.load()) as { notifyPolicy?: unknown } | null)?.notifyPolicy)
+        const snapshot: unknown = await this.workspace.load()
+        const carried = readNotifyPolicy(isRecord(snapshot) ? snapshot.notifyPolicy : undefined)
         this.write({ notifyPolicy: carried })
       }
       return { ...this.uiPrefs }
