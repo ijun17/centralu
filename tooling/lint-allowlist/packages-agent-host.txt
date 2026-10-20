@@ -143,11 +143,8 @@ packages/agent-host/src/adapters/claude/index.test.ts @typescript-eslint/no-unne
 packages/agent-host/src/adapters/claude/index.test.ts @typescript-eslint/only-throw-error 1
 packages/agent-host/src/adapters/claude/index.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/adapters/claude/index.ts @typescript-eslint/no-unsafe-type-assertion 5
-packages/agent-host/src/adapters/claude/json.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/local-spawn.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/claude/lsp-plugins.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/adapters/claude/model-messages.ts @typescript-eslint/no-unsafe-type-assertion 10
-packages/agent-host/src/adapters/claude/normalize.ts @typescript-eslint/no-unsafe-type-assertion 10
 packages/agent-host/src/adapters/claude/orchestrator-mcp.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/permissions.ts @typescript-eslint/no-base-to-string 2
 packages/agent-host/src/adapters/claude/permissions.ts @typescript-eslint/no-non-null-assertion 3
@@ -162,7 +159,7 @@ packages/agent-host/src/adapters/claude/session-servers.ts @typescript-eslint/no
 packages/agent-host/src/adapters/claude/session-servers.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-unsafe-type-assertion 7
+packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-unsafe-type-assertion 6
 packages/agent-host/src/adapters/claude/subagent.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/adapters/claude/surface.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-non-null-assertion 1

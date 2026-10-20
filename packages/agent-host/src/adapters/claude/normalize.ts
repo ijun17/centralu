@@ -8,7 +8,9 @@ import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
-import { contentBlocks, str, type Json } from './json.js'
+import type { SDKAssistantMessage, SDKModelRefusalFallbackMessage, SDKModelRefusalNoFallbackMessage } from '@anthropic-ai/claude-agent-sdk'
+import { asObj } from '../../json-value.js'
+import { messageBlocks, str, type ClaudeMessage, type UsageRead, type UserRead } from './json.js'
 import { assistantEvents, backgroundLaunch, requestInputTokens, streamEventEvents, userEvents } from './model-messages.js'
 import { ClaudeTaskPlan } from './task-plan.js'
 import { agentReport, agentStats, approvalDetail, editedPaths, toolSummary } from './tool-summary.js'
@@ -25,11 +27,10 @@ export type ClaudeLaunchedSettings = { model: string | null; effort: string | nu
  */
 
 /**
- * One SDK message to 0..N events.
- * `msg` is deliberately `unknown` — so SDK types never flow past this boundary.
+ * One SDK message to 0..N events. The message comes typed as the SDK declares it (#1339); what leaves is protocol only.
  */
 export function normalizeMessage(
-  msg: unknown,
+  msg: ClaudeMessage,
   sessionId: string,
   opts?: {
     /**
@@ -55,8 +56,6 @@ export function normalizeMessage(
     reasoningStreamed?: boolean
   },
 ): NormalizedEvent[] {
-  const m = msg as Json
-  const type = str(m.type)
   const out: NormalizedEvent[] = []
 
   /*
@@ -92,33 +91,33 @@ export function normalizeMessage(
    * subagent's stream events carry no text of their own (measured: every stream_event had
    * parent=null), so its text comes from the whole assistant message, block by block.
    */
-  const parent = str(m.parent_tool_use_id)
-  if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
-    if (type === 'stream_event') return out
-    return subagentSteps(sessionId, parent, normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId))
+  if (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'stream_event') {
+    const parent = str(msg.parent_tool_use_id)
+    if (parent && msg.type === 'stream_event') return out
+    if (parent) return subagentSteps(sessionId, parent, normalizeMessage({ ...msg, parent_tool_use_id: null }, sessionId))
   }
 
   /*
    * One family per file: what the CLI says about itself (cli-messages.ts), what the model says (model-messages.ts),
    * and how the turn ends (turn-ending.ts).
    */
-  switch (type) {
+  switch (msg.type) {
     case 'conversation_reset':
-      return conversationResetEvents(m, sessionId)
+      return conversationResetEvents(msg, sessionId)
     case 'system':
-      return systemEvents(m, sessionId)
+      return systemEvents(msg, sessionId)
     case 'active_goal':
-      return activeGoalEvents(m, sessionId)
+      return activeGoalEvents(msg, sessionId)
     case 'stream_event':
-      return streamEventEvents(m, sessionId)
+      return streamEventEvents(msg, sessionId)
     case 'assistant':
-      return assistantEvents(m, sessionId, opts)
+      return assistantEvents(msg, sessionId, opts)
     case 'user':
-      return userEvents(m, sessionId)
+      return userEvents(msg, sessionId)
     case 'rate_limit_event':
-      return rateLimitEvents(m, sessionId)
+      return rateLimitEvents(msg, sessionId)
     case 'result':
-      return resultEvents(m, sessionId)
+      return resultEvents(msg, sessionId)
     default:
       return out
   }
@@ -193,7 +192,7 @@ export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
  * over it), and that decision is not visible from outside; what the API reports it wrote is.
  */
 function ttlOf(split: unknown): { cacheTtl?: '5m' | '1h' } {
-  const c = (split ?? {}) as Json
+  const c = asObj(split)
   if (Number(c.ephemeral_1h_input_tokens ?? 0) > 0) return { cacheTtl: '1h' }
   if (Number(c.ephemeral_5m_input_tokens ?? 0) > 0) return { cacheTtl: '5m' }
   return {}
@@ -287,10 +286,9 @@ export class ClaudeStreamNormalizer {
    *   model_refusal_no_fallback   no retry ran. The CLI's main-thread paths send it with `content: ""`, so the line
    *                               falls back to the refusal's explanation, then its category.
    */
-  private refusalEvents(m: Json): NormalizedEvent[] {
-    const subtype = str(m.subtype)
+  private refusalEvents(m: SDKModelRefusalFallbackMessage | SDKModelRefusalNoFallbackMessage): NormalizedEvent[] {
     const explanation = str(m.api_refusal_explanation)
-    if (subtype === 'model_refusal_no_fallback') {
+    if (m.subtype === 'model_refusal_no_fallback') {
       const category = str(m.api_refusal_category)
       this.refusal =
         str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
@@ -322,10 +320,10 @@ export class ClaudeStreamNormalizer {
    * every reader of `tokens` takes the last value, so the repeat changes nothing there. A parent always has a reading
    * by then, since it launched the subagent from a message of its own.
    */
-  private withRequest(m: Json, events: NormalizedEvent[], subagent: boolean): NormalizedEvent[] {
-    const message = (m.message ?? {}) as Json
-    const id = str(message.id)
-    const usage = message.usage as Json | undefined
+  private withRequest(m: SDKAssistantMessage, events: NormalizedEvent[], subagent: boolean): NormalizedEvent[] {
+    // Read as carefully as before the SDK's types (#1339): a message without its body or usage counts no request
+    const id = str(m.message?.id)
+    const usage: UsageRead | null | undefined = m.message?.usage
     const fresh = !!usage && !(id && this.requestsSeen.includes(id))
     if (!subagent) {
       /*
@@ -375,9 +373,9 @@ export class ClaudeStreamNormalizer {
    * The task list as the plan (`ClaudeTaskPlan`, #843), from the parent's own calls: a subagent's tasks are not the
    * session's plan. The message's `tool_use_result` is read only when it carries one result.
    */
-  private followTasks(m: Json, events: NormalizedEvent[]): NormalizedEvent[] {
-    const results = contentBlocks(m).filter((b) => str(b.type) === 'tool_result')
-    const record = results.length === 1 && typeof m.tool_use_result === 'object' && m.tool_use_result !== null ? (m.tool_use_result as Json) : undefined
+  private followTasks(m: UserRead | undefined, events: NormalizedEvent[]): NormalizedEvent[] {
+    const results = messageBlocks(m?.message).filter((b) => b.type === 'tool_result')
+    const record = m && results.length === 1 && typeof m.tool_use_result === 'object' && m.tool_use_result !== null ? asObj(m.tool_use_result) : undefined
     const out: NormalizedEvent[] = []
     for (const e of events) {
       out.push(e)
@@ -406,18 +404,17 @@ export class ClaudeStreamNormalizer {
     return out
   }
 
-  push(msg: unknown): NormalizedEvent[] {
-    const m = msg as Json
-    const type = str(m.type)
-    const subagent = str(m.parent_tool_use_id) !== ''
-    this.unmapped.note(type === 'system' ? `system/${str(m.subtype)}` : type)
-    const tasks = this.tasks.push(m)
+  push(msg: ClaudeMessage): NormalizedEvent[] {
+    const type = msg.type
+    const subagent = 'parent_tool_use_id' in msg && str(msg.parent_tool_use_id) !== ''
+    this.unmapped.note(msg.type === 'system' ? `system/${str(msg.subtype)}` : type)
+    const tasks = this.tasks.push(msg)
 
-    if (type === 'system' && str(m.subtype) === 'task_notification') {
-      const callId = str(m.tool_use_id)
+    if (msg.type === 'system' && msg.subtype === 'task_notification') {
+      const callId = str(msg.tool_use_id)
       if (!this.background.delete(callId)) return tasks
-      const status = str(m.status, 'completed')
-      const usage = (m.usage ?? {}) as Json
+      const status = str(msg.status, 'completed')
+      const usage = asObj(msg.usage)
       /*
        * The notification's `summary` is the agent's whole final report, not a one-line status (#221). Read in the
        * CLI (2.1.282): a finished local agent's task is closed with `summary: <its final content joined by "\n"> ||
@@ -425,19 +422,21 @@ export class ClaudeStreamNormalizer {
        * puts `Agent "…" finished` in its own <summary> and the report in <result>; the SDK message has only the
        * one field.) So the whole of it is the result's record, as for a foreground agent.
        */
-      const output = agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status))
+      const output = agentReport(str(msg.summary), agentStats(usage.tool_uses, usage.duration_ms, status))
       const done = toolResultEvent(this.sessionId, callId, status === 'completed', output)
       if (!this.textStreamed && !this.reasoningStreamed) return [...tasks, done]
       this.deferred.push(done)
       return tasks
     }
 
-    if (type === 'user' && !subagent) {
-      const launched = backgroundLaunch(m)
+    if (msg.type === 'user' && !subagent) {
+      const launched = backgroundLaunch(msg)
       if (launched) this.background.add(launched)
     }
 
-    if (type === 'system' && /^model_refusal_(no_)?fallback$/.test(str(m.subtype))) return [...tasks, ...this.refusalEvents(m)]
+    if (msg.type === 'system' && (msg.subtype === 'model_refusal_fallback' || msg.subtype === 'model_refusal_no_fallback')) {
+      return [...tasks, ...this.refusalEvents(msg)]
+    }
 
     let events = [
       ...tasks,
@@ -446,7 +445,7 @@ export class ClaudeStreamNormalizer {
         reasoningStreamed: this.reasoningStreamed,
       }),
     ]
-    if (type === 'assistant') events = this.withRequest(m, events, subagent)
+    if (msg.type === 'assistant') events = this.withRequest(msg, events, subagent)
     // The turn's result is a running reading too: a subagent's request repeats whichever came last
     else if (type === 'result' && !subagent) {
       const total = readingOf(events)
@@ -457,7 +456,7 @@ export class ClaudeStreamNormalizer {
       }
     }
     events = this.touch(events)
-    if (!subagent) events = this.followTasks(m, events)
+    if (!subagent) events = this.followTasks(msg.type === 'user' ? msg : undefined, events)
     if (subagent) return events
     events = this.followRetry(type, events)
     if (type === 'result' && this.refusal !== null) {
@@ -475,15 +474,15 @@ export class ClaudeStreamNormalizer {
      * (2026-10-03): the CLI's own "Goal set: <condition>" and the model's first words, and the model's
      * words on either side of a Stop hook that sent it back to work, read as one sentence.
      */
-    if (type === 'stream_event') {
-      const e = (m.event ?? {}) as Json
-      if (str(e.type) === 'message_start') this.streamMessageId = str((e.message as Json | undefined)?.id) || undefined
+    if (msg.type === 'stream_event') {
+      const e = msg.event
+      if (e?.type === 'message_start') this.streamMessageId = str(e.message?.id) || undefined
     }
-    const wholeId = type === 'assistant' ? str((m.message as Json | undefined)?.id) || undefined : undefined
+    const wholeId = msg.type === 'assistant' ? str(msg.message?.id) || undefined : undefined
     const messageId = type === 'stream_event' ? this.streamMessageId : wholeId
     if (messageId) events = events.map((e) => (e.type === 'message_delta' && !e.messageId ? { ...e, messageId } : e))
     events.push(
-      ...this.goal.push(m, {
+      ...this.goal.push(msg, {
         streamed: wholeId !== undefined && wholeId === this.streamMessageId,
         interrupted: type === 'result' && this.stopping,
       }),
@@ -502,9 +501,9 @@ export class ClaudeStreamNormalizer {
       this.textStreamed = false
       this.reasoningStreamed = false
     }
-    if (type === 'result' && this.stopping) {
+    if (msg.type === 'result' && this.stopping) {
       this.stopping = false
-      if (str(m.subtype) === 'error_during_execution') events = events.filter((e) => e.type !== 'error')
+      if (msg.subtype === 'error_during_execution') events = events.filter((e) => e.type !== 'error')
     }
     // The chunk closed (or the turn ended with no body) — the deferred card closures are emitted now.
     if ((type === 'assistant' || type === 'result') && this.deferred.length > 0) events.push(...this.deferred.splice(0))

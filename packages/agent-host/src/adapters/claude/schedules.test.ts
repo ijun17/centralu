@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { sessionIdle } from '../../idle.js'
 import { ClaudeBackgroundTracker, ClaudeStreamNormalizer } from './normalize.js'
+import { sdk } from './sdk-message.test-helpers.js'
 
 /**
  * Claude Code's timers as background work (#568): `/loop`'s wake-ups (`ScheduleWakeup`) and scheduled prompts
@@ -138,9 +139,9 @@ describe('through the stream normalizer, as the adapter reads the CLI', () => {
   it('a /loop turn that schedules its next wake-up leaves the session not idle after the turn ends', () => {
     const n = new ClaudeStreamNormalizer('s1')
     const events = [
-      ...n.push(call('w1', 'ScheduleWakeup', { delaySeconds: 300, reason: 'poll CI', prompt: '/loop poll CI' })),
-      ...n.push(result('w1', { scheduledFor: Date.now() + 300_000 })),
-      ...n.push({ type: 'result', subtype: 'success', is_error: false, result: 'ok', usage: {} }),
+      ...n.push(sdk(call('w1', 'ScheduleWakeup', { delaySeconds: 300, reason: 'poll CI', prompt: '/loop poll CI' }))),
+      ...n.push(sdk(result('w1', { scheduledFor: Date.now() + 300_000 }))),
+      ...n.push(sdk({ type: 'result', subtype: 'success', is_error: false, result: 'ok', usage: {} })),
     ]
     const live = liveOf(events)!
     expect(live).toHaveLength(1)

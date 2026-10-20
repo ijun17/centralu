@@ -16,6 +16,7 @@ import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
+import type { ClaudeMessage } from './json.js'
 import { claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
@@ -311,7 +312,7 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** One message of the stream, in the order the CLI sent it */
-  private onMessage(q: QueryHandle, msg: unknown): void {
+  private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
     const m = msg as StreamMsg
     if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true

@@ -1,9 +1,11 @@
+import type { SDKPartialAssistantMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { NormalizedEvent } from '@cc/protocol'
+import { asObj } from '../../json-value.js'
 import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
 import { tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
-import { contentBlocks, str, type Json } from './json.js'
+import { messageBlocks, str, type AssistantBody, type UsageRead, type UserRead } from './json.js'
 import { agentReport, agentStats, resultOutput, toolSummary } from './tool-summary.js'
 
 /**
@@ -27,21 +29,22 @@ export type AssistantStreamed = { textStreamed?: boolean; reasoningStreamed?: bo
  * only one `tool_use_result`, so with more than one block there is no way to tell which block it
  * belongs to.
  */
-export function backgroundLaunch(m: Json): string | null {
-  const r = (m.tool_use_result ?? {}) as Json
+export function backgroundLaunch(m: UserRead): string | null {
+  const r = asObj(m.tool_use_result)
   if (str(r.status) !== 'async_launched' || !str(r.agentId)) return null
-  const blocks = contentBlocks(m).filter((b) => str(b.type) === 'tool_result')
+  const blocks = messageBlocks(m.message).filter((b) => b.type === 'tool_result')
   return blocks.length === 1 ? str(blocks[0]?.tool_use_id) || null : null
 }
 
 // Streaming deltas (needs includePartialMessages: true — confirmed in M0).
-export function streamEventEvents(m: Json, sessionId: string): NormalizedEvent[] {
+export function streamEventEvents(m: Pick<SDKPartialAssistantMessage, 'event'>, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
-  const e = m.event as Json | undefined
-  if (str(e?.type) === 'content_block_delta') {
-    const d = e?.delta as Json | undefined
-    if (str(d?.type) === 'text_delta') {
-      out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d?.text) })
+  // Read as carefully as before the SDK's types (#1339): a message without its event, or a delta without its text, reads as none
+  const e = m.event
+  if (e?.type === 'content_block_delta') {
+    const d = e.delta
+    if (d?.type === 'text_delta') {
+      out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d.text) })
     }
     /*
      * Thinking (measured in #58, 2026-08-26): the whole body arrives encrypted, so `thinking`
@@ -50,9 +53,10 @@ export function streamEventEvents(m: Json, sessionId: string): NormalizedEvent[]
      * pretends content exists that is not there. If the CLI ever starts sending readable text
      * here, the `text` field just flows through as-is.
      */
-    if (str(d?.type) === 'thinking_delta') {
-      const text = str(d?.thinking)
-      const estTokens = typeof d?.estimated_tokens === 'number' ? d.estimated_tokens : undefined
+    if (d?.type === 'thinking_delta') {
+      const text = str(d.thinking)
+      // Not in the SDK's type: the CLI's own (measured, #58)
+      const estTokens = 'estimated_tokens' in d && typeof d.estimated_tokens === 'number' ? d.estimated_tokens : undefined
       if (text || estTokens) {
         out.push({ type: 'reasoning_delta', sessionId, ...(text ? { text } : {}), ...(estTokens ? { estTokens } : {}) })
       }
@@ -61,30 +65,30 @@ export function streamEventEvents(m: Json, sessionId: string): NormalizedEvent[]
   return out
 }
 
-export function assistantEvents(m: Json, sessionId: string, opts?: AssistantStreamed): NormalizedEvent[] {
+export function assistantEvents(m: { readonly message?: AssistantBody }, sessionId: string, opts?: AssistantStreamed): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
-  const content = contentBlocks(m)
+  const content = messageBlocks(m.message)
   // The only way out for a body that arrives with no deltas at all (see the opts.textStreamed comment on normalizeMessage — /usage arrives this way).
   // Thinking follows the same rule as text, but on its own flag: a message can stream its thinking and
   // then call a tool without any text, and then only the thinking has already gone out.
   if (!opts?.reasoningStreamed) {
     const thinking = content
-      .filter((b) => str(b.type) === 'thinking')
+      .filter((b) => b.type === 'thinking')
       .map((b) => str(b.thinking))
       .join('')
     if (thinking) out.push({ type: 'reasoning_delta', sessionId, text: thinking })
   }
   if (!opts?.textStreamed) {
     const text = content
-      .filter((b) => str(b.type) === 'text')
+      .filter((b) => b.type === 'text')
       .map((b) => str(b.text))
       .join('')
     if (text) out.push({ type: 'message_delta', sessionId, role: 'assistant', text })
   }
   for (const block of content) {
-    if (str(block.type) === 'tool_use') {
+    if (block.type === 'tool_use') {
       const name = str(block.name)
-      const input = (block.input ?? {}) as Json
+      const input = asObj(block.input)
       /*
        * `input` is the record (#221): a Write's content and an Edit's both sides, which the title reduces to a path.
        * The files it changes are marked when its result says it went through (`ClaudeStreamNormalizer`, #843).
@@ -101,7 +105,7 @@ export function assistantEvents(m: Json, sessionId: string, opts?: AssistantStre
     }
   }
   // Usage also comes carried on an assistant message: this one request's, which `ClaudeStreamNormalizer` adds to the running reading
-  const usage = (m.message as Json | undefined)?.usage as Json | undefined
+  const usage = m.message?.usage
   if (usage) {
     out.push({
       type: 'usage_update',
@@ -117,7 +121,7 @@ export function assistantEvents(m: Json, sessionId: string, opts?: AssistantStre
  * Both the message's own reading (`assistantEvents`) and the cache accounting's request (`ClaudeStreamNormalizer`) read
  * it here.
  */
-export function requestInputTokens(usage: Json): { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } {
+export function requestInputTokens(usage: UsageRead): { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } {
   return {
     inputTokens: tokenCount(usage.input_tokens),
     cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
@@ -125,10 +129,10 @@ export function requestInputTokens(usage: Json): { inputTokens: number; cacheRea
   }
 }
 
-export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
+export function userEvents(m: UserRead, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
   // Words only (the summary after /compact is a string) has no tool result in it and makes no event: the marker already told it
-  const content = contentBlocks(m)
+  const content = messageBlocks(m.message)
   /*
    * The result of launching a background agent is **not actually a result** (#98). Closing the
    * card here would show the text meant only for the model ("never quote…") as its result, and
@@ -145,18 +149,18 @@ export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
    * instead of parsing the tool_result text."). Using the body as-is would put JSON starting
    * with "[Subagent hand-back] The text below is…" on the card (measured).
    */
-  const agent = (m.tool_use_result ?? {}) as Json
+  const agent = asObj(m.tool_use_result)
   // The finished agent's whole report is the result's record (#221); the card shows its head
   const agentDone =
     str(agent.status) === 'completed' && str(agent.agentId) && Array.isArray(agent.content) &&
-    content.filter((b) => str(b.type) === 'tool_result').length === 1
+    content.filter((b) => b.type === 'tool_result').length === 1
       ? agentReport(
-          (agent.content as Json[]).map((b) => str(b.text)).join('\n'),
+          agent.content.map((b: unknown) => str(asObj(b).text)).join('\n'),
           agentStats(agent.totalToolUseCount, agent.totalDurationMs),
         )
       : null
   for (const block of content) {
-    if (str(block.type) === 'tool_result') {
+    if (block.type === 'tool_result') {
       const c = block.content
       /*
        * The card reads the answer as the record does (#843): a list of blocks used to be cut out of its JSON, so a
@@ -171,9 +175,11 @@ export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
        * carries an image — a tool result is the only way one arrives.)
        */
       if (Array.isArray(c)) {
-        for (const part of c as Json[]) {
+        for (const item of c) {
+          // Something in the list that is not a block reads as none, as in a message's own list (`messageBlocks`)
+          const part = asObj(item)
           if (str(part.type) !== 'image') continue
-          const source = (part.source ?? {}) as Json
+          const source = asObj(part.source)
           /*
            * A non-base64 source (a URL, say) used to vanish silently (found during the #58
            * investigation). There is nothing we can do about failing to render it, but the fact

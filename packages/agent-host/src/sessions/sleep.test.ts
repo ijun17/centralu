@@ -17,6 +17,7 @@ import {
   storedSleepSetting,
   type SleepSessions,
 } from './sleep.js'
+import { sdk } from '../adapters/claude/sdk-message.test-helpers.js'
 
 /**
  * Putting idle sessions to sleep (#568): a session quiet for the set time, holding nothing a person would lose, has
@@ -274,7 +275,7 @@ describe('a session put to sleep, on the manager', () => {
       { type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'ScheduleWakeup', input: { delaySeconds: 1200, reason: 'poll CI', prompt: '/loop poll CI' } }] } },
       { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w1', content: 'ok' }] }, tool_use_result: { scheduledFor: Date.now() + 1_200_000 } },
     ]
-    for (const m of turn) for (const e of stream.push(m)) h.emit(e)
+    for (const m of turn) for (const e of stream.push(sdk(m))) h.emit(e)
     h.emit({ type: 'turn_complete', sessionId: id })
     expect(mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
     expect(await mgr.sleepSession(id)).toBe(false)
@@ -283,7 +284,7 @@ describe('a session put to sleep, on the manager', () => {
     for (const m of [
       { type: 'assistant', parent_tool_use_id: null, message: { id: 'm2', role: 'assistant', content: [{ type: 'tool_use', id: 'w2', name: 'ScheduleWakeup', input: { stop: true } }] } },
       { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w2', content: 'stopped' }] }, tool_use_result: { stopped: true } },
-    ]) for (const e of stream.push(m)) h.emit(e)
+    ]) for (const e of stream.push(sdk(m))) h.emit(e)
     h.emit({ type: 'turn_complete', sessionId: id })
     expect(await mgr.sleepSession(id)).toBe(true)
   })

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import { ClaudeStreamNormalizer } from './normalize.js'
+import { sdk } from './sdk-message.test-helpers.js'
 
 /**
  * A Claude session's background work (#290), from the messages the CLI sends.
@@ -87,7 +88,7 @@ const shellStopped = [
   { type: 'system', subtype: 'task_notification', task_id: 'bzztskv5d', tool_use_id: SHELL_CALL, status: 'stopped', summary: 'sleep 191; echo bg-shell-done' },
 ]
 
-const feed = (messages: unknown[], n = new ClaudeStreamNormalizer('s1')) => ({ n, events: messages.flatMap((m) => n.push(m)) })
+const feed = (messages: unknown[], n = new ClaudeStreamNormalizer('s1')) => ({ n, events: messages.flatMap((m) => n.push(sdk(m))) })
 const lastTasks = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'background_tasks').at(-1) as
   | Extract<NormalizedEvent, { type: 'background_tasks' }>
   | undefined
@@ -120,7 +121,7 @@ describe('a Claude session reports its background work (#290)', () => {
 
   it('a task that ended reports it once — a repeated notification adds nothing', () => {
     const { n } = feed([...launched, ...interrupted])
-    expect(n.push(interrupted[2]).filter((e) => e.type === 'background_tasks')).toEqual([])
+    expect(n.push(sdk(interrupted[2])).filter((e) => e.type === 'background_tasks')).toEqual([])
   })
 
   it('a failed task keeps the reason the CLI gave', () => {
