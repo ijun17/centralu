@@ -504,6 +504,8 @@ export class AgentStartFlow {
       this.host.children.releaseTurn(child.id, callerId)
       return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
     }
+    // The mailbox writes the task down as a thread the caller owns (docs/plans/mailbox.md §8.1): the caller's own words, not the frame
+    this.host.children.delegated(callerId, child.id, 'start_agent', choice.task)
     const notice = this.host.handles.get(child.id)?.delegationNotice?.()
     return { key, d, notice: [unchecked, notice].filter(Boolean).join('; ') || undefined }
   }

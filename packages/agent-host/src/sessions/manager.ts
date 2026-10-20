@@ -5,6 +5,7 @@ import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { MailToolArgs } from '../mail/tool.js'
+import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -87,6 +88,8 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
+  /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
+  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -818,6 +821,7 @@ export class SessionManager {
 
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
+    this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
   }
 
   /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */

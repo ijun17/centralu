@@ -2728,6 +2728,15 @@ took it is not acted on. The tool keeps the wake in its own record as a user tur
 that read the record back leave the wake out (`mail/wake-text.ts`, used by `stripInjectedBlocks`): the `✉` line the delivery
 wrote is its only trace in the conversation, and `read_session` and `recall` never show it as the person's message.
 
+**Delegations are written down beside the old path** (slice 3 of #1347, docs/plans/mailbox.md §8.1). Each place a session gives another work
+(`start_agent`, `agent_session send`, `ask_project`, the orchestrator's `send_to_session` and `create_session` with `reportBack`, a request
+queued behind a busy session, a fork) calls `ChildOwnership.delegated` once the task has been delivered by the old path, and the mailbox
+(`MailService.recordDelegation`) writes it as a thread the caller owns and the child is assigned, `running`, whose first message is the
+caller's own words and is recorded delivered and read, so nothing wakes the child. A later instruction to the same child is a `note` in
+that thread; into a `done` one it opens a thread that follows it. It makes no relation or rate check (the delegation's own checks came
+first), never throws into a delegation, and skips an auto observer's note and a child on a linked machine. Reports do not use these
+threads yet. A delegation thread is moved when a party is archived as any thread is (§3.3, `MailService.partyGone`), never closed by it: the person becomes the owner of a gone caller's, and a gone child's is `open` with nobody on it. Only a delegation tool's thread is reused for the next instruction to the same child.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

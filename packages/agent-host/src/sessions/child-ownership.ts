@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { errorMessage } from '@cc/protocol'
 import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
+import type { ThreadOrigin } from '../dev-services/store/mail.js'
 
 /**
  * How long a report held over a session's own background work (#721), here or on a linked machine (#723), waits, once
@@ -268,6 +270,25 @@ export class ChildOwnership {
   private linkedChanged: ((sessionId: string) => void) | undefined
 
   constructor(private readonly store: OwnershipStore) {}
+
+  /** The mailbox's way of hearing that a session gave another one work (docs/plans/mailbox.md §8.1), set by the host when it has one */
+  private delegatedHook: ((callerId: string, childId: string, origin: ThreadOrigin, task: string) => void) | undefined
+  onDelegated(hook: ChildOwnership['delegatedHook']): void {
+    this.delegatedHook = hook
+  }
+
+  /**
+   * `callerId` gave `childId` this task by `origin` and the host has delivered it: the mailbox writes it down, in step with the old path
+   * (a thread the caller owns and the child is assigned, `running`). Never throws: the mailbox must not break a delegation
+   */
+  delegated(callerId: string, childId: string, origin: ThreadOrigin, task: string): void {
+    if (callerId === childId || !this.delegatedHook) return
+    try {
+      this.delegatedHook(callerId, childId, origin, task)
+    } catch (e) {
+      console.error(`[mail] could not write down the work ${callerId.slice(0, 8)} gave ${childId.slice(0, 8)} (${errorMessage(e)})`)
+    }
+  }
 
   /** A new mark is new work: a pause of the work before it is not this work's, nor one an older build left stored */
   markReport(sessionId: string, callerId: string): void {

@@ -149,6 +149,20 @@ export type PostResult = {
   repeated?: boolean
 }
 
+/** Work a session gave another through a tool the host already delivered it by (start_agent, ask_project, ...): the host writes it down (§8.1) */
+export type DelegationInput = {
+  assignee: string
+  /** The caller's own words for the task (never a frame or the project's instructions the host adds) */
+  task: string
+  origin: ThreadOrigin
+  projectId?: string | null
+}
+
+export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
+
+/** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
+const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
+
 export type OpenResult = PostResult & {
   /** The participants of the threads this one follows, who may be added to it (§3.3, "offered as its own") */
   offered: string[]
@@ -1144,6 +1158,69 @@ export class MailService {
       facts,
       dedupeKey: null,
       createdAt: now,
+    })
+  }
+
+  /**
+   * A session gave another one a task by a tool whose delivery the host already made (§8.1, §4.2): the host writes it down, in step
+   * with the old path, which stays the way the task reaches the child. So the `assign` is recorded delivered and read for the
+   * child: nothing wakes it. The thread is the caller's own (it is the owner, the child the assignee) and `running`. A caller's
+   * later instruction to the same child goes into the thread they already have as a `note`; into one that is `done` it opens a new
+   * thread that follows it. No relation or rate check is made, because the delegation's own checks (consent, trust, ceilings) came
+   * first, and this is the host's act, not an agent's post: an agent reaches the mailbox only through `open` and `post`
+   */
+  recordDelegation(caller: string, input: DelegationInput): DelegationResult {
+    const owner = this.party(caller)
+    const assignee = this.party(input.assignee)
+    if (owner.kind !== 'session' || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host')
+    if (caller === input.assignee) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
+    if (!THREAD_ORIGINS.includes(input.origin)) throw refuse('bad_value', `unknown origin ${String(input.origin)}`)
+    const limit = bodyLimit('session')
+    const task = input.task.trim()
+    const body = task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
+    if (body === '') throw refuse('empty', 'a task says something')
+    return this.run(() => {
+      const now = this.now()
+      const last = this.records.latestBetween(caller, input.assignee)
+      let thread: ThreadRow
+      let message: MessageRow
+      if (last && last.state !== 'done') {
+        thread = last
+        message = this.insertPost(thread.id, caller, 'note', body, {}, {}, now, undefined, [input.assignee])
+        // The child has it in hand again: the move the old path would have made when its turn started
+        if (thread.state === 'open' || thread.state === 'review') {
+          thread = this.records.updateThread(thread.id, { state: 'running', stateSince: now }, now, true)
+          this.insertEvent(thread.id, `State: ${last.state} to running.`, { change: 'state', from: last.state, to: 'running', by: CENTRALU }, now)
+        }
+      } else {
+        const subject = oneLineText(body.split(/\r\n|[\n\r\u0085\u2028\u2029]/)[0] ?? '', SUBJECT_MAX) || 'A task'
+        const id = threadIdOf(this.host, this.ulids.next(now))
+        this.records.insertThread(
+          {
+            id,
+            home: this.host,
+            projectId: input.projectId ?? null,
+            subject,
+            origin: input.origin,
+            depth: 0,
+            parentId: null,
+            follows: last ? [last.id] : [],
+            state: 'running',
+            owner: caller,
+            assignee: input.assignee,
+            next: null,
+            links: {},
+          },
+          now,
+        )
+        this.records.putParticipant(id, caller, 'owner', now)
+        this.records.putParticipant(id, input.assignee, 'assignee', now)
+        message = this.insertPost(id, caller, 'assign', body, {}, {}, now, undefined, [input.assignee])
+        thread = this.mustThread(id)
+      }
+      // The old path delivered it already: delivered, and read with it
+      this.records.markDelivered(input.assignee, [message.id], [message.id], now)
+      return { thread, message, continued: last !== undefined && last.state !== 'done' }
     })
   }
 

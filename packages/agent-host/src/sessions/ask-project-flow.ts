@@ -337,6 +337,7 @@ export class AskProjectFlow {
       if (this.host.agentRuns.get(delegatedId) === d.wait) this.host.agentRuns.delete(delegatedId)
       return { ok: false, error: `Could not hand the task to ${target.name}: ${(e as Error).message}` }
     }
+    this.host.children.delegated(callerId, delegatedId, 'ask_project', opts.task)
     return this.awaitDelegation(key, d, signal)
   }
 

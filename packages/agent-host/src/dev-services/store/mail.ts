@@ -25,6 +25,9 @@ export type ThreadOutcome = (typeof THREAD_OUTCOMES)[number]
 export const THREAD_ORIGINS = ['mail', 'start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project', 'app', 'watch', 'person'] as const
 export type ThreadOrigin = (typeof THREAD_ORIGINS)[number]
 
+/** The origins a session's delegation tools open threads with (§8.1): work one session gave another, written down by the host */
+export const DELEGATION_ORIGINS = ['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project'] as const satisfies readonly ThreadOrigin[]
+
 /** §3.2 */
 export const MESSAGE_KINDS = ['assign', 'question', 'answer', 'report', 'notice', 'note', 'event'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]
@@ -359,6 +362,19 @@ export class MailRecords {
 
   thread(id: string): ThreadRow | undefined {
     const row = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE id = ?`).get(id)
+    return row && toThread(row)
+  }
+
+  /**
+   * The newest delegation thread `owner` gave `assignee`, whatever its state: where the next instruction of a delegation goes (§8.1).
+   * Only a thread a delegation tool opened: a task one of them gave through `mail` is another task, with its own assign still to arrive
+   */
+  latestBetween(owner: string, assignee: string): ThreadRow | undefined {
+    const row = this.db
+      .prepare<[string, string], ThreadSql>(
+        `SELECT * FROM mail_threads WHERE owner = ? AND assignee = ? AND origin IN (${DELEGATION_ORIGINS.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .get(owner, assignee)
     return row && toThread(row)
   }
 

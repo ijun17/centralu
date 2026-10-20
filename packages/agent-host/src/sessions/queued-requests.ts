@@ -191,6 +191,7 @@ export class QueuedRequests {
         const callerProject = this.host.projectRow(caller.projectId)?.name ?? 'another project'
         await this.host.deliver(sessionId, askFrame(callerProject, r.text, { name: from.name, sessionId: caller.id }), undefined, from, false, undefined, 'inline', handIn, stillAllowed)
       }
+      this.host.children.delegated(caller.id, sessionId, r.via, r.text)
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) this.host.children.queuedTurnStarted(sessionId)
     } catch (e) {

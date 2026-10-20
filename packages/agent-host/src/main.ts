@@ -22,6 +22,7 @@ import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
+import { delegationRecorder } from './mail/delegation.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
@@ -432,7 +433,10 @@ const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
 mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
-mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args) })
+mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
+  // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
+  delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id)),
+})
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

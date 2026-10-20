@@ -265,6 +265,8 @@ export class AgentSessionActions {
               release()
               return { ok: false, error: `Could not send it: ${(e as Error).message}` }
             }
+            // An observer's note is not work its owner gave (#646): only the caller's own words are written down in the mailbox
+            if (!observing) this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
             // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
             const working = this.flow.agentWorking(d, false, observing)
             return working.ok && observing ? { ...working, via: 'note' } : working
@@ -289,6 +291,7 @@ export class AgentSessionActions {
             this.host.children.releaseTurn(child.id, callerId)
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
+          this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
           return this.flow.awaitAgent(key, next, signal)
         }
         default:
