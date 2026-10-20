@@ -98,7 +98,7 @@ class ControlledTunnel implements Tunnel {
     if (this.openMs) await new Promise((r) => setTimeout(r, this.openMs))
     if (this.unreachable) throw new Error(this.failure ?? 'ssh could not reach laptop: ssh: connect to host laptop port 22: Operation timed out')
     const line = this.line()
-    return { url: `ws://127.0.0.1:${line.port}`, token: line.token, line, localPort: line.port }
+    return { url: `ws://127.0.0.1:${line.port}`, token: line.token ?? '', line, localPort: line.port }
   }
   onDown(listener: (reason: string) => void): void {
     this.downListener = listener

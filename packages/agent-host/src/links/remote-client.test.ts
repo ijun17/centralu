@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer } from '../transport/server.js'
+import { credentialProof, hostProof } from '../transport/host-proof.js'
+import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { MAX_INCOMING_CALLS, RemoteClient, type RemoteHello } from './remote-client.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -388,5 +390,43 @@ describe('a host asked to prove it holds the token (#838)', () => {
       for (const frame of s.got) expect(JSON.parse(frame)).toMatchObject({ kind: 'prove' })
       c.close()
     }
+  })
+})
+
+describe('a host the hub paired with proves under its credential (#1405)', () => {
+  it('names the credential in its prove, checks the proof under its verifier, and only then sends the token', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    const got: Record<string, unknown>[] = []
+    /** `right`: prove under the paired credential's verifier, as a serve host does; otherwise under the token itself */
+    let right = true
+    wss.on('connection', (ws) => {
+      ws.on('message', (d) => {
+        const f = JSON.parse((Buffer.isBuffer(d) ? d : Array.isArray(d) ? Buffer.concat(d) : Buffer.from(d)).toString('utf8')) as Record<string, unknown>
+        got.push(f)
+        if (f.kind === 'prove') {
+          const mac = right ? credentialProof(verifierOf(TOKEN), String(f.nonce)) : hostProof(TOKEN, String(f.nonce))
+          ws.send(JSON.stringify({ kind: 'proof', nonce: f.nonce, mac }))
+        }
+        if (f.kind === 'hello') ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' }))
+      })
+    })
+    const port = (wss.address() as { port: number }).port
+    const { c } = client(port, { proveHost: true, credential: 'abcd1234' })
+    c.connect()
+    await eventually(() => c.connected)
+    expect(got[0]).toMatchObject({ kind: 'prove', credential: 'abcd1234' })
+    expect(got[1]).toMatchObject({ kind: 'hello', token: TOKEN })
+    c.close()
+    // A proof under anything but the credential's verifier is no proof: the token is not sent
+    right = false
+    got.length = 0
+    const { c: d } = client(port, { proveHost: true, credential: 'abcd1234', handshakeTimeoutMs: 300 })
+    d.connect()
+    await eventually(() => got.length >= 2)
+    expect(d.connected).toBe(false)
+    expect(got.every((f) => f.kind === 'prove')).toBe(true)
+    d.close()
   })
 })

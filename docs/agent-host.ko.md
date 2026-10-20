@@ -1615,14 +1615,14 @@ WantedBy=default.target
 | `centralu serve --port <n>` | 같은 것을 그 포트로. 포트는 기록되어, 플래그 없는 다음 `serve`가 그것을 쓴다 |
 | `centralu serve --detach [--port <n>]` | 이 세션 바깥에서 `serve`를 띄우고, 그 호스트가 hello에 답하면 돌아온다. JSON 한 줄을 찍는다. 이미 돌고 있으면 두 번 띄우지 않고 그렇다고 답한다. 어떻게 띄우는지(setsid, WMI, WSL은 WMI로 만든 `wsl.exe`)와 `serve.log`, `serve.pid`는 영어판 §4.7 |
 | `centralu serve --stop` | 돌고 있는 호스트에 멈추라고 묻고(`host.stop`), 멈출 때까지 기다린 뒤 JSON 한 줄을 찍는다. 윈도우에서 런처를 죽이면 호스트가 정리 없이 끝나기 때문이다 |
-| `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). 토큰이 아직 없으면 만든다. 추가된 `install` 필드는 `{ managed, current, previous, node }` |
+| `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). `serve.json`이 아직 없으면 만든다. 제한 자격 증명을 싣고 전체 자격 증명은 목록만 싣는다(값은 싣지 않는다, #1405). `--pair <label>`을 붙이면 그 label의 새 전체 자격 증명(`token`, id는 `credential`)을 한 번 찍고 SHA-256만 남긴다. 허브는 연결할 때마다 `hub:<이름>`으로 이것을 실행한다. `--revoke <id>`는 전체 자격 증명 하나를 거둔다. 추가된 `install` 필드는 `{ managed, current, previous, node }` |
 | `centralu serve --rotate-token` | 포트는 두고 토큰을 바꾼다. 돌고 있는 serve는 재시작할 때까지 옛 토큰을 쓴다 |
 | `centralu serve --help` | 위의 것 |
 
 `--connection`은 클라이언트가 `ssh -T -o BatchMode=yes <target> …`로 묻는 단 하나의 질문에 답한다:
 
 ```json
-{"v":1,"port":17175,"token":"…","version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
+{"v":1,"port":17175,"limited":"ccl1:…","others":[],"version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
 ```
 
 | 필드 | 뜻 |
@@ -1648,7 +1648,7 @@ cmd.exe는 그때 이미 줄 전체를 읽었고, Ctrl+C로 배치 작업이 끝
 |---|---|
 | 런처가 번들 호스트를 시스템 Node로 띄운다; 키퍼는 없다 | 앱이 돌리는 것과 같은 `resources/host`이므로, 원격 호스트는 따로 살려 둘 두 번째 빌드가 아니다. 키퍼는 창 밑에서 빌드를 바꾸고 재시작 너머로 에이전트를 쥐려고 있다; 화면 없는 호스트에는 아직 둘 다 필요 없다 |
 | 127.0.0.1에만 바인드하고 SSH 로컬 포워드로 닿는다 | SSH가 이미 사람을 인증하고 연결을 암호화한다. 공개 포트라면 TLS와 우리만의 로그인이 필요하고, 인터넷의 모든 스캐너가 그것을 찾는다 |
-| 토큰은 `<데이터 폴더>/serve.json`에, 첫 바이트부터 0600으로, 어긋나면 다시 좁혀 둔다 | 그 머신의 모든 RPC의 열쇠다. 찍는 것은 `--connection`뿐이다: 토큰을 실은 호스트의 준비 줄은 런처가 읽고 아무 데도 넘기지 않는다 |
+| `<데이터 폴더>/serve.json`에는 호스트의 key와 전체 자격 증명의 SHA-256만 두고, 전체 자격 증명 자체는 두지 않는다(#1405). 첫 바이트부터 0600, 어긋나면 다시 좁힌다 | 전체 자격 증명은 그 머신의 모든 RPC의 열쇠다. 요청한 쪽(`--pair`)에게 한 번만 찍히고, 같은 사용자의 프로세스가 읽을 수 있는 파일로는 제한 자격 증명만 얻는다. key를 실은 호스트의 준비 줄은 런처가 읽고 아무 데도 넘기지 않는다 |
 | 토큰은 `--token`도 `CC_HOST_TOKEN`도 아니라 호스트 stdin의 첫 줄로 간다 (#538) | 머신의 아무 사용자나 남의 명령줄을 읽을 수 있고(`ps`), 같은 사용자의 모든 프로세스는 다른 프로세스가 시작할 때 받은 환경을 그 프로세스가 도는 동안 읽을 수 있다. 지워도 마찬가지다(#502). 호스트의 stdin은 어차피 런처로 가는 파이프다(`--watch-parent`) |
 | 토큰과 포트는 한 번 만들고 둔다 | 클라이언트는 그것을 저장해 두고 SSH 왕복 없이 다시 붙는다; hello가 거절될 때, 또는 같은 포워드로 다섯 번(약 6초) 다시 걸어도 호스트가 답하지 않을 때 `--connection`을 다시 돌린다: 분리되어 돌던 호스트가 죽어도 `ssh -N`은 살아 있고, 호스트를 다시 띄우라고 말해 주는 것은 연결 줄뿐이다(`LINK_REDIALS`, #1143) |
 | 기본 포트 17175 | 모든 OS의 임시 포트 범위보다, 그리고 호스트의 앱별 뷰 origin(20000–32767, `views/origin-ports.ts`)보다 아래 |

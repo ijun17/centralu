@@ -29,7 +29,9 @@ export async function readHandedToken(input: Readable, waitMs: number = HANDED_T
   } catch {
     throw new Error('the token line on stdin is not JSON')
   }
-  const token = asObj(parsed).token
+  // A `centralu serve` host that takes verifiers gets its key there instead (#1405, `serve-credentials.ts`)
+  const o = asObj(parsed)
+  const token = typeof o.token === 'string' ? o.token : o.key
   if (typeof token !== 'string' || token.trim() === '') throw new Error('the token line on stdin has no token')
   return token
 }

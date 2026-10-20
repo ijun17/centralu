@@ -46,6 +46,12 @@ export type LaunchEnv = {
    * environment, which every process of this user can read for as long as the host runs
    */
   tokenOnStdin: boolean
+  /**
+   * Where `centralu serve` keeps the full credentials' verifiers (#1405, `serve-credentials.ts`): set when the launcher
+   * hands this host its key on stdin instead of a token. The host then takes as full only a hello whose credential's
+   * verifier is in that file, read at each hello
+   */
+  serveState: string | undefined
 }
 
 /** Where a `centralu serve` was asked for from (`LaunchEnv.serveFrom`) */
@@ -61,6 +67,7 @@ export const LAUNCH_VARIABLES = [
   'CC_STARTED_BY',
   'CC_HOST_TOKEN',
   'CC_HOST_TOKEN_ON_STDIN',
+  'CC_SERVE_STATE',
 ] as const
 
 /** A hub's name or an address as the launcher passed it: short, and only characters that cannot break a sentence */
@@ -92,6 +99,7 @@ export function takeLaunchEnv(env: Record<string, string | undefined> = process.
     serveFrom: env.CC_SERVE === '1' ? parseServeFrom(env.CC_SERVE_FROM) : null,
     token: env.CC_HOST_TOKEN,
     tokenOnStdin: env.CC_HOST_TOKEN_ON_STDIN === '1',
+    serveState: env.CC_SERVE === '1' ? env.CC_SERVE_STATE || undefined : undefined,
   }
   for (const name of LAUNCH_VARIABLES) delete env[name]
   return launch

@@ -5,9 +5,9 @@
  * lock refuses.
  */
 import { join } from 'node:path'
-import { readServeState } from './serve-files.mjs'
+import { legacyHostTokenOf, pairServe, readServeState } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { hostProvesOf, probeHost, protocolVersionOf } from './serve-host.mjs'
+import { hostProvesOf, ownCredentials, probeHost, protocolVersionOf, takesVerifiers } from './serve-host.mjs'
 import { serveFolder } from './serve-run.mjs'
 import { runDetach } from './serve-detach.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -15,7 +15,9 @@ import { say, sleep } from './serve-util.mjs'
 
 /**
  * Makes sure the folder's serve host runs, then prints the window's ready line, `{"ready":true,"port","token","db"}`
- * (the line a host the window starts prints), and stays until the window goes.
+ * (the line a host the window starts prints), and stays until the window goes. The token is a full credential made for
+ * the window at each start (#1405, `--pair window`'s, replacing the last window's): serve.json keeps only its verifier.
+ * Residual: any process of this user can run `--window` too, until it checks its parent (#1417).
  *
  * - No host answers: one is started the way `--detach` starts it, in this Windows sign-in through the scheduled task,
  *   so it outlives the window and the hub's link finds it (`serve --connection`).
@@ -48,7 +50,7 @@ export async function runWindow({
   const protocolVersion = protocolVersionOf(entry) ?? 0
   const probe = () => {
     const state = readServeState(dataDir)
-    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, protocolVersion, prove }) : Promise.resolve({ running: false })
+    return state ? probeHost({ port: state.port ?? DEFAULT_SERVE_PORT, ...ownCredentials(state, entry), protocolVersion, prove }) : Promise.resolve({ running: false })
   }
 
   let host = await probe()
@@ -75,8 +77,10 @@ export async function runWindow({
     )
   }
 
+  // The window's own full credential (#1405); an older installed host knows only the token kept for it
+  const token = takesVerifiers(entry) ? pairServe(dataDir, 'window', platform).token : legacyHostTokenOf(dataDir, platform)
   const state = readServeState(dataDir)
-  write(`${JSON.stringify({ ready: true, port: state.port ?? DEFAULT_SERVE_PORT, token: state.token, db: join(dataDir, 'store.db') })}\n`)
+  write(`${JSON.stringify({ ready: true, port: state.port ?? DEFAULT_SERVE_PORT, token, db: join(dataDir, 'store.db') })}\n`)
 
   return await new Promise((resolve) => {
     let done = false

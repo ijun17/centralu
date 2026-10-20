@@ -3146,27 +3146,31 @@ this one for you.
 | `centralu serve --detach [--port <n>]` | Starts `serve` outside this session and returns once its host answers a hello (below). Prints one JSON line. A host already running is reported, not started twice |
 | `centralu serve --detach --from <hub>` | The same; `<hub>` is the name of the computer whose link asks (letters, digits, `.`, `_`, `-`), written with the ssh client's address to the host's `host.lock`, so a second Centralu refused on this folder names that link (#1223). A hub sends it only when the connection line's `takes` lists `from` |
 | `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line |
-| `centralu serve --connection` | Prints one JSON line and exits (below). Creates the token if there is none yet |
-| `centralu serve --rotate-token` | Replaces the token, keeping the port. A running serve keeps the old one until it restarts |
+| `centralu serve --connection` | Prints one JSON line and exits (below). Creates `serve.json` if there is none yet. It carries the limited credential and lists the full ones, never their values (#1405) |
+| `centralu serve --connection --pair <label>` | The same, with a new full credential for `<label>` (`token`, and its id as `credential`), printed once and kept as its SHA-256 only; it replaces `<label>`'s earlier one. A hub runs it at each link as `hub:<its name>` (#1405) |
+| `centralu serve --revoke <id>` | Withdraws one full credential; its next hello is refused. Prints one JSON line, `{ v, revoked, id }` (#1405) |
+| `centralu serve --rotate-token` | Draws a new key and withdraws every full credential, keeping the port. A running serve hands out what its old key derives until it restarts |
 | `centralu serve --autostart on\|off\|status` | Starts this machine's host at boot, stops doing that, or says whether it does (below). Never starts or stops a host now. Prints one JSON line |
 | `centralu serve --help` | The above |
 
 `--connection` answers the one question the client asks over `ssh -T -o BatchMode=yes <target> …`:
 
 ```json
-{"v":1,"port":17175,"token":"…","version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
+{"v":1,"port":17175,"limited":"ccl1:…","others":[],"version":"0.1.0-beta.11","protocolVersion":1,"dataDir":"/home/me/.centralu","hostRunning":true}
 ```
 
 | Field | Meaning |
 |---|---|
 | `v` | The shape of this line. A client that does not know the number says which side to update |
 | `port` | Where the host listens on the remote's loopback: the port the last `serve` listened on, else 17175 |
-| `token` | The token for the hello. The same across restarts until `--rotate-token` |
+| `token`, `credential` | With `--pair` only (#1405): a full credential made for the asker, and its id, which the host proves under (`prove.credential`). An older remote prints `token` always, its one token |
+| `limited` | The limited credential (#1405): everyday calls only. Absent from an older remote, and from one whose installed host predates verifiers |
+| `others` | The full credentials the folder holds besides the one just paired, as `{ id, label, created }` (#1405). Absent from an older remote |
 | `version`, `protocolVersion` | The running host's when `hostRunning`, read from its `hello_ok`; otherwise the installed package's (`host/bundle-info.json`). They differ after an `npm i -g` the host was not restarted for |
 | `dataDir` | The data folder the host owns |
 | `hostRunning` | A host holding this token answered a hello on `port` just now. A TCP connect alone does not count |
 | `proof` | Present (`true`) when the installed host answers a `prove` (#838; `hostProof` in its `bundle-info.json`): the hub then asks it to prove it holds the token before sending the hello, so a program another account put on the forward's local port never sees the token. Taken from the installed build, not from what answers on the port. A host still running from before the update refuses the proof: the link says the machine runs an older host than the one installed and asks for a restart there. Absent from an older remote, which gets the hello as before |
-| `takes` | Additive (#1223): the options this `serve` takes that an older one refuses, today `["from"]`. A hub adds `--from <its name>` to `--detach` only when it is listed: an older serve answers an option it does not know with an error and starts nothing |
+| `takes` | Additive (#1223): the options this `serve` takes that an older one refuses, today `["from", "window", "pair"]`. A hub adds `--from <its name>` to `--detach` only when it is listed: an older serve answers an option it does not know with an error and starts nothing |
 | `autostart` | Additive: `{ on, how, linger }`. `how` is what this machine starts its host at boot with (`systemd`, a scheduled `task`), null where it offers nothing; `on` whether `--autostart on` wrote that entry; `linger` (systemd) whether the user's manager starts at boot or only at login. Read from `<data>/autostart.json`, the mark `--autostart` keeps, so no link start asks systemd or Task Scheduler |
 | `install` | Additive (the line stays `v: 1`): `{ managed, current, previous, node }`. `managed` is whether the managed launcher of an install the app made over ssh ran this command ([plans/remote-hub.md](plans/remote-hub.md) §10.1); `current` and `previous` are that install's pointer files as `{ version, node }` (null when absent or not two plain words); `node` is the Node that answered |
 
@@ -3185,9 +3189,9 @@ skip the restore.
 |---|---|
 | A launcher starts the bundled host on the system Node; no keeper | The same `resources/host` the app runs, so a remote host is not a second build to keep working. The keeper exists to swap builds under a window and to hold agents across restarts; a headless host needs neither yet |
 | Bound to 127.0.0.1 only, reached through an SSH local forward | SSH already authenticates the person and encrypts the link. A public port would need TLS and a login of our own, and every scanner on the internet would find it |
-| The token lives in `<data folder>/serve.json`, mode 0600 from the first byte, narrowed back if it drifts | It is the key to every RPC on that machine. `--connection` prints it and nothing else does: the host's ready line, which carries it, is read by the launcher and never passed on |
+| `<data folder>/serve.json` holds the host's key and the full credentials' SHA-256s, never a full credential (#1405); mode 0600 from the first byte, narrowed back if it drifts | A full credential is the key to every RPC on that machine. It is printed once, to whoever paired for it (`--pair`), and the file a process of the user can read gives only the limited credential. The host's ready line, which carries its key, is read by the launcher and never passed on |
 | The token reaches the host as the first line on its stdin (#538), not `--token` and not `CC_HOST_TOKEN` | Any user on the machine can read another's command line (`ps`), and every process of the same user can read a process's start environment for as long as it runs, deleted or not (#502). The host's stdin is a pipe to the launcher anyway (`--watch-parent`) |
-| Token and port are generated once and kept | The client stores them and reconnects without an SSH round trip; it runs `--connection` again when a hello is refused, or when five redials of the same forward (about 6 s) reach no host: a detached host that died leaves `ssh -N` up, and only the connection line says to start one again (`LINK_REDIALS`, #1143) |
+| The key and port are generated once and kept; a hub's full credential is made at each link | The client keeps its credential in memory and reconnects without an SSH round trip; it pairs again (`--connection --pair`) when a hello is refused, or when five redials of the same forward (about 6 s) reach no host: a detached host that died leaves `ssh -N` up, and only the connection line says to start one again (`LINK_REDIALS`, #1143) |
 | Default port 17175 | Below every OS's ephemeral range and below the host's per-app view origins (20000–32767, `views/origin-ports.ts`) |
 | A recorded or default port another program holds moves to the next free one above it (up to 19 more, below 20000) and is recorded; `--port` is used as given | One Windows laptop linked twice, its Windows side and a WSL distro, had both hosts on 17175: WSL2 relays the distro's loopback ports to Windows (`wslrelay.exe`), so the second could not start (#482). Inside WSL, the ports Windows listens on count as taken too (`netstat.exe` through interop): a host there on such a port would be unreachable, because the hub's forward ends on Windows' loopback. `--connection` reports the port the host got |
 | The host gets its own process group and `--watch-parent` | Ctrl+C reaches the launcher, which passes one SIGINT to the host alone, and the host stops its agents in order. Killing the launcher, even with SIGKILL, closes the host's stdin and takes it down: it is never left running unsupervised (`tooling/launcher-serve.test.ts`) |
