@@ -7,7 +7,7 @@ import { METHOD_RIGHTS, type Rights } from './method-rights.js'
  */
 const CLASSES: readonly { name: Exclude<Rights, object>; says: string }[] = [
   { name: 'everyday', says: 'runs' },
-  { name: 'asks', says: 'refused for now; a card the person answers in the window replaces the refusal (#1405 slice 3)' },
+  { name: 'asks', says: "waits for the person's card in the window and runs once allowed; refused at once when no window that shows the card is attached" },
   { name: 'window', says: "refused, never a card: the person's own answers and the window's own state" },
   { name: 'link', says: 'refused: a hub linked to this host calls it, with the token' },
   { name: 'bridge', says: "refused: a session's own tool channel, which a Codex bridge reaches with its own credential" },

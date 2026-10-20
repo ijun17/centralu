@@ -17,6 +17,8 @@ import {
   TokenUsage,
   ToolSummary,
   UpdateStatus,
+  HostRequest,
+  HostRequestOutcome,
 } from './entities.js'
 import { MachineInfo } from './machines.js'
 import { HostHandover } from './host-logon.js'
@@ -795,6 +797,14 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * until it reloads.
    */
   z.object({ ...appScoped, type: z.literal('prefs_changed') }),
+  /**
+   * A call made with the limited credential waits for the person (#1405, `HostRequest`): a window that shows host
+   * requests shows the card and answers with `requests.answer`. A window that missed it reads `requests.list` after a
+   * reconnect. A window from before it drops the event (and said nothing in its hello, so the host never counts on it).
+   */
+  z.object({ ...appScoped, type: z.literal('host_request'), request: HostRequest }),
+  /** A host request ended: answered, withdrawn by the program that asked, or past its time (#1405) */
+  z.object({ ...appScoped, type: z.literal('host_request_resolved'), requestId: z.string(), outcome: HostRequestOutcome }),
   /**
    * A capability question from a chain that started from a screen was raised or closed (M4 D-4).
    * The same coarseness: this carries nothing, and the receiving side refetches

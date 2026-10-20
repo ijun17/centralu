@@ -589,6 +589,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     void get().refreshMcpProposals()
     // Capability questions also survive on the host (M4 D-4) — an app's call waiting for an answer hangs there
     void get().refreshAppQuestions()
+    // A program's call waiting for the person (#1405) waits on the host too
+    void get().refreshHostRequests()
     void get().refreshSkillProposals()
 
     /*
@@ -708,6 +710,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows
     void get().refreshExternalApps()
     void get().refreshAppQuestions()
+    // And the requests waiting for the person (#1405): a missed host_request would leave a program waiting unseen
+    void get().refreshHostRequests()
     // So is a proposal list change (#703): a missed `orchestrator_proposals_changed` leaves a card, the count and the badge stale
     void get().refreshMcpProposals()
     void get().refreshSkillProposals()

@@ -116,6 +116,7 @@ With the limited credential: runs.
 - `projects.list`
 - `projects.origin`
 - `projects.reorder`
+- `requests.list`
 - `sessions.list`
 - `sessions.markRead`
 - `sessions.rename`
@@ -144,7 +145,7 @@ With the limited credential: runs.
 
 ## asks
 
-With the limited credential: refused for now; a card the person answers in the window replaces the refusal (#1405 slice 3).
+With the limited credential: waits for the person's card in the window and runs once allowed; refused at once when no window that shows the card is attached.
 
 - `agents.deleteAgentChild`
 - `agents.deleteOrchestratorSkill`
@@ -216,6 +217,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `mail.thread`
 - `mail.unblock`
 - `mail.wake`
+- `requests.answer`
 - `updates.answerApply`
 - `updates.reportApply`
 - `workspace.save`

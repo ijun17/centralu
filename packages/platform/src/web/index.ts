@@ -731,6 +731,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       answerApply: (a) => rpc.call('updates.answerApply', a),
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
+    requests: {
+      list: () => rpc.call('requests.list', {}),
+      answer: (requestId, decision) => rpc.call('requests.answer', { requestId, decision }),
+    },
     // The page does not guess the machine: the desktop build passes the shell's answers in (`defaultCapabilities`)
     capabilities: defaultCapabilities(opts.capabilities),
     async dispose() {

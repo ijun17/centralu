@@ -32,6 +32,7 @@ import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
 import { Notices } from '../features/notices/Notices.jsx'
+import { HostRequestCards } from '../features/host-requests/HostRequestCards.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { IconButton } from '../components/IconButton.jsx'
@@ -264,6 +265,8 @@ export function App({
           */}
           {banner}
           <Body />
+          {/* A program's call waiting for the person (#1405): over the lanes, not in their flow */}
+          <HostRequestCards />
           <CommandPalette />
           {/*
             Mounted from the first time it opens, and kept: Settings remembers the category it was

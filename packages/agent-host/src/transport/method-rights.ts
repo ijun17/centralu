@@ -11,8 +11,9 @@ import type { RpcMethodName } from '@cc/protocol'
  *              by hand anyway (git, files, terminals, stopping a process)
  *   asks       irreversible or trust-widening: deletes beyond what the trash brings back, moves out of
  *              reach what the trash does not fully restore, widens what agents, apps or machines may do
- *              without the person, or brings in code that later runs unasked. Refused for now; a later
- *              slice turns the refusal into a card the person answers in the window
+ *              without the person, or brings in code that later runs unasked. Waits for the person's
+ *              card in the window and runs once allowed (host-requests.ts); refused at once when no
+ *              window that shows the card is attached
  *   window     the person's own answers (a card, a question, an apply) and the window's own state,
  *              written whole: refused, and never a card (a card that answers a card means nothing)
  *   link       host-to-host calls of a hub linked to this host, which holds this host's full token
@@ -257,6 +258,9 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'updates.setAuto': { asks: switchedOn('enabled'), when: 'it turns automatic updates on' },
   'updates.setAutoApply': { asks: switchedOn('enabled'), when: 'it turns automatic applying on' },
   'updates.apply': 'asks',
+  'requests.list': 'everyday',
+  /** The person's answer to a host request: a card answering itself means nothing */
+  'requests.answer': 'window',
   'updates.answerApply': 'window',
   /** The window's report on an apply it was handed (`update_apply_go` carries the ticket to every client) */
   'updates.reportApply': 'window',
@@ -340,8 +344,8 @@ export function limitedRight(method: string, params: unknown): 'everyday' | 'ask
 
 /**
  * Why a connection holding the limited credential may not make this call, or null if it may: the class
- * that refuses it and a sentence to show. Until the card exists (#1405 slice 3), an `asks` call is
- * refused like the rest, saying the person can do it in the window.
+ * that refuses it and a sentence to show. An `asks` call goes to the person's card instead
+ * (host-requests.ts) where the host has one; this sentence is for a host without it.
  */
 export function limitedRefusal(method: string, params: unknown): { rights: Exclude<ReturnType<typeof limitedRight>, 'everyday'>; message: string } | null {
   const rights = limitedRight(method, params)

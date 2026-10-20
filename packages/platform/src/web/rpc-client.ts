@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  SHOWS_HOST_REQUESTS,
   errorMessage,
   isRecord,
   parseRpcResult,
@@ -269,6 +270,8 @@ export class RpcClient {
           kind: 'hello',
           token: this.opts.token,
           protocolVersion: PROTOCOL_VERSION,
+          // This window shows the cards of the limited credential's calls (#1405); a host counts on it only with the token
+          shows: [SHOWS_HOST_REQUESTS],
           // A cursor travels with the lifetime that issued it (#82)
           ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.hostEpoch ? { streamEpoch: this.hostEpoch } : {}) } : {}),
         }),

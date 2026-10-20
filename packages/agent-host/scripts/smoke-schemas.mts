@@ -91,6 +91,7 @@ const T = term.terminalId
 /** What to send for each method. null means "cannot be called for this check" + a reason */
 const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> = {
   'projects.list': {},
+  'requests.list': {},
   'projects.add': { path: cwd },
   'projects.reorder': { orderedIds: [P] },
   'projects.setCommands': { projectId: P, commands: ['echo for the check'] },
@@ -161,6 +162,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
 /** What cannot be called, and why — leaving it out silently would read as "everything was checked" */
 const SKIP: Record<string, string> = {
   'agents.respondApproval': 'needs a pending approval request (covered by smoke.mjs)',
+  'requests.answer': 'needs a host request, which only a limited call raises while a window shows them (host-requests.test.ts)',
   'agents.answerQuestion': 'needs a pending question request (same reason as the approval one)',
   'agents.forkConversation': 'needs a locked codex conversation — cannot be created headlessly',
   'agents.restartSession': 'actually swaps out the process — would shake up the checks that follow',

@@ -5,6 +5,7 @@ import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
+import { HostRequests } from '../host-requests.js'
 
 describe('the limited credential is derived from the token', () => {
   it('matches the vector the keeper is checked against (#1405 slice 4)', () => {
@@ -176,5 +177,113 @@ describe('a connection holding the limited credential (#1405)', () => {
     const { port } = await start()
     const c = await hello(port, limitedToken('another-token'))
     expect(await c.closed).toBe(4001)
+  })
+})
+
+describe('a limited call that asks the person, over the sockets (#1405 slice 3)', () => {
+  /** A host whose limited `asks` calls go to host requests, with a trash of one session */
+  async function startWithRequests() {
+    const purged: string[] = []
+    const requests: HostRequests = new HostRequests({
+      emit: (e) => srv.broadcast(e),
+      canShow: () => srv.showsHostRequests(),
+      rpc: async (method, params) => {
+        if (method === 'trash.list') return { sessions: [{ id: 's1', name: 'Fix the parser', tool: 'claude', project: null, deletedAt: 1, messages: 2, bytes: 10, conversationFile: 'keep' }], runs: [], bytes: 10 }
+        if (method === 'trash.purge') purged.push((params as { sessionId: string }).sessionId)
+        return { ok: true }
+      },
+    })
+    const srv: HostServer = new HostServer({
+      port: 0,
+      token: TOKEN,
+      onRpc: async (method, params) => {
+        if (method === 'requests.list') return requests.list()
+        if (method === 'requests.answer') {
+          const a = params as { requestId: string; decision: 'allow' | 'deny' }
+          return { ok: requests.answer(a.requestId, a.decision) }
+        }
+        return { ok: true }
+      },
+      onAsk: (method, params, from, signal) => requests.ask(method, params, from, signal),
+    })
+    server = srv
+    const port = await srv.listen()
+    return { srv, port, purged, requests }
+  }
+
+  async function windowHello(port: number, shows: string[] | undefined, token = TOKEN) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+    const frames: Record<string, unknown>[] = []
+    ws.on('message', (d) => frames.push(JSON.parse(text(d))))
+    await new Promise<void>((r) => ws.on('open', () => r()))
+    ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION, ...(shows ? { shows } : {}) }))
+    const wait = async (pred: () => boolean, ms = 3000) => {
+      const t0 = Date.now()
+      while (!pred()) {
+        if (Date.now() - t0 > ms) throw new Error('timeout')
+        await new Promise((r) => setTimeout(r, 10))
+      }
+    }
+    await wait(() => frames.some((f) => f.kind === 'hello_ok'))
+    return { ws, frames, wait }
+  }
+
+  /** Sends one call and returns its answer whenever it comes */
+  function send(c: { ws: WebSocket; frames: Record<string, unknown>[] }, id: string, method: string, params: unknown) {
+    c.ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))
+    return async (wait: (pred: () => boolean, ms?: number) => Promise<void>) => {
+      await wait(() => c.frames.some((f) => f.kind === 'res' && f.id === id))
+      return c.frames.find((f) => f.kind === 'res' && f.id === id) as { ok: boolean; result?: unknown; error?: { message: string; data?: { refused?: string } } }
+    }
+  }
+
+  it('is refused at once while no window that shows host requests holds the token: a window from before, or a hub, does not count', async () => {
+    const { port, purged } = await startWithRequests()
+    await windowHello(port, undefined)
+    const script = await hello(port, limitedToken(TOKEN))
+    const res = await script.call('trash.purge', { sessionId: 's1' })
+    expect(res.ok).toBe(false)
+    expect(res.error?.data).toEqual({ refused: 'no_window' })
+    expect(purged).toEqual([])
+  })
+
+  it('waits for the window: the card reaches it, its Allow runs the call, and the program gets the answer', async () => {
+    const { port, purged } = await startWithRequests()
+    const win = await windowHello(port, ['host_requests'])
+    const script = await hello(port, limitedToken(TOKEN))
+    const answer = send(script, 'p', 'trash.purge', { sessionId: 's1' })
+    await win.wait(() => win.frames.some((f) => f.kind === 'event' && (f.event as NormalizedEvent).type === 'host_request'))
+    const raised = win.frames.find((f) => f.kind === 'event' && (f.event as NormalizedEvent).type === 'host_request')!.event as { request: { requestId: string; question: string } }
+    expect(raised.request.question).toContain('"Fix the parser"')
+    // The program cannot answer its own card
+    const self = await script.call('requests.answer', { requestId: raised.request.requestId, decision: 'allow' })
+    expect(self.error?.data).toEqual({ refused: 'rights', rights: 'window' })
+    expect(purged).toEqual([])
+    win.ws.send(JSON.stringify({ kind: 'rpc', id: 'a', method: 'requests.answer', params: { requestId: raised.request.requestId, decision: 'allow' } }))
+    expect(await answer(script.wait)).toMatchObject({ ok: true, result: { ok: true } })
+    expect(purged).toEqual(['s1'])
+  })
+
+  it('is withdrawn when the program disconnects: the window hears it, and nothing runs', async () => {
+    const { port, purged, requests } = await startWithRequests()
+    const win = await windowHello(port, ['host_requests'])
+    const script = await hello(port, limitedToken(TOKEN))
+    send(script, 'p', 'trash.purge', { sessionId: 's1' })
+    await win.wait(() => requests.list().length === 1)
+    script.ws.close()
+    await win.wait(() => win.frames.some((f) => f.kind === 'event' && (f.event as { type: string; outcome?: string }).outcome === 'withdrawn'))
+    expect(requests.list()).toEqual([])
+    expect(purged).toEqual([])
+  })
+
+  it('stops counting a window once it is gone', async () => {
+    const { srv, port } = await startWithRequests()
+    const win = await windowHello(port, ['host_requests'])
+    expect(srv.showsHostRequests()).toBe(true)
+    win.ws.close()
+    await win.wait(() => !srv.showsHostRequests())
+    // The limited credential saying it shows them counts for nothing: it cannot answer
+    await windowHello(port, ['host_requests'], limitedToken(TOKEN))
+    expect(srv.showsHostRequests()).toBe(false)
   })
 })

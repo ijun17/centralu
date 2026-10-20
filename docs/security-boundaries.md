@@ -788,6 +788,11 @@ card, and so is one whose machine could not list its apps (they are asked of tha
 (running agents per project, levels that may start agents) bound the
 orchestrator's own children too, so every change to them asks, narrowing as well as widening.
 
+A program that is not a window and holds the limited credential (#1405) is asked through none of the cards above: its
+irreversible calls raise a **host request**, the host's own card with Allow and Deny only, which only a window holding
+the token answers, refused at once with no such window, withdrawn when the program leaves and after 15 minutes ("The card
+for a limited call", under "Who holds full power").
+
 ### Turning things off
 
 The table describes `safe`/`normal`. Under `auto`, project trust and revoked remembered
@@ -1143,7 +1148,7 @@ protocol does not compile until someone classifies it, and a test compares its k
 | Class | With the limited credential | Which methods |
 |---|---|---|
 | everyday | runs | reading, creating and messaging sessions (a preset of `normal` or below), renaming, sleep policy, the trash's list, read and restore, git, files, terminals, commands, stopping a process, app upkeep that keeps what it replaces. What the user could do by hand anyway is not held back |
-| asks | refused for now; a card the person answers in the window replaces the refusal (#1405 slice 3) | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating, rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
+| asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating, rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
 | window | refused, never a card | the person's own answers (approval cards, questions, an update's apply and its report, whose ticket every client hears, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
 | link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
 | bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
@@ -1158,10 +1163,38 @@ unless it is a read made again after Allow; a card raised only in some branches 
 deleted) is not seen by it. A refusal is `ok: false` with
 `data: { refused: 'rights', rights }` and a line in the host's log naming the method; the socket stays open.
 
-**Who holds what, today.** Built so far: the credential and the classification (slice 1). Until the keeper hands out the
-limited credential instead of the token (#1405 slice 4), its `status` and `attach` still give the token to any process
-of this user ("The keeper's control socket" below), so nothing yet makes a script use the limited one; a script that
-does gets only what the table says. The serve host's `serve.json` (below) still holds its token until slice 5.
+**The card for a limited call** (`host-requests.ts`, slice 3). An `asks` call is held, and the host raises a
+**host request**: not a session's card (the program holds no session's rights, and a card in the orchestrator's slot
+would read as the orchestrator's doing) but the host's own, shown over the lanes of every window that said in its hello
+that it shows them (`hello.shows`), one at a time, oldest first.
+
+- **What it names.** The trash's deletes ask through the orchestrator's own trash flow with this card in place of
+  the orchestrator's: the same question, naming each session (quoted on one line), its machine, its size and what goes
+  with it, and the same reading of the trash again after Allow: a session restored meanwhile is not deleted, and
+  `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's card
+  names the method and its parameters, quoted on one line with format characters escaped, and the call runs as made.
+  The program's own name (`hello.client`) is shown quoted, cut to 60 characters, and said to be what it calls itself:
+  nothing checks it.
+- **Who answers.** Only a window holding the token (`requests.answer` is `window`): never the program, another
+  limited socket, a bridge or an agent. Allow and Deny only, no "always" (owner, 2026-10-21), and no key: a y meant for
+  the composer must not delete something for good.
+- **When it is refused at once.** No window that shows host requests holds the token (owner, 2026-10-21: refused,
+  not left standing): an older window, a hub's link and the limited credential count for nothing. Or 8 already wait.
+- **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
+  timer, since a raw call has no turn to end it), or the host stops. Nothing is kept across a swap: the caller asks the
+  next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
+- **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
+  linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
+  machine's token). A linked machine's own limited callers are refused there: no window there shows host requests, and
+  the hub does not show a machine's (`requests.*` are never forwarded).
+- **Residual.** A window built with `dev:live` holds the limited credential and is a window all the same: it shows
+  the card, and its Allow is refused (`window`), so the person answers in the app's own window.
+
+**Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2) and the card (slice 3).
+Until the keeper hands out the limited credential instead of the token (#1405 slice 4), its `status` and `attach`
+still give the token to any process of this user ("The keeper's control socket" below), so nothing yet makes a script
+use the limited one; a script that does gets only what the table says. The serve host's `serve.json` (below) still
+holds its token until slice 5.
 
 ## The remote host (`centralu serve`, #82)
 

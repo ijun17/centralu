@@ -19,6 +19,7 @@ const toInfo = (h: TerminalHandle) => ({
 })
 import type { UpdateService } from './updates.js'
 import type { UpdateApplyBroker } from './update-apply.js'
+import type { HostRequests } from './host-requests.js'
 import type { AgentVersionService } from './agent-versions.js'
 import type { SessionSleeper } from './sessions/sleep.js'
 import type { StopGate } from './lifecycle/stop-gate.js'
@@ -104,6 +105,8 @@ export type RpcServices = {
   hubs?: { offer(client: number, o: HubOffer): void }
   /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
   mail?: MailPerson
+  /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
+  requests?: Pick<HostRequests, 'list' | 'answer'>
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -147,7 +150,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, activity, updateApply, hubs, mail, requests }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
@@ -1029,6 +1032,12 @@ export function createRpcHandler(
     'updates.answerApply': async (p, ctx) => {
       const a = RpcMethods['updates.answerApply'].params.parse(p)
       return updateApply && ctx ? updateApply.answer(ctx.client, a) : { ticket: null }
+    },
+    // The person's answers to the limited credential's calls (#1405). Without the service (tests) nothing ever waits
+    'requests.list': async () => requests?.list() ?? [],
+    'requests.answer': async (p) => {
+      const a = RpcMethods['requests.answer'].params.parse(p)
+      return { ok: requests?.answer(a.requestId, a.decision) ?? false }
     },
     'updates.reportApply': async (p, ctx) => {
       const r = RpcMethods['updates.reportApply'].params.parse(p)
