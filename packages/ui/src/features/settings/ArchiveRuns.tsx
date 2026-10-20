@@ -5,9 +5,9 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay, formatDuration } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Markdown } from '../session/Markdown.jsx'
-import { ReaderItem } from './TrashReaderItem.jsx'
+import { ReaderItem } from './ArchiveReaderItem.jsx'
 
-/** One app's records, in the order the trash lists them (most recently kept first) */
+/** One app's records, in the order the session archive lists them (most recently kept first) */
 type RunGroup = { key: string; name: string; projectName: string | null; runs: TrashedRun[] }
 
 /** The records grouped by app (#378): an app that called run_agent a few dozen times reads as one heading, not a wall */
@@ -24,12 +24,12 @@ export function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
 }
 
 /**
- * The records of deleted app-agent sessions in Settings → Trash (#378). A session an app stood up with run_agent goes
+ * The records of deleted app-agent sessions in Settings → Archive (#378). A session an app stood up with run_agent goes
  * once its run ends cleanly; what it did waits here: the app's request, the answer, the whole conversation. Each can
  * be read and deleted for good, one at a time or an app's all at once. There is no restore: the record is the run,
  * not a session to talk to again.
  */
-export function TrashRuns({
+export function ArchiveRuns({
   runs,
   busy,
   confirming,
@@ -139,7 +139,7 @@ export function TrashRuns({
 const PAGE = 200
 
 /** A kept run, read-only (#378): what the app asked, what the agent answered, and the conversation in between */
-export function TrashRunReader({ run, onBack }: { run: TrashedRun; onBack: () => void }) {
+export function ArchiveRunReader({ run, onBack }: { run: TrashedRun; onBack: () => void }) {
   const platform = usePlatform()
   const [head, setHead] = useState<{ request: string; answer: string; output?: unknown } | null>(null)
   const [items, setItems] = useState<ChatItem[] | null>(null)
@@ -167,7 +167,7 @@ export function TrashRunReader({ run, onBack }: { run: TrashedRun; onBack: () =>
     <section data-testid="trash-run-reader">
       <div className="flex items-baseline gap-2">
         <button type="button" className="text-xs text-ink-faint hover:text-ink" onClick={onBack} data-testid="trash-reader-back">
-          ← Trash
+          ← Archive
         </button>
         <span className="min-w-0 truncate text-sm text-ink">{run.sessionName}</span>
         <span className="ml-auto shrink-0 text-2xs text-ink-faint">read-only</span>

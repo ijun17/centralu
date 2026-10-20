@@ -962,7 +962,7 @@
     },
     {
       "id": "delete-session.mouse",
-      "task": "Delete a session (to the trash)",
+      "task": "Archive a session",
       "path": "mouse",
       "access": "discoverable",
       "operators": "H P M P B B M P B B M P B B",
@@ -2171,7 +2171,7 @@
     },
     {
       "id": "restore-session.mouse",
-      "task": "Bring back a session deleted by mistake",
+      "task": "Bring back an archived session",
       "path": "mouse",
       "access": "discoverable",
       "operators": "H M P B B M P B B M P B B",
@@ -2207,7 +2207,7 @@
         },
         {
           "kind": "click",
-          "label": "settings-tab-trash",
+          "label": "settings-tab-archive",
           "operators": "M P B B",
           "seconds": 2.72,
           "pointer": {
@@ -2218,7 +2218,7 @@
         },
         {
           "kind": "wait",
-          "label": "the trash",
+          "label": "the archive",
           "operators": "R",
           "seconds": 0,
           "waitMs": 6
@@ -2243,7 +2243,7 @@
         }
       ],
       "notes": [
-        "Settings, then Trash: the delete dialog and its toast say where it went"
+        "Settings, then Archive: the delete dialog and its toast say where it went"
       ],
       "breaches": []
     },

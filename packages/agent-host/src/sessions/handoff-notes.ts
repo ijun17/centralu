@@ -84,13 +84,13 @@ export class HandoffNotes {
      * Ownership is asked per note, at the moment that note is judged — not snapshotted before the folder
      * is read. The sweep awaits the listing and each delete, and in that time a handoff can finish and its
      * predecessor be deleted (the last step of a handoff): the predecessor leaves `meta`, and only a
-     * claim or the trash read now still says the note has a reader. A snapshot taken earlier said neither,
+     * claim or the session archive read now still says the note has a reader. A snapshot taken earlier said neither,
      * and the note the successor had just been pointed at was deleted.
      */
     await sweepHandoffNotes(
       (owner) =>
         this.host.meta.has(owner) ||
-        // A session in the trash still owns its note (#204) — restoring it must find it; only purging lets it go
+        // A session in the session archive still owns its note (#204) — restoring it must find it; only purging lets it go
         this.host.store.trash.trashedIds().has(owner) ||
         this.host.store.handoffs.handoffPredecessors().has(owner),
       projectId,

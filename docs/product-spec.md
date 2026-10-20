@@ -6,7 +6,7 @@
 - Written: 2026-08-15 (v0.4), realigned 2026-08-26 (v0.5)
 - Status: shipped through M2; M2.5 (dogfooding) in progress
 - Main changes v0.4 → v0.5: §2's M0 preconditions recorded as verified; FR-4 updated to the evidence-panel tab layout (History split out of the git panel); FR-9 rewritten to what shipped (limit windows, not a cost dashboard); FR-11 rewritten to the implemented orchestrator design (kind marker, central/per-project hierarchy, curated tools, crown mark); the terminal non-goal withdrawn (§1.5); grid still experimental with its two live objections (§5.4); architecture (§6) corrected to the Node-host reality; measured numbers added to §7.1; roadmap (§8) marked up to date
-- Main changes v0.3 → v0.4: product philosophy written down (§1.2), approval allowed in place from the banner (jump only when context is needed), the concurrent-session warning softened to inline plus a recovery path, session archive (FR-20)·conversation search (FR-21)·card collapse policy added, inbox promoted to M1, React settled as the front end, 4 open questions closed
+- Main changes v0.3 → v0.4: product philosophy written down (§1.2), approval allowed in place from the banner (jump only when context is needed), the concurrent-session warning softened to inline plus a recovery path, hide-a-session, then called archive (FR-20, retired later)·conversation search (FR-21)·card collapse policy added, inbox promoted to M1, React settled as the front end, 4 open questions closed
 
 ---
 
@@ -125,7 +125,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
-| ~~Archive~~ | Retired with FR-20 (2026-09-02). A session that is not live is resumed when addressed, and one the person deletes goes to the trash (FR-22) |
+| Session archive | A finished or put-away session, kept until the person deletes it for good; it can be opened (read-only) and restored. Called the trash until #1404 (FR-22). Not the retired hide-a-session feature (FR-20). A session that is not live is resumed when addressed |
 
 ---
 
@@ -169,7 +169,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 - Chat-style UI: user message / agent response (streaming markdown) / tool call card (collapsed by default, expand for detail).
 - Tool call card: shows the command, file path and diff summary in structured form. Raw output only on expand. **The collapse default differs by tool kind**: read-oriented ones (Read/Grep/read-oriented Bash) are collapsed — 20 in a row still does not bury the conversation. File changes (Edit/Write) default to an expanded diff summary. Adjustable per tool in settings. (Half of the conversation view's readability is this policy)
 - A call to Centralu's own tools (`start_agent`, `agent_session`, `send_to_session`, an app's tools, …) stands apart from the other tool cards: Centralu's mark (an app's window icon and name), what it did in words ("Started an agent") with the job or text it carried, and **Open session →** to the session it names. These are where an agent reaches other sessions, projects, machines or apps, which a person most wants to follow. Emphasis by shape and a stronger edge, never the signal's brightness (#730). `ask_project` is one of them: its sentence names the project ("Asked Docs") and, in place of running or failed, how the work there stands (working…, waiting for approval there, waiting for an answer there, still working, did not finish, answered); its chip is the session doing the work, known from the task's provenance before the answer arrives (#371).
-- A card that launched a native subagent (Claude Code's `Agent`, Codex's `spawnAgent`) has a collapsed **Subagent's steps** section. Opening it shows what the subagent did — its text, reasoning and tool cards, drawn like the conversation's own — and a running one's later steps join it as they arrive. The conversation itself never shows them: another actor's steps among the parent's made it impossible to tell who did what (#98). Agents that ran before the steps were kept (#222) say that none are kept. Steps moved to the trash without their session (#418) are said to be there, with Settings → Trash as the way back; steps deleted from the trash for good leave the card saying none are kept.
+- A card that launched a native subagent (Claude Code's `Agent`, Codex's `spawnAgent`) has a collapsed **Subagent's steps** section. Opening it shows what the subagent did — its text, reasoning and tool cards, drawn like the conversation's own — and a running one's later steps join it as they arrive. The conversation itself never shows them: another actor's steps among the parent's made it impossible to tell who did what (#98). Agents that ran before the steps were kept (#222) say that none are kept. Steps moved to the session archive without their session (#418) are said to be there, with Settings → Archive as the way back; steps deleted from the archive for good leave the card saying none are kept.
 - Session control: interrupt, retry, new session, rename session (auto naming is FR-18).
 - Message input: multiline, attachments (FR-13), slash command passthrough (where the tool supports it).
 
@@ -413,8 +413,8 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - A single list that **ignores** project structure and gathers only the items waiting on my intervention right now.
 - Ordering: urgency first (approval → error → awaiting response); within the same urgency, ascending by when the wait started.
 - Each item: session name, project, kind of wait, elapsed time, a one-line preview of the last content.
-- Select an item → jump to that session's focus view. When handling (approval/response) is complete, the person **stays on that session**, so they can see how the agent takes what they just sent; `⌘⇧A` (FR-17) moves to the next waiting item. *(Changed 2026-10-02: this used to say the app moves to the next item automatically. Nothing did since the archive's `d` key and its `afterHandled` path were retired with FR-20, and the owner chose to keep it that way: a screen that switches the moment a reply is sent is hard to predict.)*
-- ~~**`d` (dismiss)**~~ — **retired 2026-09-02.** It archived the session, which was the only entry point archive ever had and had no exit; "I do not need to answer this" removed the session from the app. The inbox is a view of *state*, so the only honest way to empty it is to change the state — that is, to answer. See FR-20.
+- Select an item → jump to that session's focus view. When handling (approval/response) is complete, the person **stays on that session**, so they can see how the agent takes what they just sent; `⌘⇧A` (FR-17) moves to the next waiting item. *(Changed 2026-10-02: this used to say the app moves to the next item automatically. Nothing did since the hide feature's `d` key and its `afterHandled` path were retired with FR-20, and the owner chose to keep it that way: a screen that switches the moment a reply is sent is hard to predict.)*
+- ~~**`d` (dismiss)**~~ — **retired 2026-09-02.** It hid the session, which was the only entry point that hiding ever had and had no exit; "I do not need to answer this" removed the session from the app. The inbox is a view of *state*, so the only honest way to empty it is to change the state — that is, to answer. See FR-20.
 - **Awaiting response is listed only while unread** (owner, 2026-10-14, [#669](https://github.com/ijun17/centralu/issues/669)). A finished turn (`waiting_input`) is in the list, the top-bar counter, the folded-project summary and `⌘⇧A` only while `last_read_seq < last_seq`; reading the answer takes it off, and a new answer (a new `last_seq`) brings it back. Approvals and errors are listed as before, read or not. Each awaiting-response row has a **Done** button (key `D` under the cursor) that marks the session read without opening it: no new state, the same read mark FR-16 describes. This is not the retired `d` above: Done removes nothing from the app, it only says the answer has been seen.
 - **A turn that stopped before it finished says why** ([#698](https://github.com/ijun17/centralu/issues/698), proposed in its pull request, not yet an owner decision). When the network, a quit or the tool's own interrupt cut a turn short (`SessionInfo.interruption`, [agent-host.md](agent-host.md) §4.6.2), the inbox row reads "Stopped: network", "Stopped: Centralu quit or restarted" or "Stopped: interrupted" in place of the state's word, ranks and counts with errors, and carries **Continue**, which sends "Continue where you stopped. Check what already happened before repeating a step." as the person's message (a cut turn may have done part of a step already). A session a quit left `idle` is listed while unread, as a finished turn is, and has Done; an error is listed as before. The sidebar's tool mark takes the signal ring and names the reason in its tooltip, and the conversation says it above the composer with the same Continue. A tool reconnecting for more than 5 minutes is listed as "Reconnecting for 5+ min" while it lasts, with nothing to continue. Nothing is resent by itself: a resent turn can repeat a push or a release.
 - An approval row says what it asks and offers Allow / Deny (`y` / `n` under the cursor) or Open, as FR-3 "Answering from a row" describes (#543).
@@ -492,13 +492,15 @@ A folder that already exists, on this computer or a linked machine, is added wit
 repository and its origin, or by the person through Add project in the sidebar; either way it is asked
 about for trust once. `list_machines` names the linked machines.
 
-#### FR-20. Session archive — **retired (2026-09-02)**
+#### FR-20. Hide a session (once called "archive") — **retired (2026-09-02)**
 
-Archive is gone: the flag, the RPC, the orchestrator's `archive_session` tool, and the `d`
-key. Schema v28 drops the column, so nothing is hidden any more.
+The old feature that hid a session from the list, then called "archive", is gone: the flag, the RPC,
+the orchestrator's `archive_session` tool, and the `d` key. Schema v28 drops the column, so nothing
+is hidden any more. It is a different thing from the session archive of FR-22, which is the
+retired idea rebuilt with the way out it lacked.
 
 What was built was half of what is written above this line: the way in (`d` in the inbox)
-without any of the ways out (the per-project Archive list, the palette, resume in place).
+without any of the ways out (the per-project hidden-sessions list, the palette, resume in place).
 So a key labelled "Dismiss" removed a session from the sidebar, the palette and the inbox
 with no path back — indistinguishable from deletion, and reachable by one keystroke. An
 agent could do it too, through `archive_session`.
@@ -508,17 +510,17 @@ of session *state*, and "I do not need to answer this" is not a state the agent 
 so the key had no lever except removing the session from the set entirely. Emptying the
 inbox now means answering, which is the thing the inbox exists to prompt.
 
-Nothing needed archive to keep a record: deleting a session already says the conversation
+Nothing needed hiding to keep a record: deleting a session already says the conversation
 survives in Claude/Codex and can be pulled back from **+ → Past conversations** (there is a
 host test that holds that promise). If the sidebar ever does get crowded — worktree sessions
 are the plausible source — the answer belongs where the crowding is (collapsing merged
 children), not in a global hidden state.
 
-**Since 2026-09-30 a hidden-but-kept session exists again: the trash (FR-22, #204).** It is the
-shape retired here, built with what archive lacked. The way out ships with the way in (list, read,
+**Since 2026-09-30 a hidden-but-kept session exists again: the session archive (FR-22, #204; called the trash until #1404).** It is the
+shape retired here, built with what hiding lacked. The way out ships with the way in (list, read,
 restore, delete for good, in Settings); deleting is not one keystroke but a dialog that says where
-the session goes and how it comes back; no agent or app can take a session out of the trash or
-delete one for good; and the trash is emptied by nothing but the person.
+the session goes and how it comes back; no agent or app can take a session out of the archive or
+delete one for good; and the archive is emptied by nothing but the person.
 
 #### FR-21. Conversation content search
 
@@ -526,17 +528,18 @@ delete one for good; and the trash is emptied by nothing but the person.
 - M2: full-text search of conversation **content** (SQLite FTS) — "where did we talk about that" is guaranteed to come up with 4 sessions over a few days.
 - **Content is what was said**: the person's words, the agents' answers and their reasoning. Tool calls and their output are not searched ([#221](https://github.com/ijun17/centralu/issues/221)). Commands were indexed until then, and they were 55,131 of 81,816 index rows and most of a 124.5MiB index in a 236.2MiB store (a copy of the real one, 2026-09-30); a command's output never was. Taking them out cost nothing a search for what was said finds (all 397 sampled queries returned the same messages) and left a 36.6MiB index in a 145.4MiB store. What a session ran is read with `read_session`, not searched.
 - **A native subagent's steps are not searched either, its text included** ([#222](https://github.com/ijun17/centralu/issues/222)). The parent's own report on what its subagent found is in the conversation, and that is what search finds.
-- Sessions in the trash (FR-22) are **not** searched, by the person or by an agent's `recall`: their index rows are dropped when they go to the trash and rebuilt when they come back.
+- Sessions in the session archive (FR-22) are **not** searched, by the person or by an agent's `recall`: their index rows are dropped when they are archived and rebuilt when they come back.
 - **An agent's `recall` and `read_session` reach its own session only for messages earlier than its last compaction point** ([#974](https://github.com/ijun17/centralu/issues/974)): a compaction that folded something, or a fresh conversation (`/clear`). Messages earlier than that point are gone from the model's context and kept in the store; messages later than it, or all of them when there is no such point, are still in context and finding them is an echo, so they stay out. `recall` labels such a hit "(this session, before compaction)", and its snippet stops at the point; `read_session` reads itself only with `around` at such a hit, and stops at that point. Both adapters store a compaction as the same marker row (Claude's `compact_boundary`, Codex's `contextCompaction`, and either read back from the tool), so the point is known for both; a session with no marker is treated as never compacted.
 
-#### FR-22. Session trash (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
+#### FR-22. Session archive (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
 
-Deleting a session moves it to the trash. A conversation leaves this machine only when the person
-deletes it for good in **Settings → Trash**, one at a time or all at once. The reason is the
+Archiving a session (the sidebar's **Archive session…**) moves it to the session archive. A conversation leaves this machine only when the person
+deletes it for good in **Settings → Archive**, one at a time (**Delete for good**) or all at once (**Delete all archived sessions…**). The reason is the
 owner's: conversations are important data, and one click in the delete dialog used to destroy one
-with no way back.
+with no way back. The archive was called the trash until #1404, when an orchestrator read "empty the trash"
+as the operating system's Recycle Bin and permanently deleted 108 sessions; the protocol methods (`trash.*`), the `sessions.trash` column and the `Trashed*` types keep the old word because the protocol only grows. The toast after archiving reads "Archived: <name> — Settings → Archive restores it". The same archive holds the kept records of app-agent sessions and archived subagent steps (below).
 
-- **What goes to the trash** is everything deleting used to destroy: the session row, its messages,
+- **What goes to the archive** is everything deleting used to destroy: the session row, its messages,
   its approval rules, its commit links (`commit_sessions`), the app runs that point at it (with their
   token counts), its attachments and its handoff note (`<data>/handoff/<project id>/<session id>.md`).
   Its search index is the exception — dropped, not kept, which takes it out of every search and
@@ -551,26 +554,25 @@ with no way back.
     record pointing at nothing (`git worktree list` calls it prunable, and `prune` or a `gc` then
     drops the record), and Claude files a conversation by its working directory, so a moved worktree
     would lose the restored session its own history too.
-- **Out of reach while trashed**: the sidebar, inbox, palette, grid, project screen (§5.5), conversation search (FR-21), the
+- **Out of reach while archived**: the sidebar, inbox, palette, grid, project screen (§5.5), conversation search (FR-21), the
   orchestrator's `list_sessions` / `recall` / `read_session`, the apps' `host_data` `sessions.list`,
   and the approval rules list in Settings. Every store query that reads sessions has to say what it
-  does about the trash; a host test fails on one that does not.
-- **The way back**, in Settings → Trash: each session with its name, project, when it was deleted,
-  its size, and what else goes with it; read it (read-only); restore it; delete it for good; empty
-  the trash. The total size is shown, because nothing empties the trash on its own.
+  does about the archive; a host test fails on one that does not.
+- **The way back**, in Settings → Archive: each session with its name, project, when it was archived,
+  its size, and what else goes with it; read it (read-only); restore it; delete it for good; delete all archived sessions. The total size is shown, because nothing deletes the archive on its own.
 - **A restored session comes back as it was**: same id, messages, rules, commit links and app runs,
   its index rebuilt; a live-only state (working, waiting for approval) comes back idle, as after a
   restart. If its project was deleted meanwhile, restoring registers the folder again under the same
   project id — so the worktree folder, the handoff notes and the rows kept with the session line up
   again — or joins that folder if it was added again under a new id. If the folder is gone too,
-  restoring refuses and says where the folder was; the session stays readable in the trash.
-- **Deleting a project moves its sessions to the trash** instead of destroying them — the largest loss
+  restoring refuses and says where the folder was; the session stays readable in the archive.
+- **Deleting a project moves its sessions to the archive** instead of destroying them — the largest loss
   one click could cause. Nobody is asked about their tool files or worktrees then, so those stay even
-  when the trash is emptied. The project's own rows (project-scope rules, usage totals, answers given
+  when all archived sessions are deleted. The project's own rows (project-scope rules, usage totals, answers given
   to its apps) go with the project as before.
-- **Nobody but the person decides to delete for good.** The trash is reached through the UI's RPC, and by the
-  central orchestrator's `delete_trashed` and `empty_trash` (#1219), which make the same calls only after a card the person
-  answers, naming what goes. The agents' other tools and the apps' broker have no verb for it. An agent can put a session in the trash (a session's
+- **Nobody but the person decides to delete for good.** The archive is reached through the UI's RPC, and by the
+  central orchestrator's `delete_archived` and `delete_all_archived` (#1219; `delete_trashed` and `empty_trash` until #1404), which make the same calls only after a card the person
+  answers, naming what goes. The agents' other tools and the apps' broker have no verb for it. An agent can put a session in the archive (a session's
   deletion of an agent it started, `agent_session` `delete`, does; a child without a worktree is stopped first), never take one out of it.
 - **The one deletion the host makes itself: a finished app-agent session** ([#378](https://github.com/ijun17/centralu/issues/378)).
   A session an app stood up with `run_agent` is deleted for good once its run ends cleanly, because what
@@ -578,23 +580,23 @@ with no way back.
   calls included (owner decision, 2026-10-06). An app calling `run_agent` a few dozen times a day filled
   the sidebar with sessions nobody would talk to. It stays a session, as before, when the run failed,
   was stopped or cancelled, when a card was shown during it, when the person opened it or wrote to it
-  before the delete was final, when it is in use again, or when it holds attachments. The records wait in Settings → Trash, grouped by app, next to trashed sessions: each
+  before the delete was final, when it is in use again, or when it holds attachments. The records wait in Settings → Archive, grouped by app, next to archived sessions: each
   reads (request, answer, status, tokens, conversation) and is deleted for good there, one, an app's
-  all, or with the trash emptied. They go on their own only with the run log's 30-day retention.
-  Subagent steps the person had moved to the trash (#418) are not part of the record: they stay where the person put
+  all, or with all archived sessions deleted. They go on their own only with the run log's 30-day retention.
+  Subagent steps the person had moved to the archive (#418) are not part of the record: they stay where the person put
   them, and go with the session's purge.
-- **A session's subagent steps go to the trash on their own** (#418). The steps of the native subagents a session
+- **A session's subagent steps go to the archive on their own** (#418). The steps of the native subagents a session
   launched (#222) can be most of what it holds (measured: 46 MB of a 237 MB store, all from one session still in use).
-  Settings → Trash lists, per live session, how many launch cards' steps it keeps, how many steps and their size, and
-  moves them to the trash while the conversation and its launch cards stay. There they are an entry of their own,
-  restored under their cards or deleted for good by the trash's rules (only the person; one at a time or by emptying
-  the trash, which deletes only the entries the window listed: steps moved there after it read the trash stay). A launch card whose steps are in the trash says so. A subagent still running goes on writing its new
+  Settings → Archive lists, per live session, how many launch cards' steps it keeps, how many steps and their size, and
+  moves them to the archive while the conversation and its launch cards stay. There they are an entry of their own,
+  restored under their cards or deleted for good by the archive's rules (only the person; one at a time or by deleting all archived sessions,
+  which deletes only the entries the window listed: steps moved there after it read the archive stay). A launch card whose steps are in the archive says so. A subagent still running goes on writing its new
   steps under its card. Not covered yet: one run, or the runs before a date, on their own; a digest before the purge (#379).
 - Schema v39 adds `sessions.deleted_at` (NULL for a live session) and `sessions.trash` (JSON: where it
-  came from, and what to remove when it is deleted for good). A trashed session has no `project_id`;
+  came from, and what to remove when it is deleted for good). An archived session has no `project_id`;
   its project is in `trash`, which is what lets its project be deleted without the foreign key taking
-  the session with it. Later migrations have to consider rows that belong to a trashed session.
-- Not covered: attachments of a trashed session stay under the same 500MB attachment cap as every
+  the session with it. Later migrations have to consider rows that belong to an archived session.
+- Not covered: attachments of an archived session stay under the same 500MB attachment cap as every
   attachment, and app runs pointing at it under the app-run retention. Deleting a session for good no
   longer deletes those runs: they stay in the app's run log with the link cleared (#378). An agent cannot
   read the kept records yet ([#1106](https://github.com/ijun17/centralu/issues/1106), #378's fourth part, left for a decision on what a tool for it may cost).
@@ -664,7 +666,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 
 - **Usage dashboard**: weekly bar chart (daily), breakdown by tool/model/project, estimated cost, limit window status.
 - **Session creation dialog**: tool → model → permission preset → starting prompt. Includes the concurrent-session warning (FR-2).
-- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **a body font and a code font** (Pretendard and D2Coding bundled as the defaults, #731; a short list, the system's own, or any installed font by name, always in front of the app's own fonts so Korean keeps its fallback; the terminal follows the code font) **and a line height** (Compact, Normal, Relaxed; fixed-row views keep their rows), kept with the theme in the screen preferences and handed to app views (#312, [themes.md](themes.md)), **trash** — deleted sessions to read, restore or delete for good, with the total size (FR-22), and what each session's subagent steps take, to move to the trash without the session (#418), **background** — whether quitting leaves agents running (FR-10, desktop only), **updates** — the running and newest version, Check now, installing, Apply now, and Automatic updates, which checks, installs and applies when idle (on by default since 2026-10-20; FR-10, desktop only); the agent CLIs installed, and moving idle sessions to a newly installed one (on by default; FR-10, #297).
+- **Settings**: tool paths/detection status, default presets, notification policy (per state), shortcuts, **theme** — Dark, Light or follow the system, a theme per side (presets: Dark, Light, High contrast dark, High contrast light), an optional accent that never colours the signal, and custom themes as files in the data folder that can be edited in Settings, by hand or by an agent and update live, with a warning when a theme breaks the urgency order (#312, [themes.md](themes.md)), **appearance — a 5-step text scale** (2026-08-26; scales the whole surface like an OS display factor, while minimum widths and grid column math stay pinned in real pixels), **a body font and a code font** (Pretendard and D2Coding bundled as the defaults, #731; a short list, the system's own, or any installed font by name, always in front of the app's own fonts so Korean keeps its fallback; the terminal follows the code font) **and a line height** (Compact, Normal, Relaxed; fixed-row views keep their rows), kept with the theme in the screen preferences and handed to app views (#312, [themes.md](themes.md)), **archive** — archived sessions to read, restore or delete for good, with the total size (FR-22), and what each session's subagent steps take, to move to the archive without the session (#418), **background** — whether quitting leaves agents running (FR-10, desktop only), **updates** — the running and newest version, Check now, installing, Apply now, and Automatic updates, which checks, installs and applies when idle (on by default since 2026-10-20; FR-10, desktop only); the agent CLIs installed, and moving idle sessions to a newly installed one (on by default; FR-10, #297).
 
 ### 5.4 Grid view (**experimental**)
 
@@ -739,7 +741,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | **Only this project's**: another project's session or app, and the orchestrator, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
 | Remember the **explicit ordered `panels` list per project across restarts**, in the workspace snapshot beside the sidebar fold | Availability filters drawing, not saved membership. Reordering preserves unavailable ids in their saved slots; adding appends one id, and removing takes only the chosen id off the list. Explicit session deletion removes its membership. Project apps have no explicit removal event, so catalog omission never removes their panels. Deleting a project drops its entry. |
 | **Additive migration**: saved legacy entries keep every non-hidden ordered id, then other available panels; projects without an entry start empty | Startup discovery can fail or omit offline machines, so migration retains unavailable ordered ids and drawing filters availability. Even an empty-array saved entry counts as arranged: the old build could write it after hiding and showing a lone panel, so with no remembered order it keeps everything currently available. Preserve legacy fields until a later release, so the previous build can still read snapshots during an update. Subsequent writes project the list into `order` and put other available ids in `hidden`. |
-| A session in the trash (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
+| A session in the session archive (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
 | **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first. While anything is dragged, the panel covers its view with a transparent layer and the view stays in sight, as on the grid (§5.4) | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. In WebKit a drag goes into a frame whatever the frame's pointer-events say (measured in Playwright's WebKit): a row dropped on an app's view would land in the app instead of beside it, and a session's panel carried into an app's view from the side, not through its header, never reached the screen at all (#288). The cover above the frame catches both on the page; hiding the view did too, at the cost of a blank screen for the whole drag (#296). |
 | An app's panel takes the **same gestures** as a session's: dropped from the sidebar, reordered by its header, the same drop rules and highlight (`data-drop` on the panel under the hand), and a place in the keyboard order — Tab from its header goes into its view, and back out to the header | The view stands after every panel in the document (it is laid over the panel, not inside it), so without its slot handing focus on, Tab would skip it and reach it only after the last panel (#288). |
 | **The grid is its own** | It stays a hand-picked list across projects, and holds apps as well as sessions (§5.4). A session or an app can be on both; on the grid an app has a view of its own, apart from this screen's. A session's panel dropped on the Grid button goes onto the grid, like a sidebar row. |
@@ -812,11 +814,11 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
-- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the trash (FR-22, v39), and every listing filters on it
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the session archive (FR-22, v39), and every listing filters on it
 - `messages(session_id, seq, role, kind, payload, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. It closes at a recorded event, at the end of a turn, at a switch between answer and reasoning, and at a chunk that names a different message than the open row (`messageId`, #212: codex can say two things in a row with nothing recorded between them). Reads merge legacy per-delta rows, so pre-migration data behaves identically. A tool call is kept whole (#221, v40): its `summary` (the card) plus the raw `input` and the whole `output`, which only the store keeps — readers get the card unless they ask for the record by name, and the index holds only `text` and `reasoning` rows (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). Rows written before v40 have the card alone.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the orchestrator's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the trash keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled. `trashed_at` (v58, #418) is set while a step is in the trash without its session: its card no longer reads it, and the trash's purge of those steps deletes it.
-- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it goes to the trash; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
-- `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it, except to take a trashed session off it. Dropping it is a later, breaking step
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the orchestrator's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the session archive keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled. `trashed_at` (v58, #418) is set while a step is in the archive without its session: its card no longer reads it, and the archive's purge of those steps deletes it.
+- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it is archived; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
+- `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it, except to take an archived session off it. Dropping it is a later, breaking step
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `workspace(id, layout, updated_at)` — snapshot
 

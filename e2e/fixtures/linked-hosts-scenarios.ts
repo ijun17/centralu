@@ -31,7 +31,7 @@ async function send(page: Page, text: string) {
 }
 
 export function linkedHostsTests(): void {
-  test('a session on a linked machine: create, send, approve, answer, terminal, trash', async ({ page }) => {
+  test('a session on a linked machine: create, send, approve, answer, terminal, archive', async ({ page }) => {
     test.setTimeout(120_000)
     const pair = await startPair()
     const relay = new Relay(() => pair.hub.port)
@@ -85,7 +85,7 @@ export function linkedHostsTests(): void {
         await expect(surface).toContainText('hi-from-42')
       })
 
-      await test.step('trash the session', async () => {
+      await test.step('archive the session', async () => {
         await page.getByTestId(`session-menu-${id}`).click()
         await page.getByTestId(`delete-session-${id}`).click()
         await page.getByTestId('confirm-delete-yes').click()

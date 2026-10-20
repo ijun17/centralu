@@ -881,9 +881,9 @@ commands, so their 874 characters ride in none of its requests; one line of its 
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
 9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
 
-The preferences and trash commands (#1219: `get_preferences`, `set_preferences` and five trash commands, all rare) came with
+The preferences and archive commands (#1219: `get_preferences`, `set_preferences` and five commands for the session archive, all rare; the archive was called the trash until #1404, and `list_trash` became `list_archive`) came with
 almost no more resident cost. The machine line, which named six commands, now names one and says to look for the rest with
-`centralu_commands` and the query "machine"; the same line names `get_preferences`, `set_preferences` and `list_trash`. Claude
+`centralu_commands` and the query "machine"; the same line names `get_preferences`, `set_preferences` and `list_archive`. Claude
 9,443 → 9,438, Codex 9,495 → 9,490, against the ceiling of 9,500; the eight definitions ride in none of the orchestrator's
 requests (`centralu_commands` lists them).
 

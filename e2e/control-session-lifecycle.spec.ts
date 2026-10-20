@@ -251,7 +251,7 @@ test('Command palette: picking a project with no sessions navigates to that proj
     .toBe('beta')
 })
 
-test('deleting a session: once confirmed it leaves the list and goes to the trash (M2.5, #204)', async ({
+test('deleting a session: once confirmed it leaves the list and goes to the session archive (M2.5, #204)', async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -262,15 +262,15 @@ test('deleting a session: once confirmed it leaves the list and goes to the tras
   await page.getByTestId(`delete-session-${id}`).click()
   // "Cannot be undone" is not the truth — where it goes, and how it comes back or goes for good
   await expect(page.getByTestId('delete-trash-note')).toContainText(
-    'Chat history and attachments stay in Centralu’s trash',
+    'Chat history and attachments stay in Centralu’s session archive',
   )
   await expect(page.getByTestId('delete-trash-note')).toContainText(
-    'Settings → Trash reads it, restores it, or deletes it for good',
+    'Settings → Archive reads it, restores it, or deletes it for good',
   )
   await page.getByTestId('confirm-delete-yes').click()
 
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  await expect(page.getByTestId('toast')).toContainText('Moved to the trash')
+  await expect(page.getByTestId('toast')).toContainText('Archived')
   expect(await page.evaluate(() => (window as any).__mock.sessions.size)).toBe(0)
   // The default deletes the tool file too (dogfooding asked for it), but only once it is deleted for good; until then it waits
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
@@ -313,11 +313,11 @@ test("Deleting a session: by default the original is deleted too — unchecking 
 /*
  * Handoff and start fresh (dogfooding finding): the note the departing session writes becomes
  * the new session's first message, the name carries over, and the old session is deleted
- * including its original (since #204: it moves to the trash, and the tool file goes when it is
+ * including its original (since #204: it moves to the session archive, and the tool file goes when it is
  * deleted for good). The request and the note are both visible in the conversation as they
  * happen — there is no hidden step behind the scenes.
  */
-test('handoff: the note starts a new session and the old one moves to the trash (#204)', async ({ page }) => {
+test('handoff: the note starts a new session and the old one moves to the session archive (#204)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'session to switch to')
   const id = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
@@ -346,7 +346,7 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   await expect(page.getByTestId('handoff-keep-note')).toBeVisible()
   await page.getByTestId('handoff-mode-agent').click()
   await page.getByTestId('handoff-delete-toggle').locator('input').check()
-  await expect(page.getByTestId('handoff-warning')).toContainText('moves to the trash')
+  await expect(page.getByTestId('handoff-warning')).toContainText('is archived')
   await page.getByTestId('confirm-handoff-yes').click()
 
   // The handoff request enters the conversation as an ordinary message
@@ -362,7 +362,7 @@ test('handoff: the note starts a new session and the old one moves to the trash 
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
 
-  // The new session takes the name; the old one is in the trash, its tool file marked to go when it is deleted for good (#204)
+  // The new session takes the name; the old one is in the session archive, its tool file marked to go when it is deleted for good (#204)
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0, { timeout: 15_000 })
   const heirId = await page.evaluate(() => [...(window as any).__mock.sessions.keys()][0])
   await expect(page.getByTestId(`session-row-${heirId}`)).toContainText('session to switch to')

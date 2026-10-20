@@ -1,6 +1,6 @@
 /**
- * #418: a session's subagent steps go to the trash without the session, come back under their cards, and leave for
- * good only from the trash.
+ * #418: a session's subagent steps go to the session archive without the session, come back under their cards, and leave for
+ * good only from the session archive.
  *
  * The case measured: 46 MB of a 237 MB store were one live session's subagent steps, and the only way to let them go was
  * to delete the conversation.
@@ -51,7 +51,7 @@ const seqs = (rows: StoredMessage[]) => rows.map((r) => r.seq)
 const rowsLeft = (s: Store) =>
   ((s as unknown as { db: Database.Database }).db.prepare(`SELECT COUNT(*) as n FROM subagent_messages`).get() as { n: number }).n
 
-describe("a session's subagent steps in the trash without it (#418)", () => {
+describe("a session's subagent steps in the session archive without it (#418)", () => {
   it('says what each live session holds, largest first, by runs, steps and bytes', () => {
     const s = seeded()
     steps(s, 's1', A, 2)
@@ -86,7 +86,7 @@ describe("a session's subagent steps in the trash without it (#418)", () => {
     expect(s.messages.loadMessages('s1', 200, undefined, { full: true })).toEqual([said])
     expect(s.trash.isTrashed('s1')).toBe(false)
 
-    // A subagent still running numbers its next step after the trashed ones, so the two never meet on a restore
+    // A subagent still running numbers its next step after the archived ones, so the two never meet on a restore
     s.messages.appendSubagentMessage('s1', A, { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'later' }, ts: 9 })
     expect(seqs(s.messages.loadSubagentMessages('s1', A))).toEqual([4])
 
@@ -109,7 +109,7 @@ describe("a session's subagent steps in the trash without it (#418)", () => {
     s.close()
   })
 
-  it('deleting them for good takes only the trashed steps, in chunks, and leaves the session and its other steps', async () => {
+  it('deleting them for good takes only the archived steps, in chunks, and leaves the session and its other steps', async () => {
     const s = seeded()
     steps(s, 's1', A, 5)
     steps(s, 's2', A, 2)
@@ -131,7 +131,7 @@ describe("a session's subagent steps in the trash without it (#418)", () => {
     s.close()
   })
 
-  // #418 review: deleting for good took steps moved to the trash after the window read it, more than it had said
+  // #418 review: deleting for good took steps archived after the window read it, more than it had said
   it('deleting for good takes only the steps moved up to what the window listed; a later move, even in the same millisecond, stays', async () => {
     const s = seeded()
     steps(s, 's1', A, 2)
@@ -174,7 +174,7 @@ describe("a session's subagent steps in the trash without it (#418)", () => {
     s.close()
   })
 
-  it('a session in the trash holds its trashed steps in its own entry, and its purge takes them', async () => {
+  it('a session in the session archive holds its archived steps in its own entry, and its purge takes them', async () => {
     const s = seeded()
     steps(s, 's1', A, 3)
     await s.subagentSteps.trash('s1')
@@ -185,7 +185,7 @@ describe("a session's subagent steps in the trash without it (#418)", () => {
     expect(await s.subagentSteps.restore('s1')).toBe(false)
     expect(await s.subagentSteps.purge('s1', Number.MAX_SAFE_INTEGER)).toBe(false)
     expect(s.trash.listTrash()[0]!.bytes).toBe(bytesOf('s1', A, 1, 3))
-    // Restored, the session's steps are still in the trash
+    // Restored, the session's steps are still in the session archive
     await s.trash.restoreSession('s1', 'p1')
     expect(s.subagentSteps.listTrashed()).toEqual([expect.objectContaining({ sessionId: 's1', steps: 3 })])
     await s.trash.trashSession('s1', KEEP_ALL)

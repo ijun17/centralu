@@ -11,7 +11,7 @@ import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 
 /*
- * The trash's own rules (#428): a session is deleted once however often it is asked, a cleanup never rides on a plain
+ * The session archive's own rules (#428): a session is deleted once however often it is asked, a cleanup never rides on a plain
  * delete (#647), one restore or delete at a time, and emptying goes on past a failure. The deletion itself, restore and
  * purge run over the real manager and store (trash.test.ts, manager.test.ts).
  */
@@ -60,7 +60,7 @@ describe('one restore or delete at a time', () => {
   })
 })
 
-describe('the trash itself', () => {
+describe('the session archive itself', () => {
   it('emptying goes on past a failure and says which', async () => {
     const store = { trash: { listTrash: () => [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }] }, subagentSteps: { listTrashed: () => [] } } as unknown as Store
     const trash = trashWith({ store })
@@ -70,18 +70,18 @@ describe('the trash itself', () => {
     expect(await trash.emptyTrash()).toEqual({ purged: 2, failed: [{ sessionId: 'b', name: 'B', error: 'the folder is in use' }] })
   })
 
-  it('reading a session that is not in the trash says so', async () => {
+  it('reading a session that is not in the session archive says so', async () => {
     const trash = trashWith({ store: { trash: { isTrashed: () => false } } as unknown as Store })
-    await expect(trash.readTrashed('s', 10)).rejects.toThrow('Not in the trash: s')
+    await expect(trash.readTrashed('s', 10)).rejects.toThrow('Not in the session archive: s')
   })
 })
 
 describe('a restore or purge while the delete still runs (#839)', () => {
-  it('is refused: the delete has put the session in the trash, and its last steps are still to come', async () => {
+  it('is refused: the delete has put the session in the session archive, and its last steps are still to come', async () => {
     const worktrees = { worktreeCleanup: new Map<string, string>() } as unknown as WorktreeSessions
     const trash = trashWith({ worktrees })
     let finish!: () => void
-    // The store has moved it to the trash and is dropping its index in chunks; the deleted event is still to come
+    // The store has moved it to the session archive and is dropping its index in chunks; the deleted event is still to come
     privates(trash).trashSessionOnce = () => new Promise<void>((r) => (finish = r))
     const deleting = trash.trashSession('s')
     await expect(privates(trash).trashOp('s', async () => 'restored')).rejects.toThrow('That session is already being restored or deleted')
@@ -183,7 +183,7 @@ describe('purging a session for good', () => {
     expect(calls).toContain('rows')
   })
 
-  it('stops, with the session still in the trash, when the tool cannot delete its file', async () => {
+  it('stops, with the session still in the session archive, when the tool cannot delete its file', async () => {
     const id = randomUUID()
     const { trash, calls } = setup(id, { removeExternal: true, adapter: false })
     await expect(trash.purgeSession(id)).rejects.toThrow('claude does not support deleting its conversation file')

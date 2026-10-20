@@ -12,7 +12,7 @@ export type OwnAgentsHost = Pick<DelegationHost, 'children' | 'meta' | 'trashing
 
 /**
  * The sessions `callerId` started that are still here, oldest first: `askedBy` in its own project, not on the way to
- * the trash. `askedBy` only, as status, send, wait and stop take them: `parentSessionId` alone is the former worktree
+ * the session archive. `askedBy` only, as status, send, wait and stop take them: `parentSessionId` alone is the former worktree
  * manager's link, which store step v48 copied into `askedBy`, and delete accepts it only for a child without a worktree
  * (#637). A row that has only that link is the person's to clean up.
  */

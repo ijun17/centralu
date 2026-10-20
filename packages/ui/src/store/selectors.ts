@@ -160,7 +160,7 @@ export function currentWaitingId(state: AppState): string | null {
 /**
  * The linked machine a project lives on (#82), or null for this computer. What stays off for a
  * project on another machine in phase 1 asks this: reveal in the file manager, open in the IDE,
- * moving files to this computer's trash, app views (docs/plans/remote-hub.md §6).
+ * moving files to this computer's session archive, app views (docs/plans/remote-hub.md §6).
  */
 export function useProjectMachine(projectId: string | null | undefined): string | null {
   return useStore((s) => (projectId ? (s.projects[projectId]?.machine ?? null) : null))

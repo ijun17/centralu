@@ -43,7 +43,7 @@ export function SessionMenu({
       )}
       <div className="my-1 border-t border-line" />
       <ActionRow
-        label="Delete session…"
+        label="Archive session…"
         onClick={pick(onDelete)}
         testId={`delete-session-${session.id}`}
         danger

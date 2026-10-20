@@ -54,7 +54,7 @@ describe('the record of a deleted app-agent session (#378)', () => {
       ['toolu_agent', 1, 'look at the tests'],
       ['toolu_agent', 2, 'tested twice'],
     ])
-    // The trash counts what the steps take too
+    // The session archive counts what the steps take too
     const [listed] = s.keptRuns.listKeptRuns()
     expect(listed!.bytes).toBeGreaterThan(steps.reduce((n, r) => n + Buffer.byteLength(r.payload), 0))
 
@@ -63,8 +63,8 @@ describe('the record of a deleted app-agent session (#378)', () => {
     s.close()
   })
 
-  // #418 review: steps the person moved to the trash came back in the record, and outlived their own purge there
-  it('leaves out the subagent steps the person moved to the trash, and still keeps the record whole', async () => {
+  // #418 review: steps the person archived came back in the record, and outlived their own purge there
+  it('leaves out the subagent steps the person archived, and still keeps the record whole', async () => {
     const s = seeded()
     await s.subagentSteps.trash('s1', 5)
     s.messages.appendSubagentMessage('s1', 'toolu_agent', { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'after the move' }, ts: 6 })

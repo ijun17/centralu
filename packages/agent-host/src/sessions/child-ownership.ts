@@ -152,7 +152,7 @@ export type OwnerMove = {
   armReports: readonly string[]
   /** The original's start_agent requests still open that move with it */
   starts: readonly AgentStartRecord[]
-  /** Whether the requests the original queued move too (not for a removed original: the trash drops them) */
+  /** Whether the requests the original queued move too (not for a removed original: the session archive drops them) */
   queued: boolean
 }
 

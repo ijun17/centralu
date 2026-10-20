@@ -35,10 +35,10 @@ nothing inherited.
 - **Removed**: the app leaves the list and its process stops, as when an inner app's folder goes.
   Its state is **kept** under the same key, so adding the manifest back (same id) brings back its data,
   secrets, grants, runs and builder.
-- **Project deleted** (through the trash, as today): its apps' runs and grants go with the project
+- **Project deleted** (through the session archive, as today): its apps' runs and grants go with the project
   (`deleteProject` already does this for every app of the project), and now its apps' **secrets** go
   too (§5). Data, logs and kept versions stay on disk, as they do for an inner app today.
-  A project that was a user-folder app gives its folder back once nothing in the trash can restore the
+  A project that was a user-folder app gives its folder back once nothing in the session archive can restore the
   project (#1204): the folder to `<data>/app-trash/`, its data, logs and kept versions back to `_user/<id>`,
   where what the old key held goes beside the folder (`<data>/app-trash/<id>-<ms>-user-data/`), never deleted: a
   previous build serving after a rollback writes there only (§4).

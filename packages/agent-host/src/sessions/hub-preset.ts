@@ -23,13 +23,13 @@ export function presetFromHub(
 
 /**
  * Where a session started from a linked computer is marked (#1273, `SessionInfo.startedFromHub`): an app setting per
- * session, as `agent_depth:<id>`, so an older build leaves it alone and nothing needs a migration; the trash's purge
+ * session, as `agent_depth:<id>`, so an older build leaves it alone and nothing needs a migration; the session archive's purge
  * deletes it with the session (`SESSION_SETTING_OF`).
  */
 export const startedFromHubKey = (sessionId: string) => `started_from_hub:${sessionId}`
 
 /**
- * A session read back from the store (at startup, out of the trash) with its mark put back (#1273 review): the row has
+ * A session read back from the store (at startup, out of the session archive) with its mark put back (#1273 review): the row has
  * no column for it, so every place that builds a session from its row reads the mark beside it
  */
 export function withHubMark<T extends { id: string; startedFromHub?: boolean }>(settings: { appSetting(key: string): string | null }, info: T): T {

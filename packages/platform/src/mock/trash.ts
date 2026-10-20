@@ -7,12 +7,12 @@ import type { GridMock } from './grid.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'
 
-/** The trash (#204), behind the `trash` port: deleting a session moves it here until it is deleted for good */
+/** The session archive (#204), behind the `trash` port: deleting a session moves it here until it is deleted for good */
 export class TrashMock {
   /** Session ids deleted via deleteExternal — the observation point for whether "really delete" was actually delivered */
   readonly externallyDeleted: string[] = []
   /**
-   * The trash (#204), with the host's rules: deleting moves a session here with its messages, and nothing chosen in
+   * The session archive (#204), with the host's rules: deleting moves a session here with its messages, and nothing chosen in
    * the dialog happens until it is deleted for good — only then does `externallyDeleted` record the tool's file.
    */
   readonly trashBin = new Map<
@@ -85,7 +85,7 @@ export class TrashMock {
     },
     readRun: async (runId: string, limit = 200, beforeSeq?: number) => {
       const k = this.keptRuns.get(runId)
-      if (!k) throw mockError(`Not in the trash: ${runId}`, 'session_not_found')
+      if (!k) throw mockError(`Not in the session archive: ${runId}`, 'session_not_found')
       const filtered = beforeSeq ? k.messages.filter((m) => m.seq < beforeSeq) : k.messages
       return { request: k.request, answer: k.answer, ...(k.output !== undefined ? { output: k.output } : {}), messages: filtered.slice(-limit) }
     },
@@ -96,13 +96,13 @@ export class TrashMock {
     },
     read: async (sessionId: string, limit = 200, beforeSeq?: number) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!t) throw mockError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       const filtered = beforeSeq ? t.messages.filter((m) => m.seq < beforeSeq) : t.messages
       return filtered.slice(-limit)
     },
     restore: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!t) throw mockError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       let registered: ProjectInfo | null = null
       let projectId: string | null = null
       const trashedProject = t.project
@@ -132,11 +132,11 @@ export class TrashMock {
     },
     purge: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
-      if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!t) throw mockError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       // The same rule as the host: if removing the original was specified, that fact stays on the record (a point tests verify)
       if (t.removeExternal) this.externallyDeleted.push(sessionId)
       this.trashBin.delete(sessionId)
-      // Its subagent steps go with it, in the trash or not (#222)
+      // Its subagent steps go with it, in the session archive or not (#222)
       for (const key of this.subagentKeys(sessionId)) {
         for (const m of this.store.subagentMessages.get(key) ?? []) this.store.subagentTrashedAt.delete(`${key} ${m.seq}`)
         this.store.subagentMessages.delete(key)
@@ -148,11 +148,11 @@ export class TrashMock {
       for (const id of ids) await this.trash.purge(id)
       return { purged: ids.length, failed: [] }
     },
-    // A session's subagent steps, to the trash without it and back (#418), with the host's rules
+    // A session's subagent steps, to the session archive without it and back (#418), with the host's rules
     subagentUsage: async () => ({ sessions: this.subagentEntries() }),
     trashSubagentSteps: async (sessionId: string) => {
       if (!this.store.sessions.has(sessionId)) {
-        throw mockError('That session is no longer here: it was deleted, or is in the trash', 'session_not_found')
+        throw mockError('That session is no longer here: it was deleted, or is in the session archive', 'session_not_found')
       }
       // Strictly later than the session's last move, as the host stamps it, so a window's `upTo` never reaches a later one
       const prev = Math.max(0, ...this.subagentSteps(sessionId, true).map(([key, m]) => this.store.subagentTrashedAt.get(`${key} ${m.seq}`) ?? 0))
@@ -183,7 +183,7 @@ export class TrashMock {
     return [...this.store.subagentMessages.keys()].filter((k) => k.startsWith(`${sessionId} `))
   }
 
-  /** A session's steps, in the trash or under their cards, each with its card's key */
+  /** A session's steps, in the session archive or under their cards, each with its card's key */
   private subagentSteps(sessionId: string, trashed: boolean): [string, StoredMessage][] {
     const out: [string, StoredMessage][] = []
     for (const key of this.subagentKeys(sessionId)) {
@@ -194,14 +194,14 @@ export class TrashMock {
     return out
   }
 
-  /** A live session's trashed steps (moved at or before `upTo`, when given), or the host's refusal when it has none */
+  /** A live session's archived steps (moved at or before `upTo`, when given), or the host's refusal when it has none */
   private trashedSteps(sessionId: string, upTo = Number.MAX_SAFE_INTEGER): [string, StoredMessage][] {
     const session = this.store.sessions.get(sessionId)
     const trashed = session
       ? this.subagentSteps(sessionId, true).filter(([key, m]) => (this.store.subagentTrashedAt.get(`${key} ${m.seq}`) ?? 0) <= upTo)
       : []
     if (!trashed.length) {
-      throw mockError(`No subagent steps of ${session ? `“${session.name}”` : 'that session'} are in the trash`, 'session_not_found')
+      throw mockError(`No subagent steps of ${session ? `“${session.name}”` : 'that session'} are in the session archive`, 'session_not_found')
     }
     return trashed
   }
@@ -211,7 +211,7 @@ export class TrashMock {
     return this.heldSubagentSteps(false).sort((a, b) => b.bytes - a.bytes)
   }
 
-  /** What each session's subagent steps in the trash take (latest first) */
+  /** What each session's subagent steps in the session archive take (latest first) */
   private trashedSubagentEntries(): TrashedSubagentSteps[] {
     return this.heldSubagentSteps(true)
       .map((held) => ({ ...held, deletedAt: held.deletedAt ?? 0 }))

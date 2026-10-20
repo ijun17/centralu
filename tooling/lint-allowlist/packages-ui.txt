@@ -147,6 +147,8 @@ packages/ui/src/features/settings/AddMachineForm.tsx @typescript-eslint/no-non-n
 packages/ui/src/features/settings/AddMachineForm.tsx @typescript-eslint/no-unsafe-type-assertion 2
 packages/ui/src/features/settings/AddMachineForm.tsx @typescript-eslint/unbound-method 3
 packages/ui/src/features/settings/AgentModelsSection.tsx @typescript-eslint/unbound-method 1
+packages/ui/src/features/settings/ArchiveSection.tsx @typescript-eslint/no-misused-promises 1
+packages/ui/src/features/settings/ArchiveSection.tsx @typescript-eslint/unbound-method 3
 packages/ui/src/features/settings/GrantList.tsx @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/unbound-method 13
@@ -156,8 +158,6 @@ packages/ui/src/features/settings/SleepSection.tsx @typescript-eslint/unbound-me
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/no-non-null-assertion 2
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/no-unsafe-type-assertion 3
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/unbound-method 5
-packages/ui/src/features/settings/TrashSection.tsx @typescript-eslint/no-misused-promises 1
-packages/ui/src/features/settings/TrashSection.tsx @typescript-eslint/unbound-method 3
 packages/ui/src/features/settings/TypographySection.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/features/settings/UpdateLine.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/settings/UpdatesSection.tsx @typescript-eslint/unbound-method 7

@@ -218,9 +218,9 @@ describe('offersAlways', () => {
     expect(offersAlways({ kind: 'other', raw: 'Remove the linked machine Laptop (me@laptop)?', about: MACHINE_CHANGE })).toBe(false)
   })
 
-  // The orchestrator's change to its settings or the trash (#1219): asked every time, nothing remembered
-  it("is off for the orchestrator's change to its settings or the trash", () => {
-    expect(offersAlways({ kind: 'other', raw: 'Delete 2 sessions in the trash for good?', about: ORCHESTRATOR_CHANGE })).toBe(false)
+  // The orchestrator's change to its settings or the session archive (#1219): asked every time, nothing remembered
+  it("is off for the orchestrator's change to its settings or the session archive", () => {
+    expect(offersAlways({ kind: 'other', raw: 'Delete 2 sessions in the session archive for good?', about: ORCHESTRATOR_CHANGE })).toBe(false)
   })
 })
 

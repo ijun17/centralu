@@ -37,7 +37,7 @@ import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
 
 /**
- * What the trash reaches of the session manager (#428), typed as the manager declares each member. The manager builds
+ * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
  * it with getters for its fields, so each is read when used, never kept; `quitNotices`, which a deletion filters, is
  * written back through a setter.
  */
@@ -85,8 +85,10 @@ export type SessionTrashHost = {
 }
 
 /**
- * A session's way to the trash and back (#428): deleting it once even when asked twice, with what it held let go;
- * listing and reading the trash; restoring a session; purging one or all, with a worktree's recovery folder. Moved out
+ * A session's way to the session archive and back (#428). The archive was called the trash until #1404, so the code
+ * keeps `trash`, `Trashed` and `trashSession`; say "archive" in anything a person or an agent reads.
+ * It does: archiving a session once even when asked twice, with what it held let go;
+ * listing and reading the session archive; restoring a session; purging one or all, with a worktree's recovery folder. Moved out
  * of the session manager as it was; what it reaches of the manager is `SessionTrashHost`.
  */
 export class SessionTrash {
@@ -95,26 +97,26 @@ export class SessionTrash {
   readonly trashing = new Map<string, Promise<void>>()
   /**
    * The host's own deletes under way (`trashIf`), and whether a delete somebody asked for joined one (#378 review): a
-   * joined delete is the person's, so the session stays in the trash instead of being purged after it, and the tool's
+   * joined delete is the person's, so the session stays in the session archive instead of being purged after it, and the tool's
    * conversation file stays unless they asked for it to go
    */
   private readonly hostDeletes = new Map<string, { joined: { removeExternal: boolean } | null }>()
 
   /**
-   * Moves a session to the trash (#204) — what deleting a session means now. Nothing is destroyed: the process
+   * Archives a session (#204) — what deleting a session means now. Nothing is destroyed: the process
    * stops, and the session leaves every list (sidebar, inbox, palette, grid, search, the agents' session tools and
-   * the apps' `sessions.list`, all of which read `meta` or filter the trash in the store). Its rows, attachments,
+   * the apps' `sessions.list`, all of which read `meta` or filter the session archive in the store). Its rows, attachments,
    * handoff note, the tool's conversation file and its worktree stay until the person deletes it for good in
    * Settings (`purgeSession`).
    *
    * @param removeWorktree remove the worktree **when it is purged**. The default is to keep it — hours
    * of an agent's work can be sitting there. It stays registered with git and in place while the session is
-   * in the trash:
+   * in the session archive:
    * moving a worktree folder leaves git's record pointing at nothing (`git worktree list` calls it prunable, and
    * `git worktree prune` or a `gc` then drops it), and Claude files a conversation by its working directory, so the
    * restored session would not find its own history either.
    * @param removeExternal delete the tool's conversation file **when it is purged**. It stays where the tool keeps
-   * it while the session is in the trash: the file is the tool's, in the tool's layout, and only the tool's own
+   * it while the session is in the session archive: the file is the tool's, in the tool's layout, and only the tool's own
    * delete knows that layout (the Claude SDK's `deleteSession`). Left in place it is also a second way back — the
    * tool, and **+ → Past conversations**, still have it.
    */
@@ -123,14 +125,14 @@ export class SessionTrash {
   }
 
   /**
-   * A delete the host makes on its own (#378: a finished app-agent session), moved to the trash only if `onlyIf` says
+   * A delete the host makes on its own (#378: a finished app-agent session), archived only if `onlyIf` says
    * so. It is asked at the last moment, with nothing of the session touched yet and nothing awaited from there until
    * the session has left `meta`, so no message, wake or card can come in between; false keeps the session as it is.
    * Such a delete never withdraws a wake (`onlyIf` is there to refuse a waking session), and never rides on a delete
-   * already under way: that one is the person's, and keeps the session in the trash. A delete that rides on this one is
+   * already under way: that one is the person's, and keeps the session in the session archive. A delete that rides on this one is
    * the person's too, for the same reason.
-   * @returns `moved` when this call moved the session to the trash and nobody asked for a delete meanwhile, `joined`
-   * when it moved it and a delete somebody asked for joined it (the session then stays in the trash), false when it
+   * @returns `moved` when this call moved the session to the session archive and nobody asked for a delete meanwhile, `joined`
+   * when it moved it and a delete somebody asked for joined it (the session then stays in the session archive), false when it
    * stays where it was
    */
   async trashIf(sessionId: string, removeExternal: boolean, onlyIf: () => boolean): Promise<'moved' | 'joined' | false> {
@@ -168,10 +170,10 @@ export class SessionTrash {
        * the recovery snapshot, and removing the worktree after it would leave nothing a restore could bring back.
        */
       if (recovery || fromCleanup) throw rpcError('The session is already being deleted without its recovery snapshot')
-      // The person's own delete, which keeps the session in the trash: not the host's to purge after it (`trashIf`)
+      // The person's own delete, which keeps the session in the session archive: not the host's to purge after it (`trashIf`)
       if (onlyIf) return false
       // Joined, not moved by this call: only `trashIf` reads the answer, and it never joins. A host delete it joins
-      // becomes this one, which keeps the session in the trash (`hostDeletes`)
+      // becomes this one, which keeps the session in the session archive (`hostDeletes`)
       const host = this.hostDeletes.get(sessionId)
       if (host) host.joined = { removeExternal: (host.joined?.removeExternal ?? false) || removeExternal }
       await pending
@@ -217,7 +219,7 @@ export class SessionTrash {
   }
 
   /**
-   * What moving the session to the trash drops that restoring does not bring back, in words for a card (see the lines of
+   * What moving the session to the session archive drops that restoring does not bring back, in words for a card (see the lines of
    * `trashSessionOnce` that let go of what the session held): a caller waiting for its report, work it waits on, reports its
    * children owe it, the start_agent cards it raised, what the person allowed it to read or start
    */
@@ -254,7 +256,7 @@ export class SessionTrash {
     if (this.host.worktrees.worktreeCleanup.has(sessionId) && !recovery && !fromCleanup) throw rpcError('The session worktree is being removed')
     const m = this.host.meta.get(sessionId)
     if (!m) {
-      // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
+      // Already in the session archive, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
       this.host.emit({ type: 'session_deleted', sessionId })
       return false
     }
@@ -265,7 +267,7 @@ export class SessionTrash {
      * branch and a "started by a session no longer here" mark, so nothing is hidden and nothing pins the parent.
      */
     /*
-     * A tool that cannot delete its conversation file is refused now, not when the trash is emptied: the person
+     * A tool that cannot delete its conversation file is refused now, not when the session archive is emptied: the person
      * choosing it is here, and "the file stays" is worth hearing before the dialog closes rather than as a purge
      * that fails later.
      */
@@ -291,7 +293,7 @@ export class SessionTrash {
      * A handoff's original that goes (#738): what it still has (settled children, and anything it started after a
      * handoff that kept it) goes to the session that inherited its handoff, before the teardown below lets go of it. A
      * handoff whose window said the original goes next moved everything already, and this finds nothing. The move is
-     * its own transaction ahead of the trash's: a crash between them leaves the children on the heir and the original
+     * its own transaction ahead of the session archive's: a crash between them leaves the children on the heir and the original
      * standing, one owner either way.
      */
     const heir = this.host.handoffHeir(sessionId)
@@ -342,8 +344,8 @@ export class SessionTrash {
     this.host.restartPolicy.forgetBackground(sessionId)
     /*
      * The message being streamed is written out, not dropped (#66 used to drop it, because the rows were about to go).
-     * The rows now stay, and a trashed conversation that stops mid-sentence is not the one that was deleted. Written
-     * before the trash step, so its index row is dropped with the rest.
+     * The rows now stay, and an archived conversation that stops mid-sentence is not the one that was deleted. Written
+     * before the session archive step, so its index row is dropped with the rest.
      */
     this.host.record.closeStream(sessionId)
     let project: { name: string; path: string } | undefined
@@ -391,7 +393,7 @@ export class SessionTrash {
   private readonly trashBusy = new Set<string>()
 
   private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    // A delete still running counts (#839): the session is in the trash before its last steps, which would undo a restore
+    // A delete still running counts (#839): the session is in the session archive before its last steps, which would undo a restore
     if (this.trashBusy.has(sessionId) || this.trashing.has(sessionId) || this.host.worktrees.worktreeCleanup.has(sessionId)) {
       throw rpcError('That session is already being restored or deleted')
     }
@@ -404,7 +406,7 @@ export class SessionTrash {
   }
 
   /**
-   * The trash as Settings lists it (#204), with the records of deleted app-agent sessions (#378), the subagent steps moved
+   * The session archive as Settings lists it (#204), with the records of deleted app-agent sessions (#378), the subagent steps moved
    * there without their session (#418), and the total it takes on this machine
    */
   async listTrash(): Promise<{ sessions: TrashedSession[]; runs: TrashedRun[]; bytes: number; subagentSteps: TrashedSubagentSteps[] }> {
@@ -433,7 +435,7 @@ export class SessionTrash {
           messages: r.messages,
           bytes: r.bytes + files,
           conversationFile: !r.hasConversationFile ? 'none' : record.removeExternal ? 'remove' : 'keep',
-          // Only a worktree still on disk is listed — the merged-worktree cleanup removes the folder before the trash is emptied
+          // Only a worktree still on disk is listed — the merged-worktree cleanup removes the folder before the session archive is emptied
           worktree: r.worktree && existsSync(r.worktree.path) ? { ...r.worktree, remove: record.removeWorktree } : null,
         }
       }),
@@ -460,33 +462,33 @@ export class SessionTrash {
   /** An app-agent run's record, read-only (#378): its request, answer and structured output, and a page of its conversation */
   readTrashedRun(runId: string, limit: number, beforeSeq?: number): { request: string; answer: string; output?: unknown; messages: StoredMessage[] } {
     const r = this.host.store.keptRuns.readKeptRun(runId, limit, beforeSeq)
-    if (!r) throw rpcError(`Not in the trash: ${runId}`, 'session_not_found')
+    if (!r) throw rpcError(`Not in the session archive: ${runId}`, 'session_not_found')
     const output = r.output === null ? undefined : (() => { try { return JSON.parse(r.output) as unknown } catch { return r.output } })()
     return { request: r.request, answer: r.answer, ...(output !== undefined ? { output } : {}), messages: r.messages }
   }
 
-  /** Deletes app-agent run records for good (#378), only from Settings like a trashed session */
+  /** Deletes app-agent run records for good (#378), only from Settings like an archived session */
   purgeTrashedRuns(runIds: readonly string[]): { purged: number } {
     return { purged: this.host.store.keptRuns.purgeKeptRuns(runIds) }
   }
 
-  /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
+  /** An archived conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
   async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
     if (!this.host.store.trash.isTrashed(sessionId)) {
-      throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      throw rpcError(`Not in the session archive: ${sessionId}`, 'session_not_found')
     }
     return this.host.loadMessages(sessionId, limit, beforeSeq)
   }
 
   /**
-   * Brings a session back from the trash as it was (#204): same id, same messages, same rules, its commit links and
+   * Brings a session back from the session archive as it was (#204): same id, same messages, same rules, its commit links and
    * app runs still pointing at it, its search index rebuilt.
    *
    * Where it goes when its project was deleted meanwhile: the folder is registered again **under the same id**, so
    * everything keyed by that id lines up again — the worktree folder (`<worktrees>/<project id>/<session id>`), the
    * handoff notes (`<data>/handoff/<project id>/`), the commit links and app runs that stayed with the session. If
    * the folder is registered already under another id, it goes there. If the folder is gone too, it refuses and
-   * says where the folder was: a project session without its folder cannot run, and it stays readable in the trash.
+   * says where the folder was: a project session without its folder cannot run, and it stays readable in the session archive.
    *
    * A live-only state (working, waiting for approval) comes back idle, as it does after a restart: there is no
    * process behind it. Other states come back as they were, so one that was waiting for the person is in the inbox again.
@@ -495,7 +497,7 @@ export class SessionTrash {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
       const t = this.host.store.trash.trashedSession(sessionId)
-      if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!t) throw rpcError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       const { record } = t
       let projectId: string | null = null
       let registered: ProjectInfo | null = null
@@ -527,7 +529,7 @@ export class SessionTrash {
         recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.host.gitTrust(projectId))
       }
       const back = await this.host.store.trash.restoreSession(sessionId, projectId)
-      if (!back) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!back) throw rpcError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
       if (fixed !== back || recovered) this.host.store.sessions.upsertSession(fixed)
@@ -541,11 +543,11 @@ export class SessionTrash {
   }
 
   /**
-   * Deletes a session in the trash for good (#204) — only the person, only from Settings. The agents' tools and the
+   * Deletes a session in the session archive for good (#204) — only the person, only from Settings. The agents' tools and the
    * apps' broker have no path here; the RPC is the only caller.
    *
    * Order: the tool's conversation file first, when the person chose it. If that fails the purge stops and the
-   * session stays in the trash — answering "deleted" while the original lives is the worst outcome (a person
+   * session stays in the session archive — answering "deleted" while the original lives is the worst outcome (a person
    * believes 550MB is gone). It is skipped when a live session holds the same conversation (it was pulled back
    * from Past conversations meanwhile): deleting it would take that session's history. Then the worktree, when
    * chosen (a failure does not stop the purge — its folder is plain files the person can still remove). Then our
@@ -556,7 +558,7 @@ export class SessionTrash {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
       const t = this.host.store.trash.trashedSession(sessionId)
-      if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
+      if (!t) throw rpcError(`Not in the session archive: ${sessionId}`, 'session_not_found')
       const { session: s, record } = t
       const cwd = this.host.store.sessions.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
       const externalId = s.externalId ?? s.importedFrom
@@ -590,9 +592,9 @@ export class SessionTrash {
           if (!existsSync(path)) return
           // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
           if (!existsSync(repo)) {
-            throw rpcError(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
+            throw rpcError(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the session archive: delete that folder yourself, then delete this entry again.`)
           }
-          throw rpcError(`Could not remove the worktree at ${path}: ${e.message.trim()}. It stays in the trash; remove the folder or fix the cause, then delete it again.`)
+          throw rpcError(`Could not remove the worktree at ${path}: ${e.message.trim()}. It stays in the session archive; remove the folder or fix the cause, then delete it again.`)
         })
       }
       /*
@@ -607,14 +609,14 @@ export class SessionTrash {
         this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
-        await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
+        await recoveryRemoval.abort().catch((cause: Error) => console.error(`[archive] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
         throw e
       }
       await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
       // An orchestrator's child worked in a folder of its own (#853, #994 review), which goes with it
       if (cwd && isOrchestratorAgentFolder(cwd)) {
-        await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[trash] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
+        await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[archive] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
       }
       /*
        * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters
@@ -627,7 +629,7 @@ export class SessionTrash {
   }
 
   /**
-   * Deletes every session in the trash for good. One that fails stays and is reported; the rest go on. The app-agent run
+   * Deletes every session in the session archive for good. One that fails stays and is reported; the rest go on. The app-agent run
    * records (#378) are the window's to delete by id (`purgeTrashedRuns`), so a linked machine's are never emptied unseen.
    */
   async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
@@ -644,11 +646,11 @@ export class SessionTrash {
     return { purged, failed }
   }
 
-  // ── A session's subagent steps, in the trash without it (#418) ──
+  // ── A session's subagent steps, in the session archive without it (#418) ──
   //
   // The steps of the subagents a session launched (#222) can be most of what it holds, and the session may be one in
-  // use. They go to the trash on their own and come back under their cards; deleting them for good is the trash's rule,
-  // as for a session: only the person, from Settings, one at a time or by emptying the trash.
+  // use. They go to the session archive on their own and come back under their cards; deleting them for good is the session archive's rule,
+  // as for a session: only the person, from Settings, one at a time or by deleting all archived sessions.
 
   /** One move, restore or purge of a session's subagent steps at a time */
   private readonly subagentBusy = new Set<string>()
@@ -663,12 +665,12 @@ export class SessionTrash {
     }
   }
 
-  /** What each live session's subagent steps take, largest first; Settings lists them beside the trash */
+  /** What each live session's subagent steps take, largest first; Settings lists them beside the session archive */
   subagentUsage(): { sessions: SubagentStepsHeld[] } {
     return { sessions: this.host.store.subagentSteps.listHeld().map(subagentStepsHeld) }
   }
 
-  /** Moves a live session's subagent steps to the trash; the conversation and its launch cards stay */
+  /** Archives a live session's subagent steps; the conversation and its launch cards stay */
   async trashSubagentSteps(sessionId: string): Promise<{ steps: number; bytes: number }> {
     if (!this.host.meta.has(sessionId) || this.trashing.has(sessionId)) throw sessionGone()
     return this.subagentOp(sessionId, async () => {
@@ -678,7 +680,7 @@ export class SessionTrash {
     })
   }
 
-  /** Puts a session's trashed subagent steps back under their cards */
+  /** Puts a session's archived subagent steps back under their cards */
   async restoreSubagentSteps(sessionId: string): Promise<void> {
     return this.subagentOp(sessionId, async () => {
       if (!(await this.host.store.subagentSteps.restore(sessionId))) throw this.notInTrash(sessionId)
@@ -686,8 +688,8 @@ export class SessionTrash {
   }
 
   /**
-   * Deletes a session's trashed subagent steps for good, those moved there at or before `upTo` (the `deletedAt` the
-   * window listed); the session, the steps under its cards and steps moved to the trash since stay
+   * Deletes a session's archived subagent steps for good, those moved there at or before `upTo` (the `deletedAt` the
+   * window listed); the session, the steps under its cards and steps archived since stay
    */
   async purgeSubagentSteps(sessionId: string, upTo: number): Promise<void> {
     return this.subagentOp(sessionId, async () => {
@@ -695,21 +697,21 @@ export class SessionTrash {
     })
   }
 
-  /** The refusal for steps not in the trash, naming the session as the person knows it, never by its id */
+  /** The refusal for steps not in the session archive, naming the session as the person knows it, never by its id */
   private notInTrash(sessionId: string) {
     const name = this.host.meta.get(sessionId)?.name
-    return rpcError(`No subagent steps of ${name ? `“${name}”` : 'that session'} are in the trash`, 'session_not_found')
+    return rpcError(`No subagent steps of ${name ? `“${name}”` : 'that session'} are in the session archive`, 'session_not_found')
   }
 
-  /** How many of one launch card's steps are in the trash */
+  /** How many of one launch card's steps are in the session archive */
   subagentTrashed(sessionId: string, parentCallId: string): { steps: number } {
     return { steps: this.host.store.subagentSteps.trashedOf(sessionId, parentCallId) }
   }
 }
 
-/** A session that is not live (gone, or in the trash itself): said without its id, which means nothing on screen */
+/** A session that is not live (gone, or in the session archive itself): said without its id, which means nothing on screen */
 function sessionGone() {
-  return rpcError('That session is no longer here: it was deleted, or is in the trash', 'session_not_found')
+  return rpcError('That session is no longer here: it was deleted, or is in the session archive', 'session_not_found')
 }
 
 /** A row of `SubagentStepRecords` as the protocol says it */

@@ -42,7 +42,7 @@ export function PastConversations({
 
   /*
    * The empty session held nothing (no message, no turn), so it goes without a word: through the port, not the store's
-   * deleteSession, whose "Moved to the trash" toast answers a deletion the person asked for. The host's
+   * deleteSession, whose "Archived" toast answers a deletion the person asked for. The host's
    * session_deleted takes it off the screen either way.
    */
   const discardEmpty = () => void platform?.agents.deleteSession(sessionId).catch(() => {})

@@ -218,11 +218,11 @@ describe('RPC in general', () => {
 
 describe('deleting a session', () => {
   /*
-   * #204: deleting moves the session to the trash. This is the guard across the host's listing paths — every place a
+   * #204: deleting moves the session to the session archive. This is the guard across the host's listing paths — every place a
    * person, an agent or an app lists or searches sessions — and of the way back. The apps' `sessions.list` reads the
    * same `listSessions` as the RPC here (app-host-data.test.ts holds its shape).
    */
-  it('a deleted session is out of every list, search and agent tool, and comes back from the trash as it was', async () => {
+  it('a deleted session is out of every list, search and agent tool, and comes back from the session archive as it was', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
     await rpc('agents.send', { sessionId: s.id, text: 'the codename is BLUEBIRD' })
@@ -256,12 +256,12 @@ describe('deleting a session', () => {
     expect(said(await rpc('messages.load', { sessionId: s.id, limit: 100 }))).toEqual(before)
     expect(events.some((e) => e.type === 'session_created' && e.sessionId === s.id)).toBe(true)
 
-    // Only deleting it for good, from the trash, takes the conversation
+    // Only deleting it for good, from the session archive, takes the conversation
     await rpc('agents.deleteSession', { sessionId: s.id })
     await rpc('trash.purge', { sessionId: s.id })
     expect(await rpc('messages.load', { sessionId: s.id, limit: 100 })).toEqual([])
     expect(((await rpc('trash.list', {})) as { sessions: unknown[] }).sessions).toEqual([])
-    await expect(rpc('trash.read', { sessionId: s.id })).rejects.toThrow(/Not in the trash/)
+    await expect(rpc('trash.read', { sessionId: s.id })).rejects.toThrow(/Not in the session archive/)
   })
 
   /**
@@ -759,11 +759,11 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     return { m, r, s }
   }
 
-  it('the conversation file waits in the trash and is deleted with the session, with its externalId and cwd', async () => {
+  it('the conversation file waits in the session archive and is deleted with the session, with its externalId and cwd', async () => {
     const a = new ExternallyDeletableAdapter()
     const { m, r, s } = await setupWith(a)
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
-    // In the trash, not gone: the tool's file is untouched until the person deletes it for good (#204)
+    // In the session archive, not gone: the tool's file is untouched until the person deletes it for good (#204)
     expect(a.deletedExternals).toEqual([])
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(false)
     await r('trash.purge', { sessionId: s.id })
@@ -778,7 +778,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     expect(a.deletedExternals).toEqual([])
   })
 
-  it('a conversation file the tool refuses to delete keeps the session in the trash — "deleted" is never said over a live original', async () => {
+  it('a conversation file the tool refuses to delete keeps the session in the session archive — "deleted" is never said over a live original', async () => {
     const a = new ExternallyDeletableAdapter()
     a.failExternalDelete = true
     const { m, r, s } = await setupWith(a)
@@ -794,7 +794,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
   })
 
-  it('a conversation pulled back from Past conversations meanwhile is not deleted with the trashed copy', async () => {
+  it('a conversation pulled back from Past conversations meanwhile is not deleted with the archived copy', async () => {
     const a = new ExternallyDeletableAdapter()
     const { m, r, s } = await setupWith(a)
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })

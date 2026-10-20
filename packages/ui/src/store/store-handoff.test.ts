@@ -46,7 +46,7 @@ const repoHandoffTraces = (mock: MockPlatform, old: string) => [
 ]
 
 describe('handing off and starting fresh', () => {
-  it('makes a new session from the note, hands on the name, and moves the original to the trash (#204)', async () => {
+  it('makes a new session from the note, hands on the name, and moves the original to the session archive (#204)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho1')
     mock.sessions.set('ho-s1', sessionInfo('ho-s1', { projectId: proj.id, name: 'Mea', model: 'gpt-5.6', tool: 'codex', externalId: 'rollout-1' }))
@@ -85,7 +85,7 @@ describe('handing off and starting fresh', () => {
     expect(heir!.id).not.toBe('ho-s1')
     // The screen's summary also shows the inherited settings immediately — if it is only in the database while the menu says Default, it reads as "never carried over" (dogfooding)
     expect(useStore.getState().sessions[heir!.id]).toMatchObject({ model: 'gpt-5.6', effort: null })
-    // The old session is in the trash (#204), its tool file marked to go when it is deleted for good
+    // The old session is in the session archive (#204), its tool file marked to go when it is deleted for good
     expect(mock.sessions.has('ho-s1')).toBe(false)
     expect(mock.externallyDeleted).not.toContain('ho-s1')
     expect((await mock.trash.list()).sessions.find((x) => x.id === 'ho-s1')?.conversationFile).toBe('remove')

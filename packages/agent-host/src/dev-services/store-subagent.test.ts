@@ -2,7 +2,7 @@
  * #222: a native subagent's steps are kept under the card that launched it, in a table of their own.
  *
  * Nothing that reads a session's conversation reads them, nothing indexes them, and they belong to the session through
- * the trash and its purge.
+ * the session archive and its purge.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
@@ -96,14 +96,14 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     s.close()
   })
 
-  it('they stay with the session in the trash and come back with it, and the purge takes them', async () => {
+  it('they stay with the session in the session archive and come back with it, and the purge takes them', async () => {
     const s = seeded()
     s.messages.appendMessages(conversation)
     steps(s)
     const before = s.trash.listTrash()
     await s.trash.trashSession('s1', KEEP_ALL)
     expect(s.messages.loadSubagentMessages('s1', AGENT)).toHaveLength(4)
-    // What the trash says it holds counts them
+    // What the session archive says it holds counts them
     const [row] = s.trash.listTrash()
     expect(before).toEqual([])
     const ownBytes = conversation.reduce((n, m) => n + Buffer.byteLength(JSON.stringify(m.payload)), 0)

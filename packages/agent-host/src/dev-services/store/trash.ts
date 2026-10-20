@@ -11,7 +11,9 @@ import { agentInstructionsKey } from './projects.js'
 import { HUB_SELF_KEY } from './store-keys.js'
 
 /**
- * What a session in the trash remembers (`sessions.trash`, #204).
+ * What a session in the session archive remembers (`sessions.trash`, #204). The archive was called the trash until
+ * #1404; the table column, the type names and the `trash.*` protocol methods keep the old word because the store and
+ * the protocol only grow.
  *
  *   projectId, projectName, projectPath   where it came from. A trashed session has no `project_id` (see
  *                                         `trashSession`), and its project may be deleted meanwhile; restoring
@@ -66,7 +68,7 @@ function parseTrashRecord(json: string | null): TrashRecord {
  */
 const DELETE_CHUNK = 250
 
-/** The trash (#204): moving a session out of the live list and back, deleting it for good, and deleting a project */
+/** The session archive (#204, `trash` in the code): moving a session out of the live list and back, deleting it for good, and deleting a project */
 export class TrashRecords {
   constructor(private readonly db: Database.Database, private readonly sessions: SessionRecords) {}
 
@@ -359,20 +361,20 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM grid_layout WHERE kind = 'app' AND project_id = ?`).run(projectId)
       this.db
         .prepare(
-          `/* includes the trash: a rule of a session in the trash stays with it */
+          `/* includes the archive: a rule of a session in the archive stays with it */
            DELETE FROM approval_rules WHERE project_id = ? AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))`,
         )
         .run(projectId)
       this.db
         .prepare(
-          `/* includes the trash: a commit link of a session in the trash stays with it */
+          `/* includes the archive: a commit link of a session in the archive stays with it */
            DELETE FROM commit_sessions WHERE project_id = ? AND session_id NOT IN (SELECT id FROM sessions)`,
         )
         .run(projectId)
-      // The run log for that project's apps is part of this deletion too (M4 A-6) — a run that points at a session in the trash stays with it
+      // The run log for that project's apps is part of this deletion too (M4 A-6) — a run that points at a session in the archive stays with it
       this.db
         .prepare(
-          `/* includes the trash: a run of a session in the trash stays with it */
+          `/* includes the archive: a run of a session in the archive stays with it */
            DELETE FROM app_runs WHERE project_id = ?
              AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))
              AND (caller_session_id IS NULL OR caller_session_id NOT IN (SELECT id FROM sessions))`,

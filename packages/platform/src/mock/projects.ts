@@ -167,7 +167,7 @@ export class ProjectsMock {
      * Removes things in the same order as the real thing: deletes sessions one by one, firing
      * `session_deleted` for each, then drops the project. The screen clears its list from that
      * event, so if the mock silently deleted only the project, e2e would be left with ghost
-     * sessions in the sidebar. The sessions go to the trash (#204), marked to keep
+     * sessions in the sidebar. The sessions go to the session archive (#204), marked to keep
      * the tool's files and worktrees, as the host does.
      */
     remove: async (projectId: string) => {

@@ -103,12 +103,12 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             The folder itself goes to the Trash —{' '}
             <span className="readout text-ink-muted">{project.path}</span> and everything inside it,{' '}
             <span className="text-danger">including work the agents have not committed</span>. Its sessions go
-            to Centralu’s trash; restoring one needs the folder back.
+            to Centralu’s session archive; restoring one needs the folder back.
           </p>
         ) : (
           <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="delete-project-note">
             The project leaves Centralu with its always-allow rules and usage. Its sessions go to Centralu’s
-            trash — Settings → Trash restores them or deletes them for good.{' '}
+            session archive — Settings → Archive restores them or deletes them for good.{' '}
             <span className="text-ink" data-testid="delete-project-folder-note">
               {folderNote(project, outlook)}
             </span>

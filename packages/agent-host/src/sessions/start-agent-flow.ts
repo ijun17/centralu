@@ -397,15 +397,15 @@ export class AgentStartFlow {
 
   /**
    * A session made for a child or a fork whose gates no longer pass once it exists: it gets no task, named for what it
-   * was made for, and goes to the trash (a worktree stays, as for any trashed session); the call reads why. A session
-   * the trash refuses has its process stopped instead, and the call says so.
+   * was made for, and goes to the session archive (a worktree stays, as for any archived session); the call reads why. A session
+   * the session archive refuses has its process stopped instead, and the call says so.
    */
   async abandonChild(child: SessionInfo, why: string, name?: string): Promise<{ ok: false; error: string }> {
     if (name) this.host.rename(child.id, name)
     const called = this.host.meta.get(child.id)?.name ?? child.name
     try {
       await this.host.trashSession(child.id)
-      return { ok: false, error: `${why} The session "${called}" made for it got no task and was moved to the trash.` }
+      return { ok: false, error: `${why} The session "${called}" made for it got no task and was archived.` }
     } catch (e) {
       const running = this.host.handles.has(child.id)
       let stopped = running && (await this.host.sleepSession(child.id).catch(() => false))
@@ -420,7 +420,7 @@ export class AgentStartFlow {
       const left = !running ? 'no process of its was running' : stopped ? 'its process was stopped' : 'its process could not be stopped'
       return {
         ok: false,
-        error: `${why} The session "${called}" [${child.id}] made for it got no task, but could not be moved to the trash (${(e as Error).message}); ${left}. Tell the person.`,
+        error: `${why} The session "${called}" [${child.id}] made for it got no task, but could not be archived (${(e as Error).message}); ${left}. Tell the person.`,
       }
     }
   }

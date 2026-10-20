@@ -182,7 +182,7 @@ test('a user-folder app is removed from the list after asking once — cancellin
   await expect(page.getByTestId(`external-app-${pid}/notes`).getByTestId('external-app-remove')).toHaveCount(0)
   const row = page.getByTestId('external-app-_user/github-mcp')
   await row.getByTestId('external-app-remove').click()
-  await expect(row.getByTestId('external-app-remove-confirm')).toContainText('Its folder moves to the app trash')
+  await expect(row.getByTestId('external-app-remove-confirm')).toContainText('Its folder is set aside, not deleted')
   await row.getByTestId('external-app-remove-cancel').click()
   await expect(row.getByTestId('external-app-remove-confirm')).toHaveCount(0)
   expect(await removed()).toEqual([])

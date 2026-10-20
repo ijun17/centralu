@@ -19,7 +19,7 @@ beforeEach(resetStore)
  * Handing off and starting fresh (a dogfooding request — the way out of the 7-13 second resume delay
  * on an old thread). The dying session's written text becomes the new session's first message, its
  * name and settings carry over, and the old session is deleted all the way to its own original —
- * since #204 it goes to the trash, and its tool file goes when it is deleted for good.
+ * since #204 it goes to the session archive, and its tool file goes when it is deleted for good.
  * Destruction comes last — a failure deletes nothing.
  */
 /**

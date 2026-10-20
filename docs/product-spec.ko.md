@@ -8,7 +8,7 @@
 - 작성: 2026-08-15 (v0.4), 2026-08-26 재정렬 (v0.5)
 - 상태: M2까지 출시 완료; M2.5(도그푸딩) 진행 중
 - v0.4 → v0.5 주요 변경: §2의 M0 전제 조건이 검증 완료로 기록됨; FR-4를 근거 패널 탭 레이아웃으로 갱신(History를 git 패널에서 분리); FR-9를 실제 출시된 내용으로 다시 씀(비용 대시보드가 아니라 한도 윈도우); FR-11을 구현된 오케스트레이터 설계로 다시 씀(kind 마커, 중앙/프로젝트별 계층, 선별된 도구, 왕관 표시); 터미널 non-goal 철회(§1.5); 그리드는 여전히 실험적이며 살아 있는 반론 두 가지를 유지(§5.4); 아키텍처(§6)를 Node 호스트 현실에 맞게 수정; §7.1에 측정 수치 추가; 로드맵(§8) 최신화 완료 표시
-- v0.3 → v0.4 주요 변경: 제품 철학을 명문화(§1.2), 배너에서 그 자리에서 승인 허용(맥락이 필요할 때만 점프), 동시 세션 경고를 인라인 + 복구 경로로 완화, 세션 아카이브(FR-20)·대화 검색(FR-21)·카드 접기 정책 추가, 인박스를 M1로 승격, 프런트엔드를 React로 확정, 미결 질문 4개 종결
+- v0.3 → v0.4 주요 변경: 제품 철학을 명문화(§1.2), 배너에서 그 자리에서 승인 허용(맥락이 필요할 때만 점프), 동시 세션 경고를 인라인 + 복구 경로로 완화, 세션 숨기기(아카이브, FR-20, 뒤에 폐기)·대화 검색(FR-21)·카드 접기 정책 추가, 인박스를 M1로 승격, 프런트엔드를 React로 확정, 미결 질문 4개 종결
 
 ---
 
@@ -126,7 +126,7 @@ come back to the desk
 | 워크스페이스 | 등록된 프로젝트 목록 + 레이아웃 + 열린 세션들의 전체 상태 (복원의 단위) |
 | 인박스 | 프로젝트 구조를 무시하고 "지금 내 개입을 기다리는 항목"만 보여주는 트리아지 뷰 |
 | 읽음/안읽음 | 세션 상태와 독립: 마지막으로 본 이후 새 내용이 있는가 |
-| ~~아카이브~~ | FR-20과 함께 폐기됐다(2026-09-02). 살아 있지 않은 세션은 누가 말을 걸면 다시 이어지고, 사람이 지운 세션은 휴지통으로 간다(FR-22) |
+| 세션 보관함 | 끝났거나 치워 둔 세션을, 사람이 영영 지울 때까지 두는 곳. 열어 볼 수 있고(읽기 전용) 되돌릴 수 있다. #1404 전에는 휴지통이라 불렀다(FR-22). 폐기된 숨기기(아카이브) 기능(FR-20)과는 다르다. 살아 있지 않은 세션은 누가 말을 걸면 다시 이어진다 |
 
 ---
 
@@ -168,7 +168,7 @@ come back to the desk
 
 - 채팅 스타일 UI: 사용자 메시지 / 에이전트 응답 (스트리밍 마크다운) / 도구 호출 카드 (기본 접힘, 펼치면 상세).
 - 도구 호출 카드: 명령, 파일 경로, diff 요약을 구조화해 표시. raw 출력은 펼쳤을 때만. **접기 기본값은 도구 종류에 따라 다르다**: 읽기 중심 도구(Read/Grep/읽기 중심 Bash)는 접힘 — 연속으로 20개가 나와도 대화가 묻히지 않는다. 파일 변경(Edit/Write)은 diff 요약이 펼쳐진 상태가 기본. 설정에서 도구별로 조정 가능. (대화 뷰 가독성의 절반은 이 정책이다)
-- 네이티브 서브에이전트를 띄운 카드(Claude Code의 `Agent`, Codex의 `spawnAgent`)에는 접힌 **서브에이전트의 걸음(Subagent's steps)** 칸이 있다. 펼치면 서브에이전트가 한 일 — 그 글, 추론, 도구 카드를 대화의 것과 같은 모양으로 — 을 보여 주고, 실행 중이면 이후의 걸음이 오는 대로 붙는다. 대화 자체에는 결코 나오지 않는다: 다른 행위자의 걸음이 부모의 것 사이에 끼면 누가 무엇을 했는지 구분할 수 없었다 (#98). 걸음을 남기기 전에(#222) 돈 에이전트는 남은 걸음이 없다고 말한다. 세션 없이 휴지통으로 옮긴 걸음(#418)은 휴지통에 있다고, 설정 → 휴지통에서 되살린다고 말한다. 휴지통에서 영구 삭제한 걸음은 남은 것이 없다고 말한다.
+- 네이티브 서브에이전트를 띄운 카드(Claude Code의 `Agent`, Codex의 `spawnAgent`)에는 접힌 **서브에이전트의 걸음(Subagent's steps)** 칸이 있다. 펼치면 서브에이전트가 한 일 — 그 글, 추론, 도구 카드를 대화의 것과 같은 모양으로 — 을 보여 주고, 실행 중이면 이후의 걸음이 오는 대로 붙는다. 대화 자체에는 결코 나오지 않는다: 다른 행위자의 걸음이 부모의 것 사이에 끼면 누가 무엇을 했는지 구분할 수 없었다 (#98). 걸음을 남기기 전에(#222) 돈 에이전트는 남은 걸음이 없다고 말한다. 세션 없이 세션 보관함으로 옮긴 걸음(#418)은 보관함에 있다고, 설정 → Archive에서 되살린다고 말한다. 보관함에서 영구 삭제한 걸음은 남은 것이 없다고 말한다.
 - 세션 제어: 중단, 재시도, 새 세션, 세션 이름 변경 (자동 이름은 FR-18).
 - 메시지 입력: 여러 줄, 첨부(FR-13), 슬래시 명령 패스스루 (도구가 지원하는 경우).
 
@@ -397,8 +397,8 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - 프로젝트 구조를 **무시하고**, 지금 내 개입을 기다리는 항목만 모으는 단일 목록.
 - 정렬: 긴급도 우선 (승인 → 오류 → 응답 대기); 같은 긴급도 안에서는 대기 시작 시각 오름차순.
 - 각 항목: 세션 이름, 프로젝트, 대기 종류, 경과 시간, 마지막 내용 한 줄 미리보기.
-- 항목 선택 → 해당 세션의 포커스 뷰로 점프. 처리(승인/응답)가 끝나도 **그 세션에 머문다** — 방금 보낸 것을 에이전트가 어떻게 받는지 보이게. 다음 대기 항목으로는 `⌘⇧A`(FR-17)로 간다. *(2026-10-02 변경: 예전에는 자동으로 다음 항목으로 간다고 적혀 있었다. FR-20으로 보관의 `d` 키와 `afterHandled` 경로가 없어진 뒤로 그렇게 하는 것은 없었고, 소유자는 그대로 두기로 했다 — 답을 보내는 순간 화면이 바뀌는 것은 예측하기 어렵다.)*
-- ~~**`d` (dismiss)**~~ — **2026-09-02 폐기.** 세션을 아카이브했고, 그게 아카이브의 유일한 입구였는데 출구가 없었다: "이건 답 안 하겠다"는 뜻이 세션을 앱에서 지웠다. 인박스는 *상태*의 뷰라, 정직하게 비우는 방법은 상태를 바꾸는 것 — 즉 답하는 것뿐이다. FR-20 참고.
+- 항목 선택 → 해당 세션의 포커스 뷰로 점프. 처리(승인/응답)가 끝나도 **그 세션에 머문다** — 방금 보낸 것을 에이전트가 어떻게 받는지 보이게. 다음 대기 항목으로는 `⌘⇧A`(FR-17)로 간다. *(2026-10-02 변경: 예전에는 자동으로 다음 항목으로 간다고 적혀 있었다. FR-20으로 숨기기의 `d` 키와 `afterHandled` 경로가 없어진 뒤로 그렇게 하는 것은 없었고, 소유자는 그대로 두기로 했다 — 답을 보내는 순간 화면이 바뀌는 것은 예측하기 어렵다.)*
+- ~~**`d` (dismiss)**~~ — **2026-09-02 폐기.** 세션을 숨겼고(당시 이름은 아카이브), 그게 숨기기의 유일한 입구였는데 출구가 없었다: "이건 답 안 하겠다"는 뜻이 세션을 앱에서 지웠다. 인박스는 *상태*의 뷰라, 정직하게 비우는 방법은 상태를 바꾸는 것 — 즉 답하는 것뿐이다. FR-20 참고.
 - **응답 대기는 안 읽은 동안만 목록에 둔다** (사장님, 2026-10-14, [#669](https://github.com/ijun17/centralu/issues/669)). 턴이 끝난 세션(`waiting_input`)은 `last_read_seq < last_seq`인 동안에만 목록, 상단 카운터, 접힌 프로젝트 요약, `⌘⇧A`에 나온다. 답을 읽으면 빠지고, 새 답(새 `last_seq`)이 오면 돌아온다. 승인과 오류는 읽었는지와 상관없이 전과 같다. 응답 대기 행마다 **Done** 버튼(커서가 있는 행에서 `D` 키)이 있어, 세션을 열지 않고 읽음으로 표시한다. 새 상태는 없고 FR-16의 읽음 표시 그대로다. 위에서 폐기한 `d`와 다르다: Done은 앱에서 아무것도 지우지 않고, 답을 봤다고 알릴 뿐이다.
 - **끝나기 전에 멈춘 턴은 이유를 말한다** ([#698](https://github.com/ijun17/centralu/issues/698), 그 풀 리퀘스트에서 제안했고 아직 사장님 결정은 아니다). 네트워크, 종료, 도구 자신의 중단이 턴을 끊으면(`SessionInfo.interruption`, [agent-host.ko.md](agent-host.ko.md) §4.6.2) 인박스 행은 상태 대신 "Stopped: network", "Stopped: Centralu quit or restarted", "Stopped: interrupted"라고 쓰고, 오류와 같은 순서에 놓이고 오류로 세며, **Continue**를 단다. Continue는 "Continue where you stopped. Check what already happened before repeating a step."를 사람의 메시지로 보낸다(잘린 턴이 단계의 일부를 이미 했을 수 있다). 종료 때문에 `idle`이 된 세션은 끝난 턴처럼 안 읽은 동안 목록에 있고 Done이 있다. 오류는 전처럼 목록에 있다. 사이드바의 도구 표시는 신호 테두리를 받고 툴팁에 이유를 쓰며, 대화는 입력창 위에 같은 Continue와 함께 그 사실을 말한다. 5분 넘게 다시 연결하는 도구는 그동안 "Reconnecting for 5+ min"으로 목록에 있고, 이어 갈 것은 없다. 스스로 다시 보내지는 않는다: 다시 보낸 턴은 push나 출시를 되풀이할 수 있다.
 - 승인 행은 무엇을 묻는지 말하고, Allow / Deny(커서가 있는 행에서 `y` / `n`) 또는 Open을 내놓는다. FR-3 "행에서 답하기"를 따른다 (#543).
@@ -470,13 +470,13 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 몫이다(사이드바의 Add project). 새 폴더는 git 저장소(https나 ssh)의 클론일 수도 있고, 그 머신의 git과
 저장된 로그인으로 만든다.
 
-#### FR-20. 세션 아카이브 — **폐기 (2026-09-02)**
+#### FR-20. 세션 숨기기(아카이브) — **폐기 (2026-09-02)**
 
-아카이브를 걷어냈다: 플래그도, RPC도, 오케스트레이터의 `archive_session` 도구도, `d` 키도.
-스키마 v28이 컬럼을 지운다 — 이제 숨겨진 세션은 없다.
+세션을 목록에서 숨기던 옛 기능, 당시 이름으로 아카이브를 걷어냈다: 플래그도, RPC도, 오케스트레이터의 `archive_session` 도구도, `d` 키도.
+스키마 v28이 컬럼을 지운다 — 이제 숨겨진 세션은 없다. 이것은 FR-22의 세션 보관함과 다른 것이다. 보관함은 여기서 폐기한 생각을, 이 기능에 없던 나오는 길을 갖춰 다시 만든 것이다.
 
 실제로 만들어진 것은 아래 설계의 **절반**이었다: 들어가는 문(인박스의 `d`)만 있고
-나오는 문(프로젝트별 Archive 목록·팔레트·제자리 재개)이 하나도 없었다. 그래서
+나오는 문(프로젝트별 숨긴 세션 목록·팔레트·제자리 재개)이 하나도 없었다. 그래서
 "Dismiss"라고 적힌 키가 세션을 사이드바·팔레트·인박스에서 통째로 치웠고, 돌아올 길이
 없어 삭제와 구별되지 않았다. 게다가 에이전트도 `archive_session`으로 같은 일을 할 수 있었다.
 
@@ -485,24 +485,24 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 집합에서 빼는 것 말고 쥘 레버가 없었다. 이제 인박스를 비우는 방법은 답하는 것이고,
 그건 인박스가 존재하는 이유 그 자체다.
 
-기록 보존도 아카이브가 필요한 이유가 아니었다: 세션 삭제 창이 이미 "대화는 Claude/Codex에
+기록 보존도 숨기기가 필요한 이유가 아니었다: 세션 삭제 창이 이미 "대화는 Claude/Codex에
 남아 있고 **+ → Past conversations**로 다시 꺼낼 수 있다"고 말하고, host 테스트가 그 약속을
 지킨다. 사이드바가 정말 붐비게 되면(워크트리 세션이 유력하다) 그 답은 붐비는 자리에서
 찾는다(병합된 자식 접기) — 전역 숨김 상태가 아니라.
 
-**2026-09-30부터 숨기되 남기는 세션이 다시 있다: 휴지통이다 (FR-22, #204).** 여기서 폐기한
-모양을, 아카이브에 없던 것을 갖춰 다시 만들었다. 나오는 길이 들어가는 길과 같은 변경에 들어갔다
+**2026-09-30부터 숨기되 남기는 세션이 다시 있다: 세션 보관함이다 (FR-22, #204, #1404 전에는 휴지통).** 여기서 폐기한
+모양을, 숨기기에 없던 것을 갖춰 다시 만들었다. 나오는 길이 들어가는 길과 같은 변경에 들어갔다
 (설정에서 목록·읽기·되살리기·영구 삭제). 삭제는 키 하나가 아니라 창이고, 그 창이 세션이 어디로
-가고 어떻게 돌아오는지 말한다. 에이전트와 앱은 휴지통에서 세션을 꺼내지도 영구 삭제하지도 못한다.
-휴지통은 사람 말고는 아무것도 비우지 않는다.
+가고 어떻게 돌아오는지 말한다. 에이전트와 앱은 보관함에서 세션을 꺼내지도 영구 삭제하지도 못한다.
+보관함은 사람 말고는 아무것도 비우지 않는다.
 
 ---
 
 이하 폐기 전 설계 (기록용):
 
-- 아카이브 = 에이전트 프로세스 종료 + 사이드바와 인박스에서 제거. **대화 기록은 SQLite에 보존된다.**
-- 아카이브된 세션은 프로젝트별 "Archive" 목록과 커맨드 팔레트에서 볼 수 있다. resume이 가능하면 그 자리에서 resume한다 (활성으로 복귀).
-- FR-10(재시작 시 복원)은 **활성 세션만** 복원한다 — 아카이브는 복원 범위 밖이다.
+- 숨기기(아카이브) = 에이전트 프로세스 종료 + 사이드바와 인박스에서 제거. **대화 기록은 SQLite에 보존된다.**
+- 숨긴 세션은 프로젝트별 "Archive" 목록과 커맨드 팔레트에서 볼 수 있다. resume이 가능하면 그 자리에서 resume한다 (활성으로 복귀).
+- FR-10(재시작 시 복원)은 **활성 세션만** 복원한다 — 숨긴 세션은 복원 범위 밖이다.
 - 진입점: 인박스에서 `d`, 세션 헤더 버튼, 커맨드 팔레트.
 
 #### FR-21. 대화 내용 검색
@@ -511,16 +511,16 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 - M2: 대화 **내용**의 전문 검색 (SQLite FTS) — 며칠에 걸쳐 세션 4개를 굴리면 "그 얘기 어디서 했더라"는 반드시 나온다.
 - **내용은 오간 말이다**: 사람의 말, 에이전트의 답과 추론. 도구 호출과 그 출력은 검색하지 않는다 ([#221](https://github.com/ijun17/centralu/issues/221)). 그때까지는 명령이 색인됐는데, 색인 81,816행 중 55,131행이었고 236.2MiB 저장소의 124.5MiB 색인 대부분이었다 (실제 저장소의 사본, 2026-09-30). 명령의 출력은 한 번도 색인된 적이 없다. 빼도 오간 말을 찾는 검색은 잃은 것이 없고(표본 질의 397개가 모두 같은 메시지를 돌려줬다), 색인은 36.6MiB, 저장소는 145.4MiB가 됐다. 세션이 무엇을 실행했는지는 검색이 아니라 `read_session`으로 읽는다.
 - **네이티브 서브에이전트의 걸음도 검색하지 않는다, 그 글까지** ([#222](https://github.com/ijun17/centralu/issues/222)). 서브에이전트가 찾은 것에 대한 부모 자신의 보고가 대화에 있고, 검색이 찾는 것은 그것이다.
-- 휴지통의 세션(FR-22)은 사람의 검색에도 에이전트의 `recall`에도 **나오지 않는다**. 휴지통에 넣을 때 색인 행을 지우고, 되살릴 때 다시 만든다.
+- 보관함의 세션(FR-22)은 사람의 검색에도 에이전트의 `recall`에도 **나오지 않는다**. 보관함에 넣을 때 색인 행을 지우고, 되살릴 때 다시 만든다.
 - **에이전트의 `recall`과 `read_session`은 자기 세션에서 마지막 압축 지점보다 이른 메시지만 읽는다** ([#974](https://github.com/ijun17/centralu/issues/974)). 압축 지점은 무언가를 접은 압축이거나 새 대화(`/clear`)다. 그 지점보다 이른 말은 모델의 컨텍스트에서는 사라졌지만 저장소에는 남아 있다. 그 지점보다 늦은 말이나, 그런 지점이 없는 세션의 말은 아직 컨텍스트에 있으므로 찾아 봐야 메아리일 뿐이라 빠진다. `recall`은 그런 결과에 "(this session, before compaction)"을 붙이고 발췌도 그 지점에서 자르며, `read_session`은 그런 결과를 `around`로 줄 때만 자기를 읽으며 그 지점에서 멈춘다. 두 어댑터 모두 압축을 같은 표지 행으로 저장하므로(Claude의 `compact_boundary`, Codex의 `contextCompaction`, 도구에서 다시 읽어 온 것까지) 두 도구 모두 지점을 안다. 표지가 없는 세션은 압축한 적이 없는 것으로 다룬다.
 
-#### FR-22. 세션 휴지통 (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
+#### FR-22. 세션 보관함 (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
 
-세션을 지우면 휴지통으로 간다. 대화가 이 기계를 떠나는 것은 사람이 **설정 → 휴지통**에서
-영구 삭제할 때뿐이다(하나씩, 또는 한 번에). 이유는 소유자의 것이다: 대화는 중요한 데이터이고,
-예전에는 삭제 창의 클릭 한 번이 되돌릴 길 없이 대화를 없앴다.
+세션을 보관하면(사이드바의 **Archive session…**) 세션 보관함으로 간다. 대화가 이 기계를 떠나는 것은 사람이 **설정 → Archive**에서
+영구 삭제할 때뿐이다(하나씩은 **Delete for good**, 한 번에는 **Delete all archived sessions…**). 이유는 소유자의 것이다: 대화는 중요한 데이터이고,
+예전에는 삭제 창의 클릭 한 번이 되돌릴 길 없이 대화를 없앴다. 보관함은 #1404 전까지 휴지통이라 불렀다. 오케스트레이터가 "휴지통 비우기"를 운영체제의 휴지통으로 읽고 세션 108개를 영구 삭제한 일 때문에 이름을 바꿨다. 프로토콜의 메서드(`trash.*`), `sessions.trash` 열, `Trashed*` 타입은 프로토콜이 늘기만 하므로 옛 이름을 그대로 둔다. 보관한 뒤 토스트는 "Archived: <name> — Settings → Archive restores it"이다. 앱 에이전트 세션의 남긴 기록과 보관한 서브에이전트 단계도 같은 보관함에 든다(아래).
 
-- **휴지통에 가는 것**은 예전 삭제가 없애던 전부다: 세션 행, 메시지, 승인 규칙, 커밋 연결
+- **보관함에 가는 것**은 예전 삭제가 없애던 전부다: 세션 행, 메시지, 승인 규칙, 커밋 연결
   (`commit_sessions`), 그 세션을 가리키는 앱 실행 기록(토큰 수 포함), 첨부, 인수인계 노트
   (`<데이터>/handoff/<프로젝트 id>/<세션 id>.md`). 검색 색인만 예외다 — 남기지 않고 지운다.
   그래서 모든 검색에서 빠지고, 차지하던 것의 큰 절반이 풀린다(#96 실측: 137MB 가운데 색인이 71MB).
@@ -532,23 +532,23 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
   - *워크트리*는 제자리에, git에 등록된 채로 있다. 워크트리 폴더를 옮기면 git의 기록이 아무것도
     가리키지 않게 되고(`git worktree list`가 prunable이라 부르고, `prune`이나 `gc`가 기록을 지운다),
     Claude는 대화를 작업 디렉토리로 찾으므로 되살린 세션이 자기 기록도 잃는다.
-- **휴지통에 있는 동안 닿지 않는 곳**: 사이드바, 인박스, 팔레트, 그리드, 프로젝트 화면(§5.5), 대화 검색(FR-21),
+- **보관함에 있는 동안 닿지 않는 곳**: 사이드바, 인박스, 팔레트, 그리드, 프로젝트 화면(§5.5), 대화 검색(FR-21),
   오케스트레이터의 `list_sessions` / `recall` / `read_session`, 앱의 `host_data` `sessions.list`,
-  설정의 승인 규칙 목록. 세션을 읽는 저장소의 모든 질의는 휴지통을 어떻게 하는지 말해야 하고,
+  설정의 승인 규칙 목록. 세션을 읽는 저장소의 모든 질의는 보관함을 어떻게 하는지 말해야 하고,
   말하지 않는 질의가 생기면 host 시험이 실패한다.
-- **나오는 길**은 설정 → 휴지통이다: 세션마다 이름, 프로젝트, 지운 시각, 크기, 함께 갈 것을
-  보이고, 읽고(읽기 전용), 되살리고, 영구 삭제하고, 휴지통을 비운다. 전체 크기를 보인다 —
-  휴지통을 스스로 비우는 것은 없기 때문이다.
+- **나오는 길**은 설정 → Archive다: 세션마다 이름, 프로젝트, 보관한 시각, 크기, 함께 갈 것을
+  보이고, 읽고(읽기 전용), 되살리고, 영구 삭제하고, 보관한 세션을 모두 지운다. 전체 크기를 보인다 —
+  보관함을 스스로 비우는 것은 없기 때문이다.
 - **되살린 세션은 그대로 돌아온다**: 같은 id, 메시지, 규칙, 커밋 연결, 앱 실행 기록, 다시 만든 색인.
   살아 있을 때만 참인 상태(working, 승인 대기)는 재시작 뒤처럼 idle로 돌아온다. 그사이 프로젝트가
   지워졌다면 폴더를 **같은 프로젝트 id로** 다시 등록한다 — 워크트리 폴더, 인수인계 노트, 세션과 함께
   남은 행이 다시 맞물린다. 그 폴더가 새 id로 다시 추가돼 있으면 거기로 간다. 폴더까지 없으면
-  되살리기를 거절하고 폴더가 어디 있었는지 말한다. 세션은 휴지통에서 계속 읽을 수 있다.
-- **프로젝트를 지우면 그 세션들은 휴지통으로 간다** — 없애지 않는다. 클릭 한 번이 낼 수 있는 가장 큰
-  손실이었다. 그때는 도구 파일과 워크트리에 대해 아무도 묻지 않았으므로, 휴지통을 비워도 그것들은
+  되살리기를 거절하고 폴더가 어디 있었는지 말한다. 세션은 보관함에서 계속 읽을 수 있다.
+- **프로젝트를 지우면 그 세션들은 보관함으로 간다** — 없애지 않는다. 클릭 한 번이 낼 수 있는 가장 큰
+  손실이었다. 그때는 도구 파일과 워크트리에 대해 아무도 묻지 않았으므로, 보관한 세션을 모두 지워도 그것들은
   남는다. 프로젝트 자신의 행(프로젝트 범위 규칙, 사용량 합계, 앱에 한 답)은 예전처럼 프로젝트와 함께 간다.
-- **영구 삭제는 사람만 한다.** 휴지통에는 UI의 RPC로만 닿는다. 에이전트의 도구와 앱의 중개에는 그
-  동사가 없다. 에이전트는 세션을 휴지통에 넣을 수는 있지만(자기가 띄운, 병합이 증명된 워크트리 에이전트를
+- **영구 삭제는 사람만 한다.** 보관함에는 UI의 RPC로만 닿는다. 에이전트의 도구와 앱의 중개에는 그
+  동사가 없다. 에이전트는 세션을 보관함에 넣을 수는 있지만(자기가 띄운, 병합이 증명된 워크트리 에이전트를
   `agent_session` `delete`로 치우는 세션이 그렇다) 꺼내지는 못한다.
 - **호스트가 스스로 하는 영구 삭제는 하나뿐이다: 끝난 앱 에이전트 세션**([#378](https://github.com/ijun17/centralu/issues/378)).
   앱이 `run_agent`로 세운 세션은 실행이 깨끗하게 끝나면 아주 지운다. 그것이 한 일은 실행의 기록으로 남기
@@ -556,23 +556,23 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
   부르는 앱이 아무도 말 걸지 않을 세션으로 사이드바를 채웠다. 실행이 실패했거나 멈췄거나 취소됐을 때, 실행
   중에 카드가 섰을 때, 지움이 끝나기 전에 사람이 그 세션을 열었거나 글을 썼을 때, 다시 쓰이고 있을 때, 첨부가
   있을 때는 전처럼 세션으로 남는다. 기록은
-  설정 → 휴지통에서 앱별로 묶여 휴지통의 세션 옆에 선다. 하나씩 읽을 수 있고(부탁, 답, 상태, 토큰, 대화),
-  거기서 아주 지운다: 하나, 한 앱의 전부, 또는 휴지통 비우기로. 저절로 가는 것은 실행 기록의 30일 보관
-  기간이 지났을 때뿐이다. 사람이 휴지통으로 옮겨 둔 서브에이전트 단계(#418)는 기록에 들지 않는다: 사람이 둔
+  설정 → Archive에서 앱별로 묶여 보관한 세션 옆에 선다. 하나씩 읽을 수 있고(부탁, 답, 상태, 토큰, 대화),
+  거기서 아주 지운다: 하나, 한 앱의 전부, 또는 보관한 세션 모두 지우기로. 저절로 가는 것은 실행 기록의 30일 보관
+  기간이 지났을 때뿐이다. 사람이 보관함으로 옮겨 둔 서브에이전트 단계(#418)는 기록에 들지 않는다: 사람이 둔
   곳에 남고, 세션의 영구 삭제와 함께 간다.
-- **세션의 서브에이전트 단계는 세션 없이 따로 휴지통에 간다** (#418). 세션이 띄운 네이티브 서브에이전트의
+- **세션의 서브에이전트 단계는 세션 없이 따로 보관함에 간다** (#418). 세션이 띄운 네이티브 서브에이전트의
   단계(#222)가 세션이 지닌 것의 대부분일 수 있다(측정: 237 MB 저장소 중 46 MB, 모두 아직 쓰는 세션 하나).
-  설정 → 휴지통이 살아 있는 세션마다 몇 개의 띄운 카드의 단계를, 몇 단계, 얼마의 크기로 지니는지 보여 주고,
-  대화와 띄운 카드는 그대로 둔 채 그 단계를 휴지통으로 옮긴다. 휴지통에서는 따로 한 항목이고, 카드 아래로
-  되살리거나 휴지통의 규칙대로 영구 삭제한다(사람만, 하나씩 또는 휴지통 비우기로. 비우기는 창이 보여 준 항목만
-  지운다: 창이 휴지통을 읽은 뒤에 옮겨진 단계는 남는다). 단계가 휴지통에 있는 띄운
+  설정 → Archive가 살아 있는 세션마다 몇 개의 띄운 카드의 단계를, 몇 단계, 얼마의 크기로 지니는지 보여 주고,
+  대화와 띄운 카드는 그대로 둔 채 그 단계를 보관함으로 옮긴다. 보관함에서는 따로 한 항목이고, 카드 아래로
+  되살리거나 보관함의 규칙대로 영구 삭제한다(사람만, 하나씩 또는 보관한 세션 모두 지우기로. 그것은 창이 보여 준 항목만
+  지운다: 창이 보관함을 읽은 뒤에 옮겨진 단계는 남는다). 단계가 보관함에 있는 띄운
   카드는 그렇게 말한다. 아직 도는 서브에이전트는 새 단계를 계속 카드 아래에 쓴다. 아직 다루지 않는 것: 실행
   하나, 또는 어느 날짜 전의 실행만 따로; 영구 삭제 전의 요약(#379).
 - 스키마 v39가 `sessions.deleted_at`(살아 있는 세션은 NULL)과 `sessions.trash`(JSON: 어디서 왔는지,
-  영구 삭제할 때 무엇을 함께 지우는지)를 더한다. 휴지통의 세션에는 `project_id`가 없다. 프로젝트는
+  영구 삭제할 때 무엇을 함께 지우는지)를 더한다. 보관함의 세션에는 `project_id`가 없다. 프로젝트는
   `trash`에 있고, 그래서 프로젝트를 지워도 외래키가 세션을 함께 데려가지 않는다. 이후의 마이그레이션은
-  휴지통의 세션에 속한 행을 고려해야 한다.
-- 다루지 않는 것: 휴지통 세션의 첨부도 모든 첨부와 같은 500MB 상한 아래에 있고, 그 세션을 가리키는
+  보관함의 세션에 속한 행을 고려해야 한다.
+- 다루지 않는 것: 보관함 세션의 첨부도 모든 첨부와 같은 500MB 상한 아래에 있고, 그 세션을 가리키는
   앱 실행 기록도 앱 실행 기록의 보관 기간 아래에 있다. 세션을 아주 지워도 그 실행들은 더 이상 지우지 않는다.
   연결만 비운 채 앱의 실행 기록에 남는다(#378). 남은 기록을 에이전트가 읽을 길은 아직 없다([#1106](https://github.com/ijun17/centralu/issues/1106), #378의 네 번째
   부분. 그 도구가 얼마의 비용을 써도 되는지 결정을 기다린다).
@@ -641,7 +641,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - **사용량 대시보드**: 주간 막대 차트(일별), 도구/모델/프로젝트별 분해, 추정 비용, 한도 윈도우 상태.
 - **세션 생성 대화상자**: 도구 → 모델 → 권한 프리셋 → 시작 프롬프트. 동시 세션 경고 포함 (FR-2).
-- **설정**: 도구 경로/감지 상태, 기본 프리셋, 알림 정책(상태별), 단축키, **테마** — Dark, Light, 시스템 따르기, 쪽마다 고르는 테마(프리셋: Dark, Light, High contrast dark, High contrast light), 신호는 칠하지 않는 선택적 강조색, 그리고 데이터 폴더의 파일로 된 사용자 테마(설정에서, 손으로, 에이전트가 고칠 수 있고 바로 반영된다). 테마가 긴급함의 순서를 깨면 경고한다 (#312, [themes.ko.md](themes.ko.md)), **외관 — 5단계 텍스트 스케일** (2026-08-26; OS 디스플레이 배율처럼 화면 전체를 스케일하되, 최소 폭과 그리드 열 계산은 실제 픽셀에 고정), **본문 글꼴과 코드 글꼴**(기본은 함께 들어 있는 Pretendard와 D2Coding, #731. 짧은 목록, 시스템 글꼴, 설치된 아무 글꼴을 이름으로. 늘 앱 자신의 글꼴 앞에 붙어서 한글은 대체 글꼴을 지킨다. 터미널은 코드 글꼴을 따른다) **과 줄 높이**(Compact, Normal, Relaxed. 고정 행 화면은 자기 행을 지킨다), 테마와 함께 화면 설정에 담기고 앱 화면에도 건네진다 (#312, [themes.ko.md](themes.ko.md)), **휴지통** — 지운 세션을 읽고 되살리거나 영구 삭제하는 곳, 전체 크기와 함께 (FR-22), 그리고 세션마다 서브에이전트 단계가 차지하는 크기와 그것을 세션 없이 휴지통으로 옮기기 (#418), **백그라운드** — 앱을 꺼도 에이전트가 계속 도는지 (FR-10, 데스크톱 전용), **업데이트** — 지금 도는 버전과 최신 버전, Check now, 설치, Apply now, 그리고 확인·설치·한가할 때 적용을 묶은 Automatic updates (기본 켜짐, 2026-10-20; FR-10, 데스크톱 전용). 설치된 에이전트 CLI와, idle 세션을 새로 설치된 CLI로 옮기기 (기본 켜짐; FR-10, #297).
+- **설정**: 도구 경로/감지 상태, 기본 프리셋, 알림 정책(상태별), 단축키, **테마** — Dark, Light, 시스템 따르기, 쪽마다 고르는 테마(프리셋: Dark, Light, High contrast dark, High contrast light), 신호는 칠하지 않는 선택적 강조색, 그리고 데이터 폴더의 파일로 된 사용자 테마(설정에서, 손으로, 에이전트가 고칠 수 있고 바로 반영된다). 테마가 긴급함의 순서를 깨면 경고한다 (#312, [themes.ko.md](themes.ko.md)), **외관 — 5단계 텍스트 스케일** (2026-08-26; OS 디스플레이 배율처럼 화면 전체를 스케일하되, 최소 폭과 그리드 열 계산은 실제 픽셀에 고정), **본문 글꼴과 코드 글꼴**(기본은 함께 들어 있는 Pretendard와 D2Coding, #731. 짧은 목록, 시스템 글꼴, 설치된 아무 글꼴을 이름으로. 늘 앱 자신의 글꼴 앞에 붙어서 한글은 대체 글꼴을 지킨다. 터미널은 코드 글꼴을 따른다) **과 줄 높이**(Compact, Normal, Relaxed. 고정 행 화면은 자기 행을 지킨다), 테마와 함께 화면 설정에 담기고 앱 화면에도 건네진다 (#312, [themes.ko.md](themes.ko.md)), **보관함(Archive)** — 보관한 세션을 읽고 되살리거나 영구 삭제하는 곳, 전체 크기와 함께 (FR-22), 그리고 세션마다 서브에이전트 단계가 차지하는 크기와 그것을 세션 없이 보관함으로 옮기기 (#418), **백그라운드** — 앱을 꺼도 에이전트가 계속 도는지 (FR-10, 데스크톱 전용), **업데이트** — 지금 도는 버전과 최신 버전, Check now, 설치, Apply now, 그리고 확인·설치·한가할 때 적용을 묶은 Automatic updates (기본 켜짐, 2026-10-20; FR-10, 데스크톱 전용). 설치된 에이전트 CLI와, idle 세션을 새로 설치된 CLI로 옮기기 (기본 켜짐; FR-10, #297).
 
 ### 5.4 그리드 뷰 (**experimental**)
 
@@ -716,7 +716,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | **Only this project's**: another project's session or app, and the orchestrator, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
 | Remember the **explicit ordered `panels` list per project across restarts**, in the workspace snapshot beside the sidebar fold | Availability filters drawing, not saved membership. Reordering preserves unavailable ids in their saved slots; adding appends one id, and removing takes only the chosen id off the list. Explicit session deletion removes its membership. Project apps have no explicit removal event, so catalog omission never removes their panels. Deleting a project drops its entry. |
 | **Additive migration**: saved legacy entries keep every non-hidden ordered id, then other available panels; projects without an entry start empty | Startup discovery can fail or omit offline machines, so migration retains unavailable ordered ids and drawing filters availability. Even an empty-array saved entry counts as arranged: the old build could write it after hiding and showing a lone panel, so with no remembered order it keeps everything currently available. Preserve legacy fields until a later release, so the previous build can still read snapshots during an update. Subsequent writes project the list into `order` and put other available ids in `hidden`. |
-| A session in the trash (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
+| A session in the session archive (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
 | **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first. While anything is dragged, the panel covers its view with a transparent layer and the view stays in sight, as on the grid (§5.4) | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. In WebKit a drag goes into a frame whatever the frame's pointer-events say (measured in Playwright's WebKit): a row dropped on an app's view would land in the app instead of beside it, and a session's panel carried into an app's view from the side, not through its header, never reached the screen at all (#288). The cover above the frame catches both on the page; hiding the view did too, at the cost of a blank screen for the whole drag (#296). |
 | An app's panel takes the **same gestures** as a session's: dropped from the sidebar, reordered by its header, the same drop rules and highlight (`data-drop` on the panel under the hand), and a place in the keyboard order — Tab from its header goes into its view, and back out to the header | The view stands after every panel in the document (it is laid over the panel, not inside it), so without its slot handing focus on, Tab would skip it and reach it only after the last panel (#288). |
 | **The grid is its own** | It stays a hand-picked list across projects, and holds apps as well as sessions (§5.4). A session or an app can be on both; on the grid an app has a view of its own, apart from this screen's. A session's panel dropped on the Grid button goes onto the grid, like a sidebar row. |
@@ -789,11 +789,11 @@ interface AgentAdapter {
 ### 6.3 데이터 모델 (SQLite)
 
 - `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
-- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 보관함에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
 - `messages(session_id, seq, role, kind, payload, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 휴지통이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다. `trashed_at`(v58, #418)은 단계가 세션 없이 휴지통에 있는 동안 정해진다: 카드가 더는 읽지 않고, 그 단계의 영구 삭제가 지운다.
-- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 휴지통으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
-- `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 휴지통으로 간 세션을 빼는 것 말고는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 보관함이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다. `trashed_at`(v58, #418)은 단계가 세션 없이 보관함에 있는 동안 정해진다: 카드가 더는 읽지 않고, 그 단계의 영구 삭제가 지운다.
+- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 보관함으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
+- `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 보관함으로 간 세션을 빼는 것 말고는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `workspace(id, layout, updated_at)` — 스냅숏
 

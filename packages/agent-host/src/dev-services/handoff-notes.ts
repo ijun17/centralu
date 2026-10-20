@@ -52,7 +52,7 @@ export function handoffNotePath(projectId: string, sessionId: string): string {
   return join(handoffNoteDir(projectId), `${sessionId}.md`)
 }
 
-/** How much one session's note takes — the trash shows what it holds (#204). 0 when it has none */
+/** How much one session's note takes — the session archive shows what it holds (#204). 0 when it has none */
 export async function handoffNoteBytes(projectId: string, sessionId: string): Promise<number> {
   return dataBytes(handoffNotePath(projectId, sessionId))
 }

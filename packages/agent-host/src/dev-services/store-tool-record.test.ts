@@ -70,7 +70,7 @@ describe('the search index holds what was said, not the tool calls (#221)', () =
     s.close()
   })
 
-  it('a session restored from the trash gets its index back without its tool calls', async () => {
+  it('a session restored from the session archive gets its index back without its tool calls', async () => {
     const s = seeded()
     s.messages.appendMessages(conversation('s1'))
     await s.trash.trashSession('s1', KEEP_ALL)
@@ -119,7 +119,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
   let copies = 0
 
   /**
-   * An old store: two sessions of conversation (one in the trash, so with no index rows), and an index row for every
+   * An old store: two sessions of conversation (one in the session archive, so with no index rows), and an index row for every
    * tool call, well over the vacuum's 16MB in all.
    *
    * Built once and copied for each test (#368). It used to be built in every test with 50KB in each tool call's title,
@@ -167,7 +167,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     return file
   }
 
-  it('the rows of tool calls are dropped, what was said is still found, the trash stays out, and the file shrinks', async () => {
+  it('the rows of tool calls are dropped, what was said is still found, the session archive stays out, and the file shrinks', async () => {
     const file = await oldStore()
     const before = statSync(file).size
     const old = new Database(file)
@@ -178,7 +178,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     expect(s.migrationsRun).toBe(22) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844), v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347) after it
     expect(s.messages.searchMessages('zebracorn')).toEqual([])
     expect(s.messages.searchMessages('build the package').map((h) => [h.sessionId, h.seq])).toEqual([['s1', 1]])
-    expect(indexRows(s)).toBe(3) // s1's three things said; the session in the trash has none
+    expect(indexRows(s)).toBe(3) // s1's three things said; the session in the session archive has none
     s.close()
     const after = statSync(file).size
     expect(after).toBeLessThan(before - 16 * 1024 * 1024)

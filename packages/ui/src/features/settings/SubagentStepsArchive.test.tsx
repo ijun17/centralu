@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { SubagentStepsHeld } from '@cc/protocol'
-import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsTake } from './SubagentStepsTrash.jsx'
+import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsTake } from './SubagentStepsArchive.jsx'
 
 /**
- * #418: Settings → Trash says what each session's subagent steps take and moves them to the trash without the session;
- * in the trash they are a row of their own.
+ * #418: Settings → Archive says what each session's subagent steps take and moves them to the session archive without the session;
+ * in the session archive they are a row of their own.
  */
 
 const held = (sessionId: string, bytes: number, over: Partial<SubagentStepsHeld> = {}): SubagentStepsHeld => ({
@@ -32,7 +32,7 @@ describe('what a session’s subagent steps take', () => {
     ])
     expect(html).toMatch(/class="[^"]*rounded-bubble[^"]*" data-testid="subagent-steps-held-list"/)
     expect(html).toMatch(/<button[^>]*data-testid="subagent-steps-move-big"/)
-    expect(text(html)).toContain('Session big No project Move to trash… 2 runs · 1.2k steps')
+    expect(text(html)).toContain('Session big No project Archive… 2 runs · 1.2k steps')
   })
 
   it('asks before moving, and says why a move was refused, on the row it is about', () => {
@@ -48,7 +48,7 @@ describe('what a session’s subagent steps take', () => {
       />,
     )
     expect(testIds(html)).toEqual(expect.arrayContaining(['subagent-steps-error-a', 'subagent-steps-confirm', 'subagent-steps-confirm-yes']))
-    expect(text(html)).toContain('Move the subagent steps of “Session a” to the trash? The conversation stays')
+    expect(text(html)).toContain('Move the subagent steps of “Session a” to the session archive? The conversation stays')
   })
 
   // #418 review: a machine not read left the list saying no session keeps any (#841's rule, ux-writing §1.5)
@@ -70,7 +70,7 @@ describe('what a session’s subagent steps take', () => {
   })
 })
 
-describe('a session’s subagent steps in the trash', () => {
+describe('a session’s subagent steps in the session archive', () => {
   it('is a row saying what they take and that the session stays, with Restore and Delete for good', () => {
     const html = renderToStaticMarkup(
       <ul>

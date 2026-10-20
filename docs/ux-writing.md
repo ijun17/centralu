@@ -40,7 +40,7 @@ Labels, headings, menu items and tooltips capitalise the first word and proper n
 The label is the action, in as few words as say it fully. It names the consequence when the consequence
 is not the obvious one.
 
-- Follows: "Move to trash" (`sidebar/dialogs/ConfirmDelete.tsx`), "Hand off"
+- Follows: "Archive" (`sidebar/dialogs/ConfirmDelete.tsx`), "Hand off"
   (`sidebar/dialogs/ConfirmHandoff.tsx`), "Allow once" / "Always for this session" / "Deny"
   (`approval/ApprovalCard.tsx`), "Continue in a fork" (`session/SessionNotes.tsx`), "Switch anyway"
   (`git/GitPanel.tsx`), "Not now" / "Trust" (`sidebar/project/TrustAsk.tsx`).
@@ -58,9 +58,9 @@ A label ends in "…" (the single character, never "...") when pressing it opens
 more before anything happens.
 
 - Follows: "Customise…" and "Import…" (`settings/ThemeSection.tsx`), "New app…" and "Delete project…"
-  (`sidebar/menus/ProjectMenu.tsx`), "Delete session…" and "Hand off to a fresh session…"
+  (`sidebar/menus/ProjectMenu.tsx`), "Archive session…" and "Hand off to a fresh session…"
   (`sidebar/menus/SessionMenu.tsx`), "Other…" (`settings/OtherChoice.tsx`), "Delete for good…"
-  (`settings/TrashSection.tsx`, then "Delete for good" on the confirmation itself).
+  (`settings/ArchiveSection.tsx`, then "Delete for good" on the confirmation itself).
 - The same character means "in progress" on a label that changes while it works: "Restarting the agent…"
   (`session/SessionHeader.tsx`), "Deleting…" (`project/DeleteProjectDialog.tsx`), "Looking for Claude Code
   and Codex…" (`onboarding/Intro.tsx`), "Asking <machine> what is running…" (`settings/MachinesSection.tsx`).
@@ -72,7 +72,7 @@ more before anything happens.
 The common shape is "Could not <verb> <what>: <reason>", with a way to try again where there is one.
 
 - Follows: "Could not read {what}: {error}" with Retry (`components/LoadFailed.tsx`, used for runs,
-  the trash, grants), "Could not save the window layout; it is tried again on the next change or
+  the session archive, grants), "Could not save the window layout; it is tried again on the next change or
   reconnect" (`store/connection.ts`), "<cannot>: <project> is not trusted. Trust the project to attach
   its apps." (`session/appReachNotice.ts`), "You did not allow <app> to <action>. This is your decision,
   not a bug in the app." (`pinned-app/ErrorTail.tsx`).
@@ -91,7 +91,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   waiting" then "Finished agents collect here" (`inbox/Inbox.tsx`); "Drag sessions and apps here from the
   sidebar" then "They keep running — this is another way to look at them" (`grid/GridView.tsx`); "No
   versions yet. One is kept the first time the app starts." (`app-share/VersionsPanel.tsx`).
-- Short where the next step is plain: "No commits yet", "No changes", "No results", "The trash is empty".
+- Short where the next step is plain: "No commits yet", "No changes", "No results", "The session archive is empty".
 - Breaks it: "Empty" (`files/FileTree.tsx`) and "None." (`app-share/AppReviewDetails.tsx`) say less than
   their neighbours. Periods are mixed: "No projects yet." and "No runs yet." have one, most do not
   (settled in section 3).
@@ -102,7 +102,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   (`session/BackgroundTasks.tsx`), "1 run" / "2 runs" (`pinned-app/RunsPanel.tsx`), "Attaching a file…" /
   "Attaching 3 files…" (`session/chat-rows/attachments.tsx`).
 - More of the same is "· N more": "api finished · 2 more" (`inbox/InboxPill.tsx`). Parts of one line are
-  joined by " · ": "4 sessions · 630 MB" (`settings/TrashSection.tsx`).
+  joined by " · ": "4 sessions · 630 MB" (`settings/ArchiveSection.tsx`).
 - Formats live in `app/format.ts`, all in English whatever the system's language: sizes "812 B", "1.5 KB"
   (a space); durations "1.5s", "3m 20s", "2h 5m"; token counts "1.5k", "10k+"; the time under a bubble
   "3:42 PM"; a day divider "Saturday, October 18, 2026"; ages "just now", "5m ago", "3d ago"
@@ -121,7 +121,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   (`settings/Settings.tsx`).
 - Breaks it: this computer is "This computer" (`sidebar/menus/AddProjectMachines.tsx`)
   and "this machine" ("Usage on this machine", `usage/UsageDonuts.tsx`;
-  `settings/TrashSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
+  `settings/ArchiveSection.tsx`; `project/NewAppDialog.tsx`) (settled in section 3).
 
 ### 1.9 No internal words on screen unless the person needs them
 
@@ -162,16 +162,16 @@ hold.
 
 ### 1.11 A confirmation asks, says what follows, and repeats the verb
 
-- Follows: "Move this session to the trash?" then "Move to trash" (`sidebar/dialogs/ConfirmDelete.tsx`);
+- Follows: "Archive this session?" then "Archive" (`sidebar/dialogs/ConfirmDelete.tsx`);
   "Delete “<name>” for good? Its conversation, attachments and handoff note leave this machine… This cannot
-  be undone." then "Delete for good" (`settings/TrashSection.tsx`); "Remove <app>? Its folder moves to the
-  app trash and agents lose its tools. Its run records stay." (`settings/Settings.tsx`). In place, Cancel
+  be undone." then "Delete for good" (`settings/ArchiveSection.tsx`); "Remove <app>? Its folder is set
+  aside, not deleted, and agents lose its tools. Its run records stay." (`settings/Settings.tsx`). In place, Cancel
   comes first, then the action (`components/InlineConfirm.tsx`).
 - What is lost is said in the danger ink: "Uncommitted work in it would be lost once it is deleted."
   (`sidebar/dialogs/ConfirmDelete.tsx`).
 - Breaks it: "Remove?" with "Keep" (`settings/MachinesSection.tsx`) where every other one says "Cancel";
-  "the Trash" (the OS's) and "trash" (Centralu's) are both written for different things, and not always
-  the right one (settled in section 3).
+  "the Trash" (the OS's) and, until #1404, "trash" (Centralu's) were written for different things, and
+  not always the right one (settled in section 3: Centralu's is the session archive).
 
 ### 1.12 One state, one wording
 
@@ -207,7 +207,7 @@ These settle the choices the draft asked about. Strings that do not follow them 
 | Periods | None on a label, a tooltip or a single-line hint; one when there are two sentences or more | "Switch branch"; "Restart every idle session on the installed version. Busy sessions keep running." |
 | Spelling and formats | American throughout | "Customize…", "Accent color", "3:42 PM" |
 | This computer | "This computer" everywhere | "Usage on this computer" |
-| Trash | "the Trash" for the OS's, "Centralu's trash" for Centralu's | "Move the folder to the Trash too"; "Chat history stays in Centralu's trash" |
+| Trash and archive | "the Trash" for the OS's; "archive" for Centralu's, never "trash" (called the trash until #1404, when an agent read "empty the trash" as the OS bin) | "Move the folder to the Trash too"; "Chat history and attachments stay in Centralu's session archive" |
 | Labels that open a place | A toggle that opens a panel may be its noun; an action is a verb | "Runs" (toggle); "Open in VS Code" (action) |
 | One word per state | The state label on marks and cards; a sentence with the session's name in the capsule's peek | "Awaiting approval"; "api asks for approval" |
 | Korean | English only for now; Korean appears only in what the person and the agents write | |

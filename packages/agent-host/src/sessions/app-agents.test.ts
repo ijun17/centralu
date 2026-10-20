@@ -279,7 +279,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
 
     const runs = RpcMethods['apps.runs'].result.parse(await rpc('apps.runs', { appId: 'notes', projectId }))
-    // Its session is deleted once the run ends cleanly (#378): the run keeps its tokens, and its record waits in the trash
+    // Its session is deleted once the run ends cleanly (#378): the run keeps its tokens, and its record waits in the session archive
     expect(runs.find((r) => r.kind === 'broker')).toMatchObject({ tool: 'run_agent', status: 'ok', tokens: { input: 28_200, output: 80 }, sessionId: null, kept: true })
     expect(store.keptRuns.listKeptRuns()[0]).toMatchObject({ tokens: { input: 28_200, output: 80 } })
     const use = RpcMethods['apps.usage'].result.parse(await rpc('apps.usage', { appId: 'notes', projectId }))
@@ -367,15 +367,15 @@ describe('the frame and the final answer', () => {
 /*
  * #378: every run_agent call stood up a session that stayed in the list once the app had its answer, and an app calling
  * it a few dozen times a day filled the sidebar. A run that ends cleanly now takes its session with it; what the session
- * did is kept as the run's record in the trash (the whole conversation, owner decision 2026-10-06).
+ * did is kept as the run's record in the session archive (the whole conversation, owner decision 2026-10-06).
  */
-describe('run_agent — a finished session goes, its record stays in the trash (#378)', () => {
+describe('run_agent — a finished session goes, its record stays in the session archive (#378)', () => {
   const answering = (text: string) => (h: { say: (t: string) => void; done: (o?: unknown) => void }) => {
     h.say(text)
     h.done()
   }
 
-  it('a clean run deletes its session and keeps the request, the answer and the conversation, which the person reads and deletes in the trash', async () => {
+  it('a clean run deletes its session and keeps the request, the answer and the conversation, which the person reads and deletes in the session archive', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
@@ -387,7 +387,7 @@ describe('run_agent — a finished session goes, its record stays in the trash (
     expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize the notes.' } })).text).toBe('The notes say hello.')
     const agent = agentsMade()[0]!
 
-    // Gone from every list, and not left in the trash as a session: the record is what stays
+    // Gone from every list, and not left in the session archive as a session: the record is what stays
     expect(agentSessions()).toEqual([])
     expect(events.some((e) => e.type === 'session_deleted' && e.sessionId === agent.id)).toBe(true)
     const trash = RpcMethods['trash.list'].result.parse(await rpc('trash.list', {}))
@@ -403,14 +403,14 @@ describe('run_agent — a finished session goes, its record stays in the trash (
     expect([read.request, read.answer]).toEqual(['Summarize the notes.', 'The notes say hello.'])
     expect(read.messages.map((m) => m.kind)).toEqual(expect.arrayContaining(['text', 'tool_call', 'tool_result']))
 
-    // The app's run log keeps the line, pointing at the trash instead of a session
+    // The app's run log keeps the line, pointing at the session archive instead of a session
     const logged = async () => RpcMethods['apps.runs'].result.parse(await rpc('apps.runs', { appId: 'notes', projectId })).find((r) => r.id === run!.runId)
     expect(await logged()).toMatchObject({ status: 'ok', sessionId: null, kept: true })
 
-    // Deleted for good from the trash: the record goes, the line stays with its status
+    // Deleted for good from the session archive: the record goes, the line stays with its status
     expect(await rpc('trash.purgeRuns', { runIds: [run!.runId] })).toEqual({ purged: 1 })
     expect(RpcMethods['trash.list'].result.parse(await rpc('trash.list', {})).runs).toEqual([])
-    await expect(rpc('trash.readRun', { runId: run!.runId })).rejects.toThrow('Not in the trash')
+    await expect(rpc('trash.readRun', { runId: run!.runId })).rejects.toThrow('Not in the session archive')
     expect(await logged()).toMatchObject({ status: 'ok', kept: false })
     expect(store.appRuns.appRun(run!.runId)).toMatchObject({ request: '', answer: null })
     // Still an agent the app started, in its usage
@@ -463,7 +463,7 @@ describe('run_agent — a finished session goes, its record stays in the trash (
   /*
    * #378 review: the person's part was heard only while the run's wait was tracked and once the desk's verdict came. Opened
    * or written to while the process was closing (hundreds of ms to seconds with a real CLI), or written to between the
-   * check and the move to the trash, the session was deleted anyway: the person's message was lost, or its wake cancelled
+   * check and the move to the session archive, the session was deleted anyway: the person's message was lost, or its wake cancelled
    * ("The session was deleted while waking"). The gaps are driven here by a close and a wake the test holds.
    */
   const held = () => {
@@ -572,16 +572,16 @@ describe('run_agent — a finished session goes, its record stays in the trash (
 
   /*
    * #378 review (LOW): the person's delete that joined the host's own delete under way ended as the host's purge, so a
-   * session the person moved to the trash was gone for good, its conversation file with it
+   * session the person archived was gone for good, its conversation file with it
    */
-  it('a session the person deletes while the host is deleting it stays in the trash, with its conversation file', async () => {
+  it('a session the person deletes while the host is deleting it stays in the session archive, with its conversation file', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
     claude.onSend = answering('Done.')
     const removed: string[] = []
     Object.assign(claude, { deleteExternalConversation: async (id: string) => void removed.push(id) })
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
-    // The host's move into the trash is held once the session has left the lists, so the person's delete joins it
+    // The host's move into the session archive is held once the session has left the lists, so the person's delete joins it
     const move = held()
     const moving = held()
     const trashSession = store.trash.trashSession.bind(store.trash)

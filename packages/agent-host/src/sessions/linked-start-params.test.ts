@@ -114,7 +114,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
   })
 
   // #1273 review: the mark lives beside the row, and a session read back from the store lost it
-  it('keeps the mark through a host restart and through the trash and back', async () => {
+  it('keeps the mark through a host restart and through the session archive and back', async () => {
     const child = await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })
     await rpc('agents.deleteSession', { sessionId: child.id })
     const back = (await rpc('trash.restore', { sessionId: child.id })) as { session: { startedFromHub?: boolean } }

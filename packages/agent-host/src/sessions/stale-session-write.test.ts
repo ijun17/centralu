@@ -4,7 +4,7 @@ import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 /**
  * A tool switch or a fork that waits on the tool while the session is deleted (#839, item 13). Both read the session
  * once, waited (the new tool's check, the old process's close, the tool's fork), then wrote what they read: the deleted
- * session's row in the trash was rewritten with the new tool, or the fork's conversation, and the windows were told a
+ * session's row in the session archive was rewritten with the new tool, or the fork's conversation, and the windows were told a
  * state for a session no longer there.
  */
 describe('a session deleted while a switch or a fork waits (#839)', () => {
@@ -29,7 +29,7 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
     return { gate, release }
   }
 
-  it('a tool switch is refused, and the trashed row keeps its tool', async () => {
+  it('a tool switch is refused, and the archived row keeps its tool', async () => {
     const id = await session()
     const codex = w.adapters.get('codex')!
     const { gate, release } = held()
@@ -51,7 +51,7 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
     expect(w.events.slice(events).filter((e) => e.sessionId === id)).toEqual([])
   })
 
-  it('a fork gives up, and the trashed row keeps its conversation', async () => {
+  it('a fork gives up, and the archived row keeps its conversation', async () => {
     const id = await session()
     const claude = w.adapters.get('claude')!
     const { gate, release } = held()

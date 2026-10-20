@@ -5,6 +5,7 @@ e2e/app-frame.spec.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/app-frame.spec.ts @typescript-eslint/prefer-promise-reject-errors 1
 e2e/app-share.spec.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/apps.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
+e2e/archive.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/build-loop.spec.ts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/capabilities.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/composer-caret.spec.ts @typescript-eslint/no-unnecessary-type-assertion 2
@@ -38,7 +39,6 @@ e2e/perf-memory.mts @typescript-eslint/no-unnecessary-type-assertion 2
 e2e/perf-typing.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/project-screen.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/public-apps.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
-e2e/trash.spec.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/ux/core.task.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/ux/flows.task.ts @typescript-eslint/no-unnecessary-type-assertion 1
 e2e/ux/sidebar-folds.task.ts @typescript-eslint/no-unnecessary-type-assertion 2

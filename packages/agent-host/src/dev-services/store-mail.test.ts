@@ -347,7 +347,7 @@ describe('retention (§4.4)', () => {
   })
 })
 
-describe('a session purged from the trash (§4.1)', () => {
+describe('a session purged from the session archive (§4.1)', () => {
   const sessionRow = (s: Store, id: string) =>
     s.sessions.upsertSession({
       id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -379,12 +379,12 @@ describe('a session purged from the trash (§4.1)', () => {
     s.mail.putParticipant(tid(1), elsewhere, 'member', NOW)
     const toElsewhere = message(s.mail, tid(1), { kind: 'note', sender: stays, recipients: [elsewhere] })
 
-    // Not yet in the trash: nothing happens
+    // Not yet in the session archive: nothing happens
     expect(await s.trash.purgeSession('gone')).toBe(false)
     expect(s.mail.receiptsOf(m.id)).toHaveLength(1)
 
     await s.trash.trashSession('gone', KEEP)
-    // In the trash its rows stay, so that restoring it brings them back
+    // In the session archive its rows stay, so that restoring it brings them back
     expect(s.mail.receiptsOf(m.id)).toHaveLength(1)
     expect(await s.trash.purgeSession('gone')).toBe(true)
 

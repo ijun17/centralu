@@ -225,7 +225,7 @@ export function trackWorkingSince(
  * Everything kept per session goes together (#163). A leftover notification card would focus a nonexistent
  * session on click, showing "Select a project or session." The rest (history cursor, draft, wake error) is dead
  * weight nobody reads any more. The conversation's views go too — the host has already closed the instance — and
- * the read position goes with the session (#61). An id can come back: restoring a session from the trash brings
+ * the read position goes with the session (#61). An id can come back: restoring a session from the session archive brings
  * it back under the same id, and it then opens like a session read for the first time.
  *
  * A draft with words in it is the exception (#378 review): what the person was writing is theirs, not the session's,

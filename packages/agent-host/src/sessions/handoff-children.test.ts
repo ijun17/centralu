@@ -634,7 +634,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(owner(child)).toBe(heir)
     expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
     // The new session is told in its conversation; its note was read long ago
-    const notice = store.messages.loadMessages(heir, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('was deleted'))
+    const notice = store.messages.loadMessages(heir, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('was archived'))
     expect(notice?.text).toContain(`[${parent}]`)
     expect(notice?.text).toContain('"Release notes" (finished; waiting for more work)')
 

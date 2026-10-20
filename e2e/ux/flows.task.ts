@@ -234,7 +234,7 @@ uxTask({
 
 uxTask({
   id: 'delete-session.mouse',
-  task: 'Delete a session (to the trash)',
+  task: 'Archive a session',
   path: 'mouse',
   access: 'discoverable',
   start: demo,
@@ -249,10 +249,10 @@ uxTask({
 
 uxTask({
   id: 'restore-session.mouse',
-  task: 'Bring back a session deleted by mistake',
+  task: 'Bring back an archived session',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['Settings, then Trash: the delete dialog and its toast say where it went'],
+  notes: ['Settings, then Archive: the delete dialog and its toast say where it went'],
   start: async (page) => {
     await demo(page)
     const id = await sessionId(page, DONE)
@@ -265,8 +265,8 @@ uxTask({
   run: async (u, page) => {
     await u.click(page.getByTestId('open-settings'))
     await u.until('settings', () => expect(page.getByTestId('settings')).toBeVisible())
-    await u.click(page.getByTestId('settings-tab-trash'))
-    await u.until('the trash', () => expect(page.getByTestId('settings-trash')).toBeVisible())
+    await u.click(page.getByTestId('settings-tab-archive'))
+    await u.until('the archive', () => expect(page.getByTestId('settings-trash')).toBeVisible())
     await u.click(page.locator('[data-testid^="trash-restore-"]').first(), { label: 'trash-restore' })
   },
   goal: async (page) => expect(page.getByTestId('trash-list-empty')).toBeVisible(),
@@ -278,7 +278,7 @@ uxTask({
   task: "Free the space a session's subagent steps take, keeping the session",
   path: 'mouse',
   access: 'discoverable',
-  notes: ["Settings, then Trash: what each session's subagent steps take, its Move to trash capsule, then the confirmation (#418)"],
+  notes: ["Settings, then Archive: what each session's subagent steps take, its Archive capsule, then the confirmation (#418)"],
   start: async (page) => {
     await demo(page)
     const id = await sessionId(page, DONE)
@@ -292,8 +292,8 @@ uxTask({
   run: async (u, page) => {
     await u.click(page.getByTestId('open-settings'))
     await u.until('settings', () => expect(page.getByTestId('settings')).toBeVisible())
-    await u.click(page.getByTestId('settings-tab-trash'))
-    await u.until('the trash', () => expect(page.locator('[data-testid^="subagent-steps-move-"]').first()).toBeVisible())
+    await u.click(page.getByTestId('settings-tab-archive'))
+    await u.until('the archive', () => expect(page.locator('[data-testid^="subagent-steps-move-"]').first()).toBeVisible())
     await u.click(page.locator('[data-testid^="subagent-steps-move-"]').first(), { label: 'subagent-steps-move' })
     await u.until('the confirmation', () => expect(page.getByTestId('subagent-steps-confirm')).toBeVisible())
     await u.click(page.getByTestId('subagent-steps-confirm-yes'))

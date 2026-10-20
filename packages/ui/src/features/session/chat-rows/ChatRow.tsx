@@ -574,7 +574,7 @@ export function SubagentSteps({
             </p>
           )}
           {/*
-            Steps moved to the trash without the session (#418) are said to be there, with the way back: read as "none
+            Steps archived without the session (#418) are said to be there, with the way back: read as "none
             were recorded", a card the person emptied looked like one that never kept anything
           */}
           {steps && !steps.loading && !steps.error && !!steps.trashed && (
@@ -583,10 +583,10 @@ export function SubagentSteps({
             </p>
           )}
           {steps && !steps.loading && !steps.error && !steps.trashed && items.length === 0 && (
-            /* Steps deleted for good from the trash (#418) leave the card as empty as one that never kept any */
+            /* Steps deleted for good from the session archive (#418) leave the card as empty as one that never kept any */
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-empty">
               No steps are kept for this agent: it ran before Centralu kept them, or its steps were deleted from the
-              trash.
+              session archive.
             </p>
           )}
           {steps?.more && !steps.loading && (
@@ -605,13 +605,13 @@ export function SubagentSteps({
 }
 
 /**
- * Where a card's trashed steps went (#418), in the number they are: "The step was moved… restores it" for one,
+ * Where a card's archived steps went (#418), in the number they are: "The step was moved… restores it" for one,
  * "…restores them" for more, and "N earlier steps" when a running subagent wrote more under the card since
  */
 export function trashedLine(trashed: number, more: boolean): string {
   const one = trashed === 1
   const what = more ? `${formatCount(trashed)} earlier ${one ? 'step was' : 'steps were'}` : one ? 'The step was' : 'The steps were'
-  return `${what} moved to the trash. Settings → Trash restores ${one ? 'it' : 'them'}.`
+  return `${what} archived. Settings → Archive restores ${one ? 'it' : 'them'}.`
 }
 
 /**

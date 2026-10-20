@@ -168,12 +168,12 @@ describe('the answers that hand a child back (#690)', () => {
     expect(cleanUpDue(child(), 'p', 'Its own background work is still running')).toBe(false)
   })
 
-  it("list names an unmerged worktree branch as work a delete keeps in the trash, and a sleeping child as asleep", () => {
+  it("list names an unmerged worktree branch as work a delete keeps in the session archive, and a sleeping child as asleep", () => {
     const text = agentListText({ ok: true, agents: [
       { sessionId: 'a', name: 'wt job', tool: 'codex', state: 'finished', asleep: true, worktree: { branch: 'agent/wt', unmerged: true } },
       { sessionId: 'b', name: 'merged job', tool: 'claude', state: 'finished', asleep: false, worktree: { branch: 'agent/m', unmerged: false } },
     ] }).text
-    expect(text).toContain('[a] · codex · finished (asleep) · worktree branch agent/wt, not merged: a delete keeps its work in the trash')
+    expect(text).toContain('[a] · codex · finished (asleep) · worktree branch agent/wt, not merged: a delete keeps its work in the session archive')
     expect(text).toContain('[b] · claude · finished · worktree branch agent/m, merged')
   })
 })

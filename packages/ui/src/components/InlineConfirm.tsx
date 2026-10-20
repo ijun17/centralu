@@ -3,7 +3,7 @@ import { Button } from './Button.jsx'
 /**
  * An action that asks first, in the place where it was pressed (#428): a sentence, then Cancel and the action.
  *
- * Four screens had their own: the trash's "Delete for good", an app's "Remove", a machine's "Remove?" and the stop
+ * Four screens had their own: the session archive's "Delete for good", an app's "Remove", a machine's "Remove?" and the stop
  * confirmation before an update. They put the buttons in two orders (the action first on two of them), and two let the
  * action be pressed again while it ran. One component: Cancel first, then the action, which is disabled while `busy`
  * (a second press would start the same change twice).

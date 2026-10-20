@@ -181,7 +181,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     set((s) => putSubagentSteps(s.subagentSteps, sessionId, callId, { ...cur, loading: true, error: null }))
     try {
       /*
-       * With the first page, how many of the card's steps are in the trash (#418), so an empty card says where they went
+       * With the first page, how many of the card's steps are in the session archive (#418), so an empty card says where they went
        * rather than that none were recorded. A host before it does not answer, and the card reads as before.
        */
       const [page, trashed] = await Promise.all([
@@ -219,10 +219,10 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       rereadSubagentSteps(sessionId, set, get)
       const name = get().sessions[sessionId]?.name ?? 'the session'
       /*
-       * The person is on Settings → Trash, where the entry now stands with its Restore: the toast says what moved and
+       * The person is on Settings → Archive, where the entry now stands with its Restore: the toast says what moved and
        * points nowhere (docs/ux-writing.md §1.1)
        */
-      set({ toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the trash` })
+      set({ toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the session archive` })
       return null
     } catch (e) {
       return (e as Error).message
@@ -243,7 +243,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
 })
 
 /**
- * After a session's subagent steps went to the trash or came back (#418), its launch cards read them again: what an
+ * After a session's subagent steps was archived or came back (#418), its launch cards read them again: what an
  * open card shows is no longer what the host keeps under it. An open card reads at once and stays open; a closed one
  * forgets what it read, and reads when it is opened.
  */

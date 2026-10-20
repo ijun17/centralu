@@ -612,7 +612,7 @@ export class MailService {
   /**
    * A session or app that has gone (trashed or deleted) leaves the work it held (§3.3): a thread it was assigned is
    * `open` with no assignee, a thread it owned is the person's. Each leaves an `event`. Done threads are not touched.
-   * Called by the manager when a session goes to the trash, wired in slice 2 before the `mail` tool can open a thread that names a session
+   * Called by the manager when a session goes to the session archive, wired in slice 2 before the `mail` tool can open a thread that names a session
    */
   partyGone(address: string): ThreadRow[] {
     this.party(address)

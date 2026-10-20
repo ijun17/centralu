@@ -636,7 +636,7 @@ describe('requests to a busy session (#677)', () => {
       await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
       release()
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('lowered to safe') })
-      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('moved to the trash') })
+      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('archived') })
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
       expect(taskReached('review it')).toEqual([])
     })

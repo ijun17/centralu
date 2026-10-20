@@ -251,7 +251,7 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(w.mgr.listSessions().some((s) => s.id === middle.sessionId)).toBe(false)
       expect(w.mgr.listSessions().find((s) => s.id === bottom.sessionId)?.askedBy).toBe(middle.sessionId)
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
-      // The record goes with the session when the trash is emptied of it, and only its own
+      // The record goes with the session when the session archive is emptied of it, and only its own
       expect(await w.store.trash.purgeSession(middle.sessionId)).toBe(true)
       expect(w.store.settings.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
       expect(w.store.settings.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
@@ -371,7 +371,7 @@ describe('auto Centralu boundaries (#603)', () => {
     ['safe', 'unmerged'],
     ['normal', 'dirty'],
     ['normal', 'unmerged'],
-  ] as const)('%s: %s worktree cleanup keeps local work in the trash (#608)', async (preset, state) => {
+  ] as const)('%s: %s worktree cleanup keeps local work in the session archive (#608)', async (preset, state) => {
     git(w.caller.path, 'init', '-q', '-b', 'main')
     writeFileSync(join(w.caller.path, 'README.md'), 'initial')
     git(w.caller.path, 'add', '.')

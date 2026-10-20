@@ -43,7 +43,7 @@ const PURGING = '.purging-'
 
 /**
  * Finishes what a purge interrupted by a crash left (#647): a folder moved aside goes back under its session's name
- * while that session is still in the trash (its snapshots join any made since), and is deleted once the entry is gone.
+ * while that session is still in the session archive (its snapshots join any made since), and is deleted once the entry is gone.
  * Run at startup, when no purge is under way.
  */
 export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string) => boolean): Promise<void> {
@@ -71,7 +71,7 @@ export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string
       }
       await removeData(staged)
     } catch (e) {
-      console.error(`[trash] recovery folder ${name} left by an interrupted purge was not repaired, retried at the next start: ${errorMessage(e)}`)
+      console.error(`[archive] recovery folder ${name} left by an interrupted purge was not repaired, retried at the next start: ${errorMessage(e)}`)
     }
   }
 }
@@ -346,7 +346,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
   }
 }
 
-/** How much one session's recovery snapshots take — the trash shows what it holds (#204). 0 when it has none */
+/** How much one session's recovery snapshots take — the session archive shows what it holds (#204). 0 when it has none */
 export async function worktreeRecoveryBytes(sessionId: string): Promise<number> {
   return dataBytes(worktreeRecoveryDir(sessionId))
 }

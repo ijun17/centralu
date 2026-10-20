@@ -31,10 +31,10 @@ import {
   CrownIcon,
   MonitorIcon,
   ShieldIcon,
-  TrashIcon,
+  ArchiveIcon,
 } from '../../components/icons.jsx'
 import { SettingsCard, SettingsEmpty, SettingsGroup, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
-import { TrashSection } from './TrashSection.jsx'
+import { ArchiveSection } from './ArchiveSection.jsx'
 import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
 import { SettingToggle } from './SettingToggle.jsx'
 import { GrantList } from './GrantList.jsx'
@@ -139,7 +139,7 @@ const CATEGORIES = [
   { id: 'appearance', label: 'Appearance', Icon: ContrastIcon },
   { id: 'permissions', label: 'Permissions', Icon: ShieldIcon },
   // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
-  { id: 'trash', label: 'Trash', Icon: TrashIcon },
+  { id: 'archive', label: 'Archive', Icon: ArchiveIcon },
 ] as const
 
 type Category = (typeof CATEGORIES)[number]['id']
@@ -348,7 +348,7 @@ export function Settings() {
               </SettingsPage>
             )}
 
-            {category === 'trash' && <TrashSection />}
+            {category === 'archive' && <ArchiveSection />}
           </div>
         </div>
       </div>
@@ -521,8 +521,8 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           <InlineConfirm
             text={
               machineName
-                ? `Remove ${app.title} from ${machineName}? Its folder moves to the app trash there and agents there lose its tools. Its run records stay. Apps on this computer are not touched.`
-                : `Remove ${app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.`
+                ? `Remove ${app.title} from ${machineName}? Its folder is set aside there, not deleted, and agents there lose its tools. Its run records stay. Apps on this computer are not touched.`
+                : `Remove ${app.title}? Its folder is set aside, not deleted, and agents lose its tools. Its run records stay.`
             }
             yesLabel="Remove"
             busy={removing}

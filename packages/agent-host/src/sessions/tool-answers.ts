@@ -158,7 +158,7 @@ const NEW_ROLE_NEW_AGENT =
  * the parent's or the person's call.
  */
 export function cleanUpLine(sessionId: string, call = `agent_session(sessionId="${sessionId}", action="delete")`): string {
-  return `Once you have used its answer and need nothing more from it, delete it: ${call}. Work not on the trunk is kept in the trash.`
+  return `Once you have used its answer and need nothing more from it, delete it: ${call}. Work not on the trunk is kept in the session archive.`
 }
 
 /** agent_session list (#690): the caller's own children, each with what deleting it would cost */
@@ -171,7 +171,7 @@ export function agentListText(r: { ok: true; agents: readonly AgentListRow[] } |
     (r) =>
       `- ${frameField(r.name)} [${r.sessionId}] · ${r.tool} · ${r.state}${r.asleep ? ' (asleep)' : ''}` +
       (r.machine ? ` · on ${frameField(r.machine)}` : '') +
-      (r.worktree ? ` · worktree branch ${frameField(r.worktree.branch)}${r.worktree.unmerged ? ', not merged: a delete keeps its work in the trash' : ', merged'}` : '') +
+      (r.worktree ? ` · worktree branch ${frameField(r.worktree.branch)}${r.worktree.unmerged ? ', not merged: a delete keeps its work in the session archive' : ', merged'}` : '') +
       (r.lastActive ? ` · last ${r.lastActive}` : ''),
   )
   return {
@@ -241,14 +241,14 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       if (!r.sessionName) return { text: `Withdrew request ${r.sessionId}: its card is gone and no session was started.` }
       return { text: `Stopped ${who}.${r.notice ? ` ${r.notice}` : ''}` }
     case 'deleted':
-      if (r.branch === undefined) return { text: `Moved ${who} to the trash. Tell the person in one line.` }
+      if (r.branch === undefined) return { text: `Moved ${who} to the session archive. Tell the person in one line.` }
       // The worktree folder was already gone (#715): nothing was lost, and the answer says what became of the branch
-      if (r.note) return { text: `Moved ${who} to the trash. ${r.note} Tell the person in one line.` }
+      if (r.note) return { text: `Moved ${who} to the session archive. ${r.note} Tell the person in one line.` }
       return {
         text:
-          (r.warning ? `Moved ${who} to the trash. Warning: ${r.warning} ` : `Cleaned up ${who}: its worktree and branch "${r.branch}" were removed and the session went to the trash. `) +
+          (r.warning ? `Moved ${who} to the session archive. Warning: ${r.warning} ` : `Cleaned up ${who}: its worktree and branch "${r.branch}" were removed and the session was archived. `) +
           (r.setAside.changedFiles || r.setAside.commits
-            ? `${r.setAside.changedFiles} uncommitted files, ${r.setAside.commits} commits not on the trunk, kept in the trash. `
+            ? `${r.setAside.changedFiles} uncommitted files, ${r.setAside.commits} commits not on the trunk, kept in the session archive. `
             : 'Nothing needed setting aside. ') +
           'Tell the person in one line.',
       }

@@ -44,7 +44,7 @@ export function SettingsGroup({
 }: {
   title?: ReactNode
   hint?: ReactNode
-  /** A control beside the heading (Reset to defaults, Empty trash…) */
+  /** A control beside the heading (Reset to defaults, Delete all archived sessions…) */
   action?: ReactNode
   children: ReactNode
   testId?: string

@@ -211,7 +211,7 @@ export const AppRun = z.object({
   failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
   /**
    * A run_agent row whose session was deleted once the run ended cleanly (#378): its request, answer and conversation
-   * are kept in Settings → Trash. Absent from a host older than #378.
+   * are kept in Settings → Archive. Absent from a host older than #378.
    */
   kept: z.boolean().optional(),
 })

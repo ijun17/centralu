@@ -77,7 +77,7 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
     expect(s.machines.machineHeaders('m1', 'session')).toEqual([{ id: 'a', state: 'idle' }, { id: 'c' }])
   })
 
-  it('the trash keeps listing when a record is JSON but not an object', async () => {
+  it('the session archive keeps listing when a record is JSON but not an object', async () => {
     const s = seeded()
     s.sessions.upsertSession(session('s2'))
     const keep = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', removeExternal: false, removeWorktree: false }

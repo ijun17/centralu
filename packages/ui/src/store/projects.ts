@@ -267,7 +267,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         sessions,
         ...forgetSessions(s, new Set(doomed)),
         /*
-         * What was kept per project goes with it. The id can come back (restoring one of its sessions from the trash
+         * What was kept per project goes with it. The id can come back (restoring one of its sessions from the session archive
          * re-adds the project under its old id), and then it starts the way a newly added project does: the deletion
          * stopped its command runs, and a git epoch of 0 and folded folders are the defaults anyway.
          */

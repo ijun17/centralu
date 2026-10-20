@@ -100,9 +100,9 @@ visibility is not read as the default: the side that is wrong stays closed.
   a swap, a stored name, a script) resolves to the project's root app (`ExternalApps.resolve`, which
   every runtime method taking a key reads first), with that app's trust and rules, while the user
   folder has no app of that id and the project still exists.
-  **A deleted project gives the folder back** (#1204): while a session of the project is in the trash
+  **A deleted project gives the folder back** (#1204): while a session of the project is in the session archive
   the folder stays where it is, adopted, since restoring one registers the project again at that path.
-  Once none is (the project had none, or the trash lost them for good), its folder goes to
+  Once none is (the project had none, or the archive lost them for good), its folder goes to
   `<data folder>/app-trash/` as a removed user-folder app's does, the data, logs and kept versions it
   kept under `<project id>/<id>` go back to `_user/<id>`, and the record goes. **Nothing `_user/<id>`
   already held is deleted**: it can be the only copy of something (a previous build serving after a
@@ -112,12 +112,12 @@ visibility is not read as the default: the side that is wrong stays closed.
   Moving the folder back into the user folder makes it a new project, with its data. Nothing moves
   while a project is registered at that folder (the person added it again, in any spelling, or through
   a link, a junction or a `subst` drive: real paths are compared; or inside the folder) or a session in
-  the trash names it, nor while a project's path cannot be resolved (a drive that is not there now, a
+  the session archive names it, nor while a project's path cannot be resolved (a drive that is not there now, a
   link loop, no access, or a UNC path, which is never resolved). Such a project holds every give-back
   until it resolves or goes; a mapped drive letter is resolved, and a dead server can make that slow. Only
   the folder that carries the adoption's mark moves: another folder of that name, and what is kept for
   it, is never touched.
-  Checked at each start once the host is ready, after a project is deleted, and after the trash is
+  Checked at each start once the host is ready, after a project is deleted, and after the session archive is
   emptied or loses a session; a move that fails (a folder in use on Windows) is tried again a few
   times, then at the next start.
   The host marks such a project, and one added again at its folder by its spelling alone (`ProjectInfo.fromUserFolder`, only
@@ -127,7 +127,7 @@ visibility is not read as the default: the side that is wrong stays closed.
   the dialog says it could not check where the folder is); a project inside an app folder whose own project is gone is told that
   the folder around it may move. Resolved off the event loop and within 2 s per path. The dialog shows "Checking what happens to
   the folder…" and offers no Delete until the answer comes (3 s at most, then the mark decides). The dialog says the host **may** move the
-  folder, when (no session that could bring the project back left in the trash, no other project at the folder), where to, that nothing is deleted and
+  folder, when (no session that could bring the project back left in the archive, no other project at the folder), where to, that nothing is deleted and
   what putting it back is; a host without the call leaves the mark deciding, and a project that stays keeps "The folder on disk
   is left alone." (`features/project/deleteNote.ts`).
 - An MCP server approved through `propose_mcp_server` becomes a **user-folder app with no screen**
@@ -315,27 +315,27 @@ agent reads its whole context again on every call and that is the use the person
   (`session_id`, `caller_session_id`) is cleared and the row stays in the app's log. Until then
   purging an app-agent session erased its run, and purging a session that called an app erased
   those calls.
-- **The record of a deleted app-agent session (#378)** is kept in `app_run_records` (what the trash
+- **The record of a deleted app-agent session (#378)** is kept in `app_run_records` (what the session archive
   lists: app, session name, tool, status, duration, tokens, request, answer, output, times),
   `app_run_messages` (the whole conversation, tool calls and their results included, copied from
   `messages`; owner decision 2026-10-06) and `app_run_subagent_messages` (its subagents' steps, from
   `subagent_messages`), in one transaction before the session goes, checked by its row counts
   against the session's: a copy that is not whole keeps nothing, and the session stays. None points
   at `sessions`, and the project name is copied in, so a record outlives the session, its log line
-  and the project. The person reads it in Settings → Trash, grouped by app, and deletes it there, one,
-  an app's all, or with the trash emptied; deleting it also clears the request, answer and output on
+  and the project. The person reads it in Settings → Archive, grouped by app, and deletes it there, one,
+  an app's all, or with all archived sessions deleted; deleting it also clears the request, answer and output on
   its log line, which keeps status, time and tokens. Otherwise it goes with the log's 30 days. A
   record is the machine's its app ran on, as the run and the delete were: `trash.list` merges a
   linked machine's under its name, and `trash.readRun` and `trash.purgeRuns` go there by `machine`.
-  `trash.empty` leaves the records alone (the window deletes the ones it listed with
-  `trash.purgeRuns`, one call per machine), so emptying across machines never takes records nobody
+  `trash.empty` ("Delete all archived sessions…") leaves the records alone (the window deletes the ones it listed with
+  `trash.purgeRuns`, one call per machine), so deleting them all across machines never takes records nobody
   was shown. An agent use count reads a row whose session is gone by its
   kept request, so a deleted session still counts as an agent started.
 - Shown beside a pinned view (the Runs panel): time, tool, caller (with the session's name), status,
   duration, and the reason of a failure. Reading one app's runs returns its rows **and the chain
   under them** (the other apps it called, the requests it and they made), and the panel indents each
   row under the one that caused it, jumps to an agent's session ("Open session"), or says a deleted
-  one's record is in Settings → Trash (#378), and re-reads
+  one's record is in Settings → Archive (#378), and re-reads
   whenever a row it shows begins, gets its agent session, or ends: the host announces that per app
   (`external_app_runs_changed`, coalesced like §6.3's notification) for every row of the app and of
   the chain under it, a read-only tool's call and the agent run it asked for included. Open views do
@@ -1048,7 +1048,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   the query starts and Codex as the turn's `outputSchema`; the host validates the answer against
   the same schema and returns it as `structuredContent`. A finished session is left `idle`, so it
   does not wait in the inbox; an agent session gets no apps. **Once the run ends cleanly it is
-  deleted (#378)** and its record kept in the trash (§5.2): an app that calls `run_agent` a few dozen
+  deleted (#378)** and its record kept in the session archive (§5.2): an app that calls `run_agent` a few dozen
   times a day filled the sidebar with sessions nobody would talk to. It stays in the list, as before,
   when the run failed, was stopped or cancelled (the person needs to see what went wrong, a schema
   mismatch included), when a card was shown during it (the person took part), when the person
@@ -1058,7 +1058,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   files). The delete is decided at the moment the session leaves the lists, with nothing awaited
   after, so a message sent meanwhile either keeps the session or is told the session is gone; a
   waking session is never deleted by withdrawing its wake. A delete the person asks for while the
-  host's is under way is theirs: the session stays in the trash, its conversation file too unless
+  host's is under way is theirs: the session stays in the session archive, its conversation file too unless
   they chose otherwise. A draft the person had written in a session that goes is kept on screen, to
   be copied. While it runs it is visible as any
   session: its approval cards appear there. The app has its answer once the session is gone, so a
@@ -1072,7 +1072,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   app is never reached.
 - **`host_data { name }`.** A closed list, read-only, deny by default: `sessions.list` (the names
   shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
-  project's sessions for a project app, a root app included as its permission card says (#1141), every session for a user-folder app; never those in the trash, FR-22) and `git.status` (the
+  project's sessions for a project app, a root app included as its permission card says (#1141), every session for a user-folder app; never those in the session archive, FR-22) and `git.status` (the
   project's branch and changed files; project apps only). Only names declared in `uses.host`.
 - **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
   the person is asked where the chain started: on the approval card of the session whose agent

@@ -52,7 +52,7 @@ const askers = (file: string) => {
 }
 
 describe('store step v55: old cross-project askers are cleared (#844)', () => {
-  it('clears an asker of another project, listed or in the trash, and keeps one of the same project', () => {
+  it('clears an asker of another project, listed or in the session archive, and keeps one of the same project', () => {
     const file = v54Store((db) => {
       session(db, 'caller', 'web', null)
       session(db, 'gone-caller', null, null, { trashOf: 'web' })

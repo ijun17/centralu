@@ -1,5 +1,5 @@
 /**
- * Store regression tests: sessions: their facts, waking, deleting and the trash.
+ * Store regression tests: sessions: their facts, waking, deleting and the session archive.
  *
  * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
  * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
@@ -507,11 +507,11 @@ describe('a session moved into a project (#1141)', () => {
 })
 
 /*
- * The trash (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
+ * The session archive (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
  * sidebar, and a project its restore registered again arrives with it — the screen has not heard of that project,
  * and a session row under a project the sidebar does not have is drawn nowhere.
  */
-describe('the trash (#204)', () => {
+describe('the session archive (#204)', () => {
   it('deleting says where the session went, and restoring brings it and its registered project back', async () => {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/trash-a')
@@ -521,7 +521,7 @@ describe('the trash (#204)', () => {
 
     await useStore.getState().deleteSession(s.id)
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
-    expect(useStore.getState().toast).toMatch(/Moved to the trash: .* Settings → Trash/)
+    expect(useStore.getState().toast).toMatch(/Archived: .* Settings → Archive/)
 
     await mock.projects.remove(p.id)
     useStore.setState((st) => ({ projects: Object.fromEntries(Object.entries(st.projects).filter(([id]) => id !== p.id)) }))
@@ -531,7 +531,7 @@ describe('the trash (#204)', () => {
     expect(st.sessions[s.id]?.projectId).toBe(p.id)
     // Registered again is added again: it is asked about trust as a new project is
     expect(st.trustAsk).toBe(p.id)
-    expect(await useStore.getState().restoreFromTrash(s.id)).toMatch(/Not in the trash/)
+    expect(await useStore.getState().restoreFromTrash(s.id)).toMatch(/Not in the session archive/)
   })
 })
 

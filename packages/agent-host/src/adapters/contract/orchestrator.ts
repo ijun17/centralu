@@ -25,7 +25,7 @@ export type MachineRequest =
   | { action: 'disconnect' | 'rollback' | 'uninstall' | 'activity'; machine: string }
   | { action: 'ssh_hosts' }
 
-/** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
+/** What `set_preferences` changes (#1219, preferences and the session archive): each field is one setting the window offers; absent means leave it */
 export type PreferenceChanges = {
   /** A theme by id or name; it sets the dark or the light side by the theme's base, and shows that side */
   theme?: string
@@ -58,12 +58,12 @@ export type PreferencesRequest =
   /** The session header's "restart idle sessions on the new agent CLI" (#297): a session that is busy is left as it is */
   | { action: 'apply_agent_versions' }
 
-/** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
+/** One request of the orchestrator's session archive commands (#1219), as the tool runner reads its arguments */
 export type TrashRequest =
   | { action: 'list' }
   | { action: 'restore'; sessionId: string; what: 'session' | 'steps' }
-  | { action: 'trash_steps'; sessionId: string }
-  /** #1219: a session that is not the caller's child, moved to the trash (reversible) */
+  | { action: 'archive_steps'; sessionId: string }
+  /** #1219: a session that is not the caller's child, archived (reversible) */
   | { action: 'delete_session'; sessionId: string }
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
@@ -242,7 +242,7 @@ export type LinkedSessions = {
   origin(project: LinkedProject): Promise<Outcome<{ origin: string | null }> | { ok: false; error: string; olderBuild: true }>
   /** Stops a machine's session's running turn (`agents.interrupt` there, #1038) */
   interrupt(sessionId: string): Promise<Outcome>
-  /** Moves a machine's session to that machine's trash, its worktree left in place (`agents.deleteSession` there, #1038) */
+  /** Moves a machine's session to that machine's session archive, its worktree left in place (`agents.deleteSession` there, #1038) */
   deleteSession(sessionId: string): Promise<Outcome>
   /**
    * The project's instructions for started agents as the machine has them now (#1161 item 2), '' for none; an error
@@ -415,7 +415,7 @@ export type AskProjectResult =
  *   busy      the session is busy with a turn that is not the caller's: nothing was sent, the choices are listed (#677)
  *   queued    held until the session's running turn ends, then delivered as a new turn (#677)
  *   stopped   agent_session stop ended the turn
- *   deleted   agent_session delete put a child in the trash; worktree children also report branch cleanup
+ *   deleted   agent_session delete put a child in the session archive; worktree children also report branch cleanup
  *   pending   no session yet (#673): the start waits on the person's card. `sessionId` is the request's handle, which
  *             agent_session follows (status, wait) or withdraws (stop) until the person answers
  */
@@ -478,7 +478,7 @@ export type StartAgentOpts = {
  * One session the caller started, as agent_session list shows it (#690): a parent that forgot to clean up after using
  * its children's answers sweeps them in one call. `finished` is a child at rest with nothing standing on it, the one a
  * parent deletes; `asleep` says its process stopped (#568), which costs no memory but still leaves its row and
- * worktree. `unmerged` is a worktree branch git and the PR do not show as landed: a delete keeps that work in the trash.
+ * worktree. `unmerged` is a worktree branch git and the PR do not show as landed: a delete keeps that work in the session archive.
  */
 export type AgentListRow = {
   sessionId: string
@@ -720,13 +720,13 @@ export type OrchestratorTools = {
    */
   machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
-   * The preferences (#1219, preferences and the trash): read them all, and change the reversible ones the window offers (theme, text
+   * The preferences (#1219, preferences and the session archive): read them all, and change the reversible ones the window offers (theme, text
    * size, fonts, line height, idle sleep, the update switches) through the window's own calls. Turning on "apply updates
    * when idle" waits for the person's card. Absent on seats that cannot.
    */
   preferences?(req: PreferencesRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
-   * The trash (#1219): list it, restore a session or its subagent steps, move a session's subagent steps to it; deleting
+   * The session archive (#1219): list it, restore a session or its subagent steps, move a session's subagent steps to it; deleting
    * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
    */
   trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>

@@ -25,7 +25,7 @@ agent-host/src/
 │  ├─ registry.ts       # the tool → adapter map
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
-├─ sessions/            # SessionManager and the parts moved out of it: delegation, handoff, the trash,
+├─ sessions/            # SessionManager and the parts moved out of it: delegation, handoff, the session archive (`session-trash.ts`),
 │                       #   orchestrator tools, session apps (folder-structure.md §1)
 ├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
 ├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
@@ -86,7 +86,7 @@ new thread.
 a project's seat that watched its worktree sessions, proposed new ones (`propose_worktree_session`, which the person
 then created) and deleted a merged one behind a hard gate (`delete_worktree_session`). Now a session starts worktree
 agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and removes an idle child
-with `agent_session` `delete`, keeping local work with the session in the trash (#608, `cleanUpWorktreeChild` in `sessions/worktree-sessions.ts`). What stayed: the person's own worktree
+with `agent_session` `delete`, keeping local work with the session in the session archive (#608, `cleanUpWorktreeChild` in `sessions/worktree-sessions.ts`). What stayed: the person's own worktree
 sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
 pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, kept in the former slot's row;
 the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The orchestrator gets no replacement for `propose_worktree_session`:
@@ -368,7 +368,7 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
-| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the session archive; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
 
 **Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
 them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
@@ -378,11 +378,11 @@ Every answer that hands a child's result to the session that started it now ends
 The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
 and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over
 its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
-(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being trashed is
+(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being archived is
 gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
 worktree manager's, which store step v48 copied into `askedBy`.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
-is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
+is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the session archive it
 stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
@@ -392,14 +392,14 @@ an adapter does not require changing this schema.
 Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent,
 project trust and same-project ownership gates, with allowances logged. It does not open the agent depth (#867):
 `auto` children each starting their own once ran twelve sessions at once (#862). Worktree cleanup keeps local work
-in the trash under every preset (#608).
+in the session archive under every preset (#608).
 `agent_session` can status, wait, send or stop any session in the same project, and delete
 any worktree session there,
 including another parent's child or the person's turn; adapter mid-turn support and the
 child's own preset still apply. Deleting a session without a worktree still requires the caller to have started it
 (`askedBy` or `parentSessionId` equals the caller), even under `auto` (#637). Observing an app agent reuses its completion watcher, so
 `run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes an idle worktree and branch even with dirty files or an unproven tip, after setting aside
-local work with the conversation in the trash (#608). `run_agent`
+local work with the conversation in the session archive (#608). `run_agent`
 app agents stay `safe`, and no session gets a preset above its caller. When auto observes another
 caller's unfinished delegation, its wait has its own bound and cancellation and returns
 `reported: false` while working. It does not consume the owner's report, key, waiter count
@@ -444,7 +444,7 @@ below retained for `safe` and `normal`:
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
    given back if the start fails, so calls at once cannot pass the ceiling together. A fork takes its place the same way
    (`reservePlace`). Once the child's session exists, the caller's gates (`agentStartGateError`) and the preset rule
-   are read again with no wait before its delegation; a session that fails them gets no task and goes to the trash. A request still waiting on the
+   are read again with no wait before its delegation; a session that fails them gets no task and goes to the session archive. A request still waiting on the
    person's card holds no place: it may stand for hours, and is counted when it is approved.
 3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
    project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
@@ -567,7 +567,7 @@ below retained for `safe` and `normal`:
    | A call waiting on the turn (`wait: true`, `agent_session wait`) takes the paused answer, with a notice that the work is not over, and the report is held for the end without a separate pause notice. `status` and `wait` on a paused child read the answer and the same notice and leave the report owed | A read of the paused answer used to take the report down, and with it the end |
    | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
    | The person talking to a paused child: their turn ends by the same rules, so the caller hears the end once the work is over | The work the caller gave is still the child's; the person's turn does not end it |
-   | New work from the same caller (`agent_session send`, a note) ends the pause: that run's own wait or report tells its end. Trashing either session takes the report down | A pause belongs to the work it was told for; held on, it would report the new work a second time |
+   | New work from the same caller (`agent_session send`, a note) ends the pause: that run's own wait or report tells its end. Archiving either session takes the report down | A pause belongs to the work it was told for; held on, it would report the new work a second time |
    | Across a host swap the pause stays with the mark when the keeper kept the child's process (the work runs on there); a host that finds no process drops both, and a kept process that cannot be re-attached reports the work as stopped | The work went with a process that is gone |
    | A handoff moves a paused child with its report; the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
    | Only a turn the delegation's own wait saw end is judged: the delegation's outcome path reports only a wait that failed with no ending event, or one notes held (`tracksInputs`) | Judged again a microtask later, the pause could read as the end once the work had ended |
@@ -651,7 +651,7 @@ caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so 
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
 works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
-(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's trash), `answer`,
+(`agents.interrupt` there; nothing more is owed), `delete` (to that machine's session archive), `answer`,
 and `list` names its machine. **`delete` takes the worktree made for it there too** (#1161 item 3,
 `agents.deleteAgentChild` on that machine, `WorktreeSessions.deleteHubChild`), when nothing would be lost by it. Only
 that one: a worktree Centralu made (`worktree.base`) on the branch the hub's record names, for a session another
@@ -660,7 +660,7 @@ one a child started without a worktree.
 Only when nothing is lost: nothing uncommitted in it, and every commit of its own (its checkout's `HEAD` and the branch
 made for it, which the agent may have left) on a remote-tracking ref or the trunk (`gitUnpublishedCommits`); a branch
 pushed from there passes, a commit only there does not. Then it goes as a local child's does (`cleanUpWorktreeChild`:
-its recovery snapshot in the trash, the worktree and the branch removed). Otherwise the session still goes to the trash,
+its recovery snapshot in the session archive, the worktree and the branch removed). Otherwise the session still goes to the session archive,
 the worktree stays, and the answer says what was left and why ("it holds 2 uncommitted files", "it has 1 commit that no
 remote and not the trunk has: push …", work still running there, another session in its folder). A folder already gone
 is said in the cleanup's own words (#715: its branch kept when it holds commits the trunk lacks), never as "nothing was
@@ -716,7 +716,7 @@ report changes (`ChildOwnership.onLinkedReportChange`). The next host arms the r
 reads the child: a turn that ended meanwhile is reported then, one still running when it ends if it is the caller's
 (below), and a held report waits for its work once the link's resync has read it (`LinkedReports.resync`), not
 before: a link slow to come up would otherwise settle that work as ended. The orchestrator's own linked reports still live in memory. A child deleted there, or whose
-machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
+machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's session archive clears its
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
 the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
 (#1416; #1038 first drew it under its caller, in the caller's project). The caller's row carries a quiet pointer to it,
@@ -731,7 +731,7 @@ follows `askedBy`, so it moves with the heir and goes when the caller does.
 when creating a worktree. Same-folder children keep `parentSessionId: null`. The sidebar uses a present
 `parentSessionId` first, then `askedBy`. Keep these fields distinct: changing ancestry for same-folder sessions
 would also change worktree consumers. No migration or backfill is needed; deletion without a worktree accepts
-either existing creator/parent link, including records reloaded after a host swap. Stored session and trash
+either existing creator/parent link, including records reloaded after a host swap. Stored session and archive
 shapes stay unchanged, so the previous host can continue reading them during a swap.
 
 **A usable worktree** (#582). Provisioning reuses installed JS dependencies automatically, even without a
@@ -833,12 +833,12 @@ the children keep their turns and their link.
 
 **Deleting a child without a worktree** (#637). In every preset, the caller may delete only a session it started
 in the same project (`askedBy` or `parentSessionId` equals the caller). The host uses the sidebar's
-`trashSession` path: withdraw a pending wake, settle waits, dispose the child process if present, flush streamed
-messages, then move the session to the trash and emit `session_deleted`. Mid-turn deletion requires the caller's
+`trashSession` path (the session archive's entry point; the archive was called the trash until #1404, and the code names keep that word): withdraw a pending wake, settle waits, dispose the child process if present, flush streamed
+messages, then move the session to the archive and emit `session_deleted`. Mid-turn deletion requires the caller's
 own unsettled delegation, including while the parent is working; it does not stop the parent's turn. If the
 person has started another turn, or an approval/question remains without that delegation, deletion is refused
 until that work finishes, even under `auto`. History and the tool's conversation remain restorable.
-Concurrent sidebar and agent trash requests share one operation per session: the first request's options and
+Concurrent sidebar and agent archive requests share one operation per session: the first request's options and
 result apply to both, with one process disposal, store write and deletion event.
 The result is `deleted` without worktree/branch recovery fields. A session belonging to another caller, an
 unowned session, a session in another project, and self-deletion are refused.
@@ -846,7 +846,7 @@ unowned session, a session in another project, and self-deletion are refused.
 **Deleting a worktree child** (#608, decision owner 2026-10-13). In every preset the parent decides whether
 to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must
 finish or be stopped first. A worktree folder that is already gone (#715) holds no work to lose, so deletion
-goes ahead without a snapshot: the session goes to the trash, `git worktree prune` drops git's stale entry, and
+goes ahead without a snapshot: the session goes to the archive, `git worktree prune` drops git's stale entry, and
 the branch is kept when it has commits the trunk lacks (or when that cannot be told) or when another
 worktree has it checked out, and removed when it has none. "Gone" means `lstat` failed with ENOENT and the folder
 above it is there; any other error, or a missing parent (a volume not mounted), is refused with "Cannot reach the
@@ -860,16 +860,16 @@ folder inside the worktree (#647), asleep or not: a helper the child started wit
 works there, and after a host swap no session has a process, so a message would wake it right in the folder.
 The answer names those sessions so the parent deletes them first. While a cleanup runs, every session whose
 folder is inside that worktree is held like the child itself (no send, wake, resume or fork), and the
-occupants are checked again after the snapshot and again after trashing: one that came in meanwhile (restored
-from the trash, opened there) keeps the worktree in place, with the snapshot kept. A sidebar delete already
-under way refuses it too, and a cleanup cannot join a delete that started first: that delete's trash record
+occupants are checked again after the snapshot and again after archiving: one that came in meanwhile (restored
+from the archive, opened there) keeps the worktree in place, with the snapshot kept. A sidebar delete already
+under way refuses it too, and a cleanup cannot join a delete that started first: that delete's archive record
 carries no recovery snapshot, so the worktree stays in place for that path. Failed capture leaves the worktree and branch in place. Once captured,
-the session goes to the trash, then git removes the worktree (including initialized submodules) and branch.
-After trashing, removal errors return `deleted` with a warning naming the leftover worktree/branch and
-recovery location. The parent cannot retry a trashed session through `agent_session`. Capture errors still
-return a refusal before trashing. The
+the session goes to the archive, then git removes the worktree (including initialized submodules) and branch.
+After archiving, removal errors return `deleted` with a warning naming the leftover worktree/branch and
+recovery location. The parent cannot retry an archived session through `agent_session`. Capture errors still
+return a refusal before archiving. The
 tool's conversation remains. The answer reports the uncommitted file and commit counts, or that nothing
-needed setting aside. A saved notice also offers the recovery directory in the trashed conversation. Counts
+needed setting aside. A saved notice also offers the recovery directory in the archived conversation. Counts
 count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
 keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
@@ -896,7 +896,7 @@ Older Git fails capture before deletion; upgrade Git to use recovery. The lazy-f
 [Git 2.45](https://raw.githubusercontent.com/git/git/v2.45.0/Documentation/RelNotes/2.45.0.txt);
 on 2.31–2.44 the empty protocol allowlist still prevents existence checks from reaching a remote.
 
-The trash's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
+The archive record's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
 needs no schema migration. Files live at `<data>/worktree-recovery/<session id>/<snapshot id>/`:
 `0.patch` holds the root's working changes from HEAD, `0.staged.patch` its staged changes, `0.bundle` a
 self-contained bundle of both HEAD and the stored branch when commits are absent from the trunk, and
@@ -907,7 +907,7 @@ Git writes patches directly with `diff --output`, preserving CP949/Latin-1 text 
 limit. Before any `git add`, a preflight refuses input above 256 MiB across all initialized repositories
 (tracked and non-ignored untracked working files plus changed staged blobs). It leaves the files and index
 untouched. Add/diff allow 120 seconds. The index is removed after capture. Clean, merged work creates only the small restore metadata, no patch
-or bundle. Trash byte totals include recovery files.
+or bundle. Archive byte totals include recovery files.
 
 Restore recreates the root branch/worktree at its saved tip and attempts both patches before making the
 session live (its CLI remains stopped). If the original branch name is occupied, it uses `recovered/<session id>`.
@@ -929,14 +929,14 @@ A `patches-applied` marker records the worktree path after both patches succeed.
 reports that prior success, preserving any subsequent edits. Without that marker it explicitly says
 patches were not applied on this retry and may need manual recovery. Recreating a missing worktree
 clears the old marker before applying patches again. Each later deletion uses a new snapshot so earlier
-files are retained. Deleting for good, including empty trash, removes the entire session recovery directory
+files are retained. Deleting for good, including delete all archived sessions, removes the entire session recovery directory
 only after the rows are gone (#647): the directory is first moved aside, which fails where removal would and
-leaves the trash entry retryable, then deleted once the database step succeeds, or moved back when that step
+leaves the archive entry retryable, then deleted once the database step succeeds, or moved back when that step
 fails, so the entry stays restorable. A folder that cannot be moved back is logged and left aside under
 `<session id>.purging-<random>`; at startup such folders go back under their session's
-name while the entry is still in the trash (joining any snapshot made since), and are deleted once it is gone,
+name while the entry is still in the archive (joining any snapshot made since), and are deleted once it is gone,
 so a crash at any point of a purge is repaired. Purge and restore wait for that repair; a folder that cannot
-be repaired (held open on Windows) is logged and retried at the next start, and the others go on. No automatic trash expiry is implemented; expiry
+be repaired (held open on Windows) is logged and retried at the next start, and the others go on. No automatic archive expiry is implemented; expiry
 must use `purgeSession` if added. A superproject merge does not prove that module commits were pushed, so
 gitlinks in merged trunk history are scanned like unmerged ones (#623). Writes by other programs during capture are outside this session's lock.
 
@@ -1088,8 +1088,8 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 | `ifBusy` | What happens |
 |---|---|
 | `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
-| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of a trashed session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A row being delivered is left out of `withdrawReaches` and `dropOpenedByAuto`, so its gate (`queuedGateError`, for every tool) is read once more after that wait and any wake, before the task is written (`stillAllowed`). A remembered pair consent revoked in that window does not stop it: being delivered counts as running, as a delegation already running is left to finish (`revokeProjectConsent`). A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
-| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the trash. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
+| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of an archived session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A row being delivered is left out of `withdrawReaches` and `dropOpenedByAuto`, so its gate (`queuedGateError`, for every tool) is read once more after that wait and any wake, before the task is written (`stillAllowed`). A remembered pair consent revoked in that window does not stop it: being delivered counts as running, as a delegation already running is left to finish (`revokeProjectConsent`). A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
+| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the session archive. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
 
 **Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a
 bare string (the enum would put the reader's Claude request over its 2,300), and the runner refuses other values;
@@ -1177,11 +1177,11 @@ new session now takes over the original's **live** work as it is created, before
     reports, turns and delegations that are theirs, since an orphan is worse. What it asked for and the person never
     answered stays behind and goes as before: its standing start_agent cards are withdrawn and the requests it queued
     are dropped, so no card appears in another session because this one was deleted. A call of its own still waiting
-    on a moved child ends with a fixed answer (`handedOverReply`), since the trash drops the `handedOver` entries
+    on a moved child ends with a fixed answer (`handedOverReply`), since archiving drops the `handedOver` entries
     before the woken call reads them. The heir is the newest live session whose handoff marker names it
     (`Store.handoffHeirs`, filtered in SQL); successors that were removed, or are being removed at the same time
     (`trashing`), pass on to their own successors, the nearest generation first. Its note was read long ago, so it is
-    told in its conversation (a `notice`); the original, about to go, is told nothing. The move is its own transaction ahead of the trash's: a crash between them leaves the children
+    told in its conversation (a `notice`); the original, about to go, is told nothing. The move is its own transaction ahead of the archive's: a crash between them leaves the children
     on the heir and the original standing. A removed session that never handed over leaves its children on their own,
     as before.
 - **The note**: the note file the opening message points at, and the marker that keeps its original, open with a
@@ -1417,7 +1417,7 @@ a target that is no ssh target or that `ssh -G` cannot read, a name already link
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 
-**Preferences** (#1219, with the trash). `get_preferences` and `set_preferences` are rare commands of the central orchestrator
+**Preferences** (#1219, with the session archive). `get_preferences` and `set_preferences` are rare commands of the central orchestrator
 (`PreferencesFlow`, `sessions/preferences-flow.ts`). They make the window's own calls through the router
 (`SessionManager.useWindowRpc`, wired in main.ts to `router.handle`; `callWindow` in `sessions/window-rpc.ts` checks
 the params with the method's schema and reads the answer with its result schema, and only the methods named in
@@ -1504,25 +1504,25 @@ the params with the method's schema and reads the answer with its result schema,
   separate `checkForUpdates` and `applyUpdatesWhenIdle` fields are gone and refused by name; `get_preferences` shows one
   line, and says which half is on when they differ.
 
-**The trash** (#1219). The rare commands `list_trash`, `restore_trashed { sessionId, what? }`, `trash_subagent_steps { sessionId }`,
-`delete_trashed { sessionId, what? }` and `empty_trash` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
-preferences) are the Trash screen's calls. `what` is `session` (the default) or `steps`.
+**The session archive** (#1219; its commands were `list_trash`, `restore_trashed`, `trash_subagent_steps`, `delete_trashed` and `empty_trash` until #1404, when an orchestrator read "empty the trash" as the operating system's bin). The rare commands `list_archive`, `restore_archived { sessionId, what? }`, `archive_subagent_steps { sessionId }`,
+`delete_archived { sessionId, what? }` and `delete_all_archived` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
+preferences) are the Settings → Archive screen's calls. `what` is `session` (the default) or `steps`.
 
-- `list_trash` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
-  sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the trashed subagent
+- `list_archive` reads `trash.list` (linked machines merged; a machine not reached is named) and `subagents.usage`: the
+  sessions with their project, size and what deleting for good takes along, the kept app runs (#378), the archived subagent
   steps, and the sessions whose steps could be moved there. Rows beyond 25 are counted.
-- `restore_trashed`, `trash_subagent_steps`: `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and
+- `restore_archived`, `archive_subagent_steps`: `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`. They lose nothing and
   ask nothing, with one exception: restoring a session whose project was deleted registers the project's folder again (as
   the window's Restore does), which is what `add_project` asks about, so that restore raises a card naming the folder. A
-  session not in the trash is refused before any call.
-- `delete_trashed` and `empty_trash` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
-  A session or steps that are not in the trash are refused before the card, so a live session cannot be deleted this way.
+  session not in the archive is refused before any call.
+- `delete_archived` and `delete_all_archived` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
+  A session or steps that are not in the archive are refused before the card, so a live session cannot be deleted this way.
   The card names the session (or the counts, the size and up to ten names), what goes with it (the tool's conversation
-  file, a worktree marked for removal) and that it cannot be undone. After Allow the trash is read again and the host
+  file, a worktree marked for removal) and that it cannot be undone. After Allow the archive is read again and the host
   deletes exactly what the card named and is still there, one `trash.purge` / `trash.purgeSubagentSteps` (with the `upTo`
-  the card listed) / `trash.purgeRuns` (one call per machine) at a time, as the window's Empty trash does; `trash.empty` is
-  not used, because it takes everything in the trash, also what arrived after the card. A session restored or deleted while the card
-  stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
+  the card listed) / `trash.purgeRuns` (one call per machine) at a time, as the window's Delete all archived sessions does; `trash.empty` is
+  not used, because it takes everything in the archive, also what arrived after the card. A session restored or deleted while the card
+  stood is left alone and said so, and so is one restored and archived again (its `deletedAt`, message count or what goes
   with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
 
 **Trust** (#1219, third slice). The rare commands `list_projects` and `set_project_trust { project, trusted }`
@@ -1596,7 +1596,7 @@ window's channel), grouped, and for each group one of three states.
 | Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
 | Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus`, `agents.autoCompact` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
 | Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
-| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the trash keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that, and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (the trash ends its process), and one on a machine that cannot be reached |
+| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the session archive keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that, and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (archiving ends its process), and one on a machine that cannot be reached |
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `sessions.rename`, `agents.clearBackgroundTasks` | Has it (#1219, fourth slice) | `rename_session` (a worker session; the answer quotes the old name, so it can be set back) and `clear_background_tasks` (ended tasks only; running ones stay): no card |
 | Reading how the agent CLIs stand. `agents.detect`, `agents.usage`, `agents.models` | Has it (#1219, fourth slice) | `agent_status` (installed, logged in, plan and limits) and `agent_models`: read only |
@@ -1611,8 +1611,8 @@ window's channel), grouped, and for each group one of three states.
 | Agent CLIs. `agents.applyVersions` | Has it (#1219, fourth slice) | `apply_agent_versions`: the header's "restart idle sessions on the new CLI", at once and with no card; each restart ends a turn only when idle, and a busy session, or one that spoke within the last minute (`keepQuiet`: the orchestrator is not the person's own button), is named and left |
 | Notifications. The switches `approval`, `done`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`, which still carries `error` and `allDone` for older builds; the window no longer raises those two, 2026-10-20) | **Has it** (#1306) | `set_preferences notifications`, no card, except to turn `approval` off, or `sound` while it would still notify. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
 | When agents compact (#1376). `autoCompact` in `prefs.get` / `prefs.set` | **This change** | `set_preferences { autoCompact: { controlled?, share? } }`; no card (reversible, and only about when an agent compacts). Reaches a session when its process next starts |
-| The trash. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the trash: no card. `trash.read` (a trashed conversation) and `trash.readRun`: not an errand: `restore_trashed` then `read_session` reads a conversation, with the fencing `read_session` has; a second reader of conversation text would need its own |
-| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
+| The session archive. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the archive: no card. `trash.read` (an archived conversation) and `trash.readRun`: not an errand: `restore_archived` then `read_session` reads a conversation, with the fencing `read_session` has; a second reader of conversation text would need its own |
+| Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's archived steps (`delete_archived`), or all of it (`delete_all_archived`). `trash.empty` itself is not called: it takes everything there is, and `delete_all_archived` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
 | `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
@@ -1636,7 +1636,7 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
-The linked machines came first (#1238), then the preferences and the trash (#1309) and the notification switches (#1313).
+The linked machines came first (#1238), then the preferences and the session archive (#1309) and the notification switches (#1313).
 The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
 then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
 and what widens it waits for the person's card, which names exactly what changes and is checked again after Allow.
@@ -3276,7 +3276,7 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
   `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
   `store/vacuum.ts`. The records are one module per concept in `dev-services/store/` (projects, sessions, messages,
-  the trash, app runs, …), held as fields that callers name (`store.projects.listProjects()`), and the step list is in
+  the session archive, app runs, …), held as fields that callers name (`store.projects.listProjects()`), and the step list is in
   `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
@@ -3335,7 +3335,7 @@ step against:
 
 | Steps | What they do | Older build |
 |---|---|---|
-| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | add a column (45: `sessions.asked_by_session_id`, the session that asked for this one, #371, whose meaning moved with #561 and #614, see 48 and 55; 47: `grid_layout.remote_app_id` and `app_machine`, a panel of a linked machine's app, #82; 53: `sessions.interruption`, why the last turn did not finish, #698; 54: `queued_requests.opened_by_auto`, a queued ask only `auto` let through) | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 47: an older host reads app rows only where `app_id` is set, and its `setGridView` drops a linked machine's app panel when it rewrites the layout; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698; 54: an older host neither reads nor writes `opened_by_auto`; a row it queues is null, read as marked when the pair has no remembered consent) |
+| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54 | add a column (45: `sessions.asked_by_session_id`, the session that asked for this one, #371, whose meaning moved with #561 and #614, see 48 and 55; 47: `grid_layout.remote_app_id` and `app_machine`, a panel of a linked machine's app, #82; 53: `sessions.interruption`, why the last turn did not finish, #698; 54: `queued_requests.opened_by_auto`, a queued ask only `auto` let through) | reads it (39: shows sessions in the session archive as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 47: an older host reads app rows only where `app_id` is set, and its `setGridView` drops a linked machine's app panel when it rewrites the layout; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698; 54: an older host neither reads nor writes `opened_by_auto`; a row it queues is null, read as marked when the pair has no remembered consent) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677; 57 adds `app_run_records`, `app_run_messages` and `app_run_subagent_messages`, the record of a deleted app-agent session, and the nullable `app_runs.request`, `answer` and `output`, #378) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |

@@ -35,17 +35,17 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Orchestrator | The one session of the whole app that sees and directs every session. Belongs to no project | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | project orchestrator (retired) |
 | Ordinary session | A `worker` in a project that is not a builder or an app's agent. Gets the read-only `reader` tools (worktree sessions, started agents and delegated sessions too), unless Settings turns them off | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
 | Worktree session (worker) | A session working in its own git worktree and branch. One the person makes stands on its own; one a session started with `start_agent` hangs under that session (`parentSessionId`). The worktree manager that held them is gone (#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | branch session |
-| Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and trashed like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
+| Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and archived like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf` on `AppSessions`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
-| App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app. Once its run ends cleanly and nobody took part, it is deleted and its record kept in the trash (#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
+| App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app. Once its run ends cleanly and nobody took part, it is deleted and its record kept in the session archive (#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | Delegated session | `<<role>>` An existing ordinary session that another project's session gave a task through `ask_project`. Centralu never creates a session in another project for it (#614) and puts no mark on it: the asker is the task's `from` in the conversation, and the task runs as a delegated turn. Before #614 `ask_project` started or reused one and marked it with `askedBy`; those marks are removed | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
 | Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. One started on a linked machine (#1038) is a session of that machine's checkout; the hub names its parent as `askedBy` in that machine's rows, and the sidebar draws it in that machine's project with its "Asked by" mark (#1416), while its parent's row carries a pointer, "2 on ijun1", that reveals it and shows when one of them waits or has errored. Deleting it there takes the worktree made for it on that machine too, only when nothing in it is uncommitted or unpushed, and says otherwise what it left and why (#1161). Like a session working on another project's task, it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent` in `sessions/start-agent-flow.ts`, `agentSession` in `sessions/delegation-flow.ts` (both reached through `manager.ts`); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
 | Instructions for agents | The person's standing text for the agents `start_agent` starts in a project (#1161 item 2), added after every such task: set once in the project's menu ("Instructions for agents…") instead of repeated in each brief. Each machine keeps its own for its copy of the project, so a child on a linked machine reads that machine's (its paths, its shell) | `ProjectInfo.agentInstructions`, app setting `agent_instructions:<project>`; `projectInstructions` in `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | project prompt, system prompt |
 | Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `scoped`, `builder`, `reader`, or none (the worktree manager's `manager` was folded into ordinary sessions, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (asked through `toolProfileOf`, `manager.ts`); [agent-host.md](agent-host.md) §1.1 | |
 | Permission preset | How much the agent may do without asking: `safe`, `normal`, `auto` | `PermissionPreset`, `entities/approvals.ts` | mode |
-| Live | Whether the session has a process now. A session that is not live is resumed when addressed | `SessionInfo.live` | archived (FR-20 was retired) |
+| Live | Whether the session has a process now. A session that is not live is resumed when addressed | `SessionInfo.live` | hidden (FR-20 was retired) |
 | Asleep | Not live because the host ended an idle session's process (#568, after 15 minutes by default) or nothing has woken it since a restart. Typing to it or sending it a message wakes it; selecting it does not | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
-| Trash | A deleted session kept for a while before it is gone for good | `sessions.deleted_at`, `trash`; product-spec FR-22 | archive |
+| Session archive | A finished or put-away session, kept until the person deletes it for good; it can be opened and restored. It also holds the kept records of app-agent sessions and archived subagent steps. Called the trash until #1404, and not FR-20, the retired hide-a-session feature that had no way out | `sessions.deleted_at`, `sessions.trash`, `trash.*`; product-spec FR-22 | trash, recycle bin, bin |
 | Imported session | A session continued from a conversation the tool started outside Centralu | `SessionInfo.importedFrom`; [agent-host.md](agent-host.md) §8 | |
 | Handoff | A fresh successor session, on either tool, taking over from a predecessor through a note: built from the stored conversation with no model (#78; the default since #694), or written by the agent itself. The person starts one from the session menu; the central orchestrator with `handoff_session`, behind the person's card unless it is `auto`, never mid-turn, and always keeping the predecessor (#694). The note is a file, `<data>/handoff/<project>/<session>.md`, and the successor's first message points at it. The predecessor's live children (working, waiting, queued, unreported or unread, a start card still standing) become the successor's, listed at the top of the note; settled ones stay only while the predecessor does (#693). The window keeps the predecessor by default (it deleted it by default until #694); when it is deleted, every child goes to the successor, settled ones too, at the handoff or when the predecessor is deleted later (#738) | `handoff` event, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (not the keeper's handoff, §1.5) |
 | Switch tool | Keeping the session (name, order, history, panel) and swapping the agent tool under it. The new tool starts a new thread: the old tool's conversation does not carry over to the agent, though the record stays on screen | `agents.switchTool`, `packages/protocol/src/commands/methods/sessions.ts`; `switchTool`, `manager.ts` | |
@@ -61,7 +61,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Normalized event | What an adapter turns the tool's output into: deltas, tool calls and results, approvals, questions, state changes. The one stream the UI and the store read | `NormalizedEvent`, `packages/protocol/src/events.ts` | |
 | Message | One stored row of a conversation, numbered (`seq`) within its session. Kinds: text, tool call, tool result, approval, marker, image, reasoning, app view | `StoredMessage`, `commands/sessions.ts` | |
 | Tool call / tool result | The agent using a tool, and what came back. Paired by `callId`; drawn as one tool card | `tool_call`, `tool_result`, `events.ts` | |
-| Subagent step | A step of a subagent the agent launched (Claude's Task). Hangs off the launching tool call, never part of the conversation's numbering. A session's steps can go to the trash without it (#418) | `subagent_event`, `events.ts`; `subagent_messages` (store v41, `trashed_at` v58) | |
+| Subagent step | A step of a subagent the agent launched (Claude's Task). Hangs off the launching tool call, never part of the conversation's numbering. A session's steps can go to the session archive without it (#418) | `subagent_event`, `events.ts`; `subagent_messages` (store v41, `trashed_at` v58) | |
 | Approval | A pending yes/no on something the agent wants to do. At most one per session at a time | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | permission request |
 | Approval detail | What is being asked: `command`, `file_edit`, `other` (from an adapter; the host's apply and handoff cards ride on it too, with an `about`), `capability`, `project_access`, `agent_start`, `centralu_update` and `project_create` (raised by the host) | `ApprovalDetail`, `entities/approvals.ts` | |
 | Approval rule | A remembered "always allow" for commands, matched by a pattern with `*`, scoped to a session or a project (a session with no project keeps a project-scope answer for itself). Only allows are stored; the adapter checks them before it asks | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `sessions/approval-rules.ts` | allowlist |
@@ -200,8 +200,8 @@ classDiagram
 ```
 
 - A session belongs to **at most one** project. With no project: the orchestrator, a coordinator, the builder or
-  app-agent session of a user-folder app (it stands under that app's row in the sidebar), and a session in the trash
-  (its project is kept in the trash record). The inbox and the palette label every session with no project
+  app-agent session of a user-folder app (it stands under that app's row in the sidebar), and a session in the session archive
+  (its project is kept in the archive record). The inbox and the palette label every session with no project
   "Orchestrator".
 - `kind` is all a session is created as. Every other role is read off a relationship each time: a builder is named in the builder map; an app-agent session
   carries an `appId` the builder map does not point back to; a started agent has `askedBy` naming a session of its
@@ -213,7 +213,7 @@ classDiagram
 Where it is stored:
 
 - `projects`: projects, their trust, defaults, saved commands, worktree setup, and the worktree trunk (in the former manager slot's row, `worktree_manager`).
-- `sessions`: sessions, including kind, worktree, parent, app, asked-by and trash marks.
+- `sessions`: sessions, including kind, worktree, parent, app, asked-by and archive (`trash` column) marks.
 - `command_cache`: the slash commands (skills) a tool offers in a folder, so a session that is not live can list them.
 
 Live only (host memory): `live`, the pending approval and questions, goal, background tasks, agent version.
@@ -353,7 +353,7 @@ An app that is `invalid`, `untrusted`, `unconfirmed` or `failed` is given to nob
 Where it is stored:
 
 - `app_runs`: the run ledger; a `run_agent` row also keeps its request and answer (#378).
-- `app_run_records`: the record of a deleted app-agent session in the trash (#378), with what the trash lists.
+- `app_run_records`: the record of a deleted app-agent session in the session archive (#378), with what the archive lists.
 - `app_run_messages`: that record's copy of the session's whole conversation (#378).
 - `app_run_subagent_messages`: that record's copy of the session's subagent steps (#378).
 - `app_run_failures`: the raw arguments and result of an app's latest failed calls (20 kept), for its builder.
@@ -380,7 +380,7 @@ Where it is stored:
 - `grid_layout`: the grid's panels (sessions and apps, store v42; spans v43; a linked machine's session in a column
   of its own, v46; a linked machine's app in columns of their own, v47).
 - `grid_panels`: the grid of session panels as v9 made it, kept for hosts older than v42 (this build copies it once
-  and afterwards only removes a trashed session's row); dropped in a later contract step
+  and afterwards only removes an archived session's row); dropped in a later contract step
   ([agent-host.md](agent-host.md) §5.1).
 - `workspace`: the UI's snapshot, one row.
 - `commit_sessions`: commit attribution.
@@ -409,8 +409,8 @@ Where it is stored:
 - `mail_receipts`: each recipient's progress with each message.
 - `mail_turns`: the thread each turn of a session belonged to.
 
-An older build serving the same store during a swap never names these tables (step v61 only adds), and a session purged
-from the trash takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
+An older build serving the same store during a swap never names these tables (step v61 only adds), and a session deleted for good
+from the session archive takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
 and 180 days, read notices after 14) is `MailService.sweep`, which the host runs once after it is ready ([plans/mailbox.md](plans/mailbox.md) §4.4).
 
 ## 3. Session state
@@ -669,7 +669,7 @@ sequenceDiagram
   B->>B: run row closed (request, answer)
   B->>M: agentRunEnded
   opt ok, and nobody took part
-    M->>M: keep the record (app_run_records), session to the trash and deleted
+    M->>M: keep the record (app_run_records), session to the session archive and deleted
   end
   B-->>App: result
   App-->>R: tool result
@@ -678,7 +678,7 @@ sequenceDiagram
 
 Each `run_agent` stands up a new session; nothing is reused. The broker's request gets its own run row under the
 tool call's (`parentRunId`), linked to the session it stood up. A clean run takes its session with it before the app
-has its answer (#378); the record of what it did stays in the trash.
+has its answer (#378); the record of what it did stays in the session archive.
 
 ### 5.4 Switching builds (blue-green swap, with a keeper)
 

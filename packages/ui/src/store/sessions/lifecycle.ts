@@ -10,7 +10,7 @@ import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '.
 
 /**
  * A session's place in the list: opening the new-session dialog or starting one at once, creating it,
- * moving it to the trash and back, its name, its read position and its order.
+ * moving it to the session archive and back, its name, its read position and its order.
  */
 
 /**
@@ -255,8 +255,8 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
   },
 
   /**
-   * Moves a session to the trash (#204). The toast says where it went: a session that leaves the sidebar with no word
-   * about where is the retired archive again (FR-20).
+   * Archives a session (#204). The toast says where it went: a session that leaves the sidebar with no word
+   * about where is the retired hide-a-session feature again (FR-20).
    */
   async deleteSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
@@ -264,7 +264,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
       await platform.agents.deleteSession(sessionId, deleteWorktree, deleteExternal)
-      set({ toast: `Moved to the trash: ${name} — Settings → Trash restores it` })
+      set({ toast: `Archived: ${name} — Settings → Archive restores it` })
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
     }
