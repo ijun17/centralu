@@ -477,8 +477,10 @@ export function quickGreen(checks, runs, fullTier) {
  * The check suites of runs a successful run has made moot (#1015): for each CI workflow that has a
  * completed, successful run on the head, its other runs on that head that were cancelled or started
  * before the newest successful one. `runs` are the raw workflow runs on the head (readWorkflowChecks).
+ * With `checks` (every check on the head, readChecks), also a duplicate run whose failed jobs all passed in its twin
+ * (`twinPassedSuites`, #1346).
  */
-export function supersededSuites(runs) {
+export function supersededSuites(runs, checks = []) {
   const key = (r) => r.workflow_id ?? r.path ?? r.name ?? 'ci'
   const out = new Set()
   const byWorkflow = new Map()
@@ -490,6 +492,30 @@ export function supersededSuites(runs) {
     for (const r of list)
       if (!ok.includes(r) && r.check_suite_id != null && r.status === 'completed' && (r.conclusion === 'cancelled' || String(r.created_at ?? '') < newest)) out.add(r.check_suite_id)
   }
+  for (const suite of twinPassedSuites(runs, checks)) out.add(suite)
+  return out
+}
+
+/**
+ * The check suites of a duplicate run whose every job that did not pass also passed in its twin (#1346): two runs of
+ * the same workflow on one head (created in the same second for one push), where the job that failed in one (a flake,
+ * as rerun) passed in the other, whatever their ids, creation times or attempts. The older/cancelled rule above does
+ * not see it: the failing run can be the newer one, and its twin's job passed on a later attempt. Only completed runs,
+ * and only a suite whose failures all have a passing twin: a job that failed in both, or failed only there with no
+ * twin, keeps the head waiting.
+ */
+export function twinPassedSuites(runs, checks = []) {
+  const key = (r) => r.workflow_id ?? r.path ?? r.name ?? 'ci'
+  const workflowOf = new Map((runs ?? []).filter((r) => r.check_suite_id != null && r.status === 'completed').map((r) => [r.check_suite_id, key(r)]))
+  const passed = (c) => c.kind !== 'status' && c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)
+  const out = new Set()
+  for (const [suite, workflow] of workflowOf) {
+    const mine = checks.filter((c) => c.kind !== 'status' && c.suiteId === suite)
+    const bad = mine.filter((c) => !passed(c))
+    if (!bad.length) continue
+    const twinPassed = (c) => checks.some((t) => t.suiteId !== suite && workflowOf.get(t.suiteId) === workflow && t.name === c.name && passed(t))
+    if (bad.every(twinPassed)) out.add(suite)
+  }
   return out
 }
 
@@ -500,7 +526,7 @@ export function supersededSuites(runs) {
  * for as long as its head stayed, and the queue waits for CLEAN.
  */
 export function onlySupersededFailures(checks, runs) {
-  const moot = supersededSuites(runs)
+  const moot = supersededSuites(runs, checks)
   return checks.every((c) =>
     c.kind === 'status' ? c.state === 'success' : (c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)) || moot.has(c.suiteId),
   )

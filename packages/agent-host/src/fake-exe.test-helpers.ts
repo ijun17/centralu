@@ -1,8 +1,9 @@
+import { rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 
 /**
  * A stand-in for a program the code under test starts by name (`ssh`, `gh`): a Node script that
@@ -167,6 +168,24 @@ export function fakeExe(dir: string, name: string, source: string): string {
  */
 export function rmFakeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
+}
+
+/**
+ * Removes a test's folder without blocking the event loop, and briefly: 3 retries, about 3 s on Windows (measured: Node's
+ * backoff makes 10 retries last close to a minute on a held folder), inside a hook's time limit. On Windows a folder something still holds (a process whose working
+ * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the system's cleanup of the
+ * temporary folder instead of failing the test that used it, when it is inside that folder (#1346, #1312). Anywhere
+ * else, or on another platform, the error stands.
+ */
+export async function removeFakeDir(dir: string, os: { platform: NodeJS.Platform; tmp: string } = { platform: process.platform, tmp: tmpdir() }): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? ''
+    const inside = !relative(resolve(os.tmp), resolve(dir)).startsWith('..')
+    if (os.platform !== 'win32' || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code) || !inside) throw e
+    console.warn(`[test cleanup] ${dir} is still in use (${code}); left to the system's temporary folder cleanup`)
+  }
 }
 
 /**
