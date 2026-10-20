@@ -2737,6 +2737,16 @@ that thread; into a `done` one it opens a thread that follows it. It makes no re
 first), never throws into a delegation, and skips an auto observer's note and a child on a linked machine. Reports do not use these
 threads yet. A delegation thread is moved when a party is archived as any thread is (§3.3, `MailService.partyGone`), never closed by it: the person becomes the owner of a gone caller's, and a gone child's is `open` with nobody on it. Only a delegation tool's thread is reused for the next instruction to the same child.
 
+**Every turn is recorded** (slice 3). `ChildOwnership.turnStarted`, which already says whose a turn is (#1377), tells the mailbox (`turnRecorder`,
+`mail/delegation.ts`), which writes a `mail_turns` row for a turn it did not start: `person` (no thread, unless they chose to add their message to
+the task), `caller` (a message of the session that gave the work: the thread that session owns with this one), or `cli` (the CLI ran on
+after the work's background tasks, again the thread its owner has). A turn a caller's message started begins before the delegation is written
+down, so `attach` gives it the thread then, only if it is the work of that caller. A report or notice about another session starts a
+turn of its own kind (`report`; an app's message is `app`), which is nobody's send. When a turn mail started is going, the other starter
+adds nothing. The guards of §7.9 count only `mail` turns. A turn of no thread is deleted by retention once the session has a later ended
+one. A host that takes over from another keeps the open rows of the sessions the keeper handed over that are still in their turn, reads
+them back and records their end; every other open row is closed `lost` at start.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

@@ -6,6 +6,7 @@ import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
+import type { TurnSource, TurnStart } from '../mail/turns.js'
 
 /**
  * How long a report held over a session's own background work (#721), here or on a linked machine (#723), waits, once
@@ -112,7 +113,7 @@ const NEXT_STARTER_MS = 15_000
 /** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
 /** A message that went into a turn the tool may or may not have taken in (#1377): decided at the turn's end */
-type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true }
+type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true; source?: TurnSource }
 type StoredTurn = TurnStarter & { pending?: PendingMessage[] }
 function readTurn(raw: string | null): StoredTurn | null {
   if (raw === null) return null
@@ -205,6 +206,8 @@ export class ChildOwnership {
   private readonly pending = new Map<string, PendingMessage[]>()
   /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
   private readonly nextStarter = new Map<string, TurnStarter & { at: number }>()
+  /** What the work's message that is to start the session's next turn is: a caller's, a report or notice about another session, an app's */
+  private readonly nextSource = new Map<string, TurnSource>()
   /** The settle timer of a paused report whose background work has ended (#721) */
   private readonly pausedSettles = new Map<string, ReturnType<typeof setTimeout>>()
   /**
@@ -418,7 +421,7 @@ export class ChildOwnership {
    * (or where the tool holds it for a turn of its own) it is what the next turn starts from; into a running turn it joins
    * that turn: a person's into the work's is noted ("the person wrote during this turn"), into their own it is theirs.
    */
-  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, added = false, inputId?: string): void {
+  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, added = false, inputId?: string, source: TurnSource = 'caller'): void {
     if (inTurnNow && joinsRunningTurn) {
       /*
        * Into a running turn: the tool may take it in at its next round, or run it as a turn of its own once this one ends
@@ -426,17 +429,20 @@ export class ChildOwnership {
        * turn of its own). Which, is said at the turn's end (`turnEnded`), by the inputs the turn took.
        */
       if (!this.starters.has(sessionId)) this.starters.set(sessionId, { by: 'work' })
-      this.pending.set(sessionId, [...(this.pending.get(sessionId) ?? []), { ...(inputId ? { id: inputId } : {}), by, ...(added ? { added: true as const } : {}) }])
+      this.pending.set(sessionId, [...(this.pending.get(sessionId) ?? []), { ...(inputId ? { id: inputId } : {}), by, ...(added ? { added: true as const } : {}), ...(by === 'work' && source !== 'caller' ? { source } : {}) }])
       this.persistTurn(sessionId)
       return
     }
-    this.addNext(sessionId, by, added)
+    this.addNext(sessionId, by, added, source)
   }
   /** A message that is to start the session's next turn (#1377); a later one before it starts only joins */
-  private addNext(sessionId: string, by: 'person' | 'work', added: boolean): void {
+  private addNext(sessionId: string, by: 'person' | 'work', added: boolean, source: TurnSource = 'caller'): void {
     // A note that no turn ever started from (a command the tool answers itself, a message it refused) goes stale
     const found = this.nextStarter.get(sessionId)
     const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
+    // What the work's message is, for the turn it starts (the first of the messages that make one turn says)
+    if (!next) this.nextSource.delete(sessionId)
+    if (by === 'work' && !this.nextSource.has(sessionId)) this.nextSource.set(sessionId, source)
     // "Add to the task" (a person's message that is the work's): the turn is the work's, noted as their addition
     const mine: TurnStarter = added ? { by: 'work', added: true } : { by }
     if (!next) {
@@ -452,6 +458,23 @@ export class ChildOwnership {
     const wrote = next.by === 'person' || !!next.wrote
     this.nextStarter.set(sessionId, { by: 'work', ...(adds ? { added: true as const } : wrote ? { wrote: true as const } : {}), at: Date.now() })
   }
+  /** The mailbox's way of hearing that a turn started (§6), set by the host when it has one */
+  private turnStartedHook: ((sessionId: string, turn: TurnStart) => void) | undefined
+  onTurnStarted(hook: ChildOwnership['turnStartedHook']): void {
+    this.turnStartedHook = hook
+  }
+
+  /**
+   * The caller whose work a turn of this session is: the one whose turn it was given as (and who still has a delegation on it, or is owed its
+   * report), else the one a report is owed to. A turn given with no report asked for (`reportBack: false`) is nobody's work to report
+   */
+  private workOwner(sessionId: string): string | undefined {
+    const marked = this.reports.get(sessionId)
+    const caller = this.turns.get(sessionId)?.callerId
+    if (caller && (marked === caller || [...this.delegations.values()].some((d) => d.callerId === caller && d.sessionId === sessionId && !d.settled))) return caller
+    return marked
+  }
+
   /** A turn starts (#1377): from the message waiting for it, else the CLI's own (the work's background tasks ended) */
   turnStarted(sessionId: string): void {
     const found = this.nextStarter.get(sessionId)
@@ -460,6 +483,15 @@ export class ChildOwnership {
     const { at: _at, ...starter } = next ?? { by: 'work' as const, at: 0 }
     this.starters.set(sessionId, starter)
     this.persistTurn(sessionId)
+    const source = next ? (this.nextSource.get(sessionId) ?? 'caller') : 'caller'
+    this.nextSource.delete(sessionId)
+    if (!this.turnStartedHook) return
+    const ownerId = this.workOwner(sessionId)
+    try {
+      this.turnStartedHook(sessionId, { by: starter.by, added: !!starter.added, cli: !next, source, ...(ownerId ? { ownerId } : {}) })
+    } catch (e) {
+      console.error(`[mail] could not record a turn of ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+    }
   }
   /**
    * The turn ends (#1377): whose it was; none recorded reads as the work's. The record goes with it. `taken`: the inputs
@@ -474,7 +506,7 @@ export class ChildOwnership {
     this.pending.delete(sessionId)
     for (const p of pending) {
       const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
-      if (!joined) this.addNext(sessionId, p.by, !!p.added)
+      if (!joined) this.addNext(sessionId, p.by, !!p.added, p.source)
       else if (p.by === 'person' && starter.by === 'work') {
         if (p.added) starter.added = true
         else starter.wrote = true

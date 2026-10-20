@@ -899,9 +899,19 @@ export class MailRecords {
     return row?.n ?? 0
   }
 
+  /** The turns still open: a running host's, or the ones a previous host left */
+  openTurns(): TurnRow[] {
+    return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurn)
+  }
+
   /** Closes the turns still open, as ones a previous host left (they can never end) */
   closeOpenTurns(now: number, outcome: string): void {
     this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE ended_at IS NULL`).run(now, outcome)
+  }
+
+  /** The thread a running turn belongs to, found after it began */
+  setTurnThread(sessionId: string, turnSeq: number, threadId: string): void {
+    this.db.prepare(`UPDATE mail_turns SET thread_id = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL AND thread_id IS NULL`).run(threadId, sessionId, turnSeq)
   }
 
   endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {

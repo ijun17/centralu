@@ -22,7 +22,7 @@ import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
-import { delegationRecorder } from './mail/delegation.js'
+import { delegationRecorder, turnRecorder } from './mail/delegation.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
@@ -412,7 +412,7 @@ const mail = new MailService(store.mail, {
 })
 const mailTool = new MailTool(mail, store.mail, (id) => (mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail') ? COMMAND_CALLS : PLAIN_CALLS))
 // The loop and token guards (§7.9): what turns mail started, and what they used
-const mailTurns = new MailTurns(store.mail)
+const mailTurns = new MailTurns(store.mail, { keepOpen: (id) => mgr.keptInTurn(id) })
 const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
   turns: mailTurns,
   // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions (§7.9). A setting the previous build never reads
@@ -435,7 +435,9 @@ mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, t
 // to rest, answers a card or is restored may now take the mail it was holding
 mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
   // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
-  delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id)),
+  delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id), mailTurns),
+  // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)
+  turnStarted: turnRecorder(mail, store.mail, mailTurns),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty

@@ -4,18 +4,27 @@
  * caller's task as the caller wrote it (never the frame the child reads), and nothing in the mailbox wakes the child.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { delegationRecorder } from '../mail/delegation.js'
+import { delegationRecorder, turnRecorder } from '../mail/delegation.js'
+import { MailTurns } from '../mail/turns.js'
 import { MailService } from '../mail/service.js'
 import type { ThreadRow } from '../dev-services/store/mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 
 let w: CrossWorld
 let mail: MailService
+let turns: MailTurns
 
 beforeEach(async () => {
   w = await crossWorld()
   mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa' })
-  w.mgr.useMail({ sessionGone: () => {}, sessionChanged: () => {}, delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id)) })
+  turns = new MailTurns(w.store.mail)
+  w.mgr.useMail({
+    sessionGone: () => {},
+    sessionChanged: () => {},
+    sessionEvent: (e, ended) => turns.observe(e, ended),
+    delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
+    turnStarted: turnRecorder(mail, w.store.mail, turns),
+  })
 })
 afterEach(async () => {
   await w.dispose()
@@ -64,6 +73,36 @@ describe('start_agent', () => {
   })
 })
 
+describe('the turns of a delegated child', () => {
+  it('each is recorded with who started it and its thread: the task’s caller, the person, a later instruction, and how each ended', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    const thread = threadsOf(s)[0]!
+    const turnsOfChild = () => w.store.mail.turnsOf(child).map((t) => [t.startedBy, t.threadId === thread.id ? 'thread' : t.threadId, t.outcome])
+    expect(turnsOfChild()).toEqual([['caller', 'thread', null]])
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(true)
+    handleOf(child)!.event({ type: 'tool_call', sessionId: child, callId: 'c1', summary: { tool: 'Bash', title: 'ls', paths: [] } })
+    handleOf(child)!.answer('done')
+    await w.until(() => w.store.mail.hasOpenTurn(thread.id) === false)
+    // The person works in the child: a turn of their own, of no thread
+    await w.mgr.send(child, 'my own work')
+    handleOf(child)!.answer('their answer')
+    await w.until(() => turnsOfChild().length === 2 && turnsOfChild()[1]![2] !== null)
+    // The caller’s later instruction is a turn of the thread again
+    const again = w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'and the linter' })
+    await w.until(() => turnsOfChild().length === 3)
+    handleOf(child)!.answer('linted')
+    await again
+    expect(turnsOfChild()).toEqual([
+      ['caller', 'thread', 'acted'],
+      ['person', null, 'empty'],
+      ['caller', 'thread', 'empty'],
+    ])
+  })
+})
+
 describe('a fork of a busy session', () => {
   it('is one thread with one instruction, the fork’s own', async () => {
     askAgents()
@@ -104,6 +143,18 @@ describe('a fork of a busy session', () => {
     const thread = w.store.mail.latestBetween(addr(orchestrator), addr(forkId))!
     expect(thread).toMatchObject({ origin: 'send_to_session', state: 'running' })
     expect(bodies(thread)).toEqual([['assign', addr(orchestrator), 'read the logs']])
+  })
+})
+
+describe('the turn a child’s report starts in its caller', () => {
+  it('is a turn of its own kind, not a caller’s send, whatever thread the caller owns', async () => {
+    askAgents()
+    const parent = await w.callerSession()
+    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    handleOf(child)!.answer('done')
+    await w.until(() => (handleOf(parent)?.sent.length ?? 0) === 1)
+    expect(w.store.mail.turnsOf(parent).map((t) => [t.startedBy, t.threadId])).toEqual([['report', null]])
   })
 })
 

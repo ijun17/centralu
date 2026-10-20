@@ -469,3 +469,40 @@ describe('retention takes the write lock before it reads (L10)', () => {
     expect(used.every((u) => u === 'immediate')).toBe(true)
   })
 })
+
+describe('retention of turns (§4.1)', () => {
+  const turn = (s: Store, session: string, seq: number, threadId: string | null, ended: boolean) => {
+    s.mail.startTurn({ sessionId: session, turnSeq: seq, threadId, startedBy: threadId ? 'caller' : 'person', startedAt: NOW - 1000 + seq })
+    if (ended) s.mail.endTurn(session, seq, NOW, 'acted')
+  }
+  const seqs = (s: Store, session: string) => s.mail.turnsOf(session).map((t) => t.turnSeq)
+
+  it('a turn of no thread goes once a later one of the session has ended; the latest ended one, a running one and a thread’s turns stay', () => {
+    const s = new Store()
+    s.mail.insertThread(thread(tid(1)), NOW)
+    // s1: three of the person’s, the last still running; a turn of a thread between
+    turn(s, 's1', 1, null, true)
+    turn(s, 's1', 2, tid(1), true)
+    turn(s, 's1', 3, null, true)
+    turn(s, 's1', 4, null, false)
+    // s2: one ended turn of no thread is the latest ended one
+    turn(s, 's2', 1, null, true)
+    sweepMail(dbOf(s), NOW)
+    expect(seqs(s, 's1')).toEqual([2, 3, 4])
+    expect(seqs(s, 's2')).toEqual([1])
+    // Again, and a session with many: only the newest ended one stays
+    for (let i = 5; i < 60; i++) turn(s, 's1', i, null, true)
+    sweepMail(dbOf(s), NOW, { batch: 7 })
+    expect(seqs(s, 's1')).toEqual([2, 4, 59])
+  })
+
+  it('a turn of a thread that goes becomes a turn of none and goes in the same sweep, the latest ended one excepted', () => {
+    const s = new Store()
+    doneThread(s.mail, tid(1), 200 * DAY)
+    turn(s, 's1', 1, tid(1), true)
+    turn(s, 's1', 2, null, true)
+    sweepMail(dbOf(s), NOW)
+    expect(s.mail.thread(tid(1))).toBeUndefined()
+    expect(seqs(s, 's1')).toEqual([2])
+  })
+})

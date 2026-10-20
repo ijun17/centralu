@@ -5,6 +5,7 @@ import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { MailToolArgs } from '../mail/tool.js'
+import type { TurnStart } from '../mail/turns.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -90,6 +91,8 @@ export type MailHooks = {
   tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
+  turnStarted?(sessionId: string, turn: TurnStart): void
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -448,6 +451,7 @@ export class SessionManager {
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
+    this.keptAtStart = new Set(keeperOpts.keptSessions ?? [])
     this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.queue.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
       setTimeout(() => {
@@ -819,9 +823,19 @@ export class SessionManager {
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   private mailHooks: MailHooks | null = null
 
+  /** The sessions the keeper handed over from the last host, which this one took over mid-run */
+  private keptAtStart: ReadonlySet<string> = new Set()
+
+  /** Whether the session's turn goes on under the keeper from the host before: its mail turn row is not lost (§6) */
+  keptInTurn(sessionId: string): boolean {
+    const m = this.meta.get(sessionId)
+    return this.keptAtStart.has(sessionId) && !!m && inTurn(m.state)
+  }
+
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
+    this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
 
   /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */

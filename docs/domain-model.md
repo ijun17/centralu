@@ -398,7 +398,7 @@ and answers, and the delivery engine (`mail/delivery.ts`) wakes the receiver. Ap
 | Message | One post: a sender, a kind (`assign`, `question`, `answer`, `report`, `notice`, `note`, `event`), a body (the sender's words) and `facts` (what Centralu knows about it). Only Centralu writes `facts` and `event`s |
 | Receipt | One recipient's progress with one message: due, attempted, delivered, read, handled. Undelivered mail is a query on receipts. `held` says why one waits for the person: `uncertain` (a host died sending it), `failed` (six tries), `policy` (the receiver runs without asking), `budget` and `loop` (§7.9 pauses); `released` and `dismissed` are the person's answers |
 | Address | A party's name in mail: `session:<hostId>/<sessionId>`, `app:<hostId>/<projectId>/<appId>`, `person`, and `centralu` (a sender only). Host ids are in every id and address from the start, so mail can cross a link later without rewriting any |
-| Turn record | Which thread started each turn of a session (`mail_turns`): written when the delivery wakes a session with mail and closed when its turn ends (`empty` when it called no tool); what the loop and token guards count |
+| Turn record | Who started each turn of a session and which thread it belongs to (`mail_turns`): `mail` when the delivery wakes a session, `caller` for a message of the session that gave it work, `person`, `cli` for the CLI running on by itself, `report` for a report or notice about another session, `app` for an app's message; closed when the turn ends (`empty` when it called no tool). Only the `mail` ones are what the loop and token guards count. A turn of no thread is kept only while it runs, plus the session's latest ended one |
 
 Where it is stored:
 

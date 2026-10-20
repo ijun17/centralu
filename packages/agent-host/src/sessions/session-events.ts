@@ -575,7 +575,7 @@ export class SessionEvents {
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
     // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
     const inputId = joins ? randomUUID() : undefined
-    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId)
+    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
