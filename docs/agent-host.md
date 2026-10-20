@@ -2788,7 +2788,7 @@ this one for you.
 | `centralu serve --connection` | Prints one JSON line and exits (below). Creates `serve.json` if there is none yet. It carries the limited credential and lists the full ones, never their values (#1405) |
 | `centralu serve --connection --pair <label>` | The same, with a new full credential for `<label>` (`token`, and its id as `credential`), printed once and kept as its SHA-256 only; it replaces `<label>`'s earlier one. A hub runs it at each link as `hub:<its name>` (#1405) |
 | `centralu serve --revoke <id>` | Withdraws one full credential; its next hello is refused. Prints one JSON line, `{ v, revoked, id }` (#1405) |
-| `centralu serve --rotate-token` | Draws a new key and withdraws every full credential, keeping the port. A running serve hands out what its old key derives until it restarts |
+| `centralu serve --rotate-token` | Draws a new key and withdraws every full credential, keeping the port. A running serve keeps its old key until it restarts: the limited credential `--connection` prints from the new key works once it has |
 | `centralu serve --autostart on\|off\|status` | Starts this machine's host at boot, stops doing that, or says whether it does (below). Never starts or stops a host now. Prints one JSON line |
 | `centralu serve --help` | The above |
 

@@ -230,7 +230,8 @@ export function changeServeState(dataDir, change, platform = process.platform, {
       } catch {
         // gone meanwhile: try again
       }
-      if (i >= 200) throw new Error(`${lock} is held by another serve; try again`)
+      // Past the 10 s after which a lock counts as a crashed writer's, so a waiter takes it over rather than giving up first
+      if (i >= 480) throw new Error(`${lock} is held by another serve; try again`)
       sleep(25)
     }
   }
@@ -239,7 +240,8 @@ export function changeServeState(dataDir, change, platform = process.platform, {
     if (!before) throw new Error(`${file} is missing or unreadable`)
     const after = change(before)
     if (after !== before) replacePrivate(file, stateFile(after), platform)
-    return readServeState(dataDir)
+    // What was written, as a reader reads it: never null once written
+    return after !== before ? parseServeState(JSON.stringify(stateFile(after))) : before
   } finally {
     rmSync(lock, { force: true })
   }
@@ -248,14 +250,15 @@ export function changeServeState(dataDir, change, platform = process.platform, {
 /**
  * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one
  * credential: a hub pairing again (each link does) replaces its own, and `window` the window's. The `legacy` one a
- * version 1 file left goes with any pairing: whoever held it pairs now. Returns `{ token, id, state }`.
+ * version 1 file left goes with a hub's pairing: whoever held it was a hub, which pairs now. Returns `{ token, id, state }`.
  */
 export function pairServe(dataDir, label, platform = process.platform, now = Date.now()) {
   ensureServeState(dataDir, platform, now)
   const { token, id } = mint()
   const state = changeServeState(dataDir, (s) => ({
     ...s,
-    full: [...s.full.filter((e) => e.label !== label && e.label !== LEGACY_LABEL), { id, label, verifier: verifierOf(token), created: now }],
+    // A hub's pairing removes the `legacy` one: whoever held it was a hub of before #1405, which pairs now
+    full: [...s.full.filter((e) => e.label !== label && !(label.startsWith('hub:') && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
   }), platform)
   return { token, id, state }
 }

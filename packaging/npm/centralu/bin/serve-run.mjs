@@ -231,7 +231,7 @@ export function rotateToken({ env, home }) {
   const dataDir = serveDataDir(env, home)
   rotateServeToken(dataDir)
   say(`replaced the key and withdrew every full credential in ${join(dataDir, SERVE_STATE_FILE)}.`)
-  say('A linked computer pairs again at its next connection, and a window at its next start. A serve that is running hands out what its old key derives until it restarts.')
+  say('A linked computer pairs again at its next connection, and a window at its next start. A serve that is running keeps its old key until it restarts: the limited credential --connection prints works once it has.')
   return 0
 }
 

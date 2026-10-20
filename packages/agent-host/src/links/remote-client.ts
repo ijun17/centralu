@@ -209,6 +209,10 @@ export class RemoteClient {
     const proven = this.opts.credential ? provesCredential(verifierOf(this.opts.token), nonce, f?.mac) : provesToken(this.opts.token, nonce, f?.mac)
     if (f?.kind === 'proof' && f.nonce === nonce && proven) return this.sendHello(ws)
     // Something else holds the port (another account's program, #838): it never gets the token
+    if (this.opts.credential) {
+      // A paired credential's proof (#1405): a host still running from before the update there proves under its old token
+      return this.lost(ws, "the machine's host did not prove it holds this computer's credential: it may be a host from before an update there, still running (restart Centralu there), or another program on the forward's port")
+    }
     this.lost(ws, "the forward's port answered without proving it is the machine's host")
   }
 
