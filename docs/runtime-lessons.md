@@ -1783,6 +1783,23 @@ Rule: the step-2 `.mjs` travels gzipped; every step's command stays under 30,000
 Guard: `host/links/install.test.ts` "fits one Windows command line in every shell, the installer itself included".
 Platforms: Windows and WSL remotes.
 
+**RE18. A script on a Windows remote's stdin is read from the stream up to a marker line, and confirmed.**
+Happened: the update of a Windows machine stopped at the `centralu` step twice (#1360): the step's PowerShell sat in
+`[Console]::In.ReadToEnd()` with no child process until ssh's 30-minute limit. Reproduced on the same PC (Windows 11, OpenSSH
+9.5, Windows PowerShell 5.1) through a private sshd on loopback and the installer's real command: `ReadToEnd` never
+returned in 2 to 9 runs of 30 one after another and 13 to 18 of 30 ten at a time, at 17,000 characters of stdin, which is
+the installer's own size; `[Console]::In.ReadLine()` up to a marker line hung in 1 to 4 runs of 30 to 80 at 100,000
+characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6; `OpenStandardInput().Read()` into a 64 KB buffer
+until the marker did not hang in 200 of 200 runs at 17,000 and at 100,000 characters (and not with a 4 KB buffer, or reading to the
+end). Payload size is not the cause; the text readers are. Each hung step leaves its `cmd.exe`, PowerShell and `conhost.exe`
+behind on the remote (113 of them after one afternoon of tests, until new sessions failed with 0xC0000142).
+Rule: a script goes on stdin as base64 and a line with one dot; the reader reads bytes until that line (or the end), prints
+`CENTRALU-STDIN-OK`, then runs the script; `exec` waits 30 s for that line, sends the step once more when it does not come
+(the step has not started), and then fails saying the remote never confirmed the input.
+Guard: `host/links/stdin-frame.test.ts` (the reader on Windows PowerShell 5.1 with a 100 KB script and the input never
+closed, a cut input, the confirmation wait and the second try).
+Platforms: Windows and WSL remotes (a WSL step is read the same way by the PowerShell that starts it).
+
 ## 14. How the runtime is tested
 
 These are practices, not invariants of the code; they say how a replacement module is proven.

@@ -15,7 +15,7 @@ import { Tail } from '../stream-text.js'
 export type SshRunResult = { code: number | null; stdout: string; stderr: string }
 
 /** Why a run did not get to its end: its deadline, too much output, or an ssh that could not start (ENOENT) */
-export type SshRunFailureKind = 'timeout' | 'output' | 'spawn'
+export type SshRunFailureKind = 'timeout' | 'output' | 'spawn' | 'ack'
 
 export class SshRunFailure extends Error {
   constructor(
@@ -33,6 +33,12 @@ export type SshRunOptions = {
   env?: NodeJS.ProcessEnv
   /** Written to ssh's stdin, then closed. Absent: stdin is not a pipe at all */
   stdin?: string
+  /**
+   * A line the remote prints once it has read the stdin (#1360): when none has come within `withinMs` of the spawn the
+   * run rejects with `message` (kind `ack`) and the ssh is ended, instead of waiting for `timeoutMs`. The marker stays in the
+   * output the run answers; the caller takes it out
+   */
+  ack?: { marker: string; withinMs: number; message: string }
   timeoutMs: number
   /** The most characters stdout may hold before the ssh is stopped; default `SSH_STDOUT_LIMIT` */
   stdoutLimit?: number
@@ -98,16 +104,20 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      clearTimeout(ackDeadline)
       if (kind !== 'spawn') void endChild(child)
       reject(new SshRunFailure(kind, message))
     }
     const deadline = setTimeout(() => fail('timeout', `ssh to ${opts.label} did not finish within ${seconds(opts.timeoutMs)}`), opts.timeoutMs)
+    const ack = opts.ack
+    const ackDeadline = ack ? setTimeout(() => fail('ack', ack.message), ack.withinMs) : undefined
     // Decoded as a stream: a character that arrives in two chunks is one character
     child.stdout!.setEncoding('utf8')
     child.stderr!.setEncoding('utf8')
     child.stdout!.on('data', (d: string) => {
       if (settled) return
       stdout += d
+      if (ack && stdout.includes(ack.marker)) clearTimeout(ackDeadline)
       if (stdout.length > stdoutLimit) fail('output', `ssh to ${opts.label} printed more than ${stdoutLimit / 1024 / 1024} MiB`)
     })
     child.stderr!.on('data', (d: string) => stderr.push(d))
@@ -117,6 +127,7 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      clearTimeout(ackDeadline)
       resolve({ code, stdout, stderr: stderr.text })
     })
   })
