@@ -316,7 +316,7 @@ export function sidebarMachinesTests(): void {
       const parent = await newSession(page, 'alpha')
       const idOf = (name: string) =>
         page.evaluate(
-          (n) => (Object.values((window as unknown as MockWindow).__store.getState().projects) as { id: string; name: string }[]).find((p) => p.name === n)!.id,
+          (n) => (Object.values<{ id: string; name: string }>((window as unknown as MockWindow).__store.getState().projects)).find((p) => p.name === n)?.id as string,
           name,
         )
       const ccId = await idOf('cc')

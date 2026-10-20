@@ -121,7 +121,7 @@ export type LayoutSlice = {
    * groups its row stands in (`foldGroupsHiding`). The parent's pointer to what it handed to another machine uses it
    * before it scrolls to them.
    */
-  revealSessions(ids: readonly string[]): void
+  revealSessions: (ids: readonly string[]) => void
   /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   saveWorkspace(): void
