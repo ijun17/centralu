@@ -595,6 +595,103 @@ export class MailRecords {
       .run(now, now, recipient, onlyRead ? 1 : 0, threadId, upToSeq).changes
   }
 
+  /** The mailboxes that have mail waiting (not read, handled, delivered or held): who the delivery sweep looks at */
+  recipientsWithMail(): string[] {
+    return this.db
+      .prepare<[], { recipient: string }>(
+        `SELECT DISTINCT recipient FROM mail_receipts
+          WHERE delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
+      )
+      .all()
+      .map((r) => r.recipient)
+  }
+
+  /**
+   * When the first of `recipient`'s waiting mail that is not due yet becomes due, or null for none: when to look at its
+   * mailbox next. Mail already due is not counted: it was looked at, and may be waiting for its receiver, not for the clock
+   */
+  nextDue(recipient: string, after: number): number | null {
+    const row = this.db
+      .prepare<[string, number], { due: number | null }>(
+        `SELECT MIN(due_at) AS due FROM mail_receipts
+          WHERE recipient = ? AND due_at > ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released')`,
+      )
+      .get(recipient, after)
+    return row?.due ?? null
+  }
+
+  /** Whether any of `recipient`'s waiting mail is due by `now` */
+  hasDue(recipient: string, now: number): boolean {
+    return !!this.db
+      .prepare<[string, number], { one: number }>(
+        `SELECT 1 AS one FROM mail_receipts
+          WHERE recipient = ? AND due_at <= ? AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND (held IS NULL OR held = 'released') LIMIT 1`,
+      )
+      .get(recipient, now)
+  }
+
+  /** Written, and committed, before a delivery is tried (§7.6.1): a host that dies after it and before `markDelivered` leaves a delivery that may have gone */
+  markAttempt(recipient: string, messageIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = ?, attempts = attempts + 1 WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, recipient, JSON.stringify(messageIds))
+  }
+
+  /** The tool took them (§7.6.2–4): delivered, and read for those whose words went in whole. A failed attempt's error is forgotten */
+  markDelivered(recipient: string, messageIds: readonly string[], readIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET delivered_at = ?, last_error = NULL WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, recipient, JSON.stringify(messageIds))
+    this.markRead(recipient, readIds, now)
+  }
+
+  /** How many times the most-tried of these has been attempted: when to give up and hold for the person */
+  attemptsOf(recipient: string, messageIds: readonly string[]): number {
+    const row = this.db
+      .prepare<[string, string], { n: number | null }>(`SELECT MAX(attempts) AS n FROM mail_receipts WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .get(recipient, JSON.stringify(messageIds))
+    return row?.n ?? 0
+  }
+
+  /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox. Not "uncertain": nothing went */
+  failAttempt(recipient: string, messageIds: readonly string[], error: string, retryAt: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, last_error = ?, due_at = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(error, retryAt, recipient, JSON.stringify(messageIds))
+  }
+
+  /** A try that was not made after all (the receiver left rest while it was being woken): the attempt is taken back, and it counts for nothing */
+  undoAttempt(recipient: string, messageIds: readonly string[]): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET attempt_at = NULL, attempts = MAX(attempts - 1, 0) WHERE recipient = ? AND delivered_at IS NULL AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(recipient, JSON.stringify(messageIds))
+  }
+
+  /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
+  setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET held = ? WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(held, recipient, JSON.stringify(messageIds))
+  }
+
+  /** Deliveries that were tried and not known to have gone: what a host that starts finds a previous one left (§7.6.5) */
+  attemptedUnconfirmed(): ReceiptRow[] {
+    return this.db
+      .prepare<[], ReceiptSql>(
+        `SELECT * FROM mail_receipts WHERE attempt_at IS NOT NULL AND delivered_at IS NULL AND read_at IS NULL AND handled_at IS NULL AND held IS NULL`,
+      )
+      .all()
+      .map(toReceipt)
+  }
+
+  /** Receipts the Inbox lists for a person to act on: held for a reason that needs them (§7.6, §7.7, §7.9) */
+  heldReceipts(): ReceiptRow[] {
+    return this.db
+      .prepare<[], ReceiptSql>(`SELECT * FROM mail_receipts WHERE held IS NOT NULL AND held != 'released' AND read_at IS NULL AND handled_at IS NULL ORDER BY due_at`)
+      .all()
+      .map(toReceipt)
+  }
+
   /**
    * What `recipient` has not read or handled, with its message and thread, oldest first: the rows a delivery re-reads at
    * drain time to build the frame from what is true then (§7.5). Not those already delivered (unless `again`, for a wake
@@ -604,7 +701,7 @@ export class MailRecords {
     const rows = this.db
       .prepare<[string, number, number], ReceiptSql>(
         `SELECT r.* FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
-          WHERE r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL AND r.held IS NULL AND r.due_at <= ?
+          WHERE r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND r.due_at <= ?
             AND (r.delivered_at IS NULL OR ? = 1)
           ORDER BY m.created_at, m.thread_id, m.seq`,
       )

@@ -112,6 +112,18 @@ export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean
   return senderIsOwnerSession && recipientIsAssignee && (kind === 'assign' || kind === 'note' || kind === 'answer')
 }
 
+/**
+ * Whether a message wakes a receiver at rest (§3.2, §9.5). Mail from a session, the person or Centralu does; an app's notice does
+ * not unless the app marked it `needsOwner` (or asked for it), and an app can ask for no wake at all. An `event` is never mail
+ */
+export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' | 'no' | null; needsOwner: boolean }): boolean {
+  if (m.kind === 'event') return false
+  if (sender !== 'app') return true
+  if (m.wake === 'no') return false
+  if (m.kind === 'notice') return m.needsOwner || m.wake === 'yes'
+  return true
+}
+
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
 export const DEBOUNCE_MS = 2_000
 

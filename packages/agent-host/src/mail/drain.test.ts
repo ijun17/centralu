@@ -24,6 +24,9 @@ function setup(policy?: MailPolicy) {
   return { store, mail }
 }
 
+/** What a drain says when there is nothing to say */
+const NOTHING = { text: '', messageIds: [], inline: [], pointed: [], wake: false, immediate: false, line: '' }
+
 describe('what a drain says (§7.3, §7.5)', () => {
   it('words that flow down (an assign from the owner) are quoted after the frame; the subject never is', () => {
     const { mail } = setup()
@@ -72,7 +75,7 @@ describe('what a drain says (§7.3, §7.5)', () => {
 
     // S2 reads the first one with the tool before the wake goes out
     mail.read(thread.id, S2, { after: 0 })
-    expect(mail.drain(S2)).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
+    expect(mail.drain(S2)).toEqual(NOTHING)
 
     mail.post(thread.id, S1, { kind: 'note', body: 'third' })
     expect(mail.drain(S2).messageIds).toHaveLength(1)
@@ -86,7 +89,7 @@ describe('what a drain says (§7.3, §7.5)', () => {
     const { thread } = openBy(mail, { by: S1, kind: 'assign', subject: 'work', body: 'go', assignee: S2 })
     expect(mail.drain(S1).text).toBe('')
     mail.update(thread.id, S1, { state: 'done', outcome: 'dropped' })
-    expect(mail.drain(S2)).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
+    expect(mail.drain(S2)).toEqual(NOTHING)
   })
 
   it('built when handed over: a sender the policy no longer lets write is dropped', () => {
@@ -95,7 +98,7 @@ describe('what a drain says (§7.3, §7.5)', () => {
     openBy(mail, { by: S1, kind: 'assign', subject: 'work', body: 'go', assignee: S2 })
     expect(mail.drain(S2).messageIds).toHaveLength(1)
     allowed = false
-    expect(mail.drain(S2)).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
+    expect(mail.drain(S2)).toEqual(NOTHING)
   })
 
   it('only the owner session’s words to the assignee flow down: not to a member, not an app’s, not a member’s to the owner', () => {
@@ -162,7 +165,7 @@ describe('a delivery is told once (M2, §7.6)', () => {
     expect(first.text).toContain('> land #12')
 
     delivered(store, message.id, S2)
-    expect(mail.drain(S2)).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
+    expect(mail.drain(S2)).toEqual(NOTHING)
     // Asked to point at what is delivered and unread, it points: it does not send the words again
     const again = mail.drain(S2, { again: true })
     expect(again).toMatchObject({ inline: [], pointed: [message.id] })
