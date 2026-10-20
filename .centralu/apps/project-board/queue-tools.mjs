@@ -17,6 +17,7 @@ import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } fro
 import { queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
+import { acknowledge, ackHint, dueReposts, markReposted, unacked } from './notice-acks.mjs'
 
 const dataDir = () => centralu.dataDir
 const WATCH = join(APP_DIR, 'bin', 'merge-queue.mjs')
@@ -64,7 +65,8 @@ export async function tellSessions(now = Date.now()) {
     for (const e of q.events.filter((x) => x.notify && x.to && !x.told)) {
       const tried = tellTries.get(e.seq)
       if (tried && now < tried.at + TELL_RETRY_MS) continue
-      const ok = await centralu.notify(e.to, e.text)
+      // The session hears how to acknowledge it, or it stays listed (#1351)
+      const ok = await centralu.notify(e.to, `${e.text}\n${ackHint(e)}`)
       const n = (tried?.n ?? 0) + 1
       if (!ok && n < TELL_TRIES) {
         tellTries.set(e.seq, { n, at: now })
@@ -75,6 +77,11 @@ export async function tellSessions(now = Date.now()) {
         const ev = fresh.events.find((x) => x.seq === e.seq)
         if (ev) ev.told = ok ? true : 'failed'
       })
+    }
+    // A message that needs attention and is still unacknowledged after 30 minutes is posted again, once (#1351)
+    for (const e of dueReposts(readQueue(dataDir()), now).filter((x) => x.to)) {
+      await centralu.notify(e.to, `Merge queue: still not acknowledged after ${Math.round((now - Date.parse(e.at)) / 60_000)} minutes: ${e.text}\n${ackHint(e)}`)
+      updateQueue(dataDir(), (fresh) => markReposted(fresh, e.seq, new Date(now).toISOString()))
     }
   } catch (err) {
     console.error(`[project-board] merge queue: telling a session failed: ${err?.message ?? err}`)
@@ -332,9 +339,32 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
   return queuedAnswer(summary, r, { integrated: true, pr: number, url, opened, tier: j.tier, line: j.line })
 }
 
-async function mergeQueue({ all = false }) {
+/** The messages an owner (every owner when none is given) has not acknowledged, for merge_queue and the screen (#1351) */
+function unackedView(owner = null) {
+  return unacked(readQueue(dataDir()), owner).map(({ seq, at, owner: o, kind, pr, text }) => ({ seq, at, owner: o, kind, pr, text }))
+}
+
+async function mergeQueue({ all = false, owner }) {
   const v = queueView({ all })
-  return linesAnswer(v.summary, [['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, pause: v.pause, seq: v.seq })
+  const who = owner?.trim() || null
+  const waiting = unackedView(who)
+  // What its owner has not acknowledged comes first, with how to (#1351)
+  const head = waiting.length
+    ? [
+        `${plural(waiting.length, 'message')} not acknowledged${who ? ` by ${who}` : ''}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`,
+        ...waiting.map((e) => `#${e.seq} ${e.owner ? `(${e.owner}) ` : ''}${e.text}`),
+      ]
+    : []
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq })
+}
+
+async function ack({ owner, seqs = [], upTo }) {
+  const who = owner.trim()
+  if (!seqs.length && upTo === undefined) return asError(answer('Nothing acknowledged: give seqs, or upTo.', { acked: 0 }))
+  const at = new Date().toISOString()
+  const n = updateQueue(dataDir(), (q) => acknowledge(q, who, { seqs, upTo: upTo ?? null, at }))
+  const left = unackedView(who).length
+  return answer(`Acknowledged ${plural(n, 'message')} for ${who}; ${left} still not acknowledged.`, { acked: n, left })
 }
 
 async function unqueue({ pr }) {
@@ -396,10 +426,29 @@ export const tools = {
       title: 'The merge queue',
       description:
         'The merge queue (queue_merge): each item waiting, in CI (alone or in a batch), needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, the batches, who drives it now, and the latest messages. Instead of gh pr list / gh run list to follow merges.',
-      inputSchema: z.object({ all: z.boolean().optional().describe('Also items finished more than a day ago') }),
+      inputSchema: z.object({
+        all: z.boolean().optional().describe('Also items finished more than a day ago'),
+        owner: z.string().max(80).optional().describe("Yours: list first the messages to you that you have not acknowledged (ack them with ack)"),
+      }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     handler: answering(mergeQueue),
+  },
+
+  ack: {
+    config: {
+      title: 'Acknowledge merge queue messages',
+      description:
+        "Acknowledge the merge queue's messages to you (needs attention, landed, closed) once handled: by seq, or every one up to a seq. Until then merge_queue lists them first, the watch command without --after replays them, and one that needs attention is posted into your session again after 30 minutes.",
+      inputSchema: z.object({
+        owner: z.string().min(1).max(80).describe('The owner the messages are for: the name you queued with'),
+        seqs: z.array(z.number().int()).max(200).optional().describe('The messages to acknowledge, by seq'),
+        upTo: z.number().int().optional().describe('Acknowledge every one of your messages up to this seq'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    handler: answering(serially(ack)),
   },
 
   unqueue: {

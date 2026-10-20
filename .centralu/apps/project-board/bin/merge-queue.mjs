@@ -13,6 +13,7 @@
 // flight finishes and is written down first).
 import { releaseLease, readQueue, startDriver, TICK_MS } from '../queue-driver.mjs'
 import { watchState } from '../queue.mjs'
+import { ackHint, watchStart } from '../notice-acks.mjs'
 import { shellQuote } from '../util.mjs'
 
 const USAGE = 'Usage: node .centralu/apps/project-board/bin/merge-queue.mjs watch --data <folder> [--owner <name>] [--after <seq>] [--minutes <n>]'
@@ -35,7 +36,8 @@ if (!ok || !opts.data || (opts.after !== null && !Number.isInteger(opts.after)) 
 
 let after
 try {
-  after = opts.after ?? readQueue(opts.data).seq
+  // With no --after, from the owner's oldest message not acknowledged yet (#1351), so nothing missed is skipped
+  after = opts.after ?? watchStart(readQueue(opts.data), opts.owner)
 } catch (e) {
   console.error(e.message)
   process.exit(2)
@@ -72,9 +74,9 @@ function look() {
       ? ['A batch is still finishing. To hear when it has, run again in the background:', again(q.seq)]
       : ['Nothing left queued.']
   const code = news.some((e) => e.kind === 'attention') ? 3 : 0
-  if (done && news.length) return finish(code, [...news.map((e) => e.text), ...tail])
+  if (done && news.length) return finish(code, [...news.flatMap((e) => [e.text, ackHint(e)]), ...tail])
   if (done) return finish(0, [`Nothing queued${opts.owner ? ` for ${opts.owner}` : ''}.`])
-  if (Date.now() > deadline) return news.length ? finish(code, [...news.map((e) => e.text), ...tail]) : finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
+  if (Date.now() > deadline) return news.length ? finish(code, [...news.flatMap((e) => [e.text, ackHint(e)]), ...tail]) : finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
   // The driver's timer does not hold the process; this one does
   setTimeout(look, TICK_MS)
 }

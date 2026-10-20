@@ -566,7 +566,8 @@ export const noticeKey = (reason, head) => `${reason.kind}:${head ?? ''}:${reaso
  */
 export function watchState(q, { owner = null, after }) {
   const mine = (x) => !owner || x.owner === owner
-  const news = q.events.filter((e) => e.seq > after && e.notify && mine(e))
+  // What the owner acknowledged already is not news again (#1351, notice-acks.mjs)
+  const news = q.events.filter((e) => e.seq > after && e.notify && !e.ackedAt && mine(e))
   const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
   const owned = new Set(q.items.filter(mine).map((i) => i.pr))
   const batchPending = (q.batches ?? []).some((b) => BATCH_ACTIVE.has(b.state) && b.members.some((m) => !owner || owned.has(m.pr)))

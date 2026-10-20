@@ -1475,7 +1475,7 @@
       function renderQueue() {
         const box = $('queue')
         const items = queue?.queue ?? []
-        if (!items.length) {
+        if (!items.length && !queue?.unacked?.length) {
           box.hidden = true
           box.replaceChildren()
           return
@@ -1486,6 +1486,8 @@
         const groups = QUEUE_GROUPS.map(([state, label]) => ({ state, label, items: items.filter((i) => i.state === state || (state === 'merged' && i.state === 'closed')) })).filter((g) => g.items.length)
         box.replaceChildren(
           el('div', { class: 'q-head' }, el('span', { id: 'queue-title' }, 'Merge queue'), el('span', { class: 'quiet' }, queue.summary.replace(/^Merge queue: /, ''))),
+          // Messages their sessions have not acknowledged (#1351): one line, the sessions ack them with the ack tool
+          ...(queue.unacked?.length ? [el('div', { class: 'q-unacked quiet', id: 'queue-unacked' }, `${queue.unacked.length} message${queue.unacked.length === 1 ? '' : 's'} not acknowledged by ${[...new Set(queue.unacked.map((e) => e.owner ?? 'nobody'))].join(', ')}`)] : []),
           el(
             'div',
             { class: 'q-groups' },

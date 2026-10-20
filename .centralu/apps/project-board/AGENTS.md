@@ -253,10 +253,20 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   when nothing is left, 6 at its deadline (`--minutes`, default 100), 2 for a wrong argument or an
   unreadable queue, 130 or 143 when stopped by SIGINT or SIGTERM (the tick in flight finishes and is
   written down first). It names the command to run again, quoted like queue_merge's (`shellQuote`). A Claude session is woken when a background command ends.
-- **The screen** shows a "Merge queue" section above the board while it has items: needs attention
-  (with why), CI, waiting, merged in the last day, each with Unqueue while active. Nothing tells a
+- **Until acknowledged** (#1351, a stopgap until the mailbox, #1347; all of it in `notice-acks.mjs`, so the
+  mail can replace that one module): a message stays unacknowledged for its owner until the owner calls
+  `ack` (`owner`, and `seqs` or `upTo`), so a session that missed it (a `watch` restarted with a later
+  `--after`, a crash, a notice lost in a compacted or busy session) finds it again. `merge_queue` with
+  `owner` lists that owner's unacknowledged messages first, with what to do; `watch` with no `--after`
+  starts from the owner's oldest unacknowledged one, and never repeats one acknowledged; the posted
+  notice and `watch` add "Ack it with … ack({ owner, seqs })". One that needs attention and is still
+  unacknowledged 30 minutes after it was said is posted into its owner's session once more
+  (`repostedAt`). Kept on the event (`ackedAt`), in the queue file.
+- **The screen** shows a "Merge queue" section above the board while it has items, or messages not
+  acknowledged (one line naming whose): needs attention (with why), CI, waiting, merged in the last
+  day, each with Unqueue while active. Nothing tells a
   screen when the driver moves an item, so it reads `merge_queue` again every 15 s while one is active.
-- `PROJECT_BOARD_QUEUE_TICK_MS`, `PROJECT_BOARD_QUEUE_POLL_MS` and `PROJECT_BOARD_QUEUE_TELL_RETRY_MS` shorten the waits only for tests.
+- `PROJECT_BOARD_QUEUE_TICK_MS`, `PROJECT_BOARD_QUEUE_POLL_MS`, `PROJECT_BOARD_QUEUE_TELL_RETRY_MS` and `PROJECT_BOARD_QUEUE_REPOST_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
 
