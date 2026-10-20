@@ -149,7 +149,7 @@ Each is argued where the link points, with the alternatives not taken.
 | `report` | Centralu (a turn's end), or the assignee by hand | how a turn of the thread ended, or the assignee's own summary | yes |
 | `notice` | an app, Centralu (watches, task rules) | news about the thread | yes, batched (§7.9) |
 | `note` | anyone | a plain post in the thread | yes |
-| `event` | Centralu | a change of the thread itself: state, assignee, blocker resolved, the person took over | no: it is read with the thread, and the person sees it on the board |
+| `event` | Centralu | a change of the thread itself: state, assignee, blocker resolved, the person added an instruction or took the work over (§6) | no: it is read with the thread, and the person sees it on the board |
 
 A receiver in a turn gets mail by §7.1 and §7.2, whatever the kind: in that turn when it is the turn's thread, after it otherwise.
 
@@ -190,7 +190,8 @@ How the state moves:
   stays `blocked`: a move to another state is refused until the blocker is resolved (the queue's "fixed and requeued"
   is two calls).
 - A blocker that stands makes it `blocked`. The last one resolving restores the state it had before:
-  - for a session assignee, `running` if a turn of it is going, else `open`;
+  - for a session assignee, `running` if a turn of it is going, else `open`; a thread that was in `review` goes back to
+    `review` (as built in slice 1);
   - for an app assignee, the state it had when it was blocked (the app still has the work in hand);
   - with no assignee, `open`.
 
@@ -358,16 +359,32 @@ The mailbox records **whose each turn is**, when it starts (`mail_turns`):
 |---|---|---|---|
 | A delivery that carries mail of thread T where the session is the assignee or a member (§5) | `mail` | T | T's owner |
 | A delivery that carries only mail of threads the session owns (its children's reports, notices about work it gave) | `mail` | the parent of those threads, if they have one and it is still `running` with this session as its assignee; else none | that parent's owner, else nobody |
-| The person typing (composer, a slash command, `/compact`, Continue) | `person` | none | nobody |
+| The person typing (composer, a slash command, `/compact`, Continue) with **Just asking** (the default, §10.3), at rest | `person` | none | nobody |
+| The person typing with **Add to the task** | `person` | the thread the session is assignee of | T's owner, who is also told once, with an `event`, that the person added an instruction |
+| The person typing with **Take it over** | `person` | none | nobody. The thread is closed (`done`, outcome `dropped`, `facts.takenOver`) and its owner is told once |
 | The person replying from the Inbox in thread T | `person` | T | T's owner (the person may write to the assignee *in* the thread) |
 | The CLI itself (a background task finished, Claude's task notification) | `cli` | the thread of the turn that left that work running, if it paused | as that thread |
 | A synchronous caller's own send (`start_agent`'s first message, `agent_session send`, `ask_project`) | `caller` | the thread the call opened or names | the call's wait, else T's owner |
 
 Consequences:
 
-- **#1340, structurally.** A paused thread's later turns that the person starts are the person's. The owner is told once
-  in the thread (`event`: "the person continued in this session; its later turns are theirs"). The thread stays
-  `running` (paused) until its background work ends or the owner closes it. No mark has to be cleared at the right moment.
+- **A turn belongs to whoever started it (owner, 2026-10-20, #1377).** A person's message never closes a delegated thread
+  and never ends the report it owes.
+  - A turn the person starts is theirs and is reported to nobody. The thread stays as it was: `running` (paused on
+    background work, or waiting on a child) or `review`.
+  - Its next turn of the thread (a delivery, the CLI ending paused work, the caller's send) is reported as the thread's.
+  - The person chooses per message (§10.3):
+    - **Just asking** (default): the person's turn; the thread is not touched, and nobody is told.
+    - **Add to the task**: the turn counts as the thread's, and its end is reported to the owner. The owner is told once
+      that the person added an instruction (an `event` with the facts only, never the person's words).
+    - **Take it over**: the thread is closed (`done`, outcome `dropped`), and the owner is told once that the person took
+      the work over. Later turns are the person's.
+  - **A person's message inside a turn the thread started** joins that turn, and the turn stays the thread's. The
+    report says the person added a note during it (`facts.personNote = true`); the owner reads the words with
+    `read_session` if it needs them.
+  - This replaces the "the person continued in this session; its later turns are theirs" event #1344 sends as the
+    default. #1340 is still fixed structurally: the person's turns are never reported as the work, and no mark has to be
+    cleared at the right moment.
 - **Work handed down keeps a thread running.** Session B, working on T1 for A, starts child C on T2 (T2's parent is T1).
   B's turn of T1 ends while T2 is still open. The report to A says so (`facts.waitingOn = [T2]`, "paused: waiting on 1
   thread it handed on"), and T1 stays `running`. C's report starts a turn of B. That turn belongs to T1 (the second row
@@ -1048,6 +1065,23 @@ the orchestrator's person, which no project app may read (task-ledger §13.2). T
 
 A delivery is the compact line (§9.2). A session's header shows its open threads (owner or assignee) with their state, and
 its watches, each cancellable (#1324 point 5).
+
+**The composer of a session with a delegated thread** (it is the assignee of a thread that is not `done`) shows a small
+choice beside Send, per message (owner, 2026-10-20, #1377):
+
+| Choice | What happens (§6) |
+|---|---|
+| **Just asking** (default) | the turn is the person's and is not reported; the thread and its owed report are untouched |
+| **Add to the task** | the turn counts as the thread's; the owner gets its report and one `event` saying the person added an instruction |
+| **Take it over** | the thread is closed and its owner is told once; the session is the person's from then on |
+
+- The choice resets to Just asking after each message. Slash commands (`/compact` included) and Continue are always Just
+  asking.
+- In a turn the thread started, a message joins that turn whatever the choice, and the turn stays the thread's with a
+  note (§6). Take it over still closes the thread when that turn ends.
+- With no delegated thread, the composer shows nothing new.
+- The choice is sent with the message (an additive field on the send RPC). An older host ignores it, which means Just
+  asking.
 
 ## 11. Linked machines
 
