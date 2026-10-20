@@ -77,7 +77,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #0f0f0f; /* the app floor */
-  --color-surface-side: #1d1d1d; /* the sidebar — ΔL* 6.5 off the floor, see the session-view block */
+  --color-surface-side: #181818; /* the sidebar and the top bar — darker by the owner's ask (2026-10-20), see the session-view block */
   --color-surface-raised: #242424; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #353535; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #424242; /* hover and pressed; also my own message bubble */
