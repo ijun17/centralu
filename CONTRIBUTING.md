@@ -280,13 +280,15 @@ or a catch, no assertion that narrows (`as T` from `unknown`, `x!`) in shipped c
 floating. Data from outside the process goes through a zod schema or a narrowing guard, and a caught
 value's text through `errorMessage(e)` from `@cc/protocol`, not `(e as Error).message`. The findings that
 were there when these rules came in are listed in `tooling/lint-allowlist/`, one list per package, a
-sorted line per file and rule with a count. A listed file may hold up to its count, so a new finding in it
-fails like anywhere else: fix it, do not list it. A file that holds fewer passes, so fixing something never
-makes you touch a list. Code that moves to another file, or a file you rename, takes its findings along:
-run `pnpm lint:tighten`, which lowers each line to what its file holds and gives what a rule gave up to
-where its findings went, never more. `tooling/type-aware-lint.test.ts` compares the lists with main's at
-the merge base: a line may be new or higher only as such a move, so no rule totals more than on main
-(CI's `verify` fetches main's history for it; elsewhere, without one, the test says it did not compare).
+sorted line per file and rule with the number of findings it holds. A new finding in a listed file fails
+like anywhere else: fix it, do not list it. When you fix listed findings, run `pnpm lint:tighten`: a line
+above what its file holds fails `pnpm lint` too, since it would let the next change add one there unseen.
+Code that moves to another file, or a file you rename, takes its findings along the same way:
+`pnpm lint:tighten` lowers each line to what its file holds, gives what a rule gave up to where its
+findings went, never more, and prints each such move. `tooling/type-aware-lint.test.ts` compares the
+lists with main's at the merge base (a push to main with its parent): a line may be new or higher only as
+such a move, so no rule totals more than on main (CI's `verify` fetches main's history for it and fails
+without it; elsewhere, without one, the test says it did not compare).
 The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
 that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
 code. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The

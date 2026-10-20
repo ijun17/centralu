@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
 import { afterEach, describe, expect, it } from 'vitest'
+import { SLOW } from './test-timing.js'
 import {
   ALLOWLIST_DIR,
   applyAllowlist,
@@ -11,6 +13,9 @@ import {
   countFindings,
   disabledFindings,
   formatList,
+  lintFailed,
+  lintHints,
+  mainLists,
   otherErrors,
   parseList,
   readAllowlist,
@@ -76,11 +81,16 @@ describe('the lists', () => {
 })
 
 describe('applying the lists', () => {
+  it('says a line is above what its file holds only for a file whose findings are known', () => {
+    const broken = { ...result('packages/a/src/x.ts', [{ ...message(null), fatal: true }]), fatalErrorCount: 1 }
+    expect(applyAllowlist(ROOT, [broken], list([['packages/a/src/x.ts', UNSAFE, 3]])).loose).toEqual([])
+  })
+
   it('takes out the findings of a file within its count', () => {
     const results = [result('packages/a/src/x.ts', [message(UNSAFE), message(UNSAFE), message(null, 1)])]
     const { over, loose } = applyAllowlist(ROOT, results, list([['packages/a/src/x.ts', UNSAFE, 3]]))
     expect(over).toEqual([])
-    expect(loose).toBe(1)
+    expect(loose).toEqual([{ file: 'packages/a/src/x.ts', rule: UNSAFE, count: 2, allowed: 3 }])
     expect(results[0]?.messages.map((m) => m.severity)).toEqual([1])
     expect(results[0]?.errorCount).toBe(0)
     expect(results[0]?.warningCount).toBe(1)
@@ -110,7 +120,7 @@ describe('tightening the lists', () => {
     ['other.ts', UNSAFE, 4],
   ])
   const found = list([['a.ts', UNSAFE, 2], ['b.ts', UNSAFE, 5], ['c.ts', BANG, 3], ['d.ts', '@typescript-eslint/no-floating-promises', 1]])
-  const tightened = tighten(allow, found, new Set(['a.ts', 'b.ts', 'c.ts', 'd.ts']), (file) => file !== 'gone.ts')
+  const { allow: tightened, moves } = tighten(allow, found, new Set(['a.ts', 'b.ts', 'c.ts', 'd.ts']), (file) => file !== 'gone.ts')
 
   it('lowers a line to what its file holds, and drops it at zero', () => {
     expect(tightened.get('a.ts')).toEqual(new Map([[UNSAFE, 2]]))
@@ -130,10 +140,15 @@ describe('tightening the lists', () => {
     expect(tightened.has('d.ts')).toBe(false)
     const total = (l: Allowlist, rule: string) => [...l.values()].reduce((n, r) => n + (r.get(rule) ?? 0), 0)
     for (const rule of [UNSAFE, BANG]) expect(total(tightened, rule)).toBeLessThanOrEqual(total(allow, rule))
+    // And says what it listed, so the change shows it
+    expect(moves).toEqual([
+      { file: 'b.ts', rule: UNSAFE, count: 2 },
+      { file: 'c.ts', rule: BANG, count: 1 },
+    ])
   })
 
   it('moves the lines of a renamed file to its new path', () => {
-    const renamed = tighten(list([['old.ts', UNSAFE, 2]]), list([['new.ts', UNSAFE, 2]]), new Set(['new.ts']), (file) => file === 'new.ts')
+    const renamed = tighten(list([['old.ts', UNSAFE, 2]]), list([['new.ts', UNSAFE, 2]]), new Set(['new.ts']), (file) => file === 'new.ts').allow
     expect(renamed).toEqual(list([['new.ts', UNSAFE, 2]]))
   })
 
@@ -143,12 +158,12 @@ describe('tightening the lists', () => {
     const counted = countedFiles(ROOT, [broken, ignored, result('packages/a/src/fine.ts', [])])
     expect([...counted]).toEqual(['packages/a/src/fine.ts'])
     // So a file that does not parse for now keeps its lines, and gives up nothing to move elsewhere
-    const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), list([['packages/a/src/fine.ts', UNSAFE, 2]]), counted, () => true)
+    const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), list([['packages/a/src/fine.ts', UNSAFE, 2]]), counted, () => true).allow
     expect(kept).toEqual(list([['packages/a/src/broken.ts', UNSAFE, 2]]))
   })
 
   it('adds no line when nothing was given up', () => {
-    expect(tighten(new Map(), found, new Set(['a.ts', 'b.ts']), () => true).size).toBe(0)
+    expect(tighten(new Map(), found, new Set(['a.ts', 'b.ts']), () => true).allow.size).toBe(0)
   })
 })
 
@@ -175,7 +190,105 @@ describe("the lists against main's", () => {
   })
 })
 
+describe("main's lists", () => {
+  let repo = ''
+  afterEach(() => rmSync(repo, { recursive: true, force: true }))
+
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const write = (path: string, text: string) => {
+    mkdirSync(join(repo, path, '..'), { recursive: true })
+    writeFileSync(join(repo, path), text)
+  }
+  const commit = (message: string) => {
+    git(repo, 'add', '-A')
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', message)
+    return git(repo, 'rev-parse', 'HEAD')
+  }
+  /** A repository whose main has the module and a list, and a branch off it */
+  function setUp(): string {
+    repo = mkdtempSync(join(tmpdir(), 'lint-main-'))
+    git(repo, 'init', '-q', '-b', 'main')
+    write('README', 'before the lists\n')
+    commit('before')
+    write('tooling/lint-allowlist.ts', '// the module\n')
+    write(`${ALLOWLIST_DIR}/packages-a.txt`, formatList(list([['packages/a/src/x.ts', UNSAFE, 2]])))
+    const withLists = commit('lists')
+    git(repo, 'checkout', '-q', '-b', 'feature')
+    return withLists
+  }
+
+  it('are read at the merge base, also when main moved on and HEAD is a merge of the two (a pull request)', () => {
+    const base = setUp()
+    write(`${ALLOWLIST_DIR}/packages-a.txt`, formatList(list([['packages/a/src/x.ts', UNSAFE, 3]])))
+    commit('raise on the branch')
+    git(repo, 'checkout', '-q', 'main')
+    write('later.txt', 'main moved on\n')
+    commit('main later')
+    git(repo, 'checkout', '-q', 'feature')
+    // What lists more than main is told apart from what main has
+    const onBranch = mainLists(repo, 'main')
+    expect(onBranch).toEqual({ kind: 'lists', base, lists: list([['packages/a/src/x.ts', UNSAFE, 2]]) })
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', '--no-edit', 'main')
+    expect(mainLists(repo, 'main')).toMatchObject({ kind: 'lists', lists: list([['packages/a/src/x.ts', UNSAFE, 2]]) })
+  }, 60_000 * SLOW)
+
+  it('are read at the parent when HEAD is main itself (a push to main)', () => {
+    const base = setUp()
+    git(repo, 'checkout', '-q', 'main')
+    write(`${ALLOWLIST_DIR}/packages-a.txt`, formatList(list([['packages/a/src/x.ts', UNSAFE, 1]])))
+    commit('lower on main')
+    expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base, lists: list([['packages/a/src/x.ts', UNSAFE, 2]]) })
+  }, 60_000 * SLOW)
+
+  it('are none before the module existed, and empty once it does and every list is gone', () => {
+    setUp()
+    git(repo, 'checkout', '-q', 'main')
+    const before = git(repo, 'rev-parse', 'HEAD~1')
+    git(repo, 'checkout', '-q', '-b', 'old', before)
+    write('x.txt', 'a change before the lists\n')
+    commit('old branch')
+    expect(mainLists(repo, 'main')).toEqual({ kind: 'before-lists', base: before })
+    git(repo, 'checkout', '-q', 'main')
+    rmSync(join(repo, ALLOWLIST_DIR), { recursive: true })
+    const empty = commit('every list fixed')
+    git(repo, 'checkout', '-q', '-b', 'after')
+    write('y.txt', 'a change after\n')
+    commit('after branch')
+    expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base: empty, lists: new Map() })
+  }, 60_000 * SLOW)
+
+  it('are not there to read in a shallow checkout without main', () => {
+    setUp()
+    const clone = mkdtempSync(join(tmpdir(), 'lint-main-clone-'))
+    try {
+      git(clone, 'clone', '-q', '--depth', '1', '--branch', 'feature', `file://${repo.split('\\').join('/')}`, 'c')
+      expect(mainLists(join(clone, 'c'), 'origin/main')).toMatchObject({ kind: 'no-base' })
+    } finally {
+      rmSync(clone, { recursive: true, force: true })
+    }
+  }, 60_000 * SLOW)
+})
+
 describe('the lint run', () => {
+  it('fails on what is left, an eslint-disable, or a line not tightened; --record-all only on what it could not list', () => {
+    const run = { errorsLeft: 0, disabled: 0, loose: 0, recording: false, othersLeft: 0 }
+    expect(lintFailed(run)).toBe(false)
+    expect(lintFailed({ ...run, errorsLeft: 1 })).toBe(true)
+    expect(lintFailed({ ...run, disabled: 1 })).toBe(true)
+    expect(lintFailed({ ...run, loose: 1 })).toBe(true)
+    expect(lintFailed({ ...run, recording: true, errorsLeft: 0, othersLeft: 0 })).toBe(false)
+    expect(lintFailed({ ...run, recording: true, othersLeft: 1 })).toBe(true)
+  })
+
+  it('names errorMessage for `(e as Error)`, eslint --fix for an unnecessary assertion, and lint:tighten for moved code', () => {
+    const asError = { ...message(UNSAFE), message: "Unsafe type assertion: type 'Error' is more narrow than the original type" }
+    const hints = lintHints([asError, message('@typescript-eslint/no-unnecessary-type-assertion')]).join('\n')
+    expect(hints).toContain('errorMessage(e)')
+    expect(hints).toContain('eslint --fix')
+    expect(hints).toContain('pnpm lint:tighten')
+    expect(lintHints([message('no-console')])).toEqual([])
+  })
+
   it('names a finding of a type-aware rule an eslint-disable comment hid, not one of another rule or a file-level suppression', () => {
     const hidden = (ruleId: string, kind: string) => ({ ...message(ruleId), line: 7, suppressions: [{ kind, justification: '' }] })
     const r = { ...result('packages/a/src/x.ts', []), suppressedMessages: [hidden(BANG, 'directive'), hidden('no-console', 'directive'), hidden(UNSAFE, 'file')] }

@@ -7,18 +7,18 @@
  *
  * What this adds, each a way around those counts that the #1343 review found open:
  *   - the lists against main's, line by line: a line may be new or higher only as a move (its rule's total did not
- *     grow), so a hand-written line or a regenerated list cannot list new findings; a fix needs no edit here;
+ *     grow), so a hand-written line or a regenerated list cannot list new findings; CI's verify job gives it main's
+ *     history (and fails without it), elsewhere it says when it could not compare;
  *   - no `eslint-disable` of a type-aware rule, and no comment that turns one off, anywhere they run;
  *   - every `as T` in shipped code counted (ASSERTIONS), the safe widening ones included, which no rule reports;
  *   - ESLint's threads capped, since each builds the whole program.
  */
-import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { ALLOWLIST_DIR, LINT_OPTIONS, LISTABLE_RULES, compareWithBase, formatList, packageOf, parseList, parseLists, readAllowlist, type Allowlist } from './lint-allowlist.js'
+import { ALLOWLIST_DIR, LISTABLE_RULES, compareWithBase, eslintOptions, formatList, mainLists, packageOf, parseList, readAllowlist } from './lint-allowlist.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -98,50 +98,57 @@ function overAndUnder(actual: Record<string, number>, ceiling: Record<string, nu
 const D = 'eslint' + '-disable'
 const E = 'eslint'
 
+/** The comments of a file, as the compiler finds them: not text inside a string or a template */
+function commentsOf(file: string, code: string): string[] {
+  const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+  const seen = new Set<number>()
+  const out: string[] = []
+  const take = (ranges: readonly ts.CommentRange[] | undefined) => {
+    for (const r of ranges ?? []) {
+      if (seen.has(r.pos)) continue
+      seen.add(r.pos)
+      out.push(code.slice(r.pos, r.end))
+    }
+  }
+  const visit = (node: ts.Node) => {
+    take(ts.getLeadingCommentRanges(code, node.getFullStart()))
+    take(ts.getTrailingCommentRanges(code, node.getEnd()))
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  take(ts.getLeadingCommentRanges(code, source.endOfFileToken.getFullStart()))
+  return out
+}
+
 /**
  * Comments that would switch a type-aware rule off where they stand: an `eslint-disable` naming one, one naming no
  * rule (it switches every rule off), and a configuration comment (`/* eslint <rule>: off *\/`) naming one.
  */
-function forbiddenComments(code: string): string[] {
+function forbiddenComments(file: string, code: string): string[] {
   const out: string[] = []
-  const directive = new RegExp(`\\/\\/\\s*${D}(?:-next-line|-line)?(?=\\s|$)([^\\n]*)|\\/\\*\\s*${D}(?:-next-line|-line)?(?=\\s|\\*)([\\s\\S]*?)\\*\\/`, 'gm')
-  for (const m of code.matchAll(directive)) {
-    const rules = (m[1] ?? m[2] ?? '').split('--')[0]?.split(/[\s,]+/).filter(Boolean) ?? []
-    if (rules.length === 0) out.push(`${D} with no rule named: it switches the type-aware rules off too`)
-    for (const rule of rules) if (LISTABLE_RULES.has(rule)) out.push(`${D} ${rule}`)
-  }
-  for (const m of code.matchAll(/\/\*\s*eslint\s+([\s\S]*?)\*\//g)) {
-    for (const [, rule = ''] of (m[1] ?? '').matchAll(/([@\w/-]+)\s*:/g)) if (LISTABLE_RULES.has(rule)) out.push(`a configuration comment for ${rule}`)
+  for (const comment of commentsOf(file, code)) {
+    const body = comment.startsWith('//') ? comment.slice(2) : comment.slice(2, -2)
+    const directive = new RegExp(`^\\s*${D}(?:-next-line|-line)?(?=\\s|$)([\\s\\S]*)$`).exec(body)
+    if (directive) {
+      const rules = (directive[1] ?? '').split('--')[0]?.split(/[\s,]+/).filter(Boolean) ?? []
+      if (rules.length === 0) out.push(`${D} with no rule named: it switches the type-aware rules off too`)
+      for (const rule of rules) if (LISTABLE_RULES.has(rule)) out.push(`${D} ${rule}`)
+      continue
+    }
+    const config = new RegExp(`^\\s*${E}\\s+([\\s\\S]*)$`).exec(body)
+    if (config && comment.startsWith('/*')) {
+      for (const [, rule = ''] of (config[1] ?? '').matchAll(/([@\w/-]+)\s*:/g)) if (LISTABLE_RULES.has(rule)) out.push(`a configuration comment for ${rule}`)
+    }
   }
   return out
 }
 
-function git(args: string[]): string | null {
-  try {
-    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch {
-    return null
-  }
-}
-
-/**
- * main's lists where this branch left it (the merge base with `CC_LINT_BASE`, origin/main by default), or why
- * there are none: no such history here (a shallow checkout), or no lists at all at that commit (before the change
- * that brought them, which is told by the module that reads them; once it is there, no list means none allowed).
- */
-function mainLists(): { lists: Allowlist } | { none: string } {
-  const ref = process.env.CC_LINT_BASE ?? 'origin/main'
-  const base = git(['merge-base', 'HEAD', ref])?.trim()
-  if (!base) return { none: `no merge base with ${ref} in this checkout` }
-  if (git(['cat-file', '-e', `${base}:tooling/lint-allowlist.ts`]) === null) return { none: 'main has no lists yet; this change brings them' }
-  const names = git(['ls-tree', '--name-only', `${base}:${ALLOWLIST_DIR}`]) ?? ''
-  const texts = new Map<string, string>()
-  for (const name of names.split('\n').filter((n) => n.endsWith('.txt'))) {
-    const text = git(['show', `${base}:${ALLOWLIST_DIR}/${name}`])
-    if (text === null) return { none: `could not read ${name} at ${base}` }
-    texts.set(name, text)
-  }
-  return { lists: parseLists(texts) }
+/** The steps of build.yml's verify job, as text */
+function verifyJob(): string {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/build.yml'), 'utf8')
+  const start = workflow.indexOf('\n  verify:\n')
+  const end = workflow.indexOf('\n  fail-fast:\n')
+  return workflow.slice(start, end)
 }
 
 describe('type-aware lint (#1339)', () => {
@@ -155,43 +162,69 @@ describe('type-aware lint (#1339)', () => {
     expect(() => readAllowlist(ROOT)).not.toThrow()
   })
 
-  it("lists no more of any rule than main's lists do: a new or higher line only as a move", () => {
-    const main = mainLists()
-    if ('none' in main) {
-      // CI's verify job fetches main's history and sets CC_LINT_BASE, so there they have to be found
-      const first = main.none.startsWith('main has no lists yet')
-      if (!first) expect(process.env.CC_LINT_BASE, `main's lists: ${main.none}`).toBeUndefined()
-      console.warn(`type-aware-lint.test.ts: not compared with main's lists (${main.none})`)
-      return
-    }
-    const { raised, grown } = compareWithBase(main.lists, readAllowlist(ROOT))
+  it(
+    "lists no more of any rule than main's lists do: a new or higher line only as a move",
+    () => {
+      const main = mainLists(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
+      if (main.kind === 'before-lists') {
+        console.warn(`type-aware-lint.test.ts: main has no lists yet at ${main.base}; this change brings them`)
+        return
+      }
+      if (main.kind !== 'lists') {
+        // CI's verify job fetches main's history and sets CC_LINT_BASE: there, main's lists have to be read
+        expect(process.env.CC_LINT_BASE, `main's lists: ${main.why}`).toBeUndefined()
+        console.warn(`type-aware-lint.test.ts: not compared with main's lists (${main.why})`)
+        return
+      }
+      const { raised, grown } = compareWithBase(main.lists, readAllowlist(ROOT))
     const growing = grown.filter((g) => !Object.keys(TURNED_ON).some((rule) => g.startsWith(`${rule}:`)))
-    expect(
-      growing,
-      `${ALLOWLIST_DIR}/ lists more than main for these rules. Fix the new findings instead; moved code keeps its count ` +
-        `(\`pnpm lint:tighten\`). New or higher lines:\n${raised.join('\n')}`,
-    ).toEqual([])
+      expect(
+        growing,
+        `${ALLOWLIST_DIR}/ lists more than main for these rules. Fix the new findings instead; moved code keeps its count ` +
+          `(\`pnpm lint:tighten\`). New or higher lines:\n${raised.join('\n')}`,
+      ).toEqual([])
+    },
+    60_000 * SLOW,
+  )
+
+  it("is given main's history and made to compare in CI's verify job", () => {
+    const job = verifyJob()
+    expect(job).toMatch(/fetch-depth: 0/)
+    expect(job).toMatch(/filter: blob:none/)
+    expect(job).toMatch(/CC_LINT_BASE: origin\/main/)
+    // Main's bundle is measured in the same checkout when no record of it is found: that fetch must not make it shallow
+    expect(readFileSync(join(ROOT, '.github/scripts/bundle-base.mjs'), 'utf8')).toMatch(/--is-shallow-repository/)
   })
 
-  it('turns no type-aware rule off with a comment', () => {
-    const found = typedFiles().flatMap((file) => forbiddenComments(readFileSync(join(ROOT, file), 'utf8')).map((what) => `${file}: ${what}`))
-    expect(found, 'check the value (a zod schema, a guard) instead of switching the rule off').toEqual([])
-  })
+  it(
+    'turns no type-aware rule off with a comment',
+    () => {
+      const found = typedFiles().flatMap((file) => forbiddenComments(file, readFileSync(join(ROOT, file), 'utf8')).map((what) => `${file}: ${what}`))
+      expect(found, 'check the value (a zod schema, a guard) instead of switching the rule off').toEqual([])
+    },
+    30_000 * SLOW,
+  )
 
   it('finds every comment that would switch a type-aware rule off, and only those', () => {
-    expect(forbiddenComments(`// ${D}-next-line @typescript-eslint/no-non-null-assertion -- because`)).toHaveLength(1)
-    expect(forbiddenComments(`/* ${D} no-console, @typescript-eslint/no-unsafe-member-access */`)).toHaveLength(1)
-    expect(forbiddenComments(`x() // ${D}-line @typescript-eslint/no-unsafe-type-assertion`)).toHaveLength(1)
-    expect(forbiddenComments(`/* ${D} */`)).toHaveLength(1)
-    expect(forbiddenComments(`// ${D}-next-line`)).toHaveLength(1)
-    expect(forbiddenComments(`/* ${E} @typescript-eslint/no-floating-promises: "off" */`)).toHaveLength(1)
-    expect(forbiddenComments(`// ${D}-next-line no-control-regex\n/* ${D} @typescript-eslint/no-explicit-any -- raw frames */`)).toEqual([])
-    expect(forbiddenComments(`const note = 'see ${D}d rules'`)).toEqual([])
+    const f = (code: string) => forbiddenComments('x.ts', code)
+    expect(f(`// ${D}-next-line @typescript-eslint/no-non-null-assertion -- because\nconst a = 1`)).toHaveLength(1)
+    expect(f(`/* ${D} no-console, @typescript-eslint/no-unsafe-member-access */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`// ${D}-next-line no-console,@typescript-eslint/no-unsafe-call\nconst a = 1`)).toHaveLength(1)
+    expect(f(`x() // ${D}-line @typescript-eslint/no-unsafe-type-assertion`)).toHaveLength(1)
+    expect(f(`/* ${D} */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`const a = 1\n// ${D}-next-line`)).toHaveLength(1)
+    expect(f(`/* ${E} @typescript-eslint/no-floating-promises: "off" */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`// ${D}-next-line no-control-regex\n/* ${D} @typescript-eslint/no-explicit-any -- raw frames */\nconst a = 1`)).toEqual([])
+    expect(f(`/* eslint-enable @typescript-eslint/no-non-null-assertion */\nconst a = 1`)).toEqual([])
+    // Text in a string or a template is not a comment
+    expect(f(`const a = '// ${D}-next-line @typescript-eslint/no-unsafe-call'\nconst b = \`/* ${D} */\``)).toEqual([])
+    expect(f(`// see the ${D} rule\nconst a = 1`)).toEqual([])
   })
 
   it('runs ESLint on at most two threads', () => {
     // Each thread builds the whole program: six took 13.6 GB on a 12-thread PC, two 5.8 GB (#1343 review)
-    expect(LINT_OPTIONS.concurrency).toBeLessThanOrEqual(2)
+    expect(eslintOptions(ROOT).concurrency).toBeLessThanOrEqual(2)
+    expect(readFileSync(join(ROOT, 'tooling/lint.ts'), 'utf8')).toMatch(/new ESLint\(eslintOptions\(ROOT\)\)/)
   })
 
   it(
