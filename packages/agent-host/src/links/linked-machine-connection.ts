@@ -207,7 +207,15 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   get waitsForPerson(): boolean {
     if (this.reachable || this.opening || this.held) return false
+    // Connecting is an attempt under way (the handshake and its few redials outlast `opening`); a link held at
+    // versions_differ or updating waits for something Connect does not give
+    if (this.status === 'connecting' || this.status === 'starting' || this.status === 'versions_differ' || this.status === 'updating') return false
     return this.parked || !this.autoReconnect
+  }
+
+  /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */
+  protected inOperation(): boolean {
+    return this.held
   }
 
   info(): MachineInfo {
@@ -372,6 +380,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   setAutoReconnect(on: boolean): void {
     this.record = { ...this.record, autoReconnect: on }
     if (!on && this.status !== 'versions_differ') clearTimeout(this.retryTimer)
+    // A swap's hold was waiting on the retry just cancelled: the row would say updating for good
+    if (!on && this.status === 'updating' && !this.inOperation()) this.setStatus('unreachable', `The host on ${this.name} was being swapped; ${WAITS_FOR_PERSON}`)
     this.noteNextStep()
     if (on && !this.parked && !this.stopped && !this.held && AWAY.has(this.status)) this.reconnect()
   }
@@ -880,7 +890,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
     if (this.stopped || this.held) return
-    if (mode === 'backoff' && !this.autoReconnect) return
+    if (mode === 'backoff' && !this.autoReconnect && !this.inOperation()) return
     clearTimeout(this.retryTimer)
     const [first, max] = this.deps.retryMs ?? RETRY_MS
     const delay = fixedMs ?? Math.min(max, first * 2 ** this.attempt++)

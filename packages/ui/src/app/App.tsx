@@ -60,7 +60,6 @@ export function App({
 }) {
   const attach = useStore((s) => s.attach)
   const setAppFocused = useStore((s) => s.setAppFocused)
-  // The linked machines that connect when needed, while one of their projects or sessions is open here (#1134)
 
   useEffect(() => {
     void attach(platform)

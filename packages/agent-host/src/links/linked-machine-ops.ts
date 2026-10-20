@@ -24,6 +24,11 @@ export class LinkedMachine extends LinkedMachineConnection {
   /** The person removed what the hub installed (`machines.uninstall`); it does not come back unasked, until they install again */
   private removedByPerson = false
 
+  /** An operation the person started keeps retrying on the backoff while it runs, whatever the switch says (#1341) */
+  protected override inOperation(): boolean {
+    return this.held || this.busy !== null
+  }
+
   /**
    * Installs the hub's version there (`machines.install`, install.ts, plan §10.2). A host running
    * there keeps running; a link that is not connected (nothing was installed, or nothing runs) opens

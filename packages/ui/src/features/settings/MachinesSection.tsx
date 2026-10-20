@@ -311,7 +311,7 @@ function AutoReconnectSwitch({ m }: { m: MachineInfo }) {
       <p className="mt-0.5 text-xs leading-body text-ink-faint" data-testid={`machine-auto-reconnect-note-${m.id}`}>
         {m.autoReconnect
           ? 'Connects when Centralu starts and again after every drop.'
-          : 'Tries once when Centralu starts. After a drop it stays away until you press Connect, and agents cannot connect it for you.'}
+          : 'Tries once when Centralu starts. After a drop it stays away until you press Connect, and agents do not connect it for you.'}
       </p>
     </div>
   )

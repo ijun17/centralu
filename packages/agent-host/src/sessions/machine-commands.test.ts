@@ -336,7 +336,7 @@ describe('remove_machine', () => {
   })
 })
 
-describe('reconnect_machine and set_machine_connect', () => {
+describe('reconnect_machine and set_machine_auto_reconnect', () => {
   it('act at once with no card, and say the machine as it is now', async () => {
     const orc = await mgr.orchestrator()
     const re = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })

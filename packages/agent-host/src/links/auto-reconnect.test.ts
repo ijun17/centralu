@@ -72,10 +72,13 @@ const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLi
 class ControlledTunnel implements Tunnel {
   opens = 0
   unreachable = false
+  /** How long an opening takes, as an ssh to a slow machine */
+  openMs = 0
   private downListener: ((reason: string) => void) | undefined
   constructor(private readonly line: () => ConnectionLine) {}
   async open(): Promise<Endpoint> {
     this.opens++
+    if (this.openMs) await new Promise((r) => setTimeout(r, this.openMs))
     if (this.unreachable) throw new Error('ssh: connect to host laptop port 22: Operation timed out')
     const line = this.line()
     return { url: `ws://127.0.0.1:${line.port}`, token: line.token, line, localPort: line.port }
@@ -269,6 +272,25 @@ describe('a machine with Auto reconnect off (#1341)', () => {
     await pause(WINDOW_MS)
     expect(hub.tunnel().opens).toBe(1)
     expect(hub.row().status).toBe('unreachable')
+  })
+
+  it('is not said to wait for the person while its attempt at the start is under way', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port), {
+      autoReconnect: false,
+      tunnel: (line) => {
+        const t = new ControlledTunnel(line)
+        t.openMs = 400 * SLOW
+        return t
+      },
+    })
+    const machine = hub.links.get('m1')!
+    expect(hub.row().status).toBe('connecting')
+    expect(machine.waitsForPerson).toBe(false)
+    await eventually(() => hub.row().status === 'connected')
+    expect(machine.waitsForPerson).toBe(false)
+    hub.tunnel().drop()
+    expect(machine.waitsForPerson).toBe(true)
   })
 
   it('turned off while connected, it stays connected, and a later drop is not retried', async () => {
