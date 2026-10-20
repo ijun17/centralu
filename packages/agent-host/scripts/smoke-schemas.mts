@@ -162,6 +162,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
 /** What cannot be called, and why — leaving it out silently would read as "everything was checked" */
 const SKIP: Record<string, string> = {
   'agents.respondApproval': 'needs a pending approval request (covered by smoke.mjs)',
+  'machines.revokeCredential': 'needs a linked machine with another full credential (links.test.ts)',
   'requests.answer': 'needs a host request, which only a limited call raises while a window shows them (host-requests.test.ts)',
   'agents.answerQuestion': 'needs a pending question request (same reason as the approval one)',
   'agents.forkConversation': 'needs a locked codex conversation — cannot be created headlessly',

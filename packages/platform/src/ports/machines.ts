@@ -32,6 +32,8 @@ export interface MachinesPort {
   reconnect(machineId: string): Promise<MachineInfo>
   /** Closes the link until the person connects it again; the machine stays linked (#1134) */
   disconnect(machineId: string): Promise<MachineInfo>
+  /** Withdraws one of the machine's other full credentials there (#1405, `MachineInfo.otherCredentials`) */
+  revokeCredential(machineId: string, credentialId: string): Promise<MachineInfo>
   /** Auto reconnect on or off (#1341): off, the host tries once when it starts and again only when the person connects it */
   setAutoReconnect(machineId: string, autoReconnect: boolean): Promise<MachineInfo>
   /** Connects although the versions differ (one protocol only): the person declined to align them (plan §4) */

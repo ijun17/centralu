@@ -3684,3 +3684,48 @@ describe('the machine commands on a real hub (#1219)', () => {
     expect(machineCard(hub, orc.id)).toBeUndefined()
   })
 })
+
+describe('machines.revokeCredential (#1405)', () => {
+  /** A machine whose connection line names two other full credentials and this hub's own, and whose `serve --revoke` answers as serve-run.mjs does */
+  async function setup() {
+    const remote = await remoteHost()
+    const runs: string[] = []
+    let held = ['aaaa1111', 'bbbb2222']
+    const exec = async (cmd: string) => {
+      const id = /serve --revoke ([0-9a-f]{8})/.exec(cmd)?.[1]
+      runs.push(id ? `revoke ${id}` : cmd)
+      const revoked = id !== undefined && held.includes(id)
+      held = held.filter((h) => h !== id)
+      return { code: revoked ? 0 : 1, stderr: '', stdout: `${JSON.stringify({ v: 1, revoked, id })}\n` }
+    }
+    const others = () => held.map((id) => ({ id, label: id === 'aaaa1111' ? 'hub:studio' : 'agent-script', created: 5 }))
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { credential: 'cccc3333', others: others() })), { exec })
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel })
+    await eventually(() => status(hub) === 'connected')
+    return { hub, u: await ui(hub.port), runs }
+  }
+
+  it("lists the machine's other full credentials on its row, from its connection line", async () => {
+    const { hub } = await setup()
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([
+      { id: 'aaaa1111', label: 'hub:studio', created: 5 },
+      { id: 'bbbb2222', label: 'agent-script', created: 5 },
+    ])
+  })
+
+  it('withdraws one there over ssh, and the row and the event follow', async () => {
+    const { hub, u, runs } = await setup()
+    const row = await u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'bbbb2222' })
+    expect(row.otherCredentials).toEqual([{ id: 'aaaa1111', label: 'hub:studio', created: 5 }])
+    expect(runs).toEqual(['revoke bbbb2222'])
+    await eventually(() => u.events().some((e) => e.type === 'machine_status' && e.machine.otherCredentials?.length === 1))
+    // The link was never dropped for it
+    expect(status(hub)).toBe('connected')
+  })
+
+  it("refuses to withdraw this computer's own credential, which the next link would make again, and asks nothing", async () => {
+    const { u, runs } = await setup()
+    await expect(u.call('machines.revokeCredential', { machineId: 'm1', credentialId: 'cccc3333' })).rejects.toThrow(/this computer's own credential/)
+    expect(runs).toEqual([])
+  })
+})

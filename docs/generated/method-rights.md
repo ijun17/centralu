@@ -94,6 +94,7 @@ With the limited credential: runs.
 - `machines.need`
 - `machines.probe`
 - `machines.reconnect`
+- `machines.revokeCredential`
 - `machines.setAutoReconnect`
 - `machines.setConnect`
 - `machines.sshHosts`

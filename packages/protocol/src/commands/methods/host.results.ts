@@ -32,6 +32,7 @@ export const hostResults = {
   'machines.remove': z.object({ ok: z.literal(true) }),
   'machines.reconnect': MachineInfo,
   'machines.disconnect': MachineInfo,
+  'machines.revokeCredential': MachineInfo,
   'machines.setAutoReconnect': MachineInfo,
   'machines.setConnect': MachineInfo,
   'machines.need': MachineInfo,

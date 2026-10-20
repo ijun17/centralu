@@ -695,6 +695,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
       reconnect: (machineId) => rpc.call('machines.reconnect', { machineId }),
       disconnect: (machineId) => rpc.call('machines.disconnect', { machineId }),
+      revokeCredential: (machineId, credentialId) => rpc.call('machines.revokeCredential', { machineId, credentialId }),
       setAutoReconnect: (machineId, autoReconnect) => rpc.call('machines.setAutoReconnect', { machineId, autoReconnect }),
       acceptVersions: (machineId) => rpc.call('machines.acceptVersions', { machineId }),
       install: (machineId) => rpc.call('machines.install', { machineId }),

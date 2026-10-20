@@ -117,6 +117,12 @@ export const hostParams = {
    */
   'machines.disconnect': z.object({ machineId: MachineId }),
   /**
+   * Withdraws one of the machine's other full credentials (#1405, `MachineInfo.otherCredentials`): runs `centralu serve
+   * --revoke <id>` there over the link's ssh, and that credential's next hello is refused. Not this hub's own, which is
+   * made again at each link. Answers the row as it is after. Additive
+   */
+  'machines.revokeCredential': z.object({ machineId: MachineId, credentialId: z.string().regex(/^[0-9a-f]{8}$/) }),
+  /**
    * Auto reconnect on or off for this machine (#1341, `MachineInfo.autoReconnect`). Kept with the machine. Turning it
    * off while connected leaves the link up; turning it on while the link is away tries again now. Additive
    */
