@@ -26,7 +26,7 @@ export class StepsV58 extends MigrationRange {
         run: () => {
           const has = this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = 'subagent_messages'`).get()
           if (!has) return
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(subagent_messages)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(subagent_messages)`).all().map((c) => c.name))
           if (!cols.has('trashed_at')) this.db.exec(`ALTER TABLE subagent_messages ADD COLUMN trashed_at INTEGER`)
           /*
            * Which steps are in the trash, read without the rows: the column comes after the payload, so a row read for
@@ -48,7 +48,7 @@ export class StepsV58 extends MigrationRange {
          * it adds gets null, which is `at_start`. `IF` because a store from a test's partial schema has no such table.
          */
         run: () => {
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(linked_machines)`).all().map((c) => c.name))
           if (cols.size > 0 && !cols.has('connect')) this.db.exec(`ALTER TABLE linked_machines ADD COLUMN connect TEXT`)
         },
       },
@@ -72,7 +72,7 @@ export class StepsV58 extends MigrationRange {
          * column and gets the switch off; it never reads the table, and its `DELETE FROM linked_machines` cascades.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(linked_machines)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(linked_machines)`).all()
           if (cols.length > 0 && !cols.some((c) => c.name === 'asks')) {
             this.db.exec(`ALTER TABLE linked_machines ADD COLUMN asks INTEGER NOT NULL DEFAULT 0`)
           }

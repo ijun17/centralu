@@ -1,3 +1,5 @@
+import { isObj } from '../../../json-value.js'
+import { oneRow } from '../rows.js'
 import { indexedText } from '../search-index.js'
 import { APP_SETTINGS_DDL, MigrationRange, type MigrationStep } from './context.js'
 
@@ -69,7 +71,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * blocked the real data move (see data-dir.ts). The manager fills those in the first
            * time it actually needs the path, and from then on they are stored too.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'cwd')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT`)
           }
@@ -101,7 +103,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * `grid_panels` (v9), which is a table because being on the grid and existing as a
            * session are two different facts; a saved command has no such second life.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols.some((c) => c.name === 'commands')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN commands TEXT NOT NULL DEFAULT '[]'`)
           }
@@ -151,7 +153,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * one `context_update` event, so nothing here is Claude-shaped (Codex started
            * sending it in 3ae2029).
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'context_used')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN context_used INTEGER`)
             this.db.exec(`ALTER TABLE sessions ADD COLUMN context_window INTEGER`)
@@ -165,7 +167,7 @@ export class StepsV13ToV27 extends MigrationRange {
         run: () => {
           // Response length (codex's model_verbosity, #54) — the same kind of property as
           // model/effort (v4/v7), so it lives in the same place
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'verbosity')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN verbosity TEXT`)
           }
@@ -206,7 +208,7 @@ export class StepsV13ToV27 extends MigrationRange {
         run: () => {
           // Response speed (codex's service_tier) — the same kind of property as verbosity
           // (v18), so it lives in the same place
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'service_tier')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN service_tier TEXT`)
           }
@@ -230,7 +232,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * delete of the parent. A child left with a broken link gets reattached by the next
            * startup's adoption (adoptOrphanWorktrees).
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'parent_session_id')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN parent_session_id TEXT`)
           }
@@ -246,7 +248,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * files to copy over. Why this lives here (in our database) and not in the repo:
            * nothing is written to the repo (#50).
            */
-          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols.some((c) => c.name === 'worktree_setup')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN worktree_setup TEXT`)
           }
@@ -264,7 +266,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * guessing a value would produce a wrong badge, and the person can always remove one
            * by hand.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'worktree_base')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_base TEXT`)
           }
@@ -280,7 +282,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * so a person who chose Opus and high had to click high again in every new session —
            * the exact lesson default_tool already taught.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols.some((c) => c.name === 'default_effort')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN default_effort TEXT`)
           }
@@ -333,7 +335,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * settles three questions at once — where a branch forks from, where it merges to,
            * and what "merged" is measured against.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(projects)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols.some((c) => c.name === 'worktree_manager')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN worktree_manager TEXT`)
           }
@@ -365,11 +367,10 @@ export class StepsV13ToV27 extends MigrationRange {
    * pinned to rowid points at the wrong place). VACUUM is called outside the transaction.
    */
   private mergeDeltaRows(): void {
-    const before = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
+    const before = oneRow(this.db.prepare<unknown[], { n: number }>(`SELECT COUNT(*) as n FROM messages`).get())
     const tx = this.db.transaction(() => {
       const rows = this.db
-        .prepare(`SELECT rowid, session_id, seq, role, kind, payload, ts FROM messages ORDER BY session_id, seq`)
-        .all() as {
+        .prepare<unknown[], {
         rowid: number
         session_id: string
         seq: number
@@ -377,7 +378,8 @@ export class StepsV13ToV27 extends MigrationRange {
         kind: string
         payload: string
         ts: number
-      }[]
+      }>(`SELECT rowid, session_id, seq, role, kind, payload, ts FROM messages ORDER BY session_id, seq`)
+        .all()
 
       const update = this.db.prepare(`UPDATE messages SET payload = ?, ts = ? WHERE rowid = ?`)
       const del = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
@@ -412,13 +414,18 @@ export class StepsV13ToV27 extends MigrationRange {
           closeRun()
           continue
         }
-        let payload: Record<string, unknown>
+        let parsed: unknown
         try {
-          payload = JSON.parse(r.payload) as Record<string, unknown>
+          parsed = JSON.parse(r.payload)
         } catch {
           closeRun() // leave an unparsable row untouched — keeping it is better than losing it while trying to merge
           continue
         }
+        if (!isObj(parsed)) {
+          closeRun() // JSON that is no object is no streamed event either: left as it is
+          continue
+        }
+        const payload = parsed
         const text = typeof payload.text === 'string' ? payload.text : ''
         if (head && head.sessionId === r.session_id && head.kind === r.kind) {
           head.text += text
@@ -440,13 +447,13 @@ export class StepsV13ToV27 extends MigrationRange {
           body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
         );
       `)
-      const fresh = this.db.prepare(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all() as {
+      const fresh = this.db.prepare<unknown[], {
         rowid: number
         session_id: string
         seq: number
         kind: string
         payload: string
-      }[]
+      }>(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all()
       const insert = this.db.prepare(
         `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
       )
@@ -456,7 +463,7 @@ export class StepsV13ToV27 extends MigrationRange {
       }
     })
     tx()
-    const after = this.db.prepare(`SELECT COUNT(*) as n FROM messages`).get() as { n: number }
+    const after = oneRow(this.db.prepare<unknown[], { n: number }>(`SELECT COUNT(*) as n FROM messages`).get())
     if (after.n < before.n) {
       /*
        * stderr, not stdout. The host tees **stderr** to `~/.centralu/host.log`

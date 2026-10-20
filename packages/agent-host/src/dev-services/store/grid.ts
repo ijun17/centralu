@@ -17,7 +17,15 @@ export class GridRecords {
    */
   listGridView(): GridPanel[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], {
+      kind: string
+      session_id: string | null
+      project_id: string | null
+      app_id: string | null
+      app_machine: string | null
+      span_cols: number | null
+      span_rows: number | null
+    }>(
         `SELECT g.kind, COALESCE(g.session_id, g.remote_session_id) AS session_id, g.project_id,
                 COALESCE(g.app_id, g.remote_app_id) AS app_id, g.app_machine, g.span_cols, g.span_rows
            FROM grid_layout g
@@ -35,27 +43,21 @@ export class GridRecords {
                    WHERE h.kind = 'project' AND h.machine_id = g.app_machine AND h.machine_id || '.' || h.item_id = g.project_id)))
           ORDER BY g.position`,
       )
-      .all() as {
-      kind: string
-      session_id: string | null
-      project_id: string | null
-      app_id: string | null
-      app_machine: string | null
-      span_cols: number | null
-      span_rows: number | null
-    }[]
-    return rows.map((r) => {
-      if (r.kind === 'session') return { kind: 'session' as const, sessionId: r.session_id! }
+      .all()
+    // A row with no id (the WHERE above keeps none) is skipped, not drawn as a panel with nothing in it
+    return rows.flatMap((r): GridPanel[] => {
+      if (r.kind === 'session') return r.session_id === null ? [] : [{ kind: 'session', sessionId: r.session_id }]
+      if (r.app_id === null) return []
       // A span is kept only whole: a row with one half, or a value outside the protocol's bounds, reads as none chosen
       const span = GridSpan.safeParse({ cols: r.span_cols, rows: r.span_rows })
-      return {
-        kind: 'app' as const,
+      return [{
+        kind: 'app',
         projectId: r.project_id,
-        appId: r.app_id!,
+        appId: r.app_id,
         // A linked machine's user-folder app names its machine; a project app's qualified id already does (#82)
         ...(r.app_machine && r.project_id === null ? { machine: r.app_machine } : {}),
         ...(span.success ? { span: span.data } : {}),
-      }
+      }]
     })
   }
 

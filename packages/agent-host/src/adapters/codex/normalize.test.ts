@@ -355,8 +355,10 @@ describe('state and gauges', () => {
         sessionId: S,
         error: {
           code: 'internal',
-          message: "The 'opus[1m]' model is not supported\ninvalid_request_error",
-          retryable: true,
+          // A model the provider refuses is its own failure (#1369): retrying cannot help, picking another can
+          message: "Codex refused the model opus[1m]: The 'opus[1m]' model is not supported",
+          retryable: false,
+          data: { reason: 'model_rejected', model: 'opus[1m]' },
         },
       },
     ])
@@ -461,11 +463,19 @@ describe('state and gauges', () => {
     expect(out[0]).toMatchObject({ type: 'limit_reached' })
   })
 
-  it('thread/name/updated → session_title (FR-18 automatic naming)', () => {
-    expect(n('thread/name/updated', { name: 'auth refactor' })).toEqual([
+  it('thread/name/updated → session_title (FR-18 automatic naming), from the `threadName` Codex sends (#1339)', () => {
+    // generated/v2/ThreadNameUpdatedNotification.ts: { threadId, threadName? }
+    expect(n('thread/name/updated', { threadId: 't1', threadName: 'auth refactor' })).toEqual([
       // auto:true — a name the tool made up on its own, so it never overwrites a name the person set (issue #5)
       { type: 'session_title', sessionId: S, title: 'auth refactor', auto: true },
     ])
+    // A CLI that names it `name` still names the session
+    expect(n('thread/name/updated', { name: 'auth refactor' })).toEqual([{ type: 'session_title', sessionId: S, title: 'auth refactor', auto: true }])
+  })
+
+  it('thread/name/updated without a name says nothing, rather than blank an automatically named session', () => {
+    expect(n('thread/name/updated', { threadId: 't1' })).toEqual([])
+    expect(n('thread/name/updated', { threadId: 't1', threadName: '' })).toEqual([])
   })
 
   /*

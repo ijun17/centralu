@@ -1,3 +1,4 @@
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 
 /** What one session's subagent steps take (#418), in or out of the trash: `listHeld` and `listTrashed` */
@@ -44,17 +45,17 @@ export class SubagentStepRecords {
 
   /** The steps each live session holds under its cards, largest first; a session with none is not listed */
   listHeld(): SubagentStepsRow[] {
-    return this.list(`sm.trashed_at IS NULL`, '') as SubagentStepsRow[]
+    return this.list<SubagentStepsRow>(`sm.trashed_at IS NULL`, '')
   }
 
   /** The steps in the trash, one entry per live session, most recently moved first */
   listTrashed(): TrashedSubagentStepsRow[] {
-    return this.list(`sm.trashed_at IS NOT NULL`, ', MAX(sm.trashed_at) as deletedAt') as TrashedSubagentStepsRow[]
+    return this.list<TrashedSubagentStepsRow>(`sm.trashed_at IS NOT NULL`, ', MAX(sm.trashed_at) as deletedAt')
   }
 
-  private list(which: string, more: string): (SubagentStepsRow & { deletedAt?: number })[] {
+  private list<Row extends SubagentStepsRow>(which: string, more: string): Row[] {
     return this.db
-      .prepare(
+      .prepare<unknown[], Row>(
         `SELECT s.id as sessionId, s.name, s.tool, s.project_id as projectId, p.name as projectName,
                 COUNT(DISTINCT sm.parent_call_id) as runs, COUNT(*) as steps, ${STEP_BYTES} as bytes${more}
            FROM subagent_messages sm
@@ -64,7 +65,7 @@ export class SubagentStepRecords {
           GROUP BY s.id
           ORDER BY ${more ? 'deletedAt DESC' : 'bytes DESC'}`,
       )
-      .all() as (SubagentStepsRow & { deletedAt?: number })[]
+      .all()
   }
 
   /**
@@ -77,24 +78,26 @@ export class SubagentStepRecords {
    */
   async trash(sessionId: string, now = Date.now(), chunk = CHUNK): Promise<{ steps: number; bytes: number } | null> {
     if (!this.isLive(sessionId)) return null
-    const { last } = this.db.prepare(`SELECT MAX(rowid) as last FROM subagent_messages WHERE session_id = ?`).get(sessionId) as { last: number | null }
+    const { last } = oneRow(this.db.prepare<unknown[], { last: number | null }>(`SELECT MAX(rowid) as last FROM subagent_messages WHERE session_id = ?`).get(sessionId))
     if (last === null) return { steps: 0, bytes: 0 }
     /*
      * Strictly later than the session's last move, even within one millisecond: the window deletes an entry up to the
      * `deletedAt` it listed (`purge`'s `upTo`), so a move made after it read the trash must stamp above that
      */
-    const { prev } = this.db
-      .prepare(`SELECT MAX(trashed_at) as prev FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL`)
-      .get(sessionId) as { prev: number | null }
+    const { prev } = oneRow(
+      this.db
+        .prepare<unknown[], { prev: number | null }>(`SELECT MAX(trashed_at) as prev FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL`)
+        .get(sessionId),
+    )
     const at = prev !== null && prev >= now ? prev + 1 : now
-    const pick = this.db.prepare(
+    const pick = this.db.prepare<unknown[], { rowid: number; bytes: number }>(
       `SELECT rowid, LENGTH(CAST(payload AS BLOB)) as bytes FROM subagent_messages
         WHERE session_id = ? AND trashed_at IS NULL AND rowid <= ? LIMIT ?`,
     )
     const mark = this.db.prepare(`UPDATE subagent_messages SET trashed_at = ? WHERE rowid = ?`)
     const moved = { steps: 0, bytes: 0 }
     await this.inChunks(() => {
-      const rows = pick.all(sessionId, last, chunk) as { rowid: number; bytes: number }[]
+      const rows = pick.all(sessionId, last, chunk)
       for (const r of rows) {
         mark.run(at, r.rowid)
         moved.steps++
@@ -108,10 +111,10 @@ export class SubagentStepRecords {
   /** Puts a live session's trashed steps back under their cards. False when it had none in the trash */
   async restore(sessionId: string, chunk = CHUNK): Promise<boolean> {
     if (!this.hasTrashed(sessionId)) return false
-    const pick = this.db.prepare(`SELECT rowid FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL LIMIT ?`)
+    const pick = this.db.prepare<unknown[], { rowid: number }>(`SELECT rowid FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL LIMIT ?`)
     const unmark = this.db.prepare(`UPDATE subagent_messages SET trashed_at = NULL WHERE rowid = ?`)
     await this.inChunks(() => {
-      const rows = pick.all(sessionId, chunk) as { rowid: number }[]
+      const rows = pick.all(sessionId, chunk)
       for (const r of rows) unmark.run(r.rowid)
       return rows.length < chunk
     })
@@ -126,12 +129,12 @@ export class SubagentStepRecords {
    */
   async purge(sessionId: string, upTo: number, chunk = CHUNK): Promise<boolean> {
     if (!this.hasTrashed(sessionId, upTo)) return false
-    const pick = this.db.prepare(
+    const pick = this.db.prepare<unknown[], { rowid: number }>(
       `SELECT rowid FROM subagent_messages WHERE session_id = ? AND trashed_at IS NOT NULL AND trashed_at <= ? LIMIT ?`,
     )
     const drop = this.db.prepare(`DELETE FROM subagent_messages WHERE rowid = ?`)
     await this.inChunks(() => {
-      const rows = pick.all(sessionId, upTo, chunk) as { rowid: number }[]
+      const rows = pick.all(sessionId, upTo, chunk)
       for (const r of rows) drop.run(r.rowid)
       return rows.length < chunk
     })
@@ -140,9 +143,11 @@ export class SubagentStepRecords {
 
   /** How many of one launch card's steps are in the trash, so the card can say where they went */
   trashedOf(sessionId: string, parentCallId: string): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) as n FROM subagent_messages WHERE session_id = ? AND parent_call_id = ? AND trashed_at IS NOT NULL`)
-      .get(sessionId, parentCallId) as { n: number }
+    const row = oneRow(
+      this.db
+        .prepare<unknown[], { n: number }>(`SELECT COUNT(*) as n FROM subagent_messages WHERE session_id = ? AND parent_call_id = ? AND trashed_at IS NOT NULL`)
+        .get(sessionId, parentCallId),
+    )
     return row.n
   }
 

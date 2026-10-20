@@ -61,3 +61,38 @@ export function threadSettingsChanged(
     ],
   }
 }
+
+/**
+ * What a thread runs with against what Centralu shows, right after `thread/resume` (#1369). The session's recorded model
+ * is sent with the resume (`resumeThreadParams`), so a thread normally answers with it. Two cases are left:
+ *  - Nothing is recorded (a session imported from a Codex thread started elsewhere, or one that never picked a model):
+ *    the thread runs what it was last set with. Its model and effort become the session's settings, so the screen names
+ *    what runs.
+ *  - A model is recorded and the thread answers with another one (the provider put its own in the place of the one asked
+ *    for): the answer wins, with a warning, for the same reason. Never one model on screen and another running.
+ * The effort is adopted only together with the model: a session that keeps its model and has no effort chosen is on the
+ * tool's default, and Codex answers a default with a concrete value (`threadSettingsChanged`), which would turn "default"
+ * into a fixed effort on every wake. A recorded effort needs no look: it is sent with every turn.
+ * Nothing differs: nothing returns. `answered` is `threadSettingsOf` of the answer.
+ */
+export function reconcileOpenedThread(
+  sessionId: string,
+  answered: CodexThreadSettings | null,
+  recorded: { model: string | null; effort: string | null },
+): { notice?: NormalizedEvent; settings?: { model: string; effort: string | null } } {
+  if (!answered?.model || answered.model === recorded.model) return {}
+  return {
+    ...(recorded.model
+      ? {
+          notice: {
+            type: 'notice' as const,
+            sessionId,
+            level: 'warning' as const,
+            text: `Codex runs this thread with ${answered.model}, not the ${recorded.model} this session was set to; the session now shows ${answered.model}`,
+            ...noticeWords('settings', ''),
+          },
+        }
+      : {}),
+    settings: { model: answered.model, effort: recorded.effort ?? answered.effort },
+  }
+}

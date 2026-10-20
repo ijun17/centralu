@@ -1,3 +1,5 @@
+import { isObj } from '../../json-value.js'
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import type { StoredMessage } from '@cc/protocol'
 import { parseJson } from './json.js'
@@ -76,7 +78,7 @@ export class MessageRecords {
        ON CONFLICT(session_id, seq) DO UPDATE SET role = excluded.role, kind = excluded.kind,
          payload = excluded.payload, ts = excluded.ts`,
     )
-    const rowidOf = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? AND seq = ?`)
+    const rowidOf = this.db.prepare<unknown[], { rowid: number }>(`SELECT rowid FROM messages WHERE session_id = ? AND seq = ?`)
     const fts = this.db.prepare(
       `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
     )
@@ -92,7 +94,7 @@ export class MessageRecords {
         const payload = JSON.stringify(m.payload)
         stmt.run(m.sessionId, m.seq, m.role, m.kind, payload, m.ts)
         const body = indexedText(m.kind, payload)
-        const rid = (rowidOf.get(m.sessionId, m.seq) as { rowid: number } | undefined)?.rowid
+        const rid = rowidOf.get(m.sessionId, m.seq)?.rowid
         if (rid === undefined) continue
         if (body) {
           fts.run(rid, body, m.sessionId, m.seq)
@@ -128,20 +130,20 @@ export class MessageRecords {
     // Two-character searches like '승인' or '배포' are common in Korean, so this falls back to LIKE.
     if (q.length < 3) {
       return this.db
-        .prepare(
+        .prepare<unknown[], { sessionId: string; seq: number; body: string }>(
           `SELECT session_id as sessionId, seq, body FROM messages_fts
            WHERE body LIKE ? AND ${OUT_OF_TRASH} ORDER BY seq DESC LIMIT ?`,
         )
-        .all(`%${q}%`, limit) as { sessionId: string; seq: number; body: string }[]
+        .all(`%${q}%`, limit)
     }
 
     try {
       return this.db
-        .prepare(
+        .prepare<unknown[], { sessionId: string; seq: number; body: string }>(
           `SELECT session_id as sessionId, seq, body
            FROM messages_fts WHERE messages_fts MATCH ? AND ${OUT_OF_TRASH} ORDER BY rank LIMIT ?`,
         )
-        .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; body: string }[]
+        .all(`"${q.replace(/"/g, '""')}"`, limit)
     } catch {
       // An FTS syntax error (special characters, etc.) quietly returns an empty result — the search box must not break
       return []
@@ -162,11 +164,11 @@ export class MessageRecords {
    */
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
-      .prepare(
+      .prepare<unknown[], (StoredMessage & { payload: string })>(
         `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
          WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
       )
-      .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
+      .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit)
     return readRows(raw.reverse())
   }
 
@@ -181,18 +183,19 @@ export class MessageRecords {
   replyTextsContaining(sessionId: string, needle: string): string[] {
     const escaped = JSON.stringify(needle).slice(1, -1)
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], { payload: string }>(
         `SELECT payload FROM messages
            WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0
          UNION ALL
          SELECT payload FROM subagent_messages
            WHERE session_id = ? AND trashed_at IS NULL AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0`,
       )
-      .all(sessionId, escaped, sessionId, escaped) as { payload: string }[]
+      .all(sessionId, escaped, sessionId, escaped)
     const texts: string[] = []
     for (const r of rows) {
       // A row that is not JSON names nothing
-      const text = (parseJson(r.payload) as { text?: unknown } | null | undefined)?.text
+      const payload = parseJson(r.payload)
+      const text = isObj(payload) ? payload.text : undefined
       if (typeof text === 'string') texts.push(text)
     }
     return texts
@@ -204,11 +207,11 @@ export class MessageRecords {
    */
   loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
-      .prepare(
+      .prepare<unknown[], (StoredMessage & { payload: string })>(
         `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
          WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
       )
-      .all(sessionId, afterSeq, limit) as (StoredMessage & { payload: string })[]
+      .all(sessionId, afterSeq, limit)
     return readRows(raw)
   }
 
@@ -220,14 +223,16 @@ export class MessageRecords {
    * Every message earlier than this seq is in our record but no longer in the model's context.
    */
   lastContextCut(sessionId: string): number | null {
-    const row = this.db
-      .prepare(
+    const row = oneRow(
+      this.db
+      .prepare<unknown[], { seq: number | null }>(
         `SELECT MAX(seq) as seq FROM messages
          WHERE session_id = ? AND kind = 'marker' AND json_valid(payload) AND (
            json_extract(payload, '$.type') = 'conversation_reset' OR
            (json_extract(payload, '$.type') = 'compaction' AND COALESCE(json_extract(payload, '$.failed'), 0) = 0))`,
       )
-      .get(sessionId) as { seq: number | null }
+      .get(sessionId),
+    )
     return row.seq
   }
 
@@ -257,14 +262,14 @@ export class MessageRecords {
     parentCallId: string,
     m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>,
   ): number {
-    const next = this.db.prepare(
+    const next = this.db.prepare<unknown[], { seq: number }>(
       `SELECT COALESCE(MAX(seq), 0) + 1 as seq FROM subagent_messages WHERE session_id = ? AND parent_call_id = ?`,
     )
     const put = this.db.prepare(
       `INSERT INTO subagent_messages (session_id, parent_call_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     return this.db.transaction((): number => {
-      const { seq } = next.get(sessionId, parentCallId) as { seq: number }
+      const { seq } = oneRow(next.get(sessionId, parentCallId))
       put.run(sessionId, parentCallId, seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
       return seq
     })()
@@ -284,18 +289,16 @@ export class MessageRecords {
     opts: ReadOpts & { afterSeq?: number; limit?: number } = {},
   ): StoredMessage[] {
     const raw = this.db
-      .prepare(
+      .prepare<unknown[], (StoredMessage & { payload: string })>(
         `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM subagent_messages
          WHERE session_id = ? AND parent_call_id = ? AND seq > ? AND trashed_at IS NULL ORDER BY seq ASC LIMIT ?`,
       )
-      .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1) as (StoredMessage & { payload: string })[]
+      .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1)
     return readRows(raw)
   }
 
   nextSeq(sessionId: string): number {
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`)
-      .get(sessionId) as { m: number }
+    const row = oneRow(this.db.prepare<unknown[], { m: number }>(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`).get(sessionId))
     return row.m + 1
   }
 }

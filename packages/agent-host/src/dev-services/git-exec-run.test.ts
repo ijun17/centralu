@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { errorMessage } from '@cc/protocol'
+import { execFailure } from './exec-error.js'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -103,7 +105,7 @@ describe('a git that runs past its time ends with what it started (#982)', () =>
     const started = Date.now()
     const outcome = runGit(repo, ['commit', '--allow-empty', '-m', 'x'], { allowRepoPrograms: true, timeout: 5_000 * SLOW }).then(
       () => 'committed',
-      (e: { timedOut?: boolean }) => (e.timedOut ? 'timed out' : `failed: ${String(e)}`),
+      (e: unknown) => (execFailure(e).timedOut ? 'timed out' : `failed: ${errorMessage(e)}`),
     )
     await settle(() => existsSync(pidFile), Boolean, 5_000 * SLOW)
     childPid = Number(readFileSync(pidFile, 'utf8'))

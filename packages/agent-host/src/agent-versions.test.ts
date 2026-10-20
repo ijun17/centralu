@@ -197,6 +197,33 @@ describe('the agent version service (#297)', () => {
     expect(sessions.restarted).toEqual(['a'])
   })
 
+  it('the header’s action waits for no quiet period, but an agent’s (keepQuiet) leaves a session that spoke within the last minute', async () => {
+    autoApply = false
+    sessions.sessions.set('a', session('a'))
+    const svc = make()
+    await svc.check(true)
+    await advance(300_000)
+    svc.observe({ type: 'user_message', sessionId: 'a', seq: 2, text: 'next' })
+    await advance(10_000)
+    // Asked for by an agent: the session spoke ten seconds ago, so it is left and named busy
+    expect(await svc.applyNow({ keepQuiet: true })).toEqual({ restarted: [], busy: ['a'] })
+    expect(sessions.restarted).toEqual([])
+    // The person's own button: no wait
+    expect(await svc.applyNow()).toEqual({ restarted: ['a'], busy: [] })
+  })
+
+  it('an agent’s apply restarts a session once it has been quiet for the whole minute', async () => {
+    autoApply = false
+    sessions.sessions.set('a', session('a'))
+    const svc = make()
+    await svc.check(true)
+    svc.observe({ type: 'user_message', sessionId: 'a', seq: 2, text: 'next' })
+    await advance(59_000)
+    expect(await svc.applyNow({ keepQuiet: true })).toEqual({ restarted: [], busy: ['a'] })
+    await advance(1_000)
+    expect(await svc.applyNow({ keepQuiet: true })).toEqual({ restarted: ['a'], busy: [] })
+  })
+
   it('turning the setting off stops a restart that was already scheduled', async () => {
     sessions.sessions.set('a', session('a'))
     const svc = make()

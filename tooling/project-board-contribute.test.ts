@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
-import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   commitProblems,
@@ -263,9 +263,10 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
-  rmFakeDir(root)
+  await removeFakeDir(root)
 })
 
 function runtime() {

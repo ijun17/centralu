@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { copyTree, dropEscapingLinks, prepareCopyTarget, resolveExisting } from './fs.js'
@@ -28,7 +29,8 @@ export async function prepareWorktreeDependencies(projectCwd: string, worktreeCw
   const copied: string[] = []
   const folders = ['']
   while (folders.length) {
-    const folder = folders.pop()!
+    const folder = folders.pop()
+    if (folder === undefined) break
     const entries = await readdir(join(worktreeCwd, folder), { withFileTypes: true })
     // Walk the checkout, not ignored build output in the main repository, and never follow a link.
     for (const entry of entries) {
@@ -53,7 +55,7 @@ export async function prepareWorktreeDependencies(projectCwd: string, worktreeCw
       copied.push(dst)
       await copyTree(src, dst, { links: { from: projectCwd, to: worktreeCwd } })
     } catch (err) {
-      if (!isMissingPathError(err)) console.error(`[worktree] dependencies skipped: ${rel} — ${(err as Error).message}`)
+      if (!isMissingPathError(err)) console.error(`[worktree] dependencies skipped: ${rel} — ${errorMessage(err)}`)
     }
   }
   // pnpm workspace links can point to a sibling package's node_modules: check after all copies land.

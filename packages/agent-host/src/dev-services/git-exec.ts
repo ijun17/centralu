@@ -1,3 +1,4 @@
+import { execFailure } from './exec-error.js'
 import { execFile, type ChildProcess, type StdioOptions } from 'node:child_process'
 import { open } from 'node:fs/promises'
 import { devNull } from 'node:os'
@@ -162,7 +163,7 @@ async function filterOverrides(cwd: string): Promise<string[]> {
     }))
   } catch (e) {
     // 1 = no key matched. Anything else (a broken config, a denied folder) fails the read itself
-    if ((e as { code?: unknown }).code === 1) return []
+    if (execFailure(e).code === 1) return []
     throw e
   }
   const names = new Set<string>()
@@ -348,7 +349,7 @@ export function gitCancelled(): Error & { code: 'ABORT_ERR'; aborted: true } {
 
 /** Whether a call failed because its `signal` fired (`gitCancelled`) */
 export function isGitCancelled(e: unknown): boolean {
-  return (e as { aborted?: unknown } | null)?.aborted === true
+  return execFailure(e).aborted === true
 }
 
 /** Why a streamed read ended without git's own answer: it ran past its time, or the caller stopped it */
@@ -391,9 +392,16 @@ export async function streamGit(
       endGit(child)
     }
     const timer = setTimeout(() => end('timedOut'), opts.timeout ?? DEFAULTS.timeout)
+    const stderrPipe = child.stderr
+    const stdoutPipe = child.stdout
+    if (!stderrPipe || !stdoutPipe) {
+      clearTimeout(timer)
+      endGit(child)
+      return reject(new Error('git started without its output pipes'))
+    }
     const stderr: Buffer[] = []
     let stderrBytes = 0
-    child.stderr!.on('data', (chunk: Buffer) => {
+    stderrPipe.on('data', (chunk: Buffer) => {
       if (stderrBytes >= 64 * 1024) return
       stderr.push(chunk)
       stderrBytes += chunk.length
@@ -402,7 +410,7 @@ export async function streamGit(
     const give = (entry: Buffer) => {
       if (!ended && onEntry(entry)) end('stopped')
     }
-    child.stdout!.on('data', (chunk: Buffer) => {
+    stdoutPipe.on('data', (chunk: Buffer) => {
       if (ended) return
       let buf = rest.length > 0 ? Buffer.concat([rest, chunk]) : chunk
       for (let nul = buf.indexOf(0); nul >= 0 && !ended; nul = buf.indexOf(0)) {
@@ -415,8 +423,8 @@ export async function streamGit(
       if (settled) return
       settled = true
       clearTimeout(timer)
-      child.stdout!.destroy()
-      child.stderr!.destroy()
+      stdoutPipe.destroy()
+      stderrPipe.destroy()
       const message = Buffer.concat(stderr).toString('utf8')
       if (ended === 'stopped') return resolve('stopped')
       if (ended === 'timedOut') return reject(Object.assign(new Error('git did not answer in time'), { timedOut: true, stderr: message }))

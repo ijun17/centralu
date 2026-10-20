@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -21,6 +21,9 @@ type ThemeChoice = { id: string; name: string; base: 'dark' | 'light'; file: boo
 const UPDATE_CARD =
   'Turn on "Automatic updates"? From then on this computer checks for a newer Centralu, installs it by itself as soon as one is published, ' +
   'and the desktop window relaunches into it when nothing is busy, without asking again. You can turn it off in Settings, Updates.'
+
+/** The most groups `UiPreferences.foldedGroups` holds (the window drops the oldest fold past it) */
+const FOLDED_GROUPS_MAX = 500
 
 const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 
@@ -55,7 +58,9 @@ export class PreferencesFlow {
     const rpc = this.rpc
     if (!rpc) return { ok: false, error: 'This host has no window calls to make.' }
     try {
-      return req.action === 'get' ? await this.get(rpc) : await this.set(rpc, sessionId, req.changes, signal)
+      if (req.action === 'get') return await this.get(rpc)
+      if (req.action === 'apply_agent_versions') return await this.applyVersions(rpc)
+      return await this.set(rpc, sessionId, req.changes, signal)
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
@@ -98,8 +103,9 @@ export class PreferencesFlow {
       versions.status === 'fulfilled'
         ? `- Move idle sessions to a newly installed agent CLI: ${onOff(versions.value.autoApply)} (moveIdleSessionsToNewAgentCli)`
         : '- Agent CLI versions: not available on this host',
-      'Kept by the person (no command changes this)',
-      `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)}`,
+      'Interface',
+      `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)} (set_preferences sendWithModifierEnter)`,
+      `- Sidebar groups folded: ${p.foldedGroups.length} (set_preferences foldedGroups folds or unfolds a session's children)`,
       'Limits on agents (set_agent_limits changes them, behind the person\'s card)',
       `- Agents: running per project ${p.agentCeiling === undefined || p.agentCeiling === null ? 'by preset' : p.agentCeiling === 0 ? 'unlimited' : p.agentCeiling}; levels that may start agents ${p.agentDepth ?? 1}`,
     ]
@@ -128,6 +134,12 @@ export class PreferencesFlow {
       patch[key] = value.trim()
     }
     if (changes.lineHeight !== undefined) patch.lineHeight = changes.lineHeight
+    if (changes.sendWithModifierEnter !== undefined) patch.sendWithModifierEnter = changes.sendWithModifierEnter
+    if (changes.foldedGroups !== undefined) {
+      const keys = await this.foldedKeys(rpc, changes.foldedGroups)
+      if (typeof keys === 'string') return { ok: false, error: keys }
+      patch.foldedGroups = keys
+    }
     const parsed = UiPreferencesPatch.safeParse(patch)
     if (!parsed.success) return { ok: false, error: `Nothing changed: ${issuesOf(parsed.error)}.` }
     const sleep = changes.idleSleepMinutes
@@ -264,6 +276,36 @@ export class PreferencesFlow {
     return { ok: true, text: [...done, ...(failed.length ? [`Not changed: ${failed.join(' ')}`] : [])].join('\n') }
   }
 
+  /**
+   * The folded groups after this change: the window's list as it is now, less the unfolded sessions' groups, with the
+   * folded ones last (the oldest fold is dropped past the cap, as the window drops it). The patch carries the whole list, since
+   * a list cannot be patched by one entry. Or the sentence that says what is wrong with an id
+   */
+  private async foldedKeys(rpc: WindowRpc, change: { fold?: string[]; unfold?: string[] }): Promise<string[] | string> {
+    const keyOf = (id: string): string | null => {
+      const ok = SessionId.safeParse(id.trim())
+      return ok.success ? `session:${ok.data}` : null
+    }
+    const fold = (change.fold ?? []).map((id) => [id, keyOf(id)] as const)
+    const unfold = (change.unfold ?? []).map((id) => [id, keyOf(id)] as const)
+    const bad = [...fold, ...unfold].find(([, key]) => key === null)
+    if (bad) return `${plainQuoted(bad[0])} is not a session id; list_sessions names them.`
+    const drop = new Set(unfold.map(([, key]) => key))
+    const add = fold.flatMap(([, key]) => (key === null ? [] : [key]))
+    const now = (await callWindow(rpc, 'prefs.get', {})).foldedGroups
+    const kept = now.filter((key) => !drop.has(key) && !add.includes(key))
+    return [...kept, ...add].slice(-FOLDED_GROUPS_MAX)
+  }
+
+  /** The session header's action: idle sessions on an older agent CLI restart on the installed one, and the busy ones are named */
+  private async applyVersions(rpc: WindowRpc): Promise<PreferencesAnswer> {
+    // An agent asks, not the person's own button: a session that spoke within the last minute keeps its turn (the window's button waits for nothing)
+    const r = await callWindow(rpc, 'agents.applyVersions', { keepQuiet: true })
+    if (!r.restarted.length && !r.busy.length) return { ok: true, text: 'No session that has been quiet for a minute runs an older agent CLI than the one installed; nothing was restarted.' }
+    const busy = r.busy.length ? ` ${r.busy.length === 1 ? '1 session is' : `${r.busy.length} sessions are`} busy and left as ${r.busy.length === 1 ? 'it is' : 'they are'} (${r.busy.join(', ')}); with "Move idle sessions to a newly installed agent CLI" on they move once idle.` : ''
+    return { ok: true, text: `Restarted ${r.restarted.length === 1 ? '1 idle session' : `${r.restarted.length} idle sessions`} on the installed agent CLI${r.restarted.length ? ` (${r.restarted.join(', ')})` : ''}.${busy}` }
+  }
+
   /** The theme the model named, by id or by name, or the sentence that says what it can name instead */
   private async theme(rpc: WindowRpc, ref: string): Promise<ThemeChoice | string> {
     const wanted = ref.trim()
@@ -315,5 +357,7 @@ function appearanceText(now: UiPreferences, patch: Record<string, unknown>, them
   if ('bodyFont' in patch) parts.push(`body font ${now.bodyFont ? plainQuoted(now.bodyFont, 200) : "the app's own"}`)
   if ('codeFont' in patch) parts.push(`code font ${now.codeFont ? plainQuoted(now.codeFont, 200) : "the app's own"}`)
   if ('lineHeight' in patch) parts.push(`line height ${now.lineHeight}`)
+  if ('sendWithModifierEnter' in patch) parts.push(`send with ${now.sendWithModifierEnter ? 'Ctrl+Enter (Enter breaks the line)' : 'Enter'}`)
+  if ('foldedGroups' in patch) parts.push(`${now.foldedGroups.length} sidebar ${now.foldedGroups.length === 1 ? 'group' : 'groups'} folded`)
   return `Now: ${parts.join('; ')}.`
 }

@@ -12,17 +12,22 @@
  * the satisfies drift trap on CODEX_VERBOSITIES). A field Codex renames in one of them then fails
  * the build where the adapter reads it, as well as the drift check here.
  *
- *   pnpm codex:bindings          — verifies the contract, and writes those types into generated/ (to commit),
- *                                  replacing the folder: nothing else belongs in it; codex-version.txt says which
- *                                  Codex made them
- *   pnpm codex:bindings --check  — verifies the contract, and that generated/ holds them as Codex makes them
- *                                  (drift.yml, with the latest Codex: a type we read changing goes red there)
+ *   pnpm codex:bindings                   — verifies the contract, and writes those types into generated/ (to
+ *                                           commit), replacing the folder: nothing else belongs in it; and
+ *                                           protocol-types.sha256, which says which Codex made them and what each
+ *                                           file holds (generated-types.test.ts fails on a hand edit)
+ *   pnpm codex:bindings --check-contract  — verifies the contract only: a name we use is gone (a real break)
+ *   pnpm codex:bindings --check-types     — that generated/ holds the types as this Codex makes them (stale types)
+ *   pnpm codex:bindings --check           — both (drift.yml runs them as two jobs, so the two read apart)
+ *
+ * On Windows `codex` is an npm shim (codex.cmd), which only a shell runs: it is started through one there.
  *
  * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
  * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
  * (`enumValues`).
  */
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -31,14 +36,29 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const ADAPTER = join(ROOT, 'packages/agent-host/src/adapters/codex')
 const CONTRACT = join(ADAPTER, 'protocol-contract.json')
-const WRITE = !process.argv.includes('--check') // --check compares generated/ with what Codex makes, writing nothing
+const flag = (name) => process.argv.includes(name)
+// Any --check writes nothing; --check is both checks
+const WRITE = !process.argv.some((a) => a.startsWith('--check'))
+const CHECK_CONTRACT = WRITE || flag('--check') || flag('--check-contract')
+const CHECK_TYPES = flag('--check') || flag('--check-types')
+const MANIFEST = join(ADAPTER, 'protocol-types.sha256')
+
+/** Runs codex: through a shell on Windows, where it is an npm shim (codex.cmd) execFile cannot start; args are ours */
+const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
+const codex = (args, opts = {}) =>
+  process.platform === 'win32'
+    ? execFileSync('codex', args.map(quote), { ...opts, shell: true })
+    : execFileSync('codex', args, opts)
+
+/** A file's text as the manifest names it: sha256 of its UTF-8 bytes */
+const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
 
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
-const version = execFileSync('codex', ['--version'], { encoding: 'utf8' }).trim()
+const version = String(codex(['--version'], { encoding: 'utf8' })).trim()
 const tmp = mkdtempSync(join(tmpdir(), 'codex-bindings-'))
 
 try {
-  execFileSync('codex', ['app-server', 'generate-ts', '--out', tmp], { stdio: 'pipe' })
+  codex(['app-server', 'generate-ts', '--out', tmp], { stdio: 'pipe' })
 } catch (e) {
   console.error('[codex] type generation failed — check whether the codex CLI is installed:', e.message)
   process.exit(1)
@@ -207,7 +227,6 @@ const committed = new Map()
   for (const root of roots) visit(root)
 }
 const DEST = join(ADAPTER, 'generated')
-const VERSION_FILE = join(DEST, 'codex-version.txt')
 /** What generated/ no longer matches; said apart from what disappeared from the contract, since the fix differs */
 const stale = []
 /** Every file under generated/, by path without `.ts` */
@@ -221,7 +240,7 @@ const committedNow = () => {
   }
   return out
 }
-if (!WRITE) {
+if (CHECK_TYPES) {
   const now = committedNow()
   for (const [file, text] of committed) {
     if (!now.has(file)) stale.push(`generated/${file}.ts: not committed`)
@@ -230,7 +249,7 @@ if (!WRITE) {
   for (const file of now.keys()) if (!committed.has(file)) stale.push(`generated/${file}.ts: no longer read by the adapter`)
 }
 
-if (missing.length > 0) {
+if (CHECK_CONTRACT && missing.length > 0) {
   console.error(
     `[codex] the protocol has changed (${version}). ${missing.length} item(s) we depend on have disappeared:\n  ` +
       missing.join('\n  ') +
@@ -240,7 +259,7 @@ if (missing.length > 0) {
   process.exit(1)
 }
 if (stale.length > 0) {
-  const made = existsSync(VERSION_FILE) ? readFileSync(VERSION_FILE, 'utf8').trim() : 'an unknown version'
+  const made = existsSync(MANIFEST) ? (/^# (.+)$/m.exec(readFileSync(MANIFEST, 'utf8'))?.[1] ?? 'an unknown version') : 'an unknown version'
   console.error(
     `[codex] generated/ does not hold the types the adapter reads as ${version} makes them (committed: ${made}). ${stale.length} file(s):\n  ` +
       stale.join('\n  ') +
@@ -256,14 +275,21 @@ if (WRITE) {
     mkdirSync(dirname(join(DEST, file)), { recursive: true })
     writeFileSync(join(DEST, `${file}.ts`), text)
   }
-  writeFileSync(VERSION_FILE, `${version}\n`)
+  const lines = [...committed].sort(([a], [b]) => (a < b ? -1 : 1)).map(([file, text]) => `${sha256(text)}  generated/${file}.ts`)
+  writeFileSync(MANIFEST, [`# ${version}`, ...lines].join('\n') + '\n')
   console.log(`[codex] contract verified (${version}) · wrote the ${committed.size} types the adapter is compiled against into generated/ (commit them)`)
 } else {
+  if (CHECK_TYPES && !CHECK_CONTRACT) {
+    console.log(`[codex] generated/ holds the ${committed.size} types the adapter reads as ${version} makes them`)
+    rmSync(tmp, { recursive: true, force: true })
+    process.exit(0)
+  }
   console.log(
     `[codex] contract verified (${version}) — all ${groups.reduce((n, [k]) => n + contract[k].length, 0)} dependent item(s) + ` +
       `${Object.keys(contract.requestParams ?? {}).length} request param set(s) + ` +
       `${Object.keys(contract.responseFields ?? {}).length} response type(s) + ` +
-      `${Object.keys(contract.enumValues ?? {}).length} enum(s) match, and generated/ holds the ${committed.size} types the adapter reads as Codex makes them`,
+      `${Object.keys(contract.enumValues ?? {}).length} enum(s) match` +
+      (CHECK_TYPES ? `, and generated/ holds the ${committed.size} types the adapter reads as Codex makes them` : ''),
   )
 }
 

@@ -1,3 +1,4 @@
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import type { StoredMessage } from '@cc/protocol'
 import { readRows } from './messages.js'
@@ -73,14 +74,16 @@ export class KeptRuns {
            SELECT ?, parent_call_id, seq, role, kind, payload, ts FROM subagent_messages WHERE session_id = ? AND trashed_at IS NULL`,
         )
         .run(r.runId, r.sessionId).changes
-      const has = this.db
-        .prepare(
+      const has = oneRow(
+        this.db
+        .prepare<unknown[], { messages: number; steps: number; keptMessages: number; keptSteps: number }>(
           `SELECT (SELECT COUNT(*) FROM messages WHERE session_id = @s) as messages,
                   (SELECT COUNT(*) FROM subagent_messages WHERE session_id = @s AND trashed_at IS NULL) as steps,
                   (SELECT COUNT(*) FROM app_run_messages WHERE run_id = @r) as keptMessages,
                   (SELECT COUNT(*) FROM app_run_subagent_messages WHERE run_id = @r) as keptSteps`,
         )
-        .get({ s: r.sessionId, r: r.runId }) as { messages: number; steps: number; keptMessages: number; keptSteps: number }
+        .get({ s: r.sessionId, r: r.runId }),
+      )
       // Thrown, so the transaction takes back what it wrote: a record is the whole session or nothing
       if (messages !== has.messages || steps !== has.steps || has.keptMessages !== has.messages || has.keptSteps !== has.steps) throw new IncompleteCopy()
       return true
@@ -96,7 +99,7 @@ export class KeptRuns {
   /** Every kept record, most recent first, with how much of the store each holds (its messages' bytes) */
   listKeptRuns(): KeptRunRow[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (Omit<KeptRunRow, 'tokens'> & { tokensIn: number | null; tokensOut: number | null })>(
         `SELECT k.run_id as runId, k.project_id as projectId, k.project_name as projectName, k.app_id as appId,
                 k.app_name as appName, k.session_id as sessionId, k.session_name as sessionName, k.tool, k.status,
                 k.duration_ms as durationMs, k.tokens_in as tokensIn, k.tokens_out as tokensOut,
@@ -107,22 +110,20 @@ export class KeptRuns {
                   + COALESCE((SELECT SUM(LENGTH(CAST(m.payload AS BLOB))) FROM app_run_subagent_messages m WHERE m.run_id = k.run_id), 0) as bytes
          FROM app_run_records k ORDER BY k.kept_at DESC, k.rowid DESC`,
       )
-      .all() as (Omit<KeptRunRow, 'tokens'> & { tokensIn: number | null; tokensOut: number | null })[]
+      .all()
     return rows.map(({ tokensIn, tokensOut, ...r }) => ({ ...r, tokens: tokensIn === null ? null : { input: tokensIn, output: tokensOut ?? 0 } }))
   }
 
   /** One record's request, answer and output, and a page of its conversation (the shape of `messages.load`); null when it is gone */
   readKeptRun(runId: string, limit: number, beforeSeq?: number): { request: string; answer: string; output: string | null; messages: StoredMessage[] } | null {
-    const head = this.db.prepare(`SELECT request, answer, output, session_id as sessionId FROM app_run_records WHERE run_id = ?`).get(runId) as
-      | { request: string; answer: string; output: string | null; sessionId: string }
-      | undefined
+    const head = this.db.prepare<unknown[], { request: string; answer: string; output: string | null; sessionId: string }>(`SELECT request, answer, output, session_id as sessionId FROM app_run_records WHERE run_id = ?`).get(runId)
     if (!head) return null
     const raw = this.db
-      .prepare(
+      .prepare<unknown[], (StoredMessage & { payload: string })>(
         `SELECT ? as sessionId, seq, role, kind, payload, ts FROM app_run_messages
          WHERE run_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
       )
-      .all(head.sessionId, runId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
+      .all(head.sessionId, runId, beforeSeq ?? null, beforeSeq ?? null, limit)
     return { request: head.request, answer: head.answer, output: head.output, messages: readRows(raw.reverse()) }
   }
 
@@ -147,7 +148,7 @@ export class KeptRuns {
 
   /** The ids of every kept record, for emptying the trash */
   keptRunIds(): string[] {
-    return (this.db.prepare(`SELECT run_id as runId FROM app_run_records`).all() as { runId: string }[]).map((r) => r.runId)
+    return this.db.prepare<unknown[], { runId: string }>(`SELECT run_id as runId FROM app_run_records`).all().map((r) => r.runId)
   }
 }
 

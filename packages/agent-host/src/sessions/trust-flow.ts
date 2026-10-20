@@ -1,6 +1,7 @@
-import { DEFAULT_AGENT_DEPTH, ORCHESTRATOR_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type MachineInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_AGENT_DEPTH, ORCHESTRATOR_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
 import type { AgentLimitChanges, TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
+import { appLabel, awayLine, findApp, findProject, onMachine, readProjects, shown, whereText, type Projects } from './app-lookup.js'
 import { plainQuoted } from './tool-answers.js'
 import { callWindow, issuesOf, type WindowRpc } from './window-rpc.js'
 
@@ -10,9 +11,6 @@ export type TrustAnswer = { ok: true; text: string } | { ok: false; error: strin
 
 /** What the trust commands reach of the session manager: its cards */
 export type TrustFlowHost = Pick<HostCards, 'askHost'>
-
-/** A name as one quoted line the person or the model reads (`plainQuoted`) */
-const shown = (name: string): string => plainQuoted(name)
 
 /** A folder, quoted and escaped but not cut: the end of a path is what tells two projects apart */
 const shownPath = (path: string): string => plainQuoted(path, 4096)
@@ -34,9 +32,6 @@ function rows<T>(items: readonly T[], line: (t: T) => string): string[] {
 
 /** One rule as Settings lists it */
 type ApprovalRuleRow = RpcResult<'approvals.rules'>[number]
-
-/** The projects and machines as the window reads them, for naming and finding a project */
-type Projects = { projects: ProjectInfo[]; machines: Map<string, string>; away: string[] | null }
 
 /**
  * What an app may ask for, as card lines (`usesLines`, the window's words). Said only when the host said it: an app whose
@@ -151,39 +146,23 @@ export class TrustFlow {
 
   // ── Projects ──
 
-  private async projects(rpc: WindowRpc): Promise<Projects> {
-    const [projects, machines] = await Promise.all([callWindow(rpc, 'projects.list', {}), callWindow(rpc, 'machines.list', {}).catch(() => null)])
-    return {
-      projects,
-      machines: new Map((machines ?? []).map((m: MachineInfo) => [m.id, m.name])),
-      // null: the linked machines could not be read, so whether a list is complete is not known either
-      away: machines ? machines.filter((m) => m.status !== 'connected').map((m) => m.name) : null,
-    }
+  private projects(rpc: WindowRpc): Promise<Projects> {
+    return readProjects(rpc)
   }
 
   /** A list's closing line when a linked machine is not connected: what it keeps is not in the list, and the list must not read as complete */
   private awayLine(all: Projects, what: string): string[] {
-    if (all.away === null) return [`The linked machines could not be read just now, so ${what} on them may be missing.`]
-    return all.away.length ? [`Not listed: ${what} on ${all.away.map(shown).join(', ')}, which ${all.away.length === 1 ? 'is' : 'are'} not connected just now.`] : []
+    return awayLine(all, what)
   }
 
   /** Where a project is, when it is not on this computer */
   private where(p: { machine?: string | null }, machines: Map<string, string>): string {
-    return p.machine ? ` on the linked machine ${shown(machines.get(p.machine) ?? p.machine)}` : ''
+    return whereText(p, machines)
   }
 
   /** The project an argument names: its id, or its name when exactly one project has it */
   private find(all: Projects, named: string): { project: ProjectInfo } | { error: string } {
-    const want = named.trim()
-    if (!want) return { error: 'Give project: its name or id, from list_projects.' }
-    const byId = all.projects.find((p) => p.id === want)
-    if (byId) return { project: byId }
-    const byName = all.projects.filter((p) => p.name.trim().toLowerCase() === want.toLowerCase())
-    if (byName.length === 1) return { project: byName[0]! }
-    if (byName.length > 1) {
-      return { error: `${byName.length} projects are called ${shown(want)}: ${byName.map((p) => `${p.id}${this.where(p, all.machines)}`).join(', ')}. Give its id.` }
-    }
-    return { error: `No project is called ${shown(want)}; list_projects names them.` }
+    return findProject(all, named)
   }
 
   private async listProjects(rpc: WindowRpc): Promise<TrustAnswer> {
@@ -346,32 +325,17 @@ export class TrustFlow {
 
   /** The app an argument names: its id or name, in the named project when one is given; refused when several match */
   private findApp(apps: readonly ExternalAppInfo[], all: Projects, named: string, project?: string): { app: ExternalAppInfo } | { error: string } {
-    const want = named.trim().toLowerCase()
-    if (!want) return { error: 'Give app: its id or name, from list_app_grants.' }
-    let pool = apps
-    if (project?.trim()) {
-      const found = this.find(all, project)
-      if ('error' in found) return { error: found.error }
-      pool = apps.filter((a) => a.projectId === found.project.id && (a.machine ?? null) === (found.project.machine ?? null))
-    }
-    const byId = pool.filter((a) => a.appId.toLowerCase() === want)
-    const matches = byId.length ? byId : pool.filter((a) => (a.name ?? '').trim().toLowerCase() === want)
-    if (matches.length === 1) return { app: matches[0]! }
-    if (!matches.length) return { error: `No app is called ${shown(named.trim())}${project ? ` in ${shown(project.trim())}` : ''}; list_app_grants names them.` }
-    return { error: `${matches.length} apps are called ${shown(named.trim())}: ${matches.map((a) => this.appLabel(a, all)).join(', ')}. Give project too.` }
+    return findApp(apps, all, named, project)
   }
 
   /** An app as one name: its title and id, and the project or user folder it is in */
   private appLabel(a: ExternalAppInfo, all: Projects): string {
-    const title = a.name?.trim() ? a.name : a.appId
-    const project = a.projectId ? all.projects.find((p) => p.id === a.projectId) : undefined
-    const home = a.projectId ? (project ? `of the project ${shown(project.name)}` : `of the project [${a.projectId}]`) : 'in the user folder'
-    return `${shown(title)} (id ${shown(a.appId)}) ${home}${this.where(a, all.machines)}`
+    return appLabel(a, all)
   }
 
   /** The window's call for one app's remembered answers, routed to its machine as the window routes it */
   private on(a: ExternalAppInfo): { machine?: string } {
-    return a.machine ? { machine: a.machine } : {}
+    return onMachine(a)
   }
 
   private async listAppGrants(rpc: WindowRpc, named?: string, project?: string): Promise<TrustAnswer> {

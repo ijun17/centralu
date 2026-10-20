@@ -273,6 +273,24 @@ describe('a frame that is JSON but not a JSON-RPC message (#1339)', () => {
   })
 })
 
+describe('a frame with a null id (#1383 review)', () => {
+  it('is a notification when it has a method, and answers no request when it has none', async () => {
+    const notified: { method: string; params?: unknown }[] = []
+    const requested: unknown[] = []
+    const { proc, emitter, sent, reply } = fakeProcess()
+    const client = new CodexClient({ ...quiet, onNotification: (n) => notified.push(n), onServerRequest: (r) => requested.push(r) }, { process: proc })
+    const answered = client.request('probe')
+    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    // A JSON-RPC error answer to a request the server could not read carries a null id: it belongs to no request here
+    emitter.stdout.write(`${JSON.stringify({ id: null, error: { code: -32700, message: 'parse error' } })}\n`)
+    emitter.stdout.write(`${JSON.stringify({ id: null, method: 'warning', params: { message: 'w' } })}\n`)
+    reply({ id: sent[0]!.id, result: { ok: true } })
+    await expect(answered).resolves.toEqual({ ok: true })
+    expect(requested).toEqual([])
+    expect(notified).toEqual([{ method: 'warning', params: { message: 'w' } }])
+  })
+})
+
 describe('closing a codex app-server', () => {
   /*
    * A process killed by a signal has no exit code, only a signal code, and its 'exit' is reported only once its

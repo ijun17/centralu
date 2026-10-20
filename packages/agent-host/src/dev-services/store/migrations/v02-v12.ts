@@ -1,3 +1,4 @@
+import { oneRow } from '../rows.js'
 import { indexedText } from '../search-index.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
@@ -10,7 +11,7 @@ export class StepsV2ToV12 extends MigrationRange {
         breaksOlderReaders: false,
         run: () => {
           // B-7: remember the files an agent touched, across restarts
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'touched_paths')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN touched_paths TEXT NOT NULL DEFAULT '[]'`)
           }
@@ -30,12 +31,12 @@ export class StepsV2ToV12 extends MigrationRange {
             );
           `)
           // Backfill existing messages — without this, old conversations are never searchable
-          const rows = this.db.prepare(`SELECT session_id, seq, kind, payload FROM messages`).all() as {
+          const rows = this.db.prepare<unknown[], {
             session_id: string
             seq: number
             kind: string
             payload: string
-          }[]
+          }>(`SELECT session_id, seq, kind, payload FROM messages`).all()
           const insert = this.db.prepare(`INSERT INTO messages_fts (body, session_id, seq) VALUES (?, ?, ?)`)
           const tx = this.db.transaction(() => {
             for (const r of rows) {
@@ -51,7 +52,7 @@ export class StepsV2ToV12 extends MigrationRange {
         breaksOlderReaders: false,
         run: () => {
           // FR-7: remember the model and permission per session (both can change mid-conversation)
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'model')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`)
           }
@@ -66,7 +67,7 @@ export class StepsV2ToV12 extends MigrationRange {
         run: () => {
           // Which earlier conversation this one continues. external_id cannot tell us — a
           // tool can **issue a new identifier** on resume, so it differs from the original.
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'imported_from')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN imported_from TEXT`)
           }
@@ -102,7 +103,7 @@ export class StepsV2ToV12 extends MigrationRange {
         run: () => {
           // Remember the reasoning effort per session too — the same kind of property as the
           // model, so it lives in the same place
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'effort')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN effort TEXT`)
           }
@@ -113,7 +114,7 @@ export class StepsV2ToV12 extends MigrationRange {
         breaksOlderReaders: false,
         run: () => {
           // Let the person set the sidebar order (projects already had this column)
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'sidebar_order')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN sidebar_order INTEGER NOT NULL DEFAULT 0`)
           }
@@ -157,14 +158,14 @@ export class StepsV2ToV12 extends MigrationRange {
            * rows moved is **counted and checked**. Silently losing even one row would be
            * unrecoverable.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as {
+          const cols = this.db.prepare<unknown[], {
             name: string
             notnull: number
-          }[]
+          }>(`PRAGMA table_info(sessions)`).all()
           const pid = cols.find((c) => c.name === 'project_id')
           if (!pid || pid.notnull === 0) return // already nullable
 
-          const before = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
+          const before = oneRow(this.db.prepare<unknown[], { n: number }>(`SELECT COUNT(*) as n FROM sessions`).get()).n
           const names = cols.map((c) => c.name).join(', ')
 
           /*
@@ -210,13 +211,13 @@ export class StepsV2ToV12 extends MigrationRange {
                 body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
               );
             `)
-            const rows = this.db.prepare(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all() as {
+            const rows = this.db.prepare<unknown[], {
               rowid: number
               session_id: string
               seq: number
               kind: string
               payload: string
-            }[]
+            }>(`SELECT rowid, session_id, seq, kind, payload FROM messages`).all()
             const insert = this.db.prepare(
               `INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
             )
@@ -246,7 +247,7 @@ export class StepsV2ToV12 extends MigrationRange {
            * worktree.** Falling back to the project's path would silently drop the isolation
            * while the user still believes it is isolated.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'worktree_path')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_path TEXT`)
             this.db.exec(`ALTER TABLE sessions ADD COLUMN worktree_branch TEXT`)
@@ -289,7 +290,7 @@ export class StepsV2ToV12 extends MigrationRange {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, archived)`)
 
     // Silently losing even one row is unrecoverable — throwing here rolls back the whole transaction
-    const after = (this.db.prepare(`SELECT COUNT(*) as n FROM sessions`).get() as { n: number }).n
+    const after = oneRow(this.db.prepare<unknown[], { n: number }>(`SELECT COUNT(*) as n FROM sessions`).get()).n
     if (after !== before) throw new Error(`Lost rows while migrating sessions: ${before} → ${after}`)
   }
 }

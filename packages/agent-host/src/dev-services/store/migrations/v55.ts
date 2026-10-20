@@ -31,7 +31,7 @@ export class StepsV55 extends MigrationRange {
          * **Expand only (#292's rule).** A nullable column set to null, which every build reads as "nobody asked".
          */
         run: () => {
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all().map((c) => c.name))
           if (!['asked_by_session_id', 'deleted_at', 'trash'].every((c) => cols.has(c))) return
           this.db
             .prepare(
@@ -85,7 +85,7 @@ export class StepsV55 extends MigrationRange {
          * build that purges a session still deletes its `app_runs` rows, as it always did; this build clears the link.
          */
         run: () => {
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(app_runs)`).all().map((c) => c.name))
           // A store without the run log (a test's partial schema) gets it from its own step; the columns go with it there
           if (cols.size > 0) {
             if (!cols.has('request')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN request TEXT`)

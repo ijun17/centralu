@@ -90,7 +90,7 @@ export function currentRareTier(): RareTier {
  * get_preferences and set_preferences; the machine commands are found by their name (centralu_commands "machine") and the line names three more (30 characters less).
  * In since #1219's third slice: the trust commands (list_projects, set_project_trust, list_approval_rules,
  * remove_approval_rule, list_app_grants, forget_app_answer, revoke_project_consent, share_app, set_agent_limits), found
- * with the machine commands by the words the line gives (centralu_commands "machine trust rule grant limits", 2 characters more).
+ * with the machine commands by the words the line gives (centralu_commands "machine trust rule grant limits app session agent project preferences trash"; the line replaced the three that named the machine, trust, settings and trash commands, and is shorter than they were). In since the fourth slice: the remaining machine calls, delete_session, the app upkeep commands, apply_agent_versions and the housekeeping and reads, all found by the same words.
  * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
  * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
  * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
@@ -117,11 +117,18 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'reconnect_machine',
     'set_machine_auto_reconnect',
     'set_machine_autostart',
+    'disconnect_machine',
+    'rollback_machine',
+    'uninstall_machine',
+    'machine_activity',
+    'list_ssh_hosts',
     'get_preferences',
     'set_preferences',
+    'apply_agent_versions',
     'list_trash',
     'restore_trashed',
     'trash_subagent_steps',
+    'delete_session',
     'delete_trashed',
     'empty_trash',
     'list_projects',
@@ -132,6 +139,20 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'forget_app_answer',
     'revoke_project_consent',
     'share_app',
+    'rename_session',
+    'clear_background_tasks',
+    'agent_status',
+    'agent_models',
+    'project_git_status',
+    'search_project_files',
+    'list_app_versions',
+    'restore_app_version',
+    'restart_app',
+    'check_app',
+    'list_app_runs',
+    'list_app_errors',
+    'app_usage',
+    'remove_app',
     'set_agent_limits',
     'find_apps',
     'attach_app',

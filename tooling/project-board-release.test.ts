@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import {
@@ -361,13 +361,14 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
   registryHold = null
   registryAsked = null
   await registry?.close()
   registry = null
-  rmFakeDir(root)
+  await removeFakeDir(root)
 })
 
 function runtime(ignore?: string[]) {

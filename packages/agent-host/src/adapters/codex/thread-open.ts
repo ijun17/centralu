@@ -45,6 +45,15 @@ export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<stri
     threadId: opts.resumeExternalId,
     ...permissionOptionsFor(opts.permissionPreset),
     /*
+     * The model Centralu shows for this session (#1369). A thread keeps the model it was created or last set with, and
+     * resuming without one runs that: a session imported from a Codex thread started elsewhere, or a thread whose
+     * model the provider has since retired, ran on a model other than the one on screen, and failed every turn for a
+     * model the person never picked here. `ThreadResumeParams.model` is "Configuration overrides for the resumed
+     * thread" (codex-cli 0.160.0). None recorded (the tool's default): nothing is asked, and the thread's own is read
+     * from the answer (`reconcileOpenedThread`). The effort has no place here; it rides every `turn/start`.
+     */
+    ...(opts.model ? { model: opts.model } : {}),
+    /*
      * Metadata only, not the whole history (#342). Nothing here reads the history the resume used to return
      * except the running turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
      * gpt-5.6-luna, a five-turn scratch thread, 2026-10-05): 1,206 KB / 761 ms and a `deprecationNotice`

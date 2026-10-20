@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, gitWrapper, removeFakeDir, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart } from '../.centralu/apps/project-board/notice-acks.mjs'
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, supersededSuites, twinPassedSuites, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -957,7 +959,8 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
   // Without blocking the event loop while it retries; a folder Windows still holds is left to its temporary-folder cleanup (#1346)
   await removeFakeDir(root)
@@ -1019,7 +1022,7 @@ function filesNamed(dir: string, name: string): string[] {
 }
 const queueFile = () => filesNamed(join(root, 'data'), 'merge-queue.json')[0]!
 const queueOnDisk = () => JSON.parse(readFileSync(queueFile(), 'utf8'))
-const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string; told?: boolean | 'failed' }[]).filter((e) => e.notify)
+const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string; told?: boolean | 'failed'; repostedAt?: string; reposted?: 'failed' }[]).filter((e) => e.notify)
 
 /** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most `ms` (20 s). */
 async function until(ok: (q: any) => boolean, what: string, ms = 20_000) {
@@ -1122,7 +1125,7 @@ describe('the merge queue posts its news into the session that queued (#1161 ite
     await morePolls()
     expect(told).toHaveLength(1)
     expect(told[0]!.sessionId).toBe('s1')
-    expect(told[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. .* Or take it out with unqueue\.$/)
+    expect(told[0]!.text).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: cancelled\. .* Or take it out with unqueue\.\nAck it with the board app's ack tool once handled/)
   })
 
   it('a session that is gone is given up on after a few tries, not tried forever; the event stays for a watch command', async () => {
@@ -1506,7 +1509,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().filter((w) => w[0] === 'merge')[0]![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA]))
     // Nothing rerun: the duplicate's checks are moot, not a reason to spend a run
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     // A failed check that is not the duplicate's (another workflow's) still keeps it waiting
     rmFakeDir(join(root, 'data'))
@@ -1524,7 +1527,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', null, 12)] } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'ci', 'CI')
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     expect(queueOnDisk().items.map((i: any) => [i.pr, i.state])).toEqual([[77, 'ci']])
     patchGh((s) => (s.checks[SHA] = green('2026-10-17T09:00:00Z')))
@@ -2695,7 +2698,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
     const mine = await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'someone else' })
     // The app goes away (Centralu stops an idle one)
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const dir = queueFile().replace(/[\\/]merge-queue\.json$/, '')
     expect(mine.data.watch).toContain(dir.includes(' ') ? `"${dir}"` : dir)
@@ -2704,9 +2707,11 @@ describe('the watch command: the queuing session hears about its items', { timeo
     const lines = r.out.trim().split('\n')
     expect(lines[0]).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: conflict\./)
     expect(r.out).not.toContain('#78')
-    expect(lines[1]).toBe('1 still queued for tester. To hear about them, run again in the background:')
+    // How to acknowledge it, or it stays listed (#1351)
+    expect(lines[1]).toMatch(/^Ack it with the board app's ack tool once handled: ack\(\{ owner: "tester", seqs: \[\d+\] \}\)/)
+    expect(lines[2]).toBe('1 still queued for tester. To hear about them, run again in the background:')
     // Quoted only where the shell needs it, as queue_merge's own command is
-    expect(lines[2]).toMatch(/merge-queue\.mjs"? watch --data "?.+"? --owner tester --after \d+$/)
+    expect(lines[3]).toMatch(/merge-queue\.mjs"? watch --data "?.+"? --owner tester --after \d+$/)
     // Its lease is let go: the next driver need not wait for it
     expect(filesNamed(dir, 'merge-queue.lease.json')).toEqual([])
   })
@@ -2714,7 +2719,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
   it('exits 0 with the merge, and 6 when nothing happens before its deadline', async () => {
     runtime(ghState(), IDLE_SERVER)
     const q = await call('queue_merge', { pr: 77, owner: 'tester' })
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const dir = queueFile().replace(/[\\/]merge-queue\.json$/, '')
     const r = await watch(['watch', '--data', dir, '--owner', 'tester', '--after', String(q.data.seq)])
@@ -2728,7 +2733,7 @@ describe('the watch command: the queuing session hears about its items', { timeo
     patchGh((s) => (s.checks[SHA] = [ghCheck('verify', null, 11)]))
     runtime(undefined, IDLE_SERVER)
     const p = await call('queue_merge', { pr: 78, owner: 'tester' })
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     rt = null
     const quiet = await watch(['watch', '--data', dir, '--owner', 'tester', '--after', String(p.data.seq), '--minutes', '0.01'])
     expect(quiet.code).toBe(6)
@@ -3544,5 +3549,176 @@ describe('the queue judges an integrated change again on each new head and befor
     // Not the integrator's any more: never turned back into a draft
     await morePolls(2)
     expect(writes().map(short2)).not.toContain('draft 600')
+  })
+})
+
+// --- Messages kept until their owner acknowledges them (#1351) --------------------------------------------------------
+
+describe("the merge queue keeps its messages until their owner acknowledges them (#1351)", { timeout: 90_000 * SLOW }, () => {
+  /** A queue with messages for two owners, and an event that is not a message */
+  function mailbox() {
+    const q = emptyQueue()
+    const at = (m: number) => new Date(NOW + m * 60_000).toISOString()
+    pushEvent(q, { repo: R, pr: 77, owner: 'tester' }, { kind: 'attention', text: '#77 needs attention: dirty.', notify: true, at: at(0) })
+    pushEvent(q, { repo: R, pr: 78, owner: 'tester' }, { kind: 'merged', text: 'merged #78.', notify: true, at: at(1) })
+    pushEvent(q, { repo: R, pr: 79, owner: 'other' }, { kind: 'attention', text: '#79 needs attention: failed.', notify: true, at: at(2) })
+    pushEvent(q, { repo: R, pr: 80, owner: 'tester' }, { kind: 'queued', text: '#80 queued.', at: at(3) })
+    return q
+  }
+  const seqs = (list: { seq: number }[]) => list.map((e) => e.seq)
+
+  it('keeps a message that needs attention unacknowledged for its owner, however far a watch has read, until it is acknowledged', () => {
+    const q = mailbox()
+    pushEvent(q, { repo: R, pr: 81, owner: 'tester' }, { kind: 'attention', text: '#81 needs attention: dirty.', notify: true, at: new Date(NOW).toISOString() })
+    expect(seqs(unacked(q, 'tester'))).toEqual([1, 5])
+    // An event before a watch's --after is still listed, and a watch without --after starts at the oldest
+    expect(watchState(q, { owner: 'tester', after: 5 }).news).toEqual([])
+    expect(seqs(unacked(q, 'tester'))).toEqual([1, 5])
+    expect(watchStart(q, 'tester')).toBe(0)
+    expect(seqs(watchState(q, { owner: 'tester', after: watchStart(q, 'tester') }).news)).toEqual([1, 2, 5])
+    // Acknowledged by seq, then every one up to a seq; another owner's are untouched
+    expect(acknowledge(q, 'tester', { seqs: [1], at: 'x' })).toBe(1)
+    expect(seqs(unacked(q, 'tester'))).toEqual([5])
+    expect(acknowledge(q, 'tester', { upTo: 9, at: 'x' })).toBe(1)
+    expect(unacked(q, 'tester')).toEqual([])
+    expect(seqs(unacked(q, 'other'))).toEqual([3])
+    // What was acknowledged is no news to a watch, and a watch with nothing left starts at the end
+    expect(seqs(watchState(q, { owner: 'tester', after: 0 }).news)).toEqual([2])
+    expect(watchStart(q, 'tester')).toBe(q.seq)
+  })
+
+  it('counts a landing or another message for information as acknowledged once posted, and never lists it', () => {
+    const q = mailbox()
+    // The landing (#78) is not listed, before or after it is posted
+    expect(seqs(unacked(q))).toEqual([1, 3])
+    expect(seqs(watchState(q, { owner: 'tester', after: 0 }).news)).toEqual([1, 2])
+    // Posted into its session: no news to a watch any more; one needing attention stays, posted or not
+    for (const e of q.events) Object.assign(e, { told: true, toldAt: new Date(NOW).toISOString() })
+    expect(seqs(watchState(q, { owner: 'tester', after: 0 }).news)).toEqual([1])
+    expect(seqs(unacked(q))).toEqual([1, 3])
+    // Only one needing attention says how to acknowledge it
+    expect(noticeText(q.events[0])).toBe(`#77 needs attention: dirty.\nAck it with the board app's ack tool once handled: ack({ owner: "tester", seqs: [1] }) (merge_queue lists what is unacknowledged).`)
+    expect(noticeText(q.events[1])).toBe('merged #78.')
+  })
+
+  it('acknowledges nothing for an empty or blank owner, rather than every owner\'s', () => {
+    const q = mailbox()
+    for (const owner of ['', ' ', '\t']) expect(acknowledge(q, owner, { upTo: 99, at: 'x' })).toBe(0)
+    expect(seqs(unacked(q))).toEqual([1, 3])
+  })
+
+  it('posts a message that needs attention again once, when it is still unacknowledged 30 minutes after it was posted', () => {
+    const q = mailbox()
+    const told = (seq: number, m: number) => Object.assign(q.events.find((e: { seq: number }) => e.seq === seq), { told: true, toldAt: new Date(NOW + m * 60_000).toISOString() })
+    // Not posted yet (Centralu down, or still trying): no repost before its first post, however old
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+    told(1, 0)
+    // Posted late, 60 minutes after it was said: 30 minutes from then, not at once
+    told(3, 60)
+    expect(dueReposts(q, NOW + 29 * 60_000)).toEqual([])
+    expect(seqs(dueReposts(q, NOW + 61 * 60_000))).toEqual([1])
+    markReposted(q, 1, 'x')
+    expect(dueReposts(q, NOW + 89 * 60_000)).toEqual([])
+    expect(seqs(dueReposts(q, NOW + 91 * 60_000))).toEqual([3])
+    acknowledge(q, 'other', { seqs: [3], at: 'x' })
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+  })
+
+  it('counts what a queue file from before acknowledging already said as acknowledged, and keeps new ones', () => {
+    // A file written before #1351: no acksFrom, its messages never acknowledged, one told long ago
+    const old = mailbox() as Record<string, unknown> & { events: Record<string, unknown>[] }
+    delete old.acksFrom
+    Object.assign(old.events[0]!, { told: true, toldAt: new Date(NOW).toISOString() })
+    const q = normalize(JSON.parse(JSON.stringify(old)))
+    expect(unacked(q)).toEqual([])
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+    expect(watchStart(q, 'tester')).toBe(q.seq)
+    // What it says from now on is kept, and stays so once written and read again
+    pushEvent(q, { repo: R, pr: 81, owner: 'tester' }, { kind: 'attention', text: '#81 needs attention.', notify: true, at: new Date(NOW).toISOString() })
+    expect(seqs(unacked(normalize(JSON.parse(JSON.stringify(q))), 'tester'))).toEqual([5])
+  })
+
+  it('keeps no message that has no owner to acknowledge it', () => {
+    const q = mailbox()
+    // Needing attention, with no owner (an item queued by hand with none)
+    pushEvent(q, { repo: R, pr: 81, owner: null }, { kind: 'attention', text: '#81 needs attention.', notify: true, at: new Date(NOW).toISOString() })
+    expect(seqs(unacked(q))).toEqual([1, 3])
+    expect(watchStart(q)).toBe(0)
+  })
+
+  it('lists them first in merge_queue for their owner, acks them with ack, and posts one again into its session once', async () => {
+    runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY' }) } }), { PROJECT_BOARD_QUEUE_REPOST_MS: '400', PROJECT_BOARD_QUEUE_TELL_RETRY_MS: '1' })
+    const told: string[] = []
+    rt!.attachBrokerHost(fakeBrokerHost({ appNotice: async (_sessionId, text) => void told.push(text) }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention')
+    // Posted once, with how to acknowledge it; then once more, 400 ms on (30 minutes in the product), and no more
+    await until(() => told.length >= 2, 'the repost')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(told).toHaveLength(2)
+    expect(told[0]).toMatch(/needs attention: conflict\.[\s\S]*Ack it with the board app's ack tool once handled: ack\(\{ owner: "tester", seqs: \[\d+\] \}\)/)
+    expect(told[1]).toMatch(/^Merge queue: still not acknowledged after \d+ minutes: Merge queue: #77/)
+    // merge_queue lists it first for its owner
+    const listed = await call('merge_queue', { owner: 'tester' })
+    expect(listed.text.split('\n')[1]).toMatch(/^1 message not acknowledged by tester; act on each, then ack\(\{ owner, seqs \}\)/)
+    expect(listed.data.unacked).toHaveLength(1)
+    const seq = listed.data.unacked[0].seq
+    expect((await call('merge_queue', { owner: 'someone else' })).data.unacked).toEqual([])
+    // Without an owner, only how many and whose
+    expect((await call('merge_queue', {})).text.split('\n')[1]).toBe('1 message not acknowledged, for tester (1); merge_queue({ owner }) lists them.')
+    // A blank owner is refused, and acknowledges nobody's
+    const blank = await call('ack', { owner: ' ', upTo: 999 })
+    expect(blank.isError).toBe(true)
+    expect(blank.text).toBe('Nothing acknowledged: give the owner you queued with.')
+    expect((await call('merge_queue', { owner: 'tester' })).data.unacked).toHaveLength(1)
+    // Acknowledged: gone from the list
+    const acked = await call('ack', { owner: 'tester', seqs: [seq] })
+    expect(acked.text).toBe('Acknowledged 1 message for tester; 0 still not acknowledged.')
+    expect((await call('merge_queue', { owner: 'tester' })).data.unacked).toEqual([])
+  })
+
+  it('tries a repost Centralu did not take again, as a first post, and records it posted only once it is', async () => {
+    runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY' }) } }), { PROJECT_BOARD_QUEUE_REPOST_MS: '400', PROJECT_BOARD_QUEUE_TELL_RETRY_MS: '1' })
+    const told: string[] = []
+    let refused = 0
+    rt!.attachBrokerHost(
+      fakeBrokerHost({
+        appNotice: async (_sessionId, text) => {
+          // Centralu restarting: the first two reposts are not taken
+          if (text.startsWith('Merge queue: still not acknowledged') && refused < 2) {
+            refused += 1
+            throw new Error('Centralu is restarting')
+          }
+          told.push(text)
+        },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => told.length >= 2, 'the repost, taken on the third try')
+    expect(refused).toBe(2)
+    expect(told[1]).toMatch(/^Merge queue: still not acknowledged after \d+ minutes: /)
+    // Recorded once taken (written just after the post), and not as given up on
+    await until(() => Boolean(notices().find((e) => e.kind === 'attention')?.repostedAt), 'the repost recorded')
+    expect(notices().find((e) => e.kind === 'attention')?.reposted).toBeUndefined()
+  })
+
+  it('replays what was not acknowledged to a watch restarted with no --after, and not once acknowledged', async () => {
+    runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY' }) } }), IDLE_SERVER)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const dir = queueFile().replace(/[\\/]merge-queue\.json$/, '')
+    // The message is said while nobody watches (a watch run once and gone)
+    const first = await watch(['watch', '--data', dir, '--owner', 'tester'])
+    expect(first.code).toBe(3)
+    // A watch started again with no --after hears it again: it is not acknowledged
+    const again = await watch(['watch', '--data', dir, '--owner', 'tester', '--minutes', '0.05'])
+    expect(again.code).toBe(3)
+    expect(again.out).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: conflict\./)
+    const seq = (await call('merge_queue', { owner: 'tester' })).data.unacked[0].seq
+    await call('ack', { owner: 'tester', seqs: [seq] })
+    await rt!.dispose()
+    rt = null
+    const quiet = await watch(['watch', '--data', dir, '--owner', 'tester', '--minutes', '0.02'])
+    expect(quiet.code).toBe(6)
+    expect(quiet.out).not.toContain('needs attention')
   })
 })

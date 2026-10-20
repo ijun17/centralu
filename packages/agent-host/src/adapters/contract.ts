@@ -262,6 +262,14 @@ export interface SessionHandle {
   answerQuestion?(requestId: string, answers: QuestionAnswer[]): boolean
   /** Injects saved "always allow" rules — so they survive a restart (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
+  /**
+   * The model and effort the tool's conversation turned out to run with when it was opened, when they are not what the
+   * session was asked to run (#1369): a conversation started elsewhere keeps the model it was started with. Taken once,
+   * by the host, as it registers the handle, so it can record them before anything reads the session's settings; a
+   * handle that is not registered yet cannot hear a `settings_changed`. After it is taken, a later answer (a slow
+   * background resume) comes as a `settings_changed` the tool made. Left unimplemented by a tool that always runs what it is asked.
+   */
+  takeOpenedSettings?(): { model: string | null; effort: string | null } | null
   /** Changes model or permission (starting next turn). Left unimplemented if unsupported */
   updateSettings?(settings: {
     model?: string | null
