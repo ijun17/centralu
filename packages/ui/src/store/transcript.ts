@@ -86,7 +86,7 @@ export type ChatItem =
      * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
      * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
      */
-    | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine }
+    | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine; pickModel?: true }
   ) & {
     /**
      * The **number within the session** the host assigned when it stored this row (the store's
@@ -412,7 +412,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'error':
       // A session's error is recorded as a marker row and carries its number (#161) — matched by number like every other stored row
       if (holds(items, e.seq)) return items
-      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: errorText(e) }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     default:
       return items
   }
@@ -535,15 +535,26 @@ function markerParts(
 ): {
   text: string
   notice?: NoticeLine
+  pickModel?: true
 } {
   const notice = e.type === 'notice' ? noticeLine(e) : null
+  if (e.type === 'error' && refusedModel(e)) return { text: markerText(e), pickModel: true }
   return notice ? { text: markerText(e), notice } : { text: markerText(e) }
+}
+
+/** The model the provider refused, when this error is that failure (#1369) — the host marks it in `error.data`; other errors carry none */
+export function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | null {
+  const data: unknown = e.error.data
+  if (typeof data !== 'object' || data === null || !('reason' in data) || data.reason !== 'model_rejected') return null
+  return 'model' in data && typeof data.model === 'string' ? data.model : null
 }
 
 /** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
 export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   // No turn was running — the conversation could not be opened at all (#168, item 5)
   if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
+  // Trying again cannot help; picking another model can, and the row offers it (#1369)
+  if (refusedModel(e)) return `The agent could not finish this turn — ${e.error.message} Pick another model for this session to continue.`
   return `The agent could not finish this turn — ${e.error.message}`
 }
 

@@ -3185,6 +3185,32 @@ describe('the machine commands on a real hub (#1219)', () => {
     expect(remote.store.projects.listProjects().length).toBe(1)
   })
 
+  it('disconnects the real link with no card, reads what an update would stop, and refuses what has nothing to act on before any card (#1219)', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => status(hub) === 'connected')
+    const orc = await hub.mgr.orchestrator()
+    const activity = await run(hub, orc.id, 'machine_activity', { machine: 'Remote box' })
+    expect(activity.isError).toBeFalsy()
+    expect(activity.text).toMatch(/^(Nothing is running on Remote box|On Remote box, an update or a restart would stop|Remote box cannot say what is running)/)
+    for (const command of ['rollback_machine', 'uninstall_machine']) {
+      const r = await run(hub, orc.id, command, { machine: 'Remote box' })
+      expect(r.isError, command).toBe(true)
+      expect(machineCard(hub, orc.id), command).toBeUndefined()
+    }
+    expect(status(hub)).toBe('connected')
+    const r = await run(hub, orc.id, 'disconnect_machine', { machine: 'Remote box' })
+    expect(r.isError).toBeFalsy()
+    expect(status(hub)).toBe('disconnected')
+    expect(machineCard(hub, orc.id)).toBeUndefined()
+    // Connecting it again is the person's (#1341)
+    const back = run(hub, orc.id, 'reconnect_machine', { machine: 'Remote box' })
+    await eventually(() => !!machineCard(hub, orc.id))
+    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
+    expect((await back).isError).toBe(true)
+    expect(status(hub)).toBe('disconnected')
+  })
+
   it('refuses an install this computer cannot make before any card', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))

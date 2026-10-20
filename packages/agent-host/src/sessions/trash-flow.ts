@@ -11,6 +11,12 @@ export type TrashAnswer = { ok: true; text: string } | { ok: false; error: strin
 /** What the trash commands reach of the session manager: its cards */
 export type TrashFlowHost = Pick<HostCards, 'askHost'>
 
+/** What `delete_session` reaches of this host's own sessions (`SessionTrash`): what a delete drops, and the delete decided in the step that moves the session */
+export type SessionOps = {
+  lossesOf(sessionId: string): string[]
+  deleteIfQuiet(sessionId: string, also: () => boolean): Promise<boolean>
+}
+
 /** How many rows of a list or a card name their items; the rest are counted */
 const ROWS = 25
 
@@ -86,10 +92,16 @@ type Trash = { sessions: TrashedSession[]; runs: TrashedRun[]; steps: TrashedSub
 export class TrashFlow {
   private rpc: WindowRpc | null = null
 
+  private sessions: SessionOps | null = null
+
   constructor(private readonly host: TrashFlowHost) {}
 
   useRpc(rpc: WindowRpc): void {
     this.rpc = rpc
+  }
+
+  useSessions(ops: SessionOps): void {
+    this.sessions = ops
   }
 
   async run(sessionId: string, req: TrashRequest, signal?: AbortSignal): Promise<TrashAnswer> {
@@ -97,7 +109,7 @@ export class TrashFlow {
     if (!rpc) return { ok: false, error: 'This host has no window calls to make.' }
     try {
       // The window's own check of an id, said before the trash is read to look for it
-      if (req.action === 'restore' || req.action === 'delete') {
+      if (req.action === 'restore' || req.action === 'delete' || req.action === 'delete_session') {
         const id = SessionId.safeParse(req.sessionId)
         if (!id.success) return { ok: false, error: issuesOf(id.error) }
       }
@@ -115,6 +127,8 @@ export class TrashFlow {
               : `${req.sessionId} holds no subagent steps to move.`,
           }
         }
+        case 'delete_session':
+          return await this.deleteSession(rpc, sessionId, req.sessionId, signal)
         case 'delete':
           return await this.delete(rpc, sessionId, req.sessionId, req.what, signal)
         case 'empty':
@@ -145,6 +159,77 @@ export class TrashFlow {
     }
     if (!trash.sessions.length && !trash.runs.length && !trash.steps.length) out.push('The trash is empty.')
     return { ok: true, text: out.join('\n') }
+  }
+
+  /**
+   * delete_session (#1219, fourth slice): moves a session that is not the caller's child to the trash. It **asks, every
+   * time**: what comes back with `restore_trashed` is the conversation, the worktree and the tool's file, but the host lets go
+   * of what the session held when it leaves (a caller's wait for its report, delegations, its children's reports, the
+   * start_agent cards it raised, what the person allowed it), and the card names what is lost for this session
+   * (`SessionTrash.lossesOf`). A worker the person started themselves is named as theirs.
+   *
+   * Refused before the card, from the window's list: the caller itself, a session that is not a worker, a child the caller
+   * started (that is `agent_session delete`), one on a machine that cannot be reached, one busy now (a turn, a card, a
+   * background job: moving it ends its process). After Allow the host decides at the last moment, in the step that moves it
+   * and with nothing awaited between (`SessionTrash.trashIfQuiet`): a message the person sent meanwhile, a card, a job, or
+   * a change in what is lost since the card keeps the session where it is. A linked machine's session is moved by that
+   * machine's own `agents.deleteSession`, which cannot be decided in the step, so there the card is the safeguard.
+   */
+  private async deleteSession(rpc: WindowRpc, caller: string, id: string, signal?: AbortSignal): Promise<TrashAnswer> {
+    if (id === caller) return { ok: false, error: 'This session cannot delete itself.' }
+    const row = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === id)
+    if (!row) return { ok: false, error: `No session [${id}] is listed; list_sessions shows them. Nothing was deleted.` }
+    const name = shown(row.name)
+    if (row.kind !== 'worker') return { ok: false, error: `${name} is ${row.kind === 'orchestrator' ? 'an orchestrator' : 'a coordinator'}; only the person deletes those.` }
+    if (row.askedBy === caller) return { ok: false, error: `${name} is a child you started; delete it with agent_session (action delete), which also settles its report and its worktree.` }
+    if (row.unreachable) return { ok: false, error: `${name} is on a machine that cannot be reached just now; try again when it answers.` }
+    if (row.state === 'working' || row.pendingApproval || row.pendingQuestions.length > 0) {
+      return { ok: false, error: `${name} is busy (${row.pendingApproval || row.pendingQuestions.length ? 'waiting on the person' : 'working'}); the person may be using it. Delete it once it is idle.` }
+    }
+    // Moving it to the trash ends its process, and with it a server or a watch it started: that is not what the trash brings back
+    const running = row.backgroundTasks.filter((t) => t.status === 'running')
+    if (running.length) {
+      return { ok: false, error: `${name} has ${plural(running.length, 'background job')} still running (${running.slice(0, 3).map((t) => plainQuoted(t.description, 80)).join(', ')}); deleting it would end ${running.length === 1 ? 'it' : 'them'} for good. The person can stop ${running.length === 1 ? 'it' : 'them'} first.` }
+    }
+    const ops = this.sessions
+    const local = !row.machine
+    if (local && !ops) return { ok: false, error: 'This host cannot move a session to the trash from here.' }
+    const lost = local && ops ? ops.lossesOf(id) : []
+    const yours = row.askedBy == null && row.parentSessionId == null
+    const question = [
+      `Move the session ${name}${row.machine ? ` on the linked machine ${shown(row.machine)}` : ''} to the trash?`,
+      yours ? 'The person started it themselves.' : '',
+      'Its process stops. Restoring it from the trash brings back its conversation, its worktree and the tool\'s own conversation file, and a restored session starts a new process.',
+      lost.length
+        ? `Restoring does not bring back what the host lets go of when it leaves:\n${lost.map((l) => `- ${l}`).join('\n')}`
+        : local
+          ? 'Nothing else is lost: no one is waiting on it and it owes no report.'
+          : 'What a linked machine lets go of when it moves a session is that machine\'s to say; the person can read it on that machine.',
+      'It is moved only if it is still at rest when you answer; a turn, a card or a message that arrives meanwhile keeps it where it is.',
+    ]
+      .filter(Boolean)
+      .join('\n')
+    const refused = await this.ask(caller, question, signal, 'moved to the trash')
+    if (refused) return { ok: false, error: refused }
+    if (local && ops) {
+      // Decided in the step that moves it: at rest, and losing exactly what the card said
+      const moved = await ops.deleteIfQuiet(id, () => JSON.stringify(ops.lossesOf(id)) === JSON.stringify(lost))
+      if (!moved) return { ok: false, error: `${name} is not at rest any more, or what moving it drops changed, or it is already gone (a message, a card, a job, or a change in who waits on it came while the card stood), so it was not moved. Ask again if it still should be.` }
+    } else {
+      // The machine decides on its own; the list is read again so a session busy since the card is not moved
+      const now = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === id)
+      if (!now) return { ok: true, text: `${name} [${id}] was already gone while the card stood; nothing more was done.` }
+      if (now.state === 'working' || now.pendingApproval || now.pendingQuestions.length > 0 || now.backgroundTasks.some((t) => t.status === 'running')) {
+        return { ok: false, error: `${name} became busy while the card stood, so it was not moved. Ask again if it still should be.` }
+      }
+      await callWindow(rpc, 'agents.deleteSession', { sessionId: id, deleteWorktree: false, deleteExternal: false })
+    }
+    return {
+      ok: true,
+      text:
+        `Moved ${name} [${id}]${row.machine ? ` on ${shown(row.machine)}` : ''} to the trash. Nothing was destroyed: ${row.worktree ? 'its worktree stays, ' : ''}the tool's own conversation file stays, ` +
+        `and restore_trashed brings it back${lost.length ? ' (not what the card listed as dropped)' : ''}; delete_trashed deletes it for good, after the person's card.`,
+    }
   }
 
   private async restore(rpc: WindowRpc, caller: string, id: string, what: 'session' | 'steps', signal?: AbortSignal): Promise<TrashAnswer> {
@@ -279,7 +364,7 @@ export class TrashFlow {
   }
 
   /** The delete card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
-  private async ask(sessionId: string, question: string, signal?: AbortSignal, notDone: 'deleted' | 'restored' = 'deleted'): Promise<string | null> {
+  private async ask(sessionId: string, question: string, signal?: AbortSignal, notDone: 'deleted' | 'restored' | 'moved to the trash' = 'deleted'): Promise<string | null> {
     const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it, so nothing was ' + notDone + '. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing was ' + notDone + '.'

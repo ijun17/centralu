@@ -34,6 +34,7 @@
         "threadId",
         "clientUserMessageId",
         "input",
+        "model",
         "effort",
         "outputSchema"
       ]
@@ -74,6 +75,7 @@
       "type": "ThreadResumeParams",
       "send": [
         "threadId",
+        "model",
         "config",
         "approvalPolicy",
         "sandbox",
@@ -117,7 +119,9 @@
       "sandbox"
     ],
     "ThreadResumeResponse": [
-      "sandbox"
+      "sandbox",
+      "model",
+      "reasoningEffort"
     ],
     "InitializeResponse": [
       "userAgent"

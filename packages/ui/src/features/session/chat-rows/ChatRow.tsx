@@ -13,6 +13,7 @@ import { WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
 import { CentraluCallBody } from './CentraluCallBody.jsx'
 import { Badge } from '../../../components/Badge.jsx'
+import { Button } from '../../../components/Button.jsx'
 
 /*
  * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
@@ -172,6 +173,17 @@ export const ChatRow = memo(function ChatRow({
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
         <span className="h-px flex-1 bg-line" />
         <span className="readout min-w-0 break-words text-center text-2xs text-ink-faint">{item.text}</span>
+        {item.pickModel && (
+          // The provider refused this session's model (#1369): the model menu below the composer, one click away
+          <Button
+            size="xs"
+            className="shrink-0"
+            data-testid="msg-mark-pick-model"
+            onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
+          >
+            Pick another model
+          </Button>
+        )}
         <span className="h-px flex-1 bg-line" />
       </div>
     )

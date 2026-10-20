@@ -8,7 +8,8 @@ import { imageEventFromDisk } from '../images.js'
 import { launchedThreads } from './child-tracker.js'
 import { CODEX_KNOWN_NOTIFICATIONS } from './known-notifications.js'
 import { CompactionMarks, goalFromCodex, normalizeNotification } from './normalize.js'
-import { threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } from './thread-settings.js'
+import { turnError } from './model-rejected.js'
+import { reconcileOpenedThread, threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } from './thread-settings.js'
 import { CodexRequestInputs } from './token-readings.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
@@ -83,6 +84,8 @@ export class CodexSession implements SessionHandle {
   private readonly compactions = new CompactionMarks()
   /** Each model request's input, once (prompt cache accounting, see `CodexRequestInputs`) */
   private readonly requests = new CodexRequestInputs()
+  /** The model and effort turns ask for: the session's own, or what the thread answered a resume with instead (#1369, `reconcileOpenedThread`) */
+  private shown: { model: string | null; effort: string | null } | null = null
   /** What the thread said it runs with — a `thread/settings/updated` is measured against this (#304, `threadSettingsChanged`) */
   private threadSettings: CodexThreadSettings | null = null
   /** Centralu's bridge and the app bridges this thread loads (see `CodexServers`) */
@@ -178,6 +181,37 @@ export class CodexSession implements SessionHandle {
     )
   }
 
+  /**
+   * The settings the thread turned out to run with (#1369) go to the host as it registers the handle (`takeOpenedSettings`):
+   * until then it cannot record a `settings_changed`. A resume still running when the host took them (a slow background
+   * resume) sends the event itself once it answers.
+   */
+  private opened: { model: string | null; effort: string | null } | null = null
+  private openedTaken = false
+
+  private adoptOpened(settings: { model: string | null; effort: string | null }): void {
+    if (!this.openedTaken) {
+      this.opened = settings
+      return
+    }
+    this.emit({
+      type: 'settings_changed',
+      sessionId: this.sessionId,
+      model: settings.model,
+      effort: settings.effort,
+      verbosity: this.opts.verbosity ?? null,
+      serviceTier: this.opts.serviceTier ?? null,
+      by: 'tool',
+    })
+  }
+
+  takeOpenedSettings(): { model: string | null; effort: string | null } | null {
+    this.openedTaken = true
+    const settings = this.opened
+    this.opened = null
+    return settings
+  }
+
   private async start(): Promise<void> {
     const adopted = !!this.opts.processSource?.adopt
     await initializeAppServer(this.client, this.sessionId, adopted, (e) => this.emit(e))
@@ -193,6 +227,14 @@ export class CodexSession implements SessionHandle {
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
+      // What the thread runs, against what Centralu shows (#1369): the screen follows the thread, never the other way round
+      const opened = reconcileOpenedThread(this.sessionId, this.threadSettings, { model: this.opts.model ?? null, effort: this.opts.effort ?? null })
+      if (opened.notice) this.emit(opened.notice)
+      if (opened.settings) {
+        // Another model than the one recorded answered: what every turn asks for from here on, or the next turn would undo it
+        if (this.opts.model) this.shown = { model: opened.settings.model, effort: this.opts.effort ?? null }
+        this.adoptOpened(opened.settings)
+      }
       this.threadServers.checkAppMode(res)
       this.networkAccess = networkAccessOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
@@ -303,12 +345,15 @@ export class CodexSession implements SessionHandle {
     }
     if (n.method === 'thread/settings/updated') {
       const { next, events } = threadSettingsChanged(this.sessionId, this.threadSettings, n.params, {
-        model: this.opts.model ?? null,
-        effort: this.opts.effort ?? null,
+        model: this.shown?.model ?? this.opts.model ?? null,
+        effort: this.shown?.effort ?? this.opts.effort ?? null,
         verbosity: this.opts.verbosity ?? null,
         serviceTier: this.opts.serviceTier ?? null,
       })
       this.threadSettings = next
+      // The thread changed under us and the record follows (settings_changed): turns ask for what runs now, not for the old one
+      const switched = events.find((e) => e.type === 'settings_changed')
+      if (switched?.type === 'settings_changed') this.shown = { model: switched.model, effort: switched.effort }
       for (const e of events) this.emit(e)
       return
     }
@@ -398,12 +443,7 @@ export class CodexSession implements SessionHandle {
               threadId: this.threadId,
               ...(receipt ? { clientUserMessageId: receipt.id } : {}),
               input: [{ type: 'text', text }],
-              /*
-               * Reasoning effort is passed per turn — this is the slot codex documents as applying
-               * to "this turn and turns after it". It is cheaper this way, since it can be changed
-               * without restarting the session.
-               */
-              ...(this.opts.effort ? { effort: this.opts.effort } : {}),
+              ...this.turnSettings(),
               ...this.outputSchemaParam(),
             })
             // The turn also rides along on the response — this covers the case where it arrives before the notification (the target of stop)
@@ -419,9 +459,23 @@ export class CodexSession implements SessionHandle {
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
-          error: { code: 'internal', message: e.message, retryable: true },
+          error: turnError(e.message),
         })
       })
+  }
+
+  /**
+   * The model and effort a turn is started with (#1369). Both are passed per turn: `TurnStartParams.model` and
+   * `.effort` are documented as applying to "this turn and subsequent turns" (codex-cli 0.160.0), so what Centralu
+   * shows is what the thread runs even when its stored model is another (a thread imported from elsewhere, one whose
+   * model was retired) and changes without restarting the session. None recorded: the thread's own runs.
+   */
+  private turnSettings(): { model?: string; effort?: string } {
+    const { model, effort } = this.shown ?? { model: this.opts.model ?? null, effort: this.opts.effort ?? null }
+    return {
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+    }
   }
 
   /** Sends the messages that were queued out as one turn — each message as its own input item (does not blur the boundary) */
@@ -438,7 +492,7 @@ export class CodexSession implements SessionHandle {
         threadId: this.threadId,
         ...(clientId ? { clientUserMessageId: clientId } : {}),
         input,
-        ...(this.opts.effort ? { effort: this.opts.effort } : {}),
+        ...this.turnSettings(),
         ...this.outputSchemaParam(),
       })
       .then((res) => this.takeInputTurn(res, receipts))
@@ -449,7 +503,7 @@ export class CodexSession implements SessionHandle {
         this.emit({
           type: 'error',
           sessionId: this.sessionId,
-          error: { code: 'internal', message: e.message, retryable: true },
+          error: turnError(e.message),
         })
       })
   }

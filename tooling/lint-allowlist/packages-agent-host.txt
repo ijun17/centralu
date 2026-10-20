@@ -562,7 +562,7 @@ packages/agent-host/src/sessions/transcript-view.ts @typescript-eslint/no-unsafe
 packages/agent-host/src/sessions/trash-flow.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/sessions/trust-commands.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/trust-flow.ts @typescript-eslint/no-base-to-string 2
-packages/agent-host/src/sessions/trust-flow.ts @typescript-eslint/no-non-null-assertion 4
+packages/agent-host/src/sessions/trust-flow.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/trust-flow.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/trust-flow.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/sessions/turn-answer.ts @typescript-eslint/no-base-to-string 1

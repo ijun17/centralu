@@ -17,7 +17,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * name. Each makes the window's own call (here the real RPC handler on a real store), so a session id is checked as the
  * window checks it.
  */
-const COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash'] as const
+const COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_session', 'delete_trashed', 'empty_trash'] as const
 type Command = (typeof COMMANDS)[number]
 
 let root: string
@@ -215,6 +215,143 @@ describe('restore_trashed of a session whose project was deleted', () => {
     const none = await run(orc.id, 'restore_trashed', { sessionId: gone.id })
     expect(none.isError).toBe(true)
     expect(none.text).toMatch(/is not in the trash; list_trash shows what is\. Nothing was restored/)
+  })
+})
+
+describe('delete_session', () => {
+  const listed = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).map((s) => s.id)
+
+  it("asks, naming what restoring does not bring back, then moves a session that is not the caller's, keeping what the window's delete keeps, and restore_trashed brings it back", async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Old work')
+    const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
+    expect(denied.question).toContain('Move the session "Old work" to the trash?')
+    expect(denied.question).toContain('The person started it themselves.')
+    expect(denied.question).toContain("Restoring it from the trash brings back its conversation, its worktree and the tool's own conversation file")
+    expect(denied.question).toContain('Nothing else is lost: no one is waiting on it and it owes no report.')
+    expect(denied.question).toContain('It is moved only if it is still at rest when you answer')
+    expect(denied.r.isError).toBe(true)
+    expect(await listed()).toContain(s.id)
+
+    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain(`Moved "Old work" [${s.id}] to the trash.`)
+    expect(r.text).toContain('restore_trashed brings it back')
+    expect(await listed()).not.toContain(s.id)
+    const inTrash = (await trash()).sessions.find((x) => x.id === s.id)!
+    // The two boxes of the window's delete stay unchecked: nothing goes for good with it
+    expect(inTrash.conversationFile).not.toBe('remove')
+    expect(inTrash.worktree?.remove ?? false).toBe(false)
+    const back = await run(orc.id, 'restore_trashed', { sessionId: s.id })
+    expect(back.isError).toBeFalsy()
+    expect(await listed()).toContain(s.id)
+  })
+
+  it('asks again under auto, and "always" is not offered', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
+    const one = await newSession('One')
+    const two = await newSession('Two')
+    expect((await answered(orc.id, 'delete_session', { sessionId: one.id }, 'allow')).r.isError).toBeFalsy()
+    const second = await answered(orc.id, 'delete_session', { sessionId: two.id }, 'deny')
+    expect(second.r.isError).toBe(true)
+    expect(await listed()).toContain(two.id)
+  })
+
+  it('names what the host lets go of that restoring does not bring back: a caller waiting for its report, reports its children owe it', async () => {
+    const orc = await mgr.orchestrator()
+    const waited = await newSession('Waited on')
+    const other = await newSession('Caller')
+    const owing = await newSession('Owing')
+    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    // `Caller` waits for the report of `Waited on`, which in turn is owed one by `Owing`
+    children.markReport(waited.id, other.id)
+    children.markReport(owing.id, waited.id)
+    const { question, r } = await answered(orc.id, 'delete_session', { sessionId: waited.id }, 'deny')
+    expect(question).toContain('Restoring does not bring back what the host lets go of when it leaves:')
+    expect(question).toContain('- "Caller" is waiting for the report of the work it gave this session; that report will not come.')
+    expect(question).toContain('- A session it started owes it a report; it will not be told, and the report is dropped.')
+    expect(r.isError).toBe(true)
+    expect(await listed()).toContain(waited.id)
+  })
+
+  it('decides at the last moment: a message the person sends while the card stands keeps the session, and its new turn is not cut', async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Mine')
+    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => {
+      await mgr.send(s.id, 'one more thing')
+    })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('is not at rest any more')
+    expect(await listed()).toContain(s.id)
+    expect((await trash()).sessions).toEqual([])
+    expect(mgr.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
+  })
+
+  it('does not move a session whose losses changed while the card stood: it is not what the card named', async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Changing')
+    const caller = await newSession('Late caller')
+    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => void children.markReport(s.id, caller.id))
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('what moving it drops changed')
+    expect(await listed()).toContain(s.id)
+  })
+
+  it('refuses before moving anything: itself, an id no session has, a bad id, and a session working or waiting on the person', async () => {
+    const orc = await mgr.orchestrator()
+    const own = await run(orc.id, 'delete_session', { sessionId: orc.id })
+    expect(own.text).toBe('Nothing changed: This session cannot delete itself.')
+    expect((await run(orc.id, 'delete_session', { sessionId: 's-nothing' })).text).toMatch(/No session \[s-nothing\] is listed/)
+    expect((await run(orc.id, 'delete_session', { sessionId: '../x' })).isError).toBe(true)
+    const busy = await newSession('Busy')
+    await mgr.send(busy.id, 'work on it')
+    await eventually(() => mgr.listSessions().find((s) => s.id === busy.id)?.state === 'working')
+    const r = await run(orc.id, 'delete_session', { sessionId: busy.id })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('"Busy" is busy (working); the person may be using it. Delete it once it is idle.')
+    expect(await listed()).toContain(busy.id)
+    expect((await trash()).sessions).toEqual([])
+  })
+
+  it('refuses a session with a background job still running, which the trash would end for good, and takes it once only ended jobs are left', async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Serving')
+    const meta = (mgr as unknown as { meta: Map<string, { backgroundTasks: { id: string; kind: string; description: string; status: string }[] }> }).meta.get(s.id)!
+    meta.backgroundTasks = [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'running' }]
+    const r = await run(orc.id, 'delete_session', { sessionId: s.id })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('"Serving" has 1 background job still running ("npm run dev"); deleting it would end it for good.')
+    expect(await listed()).toContain(s.id)
+    meta.backgroundTasks = [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }]
+    expect((await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')).r.isError).toBeFalsy()
+    expect(await listed()).not.toContain(s.id)
+  })
+
+  it('refuses a session that is not a worker, or whose machine cannot be reached', async () => {
+    const orc = await mgr.orchestrator()
+    const meta = (id: string) => (mgr as unknown as { meta: Map<string, { kind: string; unreachable?: boolean }> }).meta.get(id)!
+    const lead = await newSession('Lead')
+    meta(lead.id).kind = 'coordinator'
+    const far = await newSession('Far')
+    meta(far.id).unreachable = true
+    const a = await run(orc.id, 'delete_session', { sessionId: lead.id })
+    expect(a.text).toContain('"Lead" is a coordinator; only the person deletes those.')
+    const b = await run(orc.id, 'delete_session', { sessionId: far.id })
+    expect(b.text).toContain('"Far" is on a machine that cannot be reached just now')
+    expect(await listed()).toEqual(expect.arrayContaining([lead.id, far.id]))
+  })
+
+  it("leaves the caller's own children to agent_session", async () => {
+    const orc = await mgr.orchestrator()
+    const child = await newSession('Child')
+    // As start_agent leaves it: the orchestrator asked for it
+    ;(mgr as unknown as { meta: Map<string, { askedBy?: string | null }> }).meta.get(child.id)!.askedBy = orc.id
+    const r = await run(orc.id, 'delete_session', { sessionId: child.id })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('is a child you started; delete it with agent_session (action delete)')
+    expect(await listed()).toContain(child.id)
   })
 })
 

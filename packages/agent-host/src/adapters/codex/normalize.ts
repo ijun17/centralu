@@ -4,6 +4,7 @@ import { mcpImageEvents } from '../images.js'
 import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { codexItemOk, fileChangesOf, itemInput, itemSummary, resultSummary } from './items.js'
+import { turnError } from './model-rejected.js'
 import { noticeWords } from './notices.js'
 import { tokenUsageEvents } from './token-readings.js'
 
@@ -250,17 +251,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       if (str(turn.status) === 'interrupted' && !failure.message) return [{ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' }]
       if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
       const detail = str(failure.additionalDetails)
-      return [
-        {
-          type: 'error',
-          sessionId,
-          error: {
-            code: 'internal',
-            message: [str(failure.message) || 'The turn failed', detail].filter(Boolean).join('\n'),
-            retryable: true,
-          },
-        },
-      ]
+      return [{ type: 'error', sessionId, error: turnError([str(failure.message) || 'The turn failed', detail].filter(Boolean).join('\n')) }]
     }
 
     case 'turn/started':
@@ -406,7 +397,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return [{ type: 'activity', sessionId, activity: 'retrying' }]
       }
       if (str(p.turnId)) return []
-      return [{ type: 'error', sessionId, error: { code: 'internal', message, retryable: true } }]
+      return [{ type: 'error', sessionId, error: turnError(message) }]
     }
 
     default:

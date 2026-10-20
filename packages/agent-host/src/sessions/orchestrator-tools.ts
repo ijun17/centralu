@@ -7,6 +7,8 @@ import { machineLine, type MachineRequest } from './machine-flow.js'
 import type { PreferencesRequest } from './preferences-flow.js'
 import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
+import type { AppUpkeepRequest } from './app-upkeep-flow.js'
+import type { HousekeepingRequest } from './housekeeping-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
@@ -314,11 +316,17 @@ const HANDLERS: ToolHandlers = {
   reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
   set_machine_auto_reconnect: ({ machine, on }, call) => machineCommand({ action: 'auto_reconnect', machine, on }, call),
   set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
+  disconnect_machine: ({ machine }, call) => machineCommand({ action: 'disconnect', machine }, call),
+  rollback_machine: ({ machine }, call) => machineCommand({ action: 'rollback', machine }, call),
+  uninstall_machine: ({ machine }, call) => machineCommand({ action: 'uninstall', machine }, call),
+  machine_activity: ({ machine }, call) => machineCommand({ action: 'activity', machine }, call),
+  list_ssh_hosts: (_args, call) => machineCommand({ action: 'ssh_hosts' }, call),
 
   // The trash (#1219): the flow writes each answer; deleting for good waits for the person's card there
   list_trash: (_args, call) => trashCommand({ action: 'list' }, call),
   restore_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'restore', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
   trash_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'trash_steps', sessionId: sessionId.trim() }, call),
+  delete_session: ({ sessionId }, call) => trashCommand({ action: 'delete_session', sessionId: sessionId.trim() }, call),
   delete_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
   empty_trash: (_args, call) => trashCommand({ action: 'empty' }, call),
 
@@ -331,14 +339,32 @@ const HANDLERS: ToolHandlers = {
   forget_app_answer: ({ app, project, capability }, call) => trustCommand({ action: 'forget_app_answer', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), capability }, call),
   revoke_project_consent: ({ from, to, kind }, call) => trustCommand({ action: 'revoke_consent', from, to, kind }, call),
   set_agent_limits: (changes, call) => trustCommand({ action: 'set_limits', changes }, call),
+  // Housekeeping and reads (#1219, fourth slice): none asks
+  rename_session: ({ sessionId, name }, call) => housekeepingCommand({ action: 'rename_session', sessionId, name }, call),
+  clear_background_tasks: ({ sessionId }, call) => housekeepingCommand({ action: 'clear_background_tasks', sessionId }, call),
+  agent_status: ({ tool }, call) => housekeepingCommand({ action: 'agent_status', ...(trimmed(tool) ? { tool: trimmed(tool) } : {}) }, call),
+  agent_models: ({ tool }, call) => housekeepingCommand({ action: 'agent_models', tool }, call),
+  project_git_status: ({ project }, call) => housekeepingCommand({ action: 'git_status', project }, call),
+  search_project_files: ({ project, query, limit }, call) => housekeepingCommand({ action: 'search_files', project, query, ...(limit !== undefined ? { limit } : {}) }, call),
+
+  // App upkeep (#1219, fourth slice): the flow writes each answer; removing an app waits for the person's card there
+  list_app_versions: ({ app, project }, call) => appUpkeepCommand({ action: 'versions', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  restore_app_version: ({ app, project, id }, call) => appUpkeepCommand({ action: 'restore_version', app, id, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  restart_app: ({ app, project }, call) => appUpkeepCommand({ action: 'restart', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  check_app: ({ app, project }, call) => appUpkeepCommand({ action: 'check', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  list_app_runs: ({ app, project, limit }, call) => appUpkeepCommand({ action: 'runs', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), ...(limit !== undefined ? { limit } : {}) }, call),
+  list_app_errors: ({ app, project }, call) => appUpkeepCommand({ action: 'errors', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  app_usage: ({ app, project }, call) => appUpkeepCommand({ action: 'usage', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  remove_app: ({ app, project }, call) => appUpkeepCommand({ action: 'remove', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
   share_app: ({ app, project, shared }, call) => trustCommand({ action: 'share_app', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), shared }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
   get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
+  apply_agent_versions: (_args, call) => preferencesCommand({ action: 'apply_agent_versions' }, call),
   set_preferences: (changes, call) =>
     Object.values(changes).some((v) => v !== undefined && !(typeof v === 'object' && Object.values(v).every((x) => x === undefined)))
       ? preferencesCommand({ action: 'set', changes }, call)
-      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, notifications.', isError: true },
+      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, sendWithModifierEnter, foldedGroups, notifications.', isError: true },
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''
@@ -669,6 +695,20 @@ async function preferencesCommand(req: PreferencesRequest, { tools, signal }: To
 async function trustCommand(req: TrustRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
   if (!tools.trust) return { text: 'This session cannot change trust.', isError: true }
   const r = await tools.trust(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One housekeeping or read command (#1219), through the seat's `housekeeping`; a seat without it is told so */
+async function housekeepingCommand(req: HousekeepingRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.housekeeping) return { text: 'This session cannot do this housekeeping.', isError: true }
+  const r = await tools.housekeeping(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One app upkeep command (#1219), through the seat's `appUpkeep`; a seat without it is told so */
+async function appUpkeepCommand(req: AppUpkeepRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.appUpkeep) return { text: 'This session cannot look after apps.', isError: true }
+  const r = await tools.appUpkeep(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
 
