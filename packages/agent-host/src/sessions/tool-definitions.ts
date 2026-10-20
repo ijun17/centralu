@@ -343,6 +343,50 @@ export const ORCHESTRATOR_TOOLS = [
     description: "Grants a project's inner app to the other projects (shares it), or stops. Sharing waits for the person's card; stopping acts at once.",
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
   },
+  /*
+   * #1219, fourth slice: app upkeep. Rare commands. Reads and what undoes itself act at once; removing an app waits for
+   * the person's card (its folder moves to app-trash/).
+   */
+  {
+    name: 'list_app_versions',
+    description: "Lists an app's kept versions (a user-folder app's snapshots, or a project app's recent commits, which are git's).",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'restore_app_version',
+    description: "Restores a user-folder app to a kept version; the code it replaces is kept as a version first, so it can be undone. Acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), id: z.string().describe('The id list_app_versions gives.') }).strict(),
+  },
+  {
+    name: 'restart_app',
+    description: 'Stops an app (a call in progress ends) and clears its failures; it starts again the first time something calls it. Acts at once.',
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'check_app',
+    description: "Restarts an app on its files and reports the problems with its manifest, tools and screens, as the building session's check does.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'list_app_runs',
+    description: "Lists an app's recent runs: tool calls to it and what it asked of Centralu, with status, caller and how it was called.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), limit: z.number().int().optional().describe('1 to 100; 20 by default.') }).strict(),
+  },
+  {
+    name: 'list_app_errors',
+    description: "Lists an app's recent errors since the host started, with the last lines of its standard error (the app's own words, quoted as data).",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'app_usage',
+    description: 'Says how much agent use an app requested over the last day and the last 30 days.',
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'remove_app',
+    description: "Removes a user-folder app: its folder moves to app-trash/ and it is detached from every session. The person approves a card first. A project app is withdrawn through git.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
   {
     name: 'set_agent_limits',
     description: "Changes the limits on agents: running agents per project, levels of sessions that may start agents. Waits for the person's card.",

@@ -73,6 +73,15 @@ export type TrustRequest =
   | { action: 'share_app'; app: string; project?: string; shared: boolean }
   | { action: 'set_limits'; changes: AgentLimitChanges }
 
+/**
+ * One request of the orchestrator's app upkeep commands (#1219, fourth slice), as the tool runner reads its arguments: looking
+ * after an app the way its screens in the window do. Removing waits for the person's card; the rest read or undo themselves.
+ */
+export type AppUpkeepRequest =
+  | { action: 'versions' | 'check' | 'errors' | 'usage' | 'restart' | 'remove'; app: string; project?: string }
+  | { action: 'restore_version'; app: string; project?: string; id: string }
+  | { action: 'runs'; app: string; project?: string; limit?: number }
+
 /** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
 export type AgentLimitChanges = {
   /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
@@ -703,6 +712,8 @@ export type OrchestratorTools = {
    * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
    */
   trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /** The app upkeep commands (#1219, fourth slice) */
+  appUpkeep?(req: AppUpkeepRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

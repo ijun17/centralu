@@ -7,6 +7,7 @@ import { machineLine, type MachineRequest } from './machine-flow.js'
 import type { PreferencesRequest } from './preferences-flow.js'
 import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
+import type { AppUpkeepRequest } from './app-upkeep-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
@@ -337,6 +338,15 @@ const HANDLERS: ToolHandlers = {
   forget_app_answer: ({ app, project, capability }, call) => trustCommand({ action: 'forget_app_answer', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), capability }, call),
   revoke_project_consent: ({ from, to, kind }, call) => trustCommand({ action: 'revoke_consent', from, to, kind }, call),
   set_agent_limits: (changes, call) => trustCommand({ action: 'set_limits', changes }, call),
+  // App upkeep (#1219, fourth slice): the flow writes each answer; removing an app waits for the person's card there
+  list_app_versions: ({ app, project }, call) => appUpkeepCommand({ action: 'versions', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  restore_app_version: ({ app, project, id }, call) => appUpkeepCommand({ action: 'restore_version', app, id, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  restart_app: ({ app, project }, call) => appUpkeepCommand({ action: 'restart', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  check_app: ({ app, project }, call) => appUpkeepCommand({ action: 'check', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  list_app_runs: ({ app, project, limit }, call) => appUpkeepCommand({ action: 'runs', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), ...(limit !== undefined ? { limit } : {}) }, call),
+  list_app_errors: ({ app, project }, call) => appUpkeepCommand({ action: 'errors', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  app_usage: ({ app, project }, call) => appUpkeepCommand({ action: 'usage', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
+  remove_app: ({ app, project }, call) => appUpkeepCommand({ action: 'remove', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
   share_app: ({ app, project, shared }, call) => trustCommand({ action: 'share_app', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), shared }, call),
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
@@ -675,6 +685,13 @@ async function preferencesCommand(req: PreferencesRequest, { tools, signal }: To
 async function trustCommand(req: TrustRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
   if (!tools.trust) return { text: 'This session cannot change trust.', isError: true }
   const r = await tools.trust(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One app upkeep command (#1219), through the seat's `appUpkeep`; a seat without it is told so */
+async function appUpkeepCommand(req: AppUpkeepRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.appUpkeep) return { text: 'This session cannot look after apps.', isError: true }
+  const r = await tools.appUpkeep(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
 

@@ -64,6 +64,7 @@ beforeEach(() => {
     preferencesRequest: vi.fn(),
     trashRequest: vi.fn(),
     trustRequest: vi.fn(),
+    appUpkeepRequest: vi.fn(),
     startAgent: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     agentSession: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     listAgents: vi.fn(async () => []),
@@ -198,6 +199,16 @@ describe('the scope of a seat', () => {
     expect(host.trustRequest).not.toHaveBeenCalled()
     expect(await orchestratorToolsFor(host, 'orch').trust!({ action: 'list_projects' })).toEqual({ ok: true, text: 'reached the flow' })
     expect(host.trustRequest).toHaveBeenCalledWith('orch', { action: 'list_projects' }, undefined)
+  })
+
+  it('only the central orchestrator reaches the app upkeep commands (#1219): a lead, a reader view and a hub view never do', async () => {
+    host.appUpkeepRequest = vi.fn(async () => ({ ok: true as const, text: 'reached the flow' }))
+    for (const seat of [orchestratorToolsFor(host, 'orch', ['a']), orchestratorToolsFor(host, 'b', undefined, true), orchestratorToolsFor(host, 'orch', undefined, false, true)]) {
+      expect(await seat.appUpkeep!({ action: 'remove', app: 'notes' })).toEqual({ ok: false, error: 'Only the orchestrator looks after apps' })
+    }
+    expect(host.appUpkeepRequest).not.toHaveBeenCalled()
+    expect(await orchestratorToolsFor(host, 'orch').appUpkeep!({ action: 'usage', app: 'notes' })).toEqual({ ok: true, text: 'reached the flow' })
+    expect(host.appUpkeepRequest).toHaveBeenCalledWith('orch', { action: 'usage', app: 'notes' }, undefined)
   })
 
   it('never reads or sends to itself', async () => {
