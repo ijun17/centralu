@@ -20,6 +20,7 @@ import {
   lintHints,
   mainLists,
   otherErrors,
+  parseRenames,
   renamesSince,
   parseList,
   readAllowlist,
@@ -318,6 +319,14 @@ describe("main's lists", () => {
     expect(renamesSince(repo, base ?? '')).toEqual([{ from: 'packages/a/src/mine.ts', to: 'packages/a/src/mine-renamed.ts' }])
     expect(addedSince(repo, base ?? '')).toEqual(['packages/a/src/new.ts'])
   }, 60_000 * SLOW)
+
+  it('read renames as git writes them with -z, a path with any character included (#1343 review)', () => {
+    expect(parseRenames('R100\0packages/a/src/café.ts\0packages/a/src/naïve.ts\0R087\0x/a.ts\0x/b.ts\0')).toEqual([
+      { from: 'packages/a/src/café.ts', to: 'packages/a/src/naïve.ts' },
+      { from: 'x/a.ts', to: 'x/b.ts' },
+    ])
+    expect(parseRenames('')).toEqual([])
+  })
 
   it('tell the renames since the base, committed or only staged, and nothing else as one', () => {
     const base = setUp()

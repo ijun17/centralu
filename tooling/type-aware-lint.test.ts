@@ -204,15 +204,27 @@ describe('type-aware lint (#1339)', () => {
     60_000 * SLOW,
   )
 
-  it('has a weekly job lower stale lines in a pull request of their own', () => {
+  it('has a weekly job lower stale lines in one pull request, with no dependency code where the write token is', () => {
     // A line above its file is not a lint failure (lintFailed), so something has to lower it
-    const job = readFileSync(join(ROOT, '.github/workflows/lint-tighten.yml'), 'utf8')
-    expect(job).toMatch(/schedule:\s*\n(\s*#.*\n)*\s*- cron:/)
-    expect(job).toMatch(/pnpm lint:tighten \|\| rc=\$\?/)
+    const workflow = readFileSync(join(ROOT, '.github/workflows/lint-tighten.yml'), 'utf8')
+    expect(workflow).toMatch(/schedule:\s*\n(\s*#.*\n)*\s*- cron:/)
+    expect(workflow).toMatch(/^permissions: \{\}$/m)
+    const tighten = workflow.slice(workflow.indexOf('\n  tighten:\n'), workflow.indexOf('\n  open:\n'))
+    const open = workflow.slice(workflow.indexOf('\n  open:\n'))
+    // The job that installs and runs repository code reads only, and its checkout keeps no token (#1343 review)
+    expect(tighten).toMatch(/pnpm install/)
+    expect(tighten).toMatch(/contents: read/)
+    expect(tighten).not.toMatch(/: write/)
+    expect(tighten).toMatch(/persist-credentials: false/)
     // Findings on main (1) do not stop it; a crash (2, tooling/lint-crash.ts) fails it
-    expect(job).toMatch(/if \[ "\$rc" -gt 1 \]; then/)
-    expect(job).toMatch(/git add tooling\/lint-allowlist\n/)
-    expect(job).toMatch(/gh pr create --base main/)
+    expect(tighten).toMatch(/pnpm lint:tighten \|\| rc=\$\?/)
+    expect(tighten).toMatch(/if \[ "\$rc" -gt 1 \]; then/)
+    // The job with the write token runs nothing installed and nothing from the repository
+    expect(open).toMatch(/contents: write/)
+    expect(open).not.toMatch(/\bpnpm\b|\bnpm\b|\bnode\b|\btsx\b/)
+    // One branch, one pull request: a week not yet landed is updated, not doubled
+    expect(open).toMatch(/branch='lint-tighten\/weekly'/)
+    expect(open).toMatch(/gh pr list --head "\$branch" --state open/)
   })
 
   it("is given main's history and made to compare in CI's verify job", () => {

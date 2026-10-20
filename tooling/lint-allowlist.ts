@@ -305,8 +305,8 @@ export function baseCommit(root: string, ref: string): string | null {
 
 /** The files added since `base` (not renamed), in the working tree; null when git cannot tell */
 export function addedSince(root: string, base: string): string[] | null {
-  const out = runGit(root, 'diff', '--name-only', '-M', '--diff-filter=A', base, '--')
-  return out === null ? null : out.split('\n').filter(Boolean)
+  const out = runGit(root, 'diff', '--name-only', '-z', '-M', '--diff-filter=A', base, '--')
+  return out === null ? null : out.split('\0').filter(Boolean)
 }
 
 /**
@@ -314,12 +314,21 @@ export function addedSince(root: string, base: string): string[] | null {
  * A file moved without `git mv` or `git add` is not in the diff, so it is no rename: its count stays behind.
  */
 export function renamesSince(root: string, base: string): Rename[] | null {
-  const out = runGit(root, 'diff', '--name-status', '-M', '--diff-filter=R', base, '--')
+  // -z: paths as they are (no quoting of other characters), each record `R<score>\0<from>\0<to>\0`
+  const out = runGit(root, 'diff', '--name-status', '-z', '-M', '--diff-filter=R', base, '--')
   if (out === null) return null
-  return out
-    .split('\n')
-    .map((line) => /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(line))
-    .flatMap((m) => (m?.[1] && m[2] ? [{ from: m[1], to: m[2] }] : []))
+  return parseRenames(out)
+}
+
+/** `git diff --name-status -z --diff-filter=R` read as renames */
+export function parseRenames(out: string): Rename[] {
+  const fields = out.split('\0')
+  const renames: Rename[] = []
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    const [status = '', from = '', to = ''] = fields.slice(i, i + 3)
+    if (/^R\d*$/.test(status) && from && to) renames.push({ from, to })
+  }
+  return renames
 }
 
 /** Where main's lists come from, or why there are none to compare with */

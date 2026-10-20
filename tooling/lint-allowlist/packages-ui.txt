@@ -202,7 +202,7 @@ packages/ui/src/store/historyPages.ts @typescript-eslint/consistent-type-asserti
 packages/ui/src/store/historyPages.ts @typescript-eslint/no-non-null-assertion 11
 packages/ui/src/store/historyPages.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/ui/src/store/layout.ts @typescript-eslint/no-unsafe-type-assertion 3
-packages/ui/src/store/machines.ts @typescript-eslint/no-non-null-assertion 14
+packages/ui/src/store/machines.ts @typescript-eslint/no-non-null-assertion 13
 packages/ui/src/store/machines.ts @typescript-eslint/no-unsafe-type-assertion 7
 packages/ui/src/store/navHistory.ts @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/store/navHistory.ts @typescript-eslint/no-unsafe-type-assertion 8
