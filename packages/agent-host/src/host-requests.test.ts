@@ -28,6 +28,8 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
   const requests = new HostRequests({
     emit: (e) => events.push(e),
     canShow: () => canShow,
+    // The host's sessions by name: "named" has one, "unnamed" has none, "long" is all format characters
+    sessionName: (id) => ({ named: 'Orchestrator', long: String.fromCharCode(0x202e).repeat(200) })[id] ?? null,
     limits: opts.limits,
     rpc: async (method, params) => {
       // The lists a card reads to name what a call acts on; every other call is recorded
@@ -248,6 +250,23 @@ describe('a host request (#1405)', () => {
     expect(e.data?.refused).toBe('not_done')
     expect(e.message).toContain('changed while it stood')
     expect(h.calls).toEqual([])
+  })
+
+  it('names the session whose credential asked by its name, or its id when it has none, and nothing without one', async () => {
+    const h = harness()
+    const signal = new AbortController().signal
+    const asks = [
+      h.requests.ask('projects.delete', { projectId: 'p1' }, { client: null, session: 'named' }, signal),
+      h.requests.ask('projects.delete', { projectId: 'p2' }, { client: null, session: 'unnamed' }, signal),
+      h.requests.ask('projects.delete', { projectId: 'p3' }, { client: null, session: 'long' }, signal),
+      h.requests.ask('projects.delete', { projectId: 'p4' }, { client: null }, signal),
+    ]
+    for (let i = 0; i < 200 && h.requests.list().length < 4; i++) await new Promise((r) => setTimeout(r, 5))
+    const cards = h.requests.list()
+    expect(cards.map((c) => c.session?.slice(0, 19) ?? null)).toEqual(['"Orchestrator"', '"unnamed"', '"\\u202e\\u202e\\u202e', null])
+    for (const card of cards) expect(HostRequestSchema.safeParse(card).success).toBe(true)
+    for (const card of cards) h.requests.answer(card.requestId, 'deny')
+    for (const asked of asks) await caught(asked)
   })
 
   it('quotes a name of format characters within what the request may hold, so the window can read the card', async () => {

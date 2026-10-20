@@ -108,6 +108,9 @@ describe("the launcher's variables (ST16)", () => {
       CC_SERVE: '1',
       CC_HOST_TOKEN: 'secret',
       CC_HOST_TOKEN_ON_STDIN: '1',
+      // What a host inside an agent inherits from that agent's host (#1405): its own agents get their own
+      CC_HOST_URL: 'ws://127.0.0.1:4000',
+      CC_HOST_CREDENTIAL: 'ccs1:parent:mac',
       CC_DATA_DIR: '/d',
       PATH: '/bin',
     }

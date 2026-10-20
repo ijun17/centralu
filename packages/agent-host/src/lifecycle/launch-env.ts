@@ -57,7 +57,11 @@ export type LaunchEnv = {
 /** Where a `centralu serve` was asked for from (`LaunchEnv.serveFrom`) */
 export type ServeFrom = { hub?: string; ssh?: string }
 
-/** The variables `takeLaunchEnv` reads and removes. Nothing the host spawns may see any of them */
+/**
+ * The variables `takeLaunchEnv` reads or removes. Nothing the host spawns may see any of them: `CC_HOST_URL` and
+ * `CC_HOST_CREDENTIAL` are what a host gives its own agents (#1405), and a host started inside one (`pnpm app:dev` run
+ * by an agent) must not hand its agents the parent's
+ */
 export const LAUNCH_VARIABLES = [
   'CC_KEEPER',
   'CC_HOST_SOURCE',
@@ -68,6 +72,8 @@ export const LAUNCH_VARIABLES = [
   'CC_HOST_TOKEN',
   'CC_HOST_TOKEN_ON_STDIN',
   'CC_SERVE_STATE',
+  'CC_HOST_URL',
+  'CC_HOST_CREDENTIAL',
 ] as const
 
 /** A hub's name or an address as the launcher passed it: short, and only characters that cannot break a sentence */

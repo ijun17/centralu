@@ -1151,7 +1151,10 @@ a token from somewhere. One naming a session this host does not have is refused 
 proof**: an agent's environment is readable by every process of the same user for as long as it runs ("The front door"
 below), so a process can present another session's credential. Its rights are the same either way; all it can fake is
 the session a card names, which says "which says it runs under the session". Derived like the bridge's, so the next
-host after a swap, and a keeper's adopted agent, keep it working. The orchestrator's instructions do not mention it:
+host after a swap, and a keeper's adopted agent, keep it working. An agent started by a build from before slice 6 and
+adopted after an update has none (a process's environment is fixed when it starts) until its next start. A host started
+inside an agent takes both variables out of its own environment at start (`LAUNCH_VARIABLES`), so its agents get only
+its own. The orchestrator's instructions do not mention it:
 their resident budget had no room, and `keeper.sock` hands out only the limited credential anyway.
 
 **Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
