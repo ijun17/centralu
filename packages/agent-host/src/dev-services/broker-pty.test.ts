@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PtyBroker, brokerPath, brokerPtyModule } from './broker-pty.js'
+import { PtyBroker, brokerPath, brokerPtyModule, parseBrokerEvent } from './broker-pty.js'
 import type { Pty, PtyModule } from './pty-slot.js'
 import { TerminalService } from './terminal.js'
 import { cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
@@ -31,6 +31,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }, 50)
   } else if (m.op === 'write') {
     if (m.data === 'end the broker') process.exit(3)
+    // Lines that are no event: they are skipped, and the next one still arrives
+    if (m.data === 'say junk') process.stdout.write('null\\n[1]\\n7\\n{"ev":"data","id":' + m.id + '}\\n{"ev":"unheard of","id":1}\\nnot json\\n')
     send({ ev: 'data', id: m.id, data: 'got ' + m.data })
   } else if (m.op === 'resize') send({ ev: 'data', id: m.id, data: 'size ' + m.cols + 'x' + m.rows })
   else if (m.op === 'kill') {
@@ -39,6 +41,19 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
 })
 `
+
+describe('parseBrokerEvent', () => {
+  it('reads each event the broker speaks, and nothing else', () => {
+    expect(parseBrokerEvent('{"ev":"ready"}')).toEqual({ ev: 'ready' })
+    expect(parseBrokerEvent('{"ev":"spawned","id":2,"pid":99}')).toEqual({ ev: 'spawned', id: 2, pid: 99 })
+    expect(parseBrokerEvent('{"ev":"error","id":2,"message":"no"}')).toEqual({ ev: 'error', id: 2, message: 'no' })
+    expect(parseBrokerEvent('{"ev":"data","id":2,"data":"x"}')).toEqual({ ev: 'data', id: 2, data: 'x' })
+    expect(parseBrokerEvent('{"ev":"exit","id":2,"exitCode":1,"signal":null}')).toEqual({ ev: 'exit', id: 2, exitCode: 1, signal: null })
+    for (const junk of ['null', '[1]', '7', 'not json', '{}', '{"ev":"data","id":1}', '{"ev":"data","data":"x"}', '{"ev":"exit","id":1,"exitCode":"1","signal":null}', '{"ev":"other","id":1}']) {
+      expect(parseBrokerEvent(junk)).toBeNull()
+    }
+  })
+})
 
 function follow(p: Pty) {
   const seen = { data: '', exit: null as { exitCode: number; signal?: number } | null }
@@ -78,6 +93,18 @@ describe('a pty through the broker', () => {
     expect(seen.data).toContain('size 120x40')
     p.kill()
     expect(await settle(() => seen.exit, Boolean, 5_000 * SLOW)).toEqual({ exitCode: 0, signal: 1 })
+  })
+
+  it('lines that are no event are skipped, and the output after them still arrives', async () => {
+    const p = fake().spawn('pwsh.exe', [], { cwd: 'C:\\', cols: 80, rows: 24, env: {} })
+    const seen = follow(p)
+    await settle(() => seen.data, (d) => d.includes('started'), 5_000 * SLOW)
+    const before = seen.data
+    p.write('say junk')
+    p.write('after')
+    await settle(() => seen.data, (d) => d.includes('got after'), 5_000 * SLOW)
+    expect(seen.data).toBe(`${before}got say junkgot after`)
+    expect(seen.exit).toBeNull()
   })
 
   it('a kill before the pid has come still ends it (a tab closed at once)', async () => {

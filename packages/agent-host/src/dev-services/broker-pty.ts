@@ -36,6 +36,31 @@ type BrokerEvent =
  * Where the broker's script is: beside this file in the source tree, and beside `main.mjs` (which this file is bundled
  * into) in the bundle, where `scripts/bundle.mjs` copies it. The same relative name either way.
  */
+/**
+ * One line of the broker's output as an event, or null for a line that is none: not JSON, not an object (`null` used to
+ * throw out of the line handler), or an event whose fields are not what it names (a `data` event with no text).
+ */
+export function parseBrokerEvent(line: string): BrokerEvent | null {
+  let v: unknown
+  try {
+    v = JSON.parse(line)
+  } catch {
+    return null
+  }
+  if (!isObj(v)) return null
+  const { ev, id } = v
+  if (ev === 'ready') return { ev }
+  if (typeof id !== 'number') return null
+  if (ev === 'spawned') return typeof v.pid === 'number' ? { ev, id, pid: v.pid } : null
+  if (ev === 'error') return typeof v.message === 'string' ? { ev, id, message: v.message } : null
+  if (ev === 'data') return typeof v.data === 'string' ? { ev, id, data: v.data } : null
+  if (ev === 'exit') {
+    if (typeof v.exitCode !== 'number') return null
+    return v.signal === null || typeof v.signal === 'number' ? { ev, id, exitCode: v.exitCode, signal: v.signal } : null
+  }
+  return null
+}
+
 export function brokerPath(): string {
   const path = fileURLToPath(new URL('./pty-broker.mjs', import.meta.url))
   if (!existsSync(path)) throw new Error(`terminal broker not found: ${path}`)
@@ -161,12 +186,8 @@ export class PtyBroker {
   }
 
   private receive(line: string): void {
-    let e: BrokerEvent
-    try {
-      e = JSON.parse(line) as BrokerEvent
-    } catch {
-      return
-    }
+    const e = parseBrokerEvent(line)
+    if (!e) return
     if (e.ev === 'ready') return
     const p = this.ptys.get(e.id)
     if (!p) return
