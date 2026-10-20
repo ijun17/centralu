@@ -168,6 +168,8 @@ export type ReadOptions = {
   after?: number
   /** Do not mark what is returned read (the board and the Inbox list; a peek) */
   peek?: boolean
+  /** At most this many messages: the reader is moved on only as far as it got */
+  limit?: number
 }
 
 /** What a delivery to one receiver would send now (§7.5, §7.6) */
@@ -568,7 +570,7 @@ export class MailService {
     if (!standing) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
     const position = this.records.readPosition(thread.id, reader)
     const after = opts.after ?? (opts.all ? 0 : position)
-    const messages = this.records.messagesAfter(thread.id, after)
+    const messages = this.records.messagesAfter(thread.id, after, opts.limit)
     const view: ReadMessage[] = messages.map((m) => {
       const { facts, ...rest } = m
       const out: ReadMessage = party.kind === 'app' ? rest : { ...rest, facts }
@@ -598,6 +600,13 @@ export class MailService {
     const thread = this.mustThread(threadId)
     if (!this.standing(thread, reader)) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
     return this.records.markHandled(thread.id, reader, upTo ?? Number.MAX_SAFE_INTEGER, this.now())
+  }
+
+  /** Whether `address` may change the task of the thread (its owner, its assignee, the person): asked before anything is posted for a change that would be refused */
+  mayEditTask(threadId: string, address: string): boolean {
+    const thread = this.mustThread(threadId)
+    const standing = this.standing(thread, address)
+    return standing !== null && mayEditTask(standing)
   }
 
   /** The threads that follow this one, and the ones it follows: a follow-up is shown both ways (§3.3) */
@@ -816,7 +825,9 @@ export class MailService {
     const candidates: Candidate[] = []
     const heldBack: { messageId: string; reason: HoldReason }[] = []
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
-      if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
+      // A thread that is done takes no more mail, but what was posted before it closed is still owed: the closing report is how the owner
+      // hears (§3.3). Anything else a done thread has waiting (an assign it will never run) is dropped
+      if (thread.state === 'unknown' || (thread.state === 'done' && message.kind !== 'report') || message.kind === 'event' || message.sender === recipient) continue
       if (this.policy.mayWrite(message.sender, recipient, thread) !== null || this.policy.cannotRead?.(recipient)) continue
       if (opts.skip?.(message, receipt)) continue
       const holdBack = opts.holdBack?.(message, receipt, thread)
@@ -1239,7 +1250,7 @@ function deliveryLine(messages: number, threads: number, relations: ReadonlySet<
 }
 
 /** Centralu's word for how the sender stands to the receiver in this thread (§7.3). Never a name another party wrote */
-function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
+export function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
   const party = parseAddress(sender)
   if (party?.kind === 'centralu') return 'Centralu'
   if (party?.kind === 'person') return 'the person'

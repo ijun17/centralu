@@ -9,6 +9,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { InputObserver } from '../adapters/contract.js'
 import { MailDelivery } from '../mail/delivery.js'
 import { MailService } from '../mail/service.js'
+import { MailTool } from '../mail/tool.js'
 import { MailTurns } from '../mail/turns.js'
 import { openBy } from '../mail/mail.test-helpers.js'
 import { MAIL_ACCEPT_MS } from './session-events.js'
@@ -27,7 +28,7 @@ beforeEach(() => {
   // The timers are not used: a test looks at a mailbox when it says so
   turns = new MailTurns(w.store.mail, { now: () => clock.t })
   delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {}, turns })
-  w.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => delivery.poke(id), sessionEvent: (e, ended) => turns.observe(e, ended) })
+  w.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => delivery.poke(id), sessionEvent: (e, ended) => turns.observe(e, ended), tool: (id, args) => new MailTool(mail, w.store.mail).run(id, args) })
   delivery.start()
 })
 afterEach(() => delivery.stop())
@@ -114,6 +115,20 @@ describe('a session at rest is woken by mail', () => {
     handleOf(worker.id).respondApproval('req-1', 'deny')
     await settle()
     expect(handleOf(worker.id).sent.filter((t) => t.includes('> after the card'))).toHaveLength(1)
+  })
+})
+
+describe('the mail tool of an ordinary session', () => {
+  it('answers through the real tool bundle the host gives the session, not a fake: its inbox, and a thread it was given', async () => {
+    const worker = await create()
+    const empty = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
+    expect(empty).toEqual({ text: 'Your mailbox is empty.' })
+    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 'Land #12', body: 'please', assignee: mail.sessionAddress(worker.id) })
+    const listed = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
+    expect(listed.isError).toBeUndefined()
+    expect(listed.text).toContain(thread.id)
+    const read = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'read', thread: thread.id })
+    expect(read.text).toContain('> please')
   })
 })
 

@@ -38,6 +38,8 @@ describe('the Claude in-process server', () => {
         find_apps: 'loaded',
         attach_app: 'deferred',
         detach_app: 'deferred',
+        // The mailbox (#1347): the wake that delivers mail names the exact call
+        mail: 'deferred',
       },
       instructions: READER_INSTRUCTIONS,
     })

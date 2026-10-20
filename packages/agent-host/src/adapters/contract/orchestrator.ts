@@ -1,3 +1,4 @@
+import type { MailToolArgs } from '../../mail/tool.js'
 import type {
   AgentDifficulty,
   BackgroundTask,
@@ -650,6 +651,8 @@ export type OrchestratorTools = {
    * `wait` is false; `signal` is the caller's tool call, and aborted it stops the turn being waited on.
    */
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  /** The mailbox for the session that has these tools (#1347, mail): an ordinary session's alone; absent where there is none */
+  mail?(args: MailToolArgs): { text: string; isError?: boolean }
   /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */

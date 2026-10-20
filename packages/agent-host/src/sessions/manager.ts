@@ -4,6 +4,7 @@ import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import type { MailToolArgs } from '../mail/tool.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -84,6 +85,8 @@ export type MailHooks = {
   sessionGone(sessionId: string): void
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
+  /** The `mail` tool of a session */
+  tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -1837,6 +1840,7 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
+      mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
       listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
         return self.agentRuns

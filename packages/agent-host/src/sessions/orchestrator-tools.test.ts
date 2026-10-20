@@ -9,6 +9,8 @@ import {
   AGENT_TOOLS,
   APP_ACCESS_BUDGET_CHARS,
   APP_ACCESS_TOOLS,
+  MAIL_BUDGET_CHARS,
+  MAIL_TOOLS,
   DELEGATE_BUDGET_CHARS,
   DELEGATE_TOOLS,
   ORCHESTRATOR_MCP_NAME,
@@ -199,7 +201,7 @@ describe("a reader's list and reads across projects (#984)", () => {
 describe('the reader set', () => {
   it('holds reading, consented updates, delegation and app access without the orchestrator\'s directing tools', () => {
     // The app-access set (#371 part A) changes only the calling session's own tools
-    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
+    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail'])
     for (const t of ORCHESTRATOR_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['update_centralu', 'read_session', 'recall', 'app_guide'].includes(t.name))
     }
@@ -271,7 +273,14 @@ describe('the reader set', () => {
   it(`keeps the app-access set within ${APP_ACCESS_BUDGET_CHARS} characters, beside the reader set`, () => {
     expect(sentChars(APP_ACCESS_TOOLS)).toBeLessThanOrEqual(APP_ACCESS_BUDGET_CHARS)
     // Everything the reader seat is sent is in one counted set or another — nothing rides uncounted
-    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).sort())
+    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].map((t) => t.name).sort())
+  })
+
+  it(`keeps the mail tool within ${MAIL_BUDGET_CHARS} characters, deferred on Claude and loaded on Codex, an ordinary session’s alone`, () => {
+    expect(sentChars(MAIL_TOOLS)).toBeLessThanOrEqual(MAIL_BUDGET_CHARS)
+    expect(MAIL_TOOLS.every((t) => t.deferred)).toBe(true)
+    expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'mail')).toBe(false)
+    expect(orchestratorToolSchemas('scoped').some((t) => t.name === 'mail')).toBe(false)
   })
 
   it('lists with read_session and no id — only for the reader; the orchestrator still has to name a session', async () => {
@@ -476,10 +485,36 @@ describe('the resident cost of each profile', () => {
     }
   }
 
-  it('counts the reader seat on Codex as exactly its four counted sets, and on Claude only the ones not deferred', () => {
-    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS))
-    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
+  it('counts the reader seat on Codex as exactly its five counted sets, and on Claude only the ones not deferred', () => {
+    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS) + sentChars(MAIL_TOOLS))
+    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => !('deferred' in t && t.deferred))
     expect(residentCost('reader', DEFERRED_SERVER).residentChars).toBe(sentChars(loaded))
+  })
+})
+
+describe('the mail tool (#1347)', () => {
+  it('runs for an ordinary session with its arguments checked, and is not a tool of any directing seat or of the person', async () => {
+    let seen: unknown
+    const tools = toolsWith({
+      mail: (args) => {
+        seen = args
+        return { text: 'ok' }
+      },
+    })
+    expect(await runOrchestratorTool(tools, 'mail', { action: 'inbox', thread: null }, { sessionId: 's', profile: 'reader' })).toEqual({ text: 'ok' })
+    expect(seen).toEqual({ action: 'inbox' })
+    const bad = await runOrchestratorTool(tools, 'mail', { action: 'nope' }, { sessionId: 's', profile: 'reader' })
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toContain('Wrong arguments for mail')
+    for (const profile of ['orchestrator', 'scoped', 'builder', 'human'] as const) {
+      const r = await runOrchestratorTool(tools, 'mail', { action: 'inbox' }, { sessionId: 's', profile })
+      expect(r).toMatchObject({ isError: true, text: 'Not a tool of this session: mail' })
+    }
+  })
+
+  it('says so when the host has no mailbox', async () => {
+    const r = await runOrchestratorTool(toolsWith({}), 'mail', { action: 'inbox' }, { sessionId: 's', profile: 'reader' })
+    expect(r).toEqual({ text: 'The mailbox is not available in this session.', isError: true })
   })
 })
 

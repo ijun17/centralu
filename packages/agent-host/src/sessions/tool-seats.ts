@@ -10,6 +10,7 @@ import {
   COMMAND_TOOLS,
   COMMANDS_INSTRUCTION,
   DELEGATE_TOOLS,
+  MAIL_TOOLS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   READER_INSTRUCTIONS,
@@ -254,9 +255,12 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       READER_TOOLS.some((t) => t.name === name) ||
       DELEGATE_TOOLS.some((t) => t.name === name) ||
       AGENT_TOOLS.some((t) => t.name === name) ||
-      APP_ACCESS_TOOLS.some((t) => t.name === name)
+      APP_ACCESS_TOOLS.some((t) => t.name === name) ||
+      MAIL_TOOLS.some((t) => t.name === name)
     )
   }
+  // The mailbox is an ordinary session's: the directing seats are not parties of it (slice 2 of #1347)
+  if (MAIL_TOOLS.some((t) => t.name === name)) return false
   // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
   // the orchestrator's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
   // root apps it attaches when it needs one
@@ -276,7 +280,7 @@ export function toolDefsFor(
   profile: ToolProfile,
   tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS]
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
     ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),

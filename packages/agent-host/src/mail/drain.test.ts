@@ -358,3 +358,18 @@ describe('one turn, one thread (§5, §6)', () => {
     expect(mail.drain(S2).workThread).toBe(asks.thread.id)
   })
 })
+
+describe('a thread that is done (§3.3, §7.5)', () => {
+  it('still owes the closing report to its owner, and nothing else: an assign it will never run is dropped', () => {
+    const { mail, store } = setup()
+    const a = openBy(mail, { by: S1, kind: 'assign', subject: 'work', body: 'go', assignee: S2 })
+    const stale = openBy(mail, { by: S1, kind: 'assign', subject: 'never run', body: 'also', assignee: S2 })
+    mail.read(a.thread.id, S2)
+    const report = mail.post(a.thread.id, S2, { kind: 'report', body: 'landed' })
+    mail.update(a.thread.id, S2, { state: 'done', outcome: 'finished' })
+    mail.update(stale.thread.id, S1, { state: 'done', outcome: 'dropped' })
+    expect(store.mail.thread(a.thread.id)?.state).toBe('done')
+    expect(mail.drain(S1)).toMatchObject({ messageIds: [report.message.id], wake: true })
+    expect(mail.drain(S2).messageIds).toEqual([])
+  })
+})

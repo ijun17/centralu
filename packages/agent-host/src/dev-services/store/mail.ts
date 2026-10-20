@@ -123,6 +123,8 @@ export type ReceiptRow = {
 /** A receipt with the message it is for and the thread that message is in: what a delivery re-reads at drain time (§7.5) */
 export type PendingMail = { receipt: ReceiptRow; message: MessageRow; thread: ThreadRow }
 
+export type InboxRow = { thread: ThreadRow; unread: number }
+
 export type TurnRow = { sessionId: string; turnSeq: number; threadId: string | null; startedBy: string; startedAt: number; endedAt: number | null; outcome: string | null }
 
 /** The member of `list` that `value` is, or `fallback` for a word this build does not know */
@@ -365,6 +367,25 @@ export class MailRecords {
     const column = role === 'owner' ? 'owner' : 'assignee'
     const rows = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE ${column} = ? ORDER BY created_at, id`).all(address)
     return rows.map(toThread).filter((t) => !states || states.includes(t.state))
+  }
+
+  /**
+   * What a party's mailbox holds (§9.3, §10.1): the threads it is in that are not done, and the done ones it has mail unread
+   * in, with how much it has not read. Unread first, then the latest change. A mail held back for the person (a loop, a spent
+   * budget) is unread too: that is what the Inbox lists
+   */
+  inboxOf(address: string, limit = 50): InboxRow[] {
+    const rows = this.db
+      .prepare<[string, string, number], ThreadSql & { unread: number }>(
+        `SELECT t.*, (SELECT COUNT(*) FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+                       WHERE m.thread_id = t.id AND r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL
+                         AND (r.held IS NULL OR r.held <> 'dismissed')) AS unread
+           FROM mail_threads t JOIN mail_participants p ON p.thread_id = t.id AND p.address = ? AND p.left_at IS NULL
+          WHERE t.state <> 'done' OR unread > 0
+          ORDER BY (unread > 0) DESC, t.updated_at DESC LIMIT ?`,
+      )
+      .all(address, address, limit)
+    return rows.map((r) => ({ thread: toThread(r), unread: r.unread }))
   }
 
   /** The threads that name `id` in `follows` (§3.3: "shown both ways") */
